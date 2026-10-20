@@ -4,10 +4,9 @@
 		"module": "Preserve",
 		"moduleResolution": "bundler",
 		"noEmit": true,
-		"skipLibCheck": true,
 		"strict": true,
 		"target": "ESNext",
-		"types": ["bun", "@cloudflare/workers-types"]
+		"types": ["@cloudflare/workers-types"]
 	},
 	"include": ["**/*.ts"]
 }

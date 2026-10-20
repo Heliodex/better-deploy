@@ -1,9 +1,0 @@
-{
-	"identities": [
-		{
-			"actions": ["Admin", "Read", "Write", "List", "Tagging"],
-			"credentials": [{ "accessKey": "celld", "secretKey": "celld-local-secret" }],
-			"name": "celld"
-		}
-	]
-}
