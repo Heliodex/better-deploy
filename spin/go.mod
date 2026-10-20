@@ -2,7 +2,10 @@ module github.com/gotime
 
 go 1.25.5
 
-require github.com/spinframework/spin-go-sdk/v3 v3.0.0
+require (
+	github.com/inertia-go/inertia-go v0.10.0
+	github.com/spinframework/spin-go-sdk/v3 v3.0.0
+)
 
 require (
 	github.com/apparentlymart/go-userdirs v0.0.0-20200915174352-b0c018a67c13 // indirect
