@@ -23,7 +23,7 @@
 		}
 	},
 	"files": {
-		"includes": ["**/*.ts"]
+		"includes": ["**/*.ts", "**/*.json"]
 	},
 	"formatter": {
 		"indentStyle": "tab",
