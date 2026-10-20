@@ -8,7 +8,7 @@ export async function readPid(pidFile: string): Promise<number | undefined> {
 	const file = Bun.file(pidFile)
 	if (!(await file.exists())) return undefined
 
-	const pid = Number.parseInt((await file.text()).trim(), 10)
+	const pid = Math.trunc(Number((await file.text()).trim()))
 	return Number.isInteger(pid) && pid > 0 ? pid : undefined
 }
 
