@@ -1,5 +1,9 @@
 {
 	"dependencies": {},
+	"scripts": {
+		"lint": "oxlint; biome check",
+		"lint:fix": "oxlint --fix; biome check --fix"
+	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.5.15",
 		"@types/bun": "^1.4.3",
