@@ -12,8 +12,11 @@
 		"@inertiajs/svelte": "^3.9.1"
 	},
 	"devDependencies": {
+		"@biomejs/biome": "^2.5.15",
 		"@sveltejs/vite-plugin-svelte": "^7.3.1",
 		"@tsconfig/svelte": "^5.0.8",
+		"oxlint": "^1.89.0",
+		"oxlint-tsgolint": "^7.0.2004",
 		"svelte": "^5.57.2",
 		"svelte-check": "^4.7.7",
 		"typescript": "^5.9.0",

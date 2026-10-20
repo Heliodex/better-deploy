@@ -14,7 +14,7 @@
 		"builtin": true,
 		"node": true
 	},
-	"ignorePatterns": [".next/**", "node_modules/**", "public/**", "src/app/generated/**"],
+	"ignorePatterns": ["node_modules/**", "public/**"],
 	"options": {
 		"denyWarnings": true,
 		"reportUnusedDisableDirectives": "warn",
