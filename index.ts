@@ -1,5 +1,5 @@
 export class Counter {
-	constructor(state, env) {
+	constructor(state, _env) {
 		this.state = state
 	}
 	async fetch(request) {
