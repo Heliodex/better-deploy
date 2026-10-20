@@ -37,9 +37,9 @@ function weedShell(script: string) {
 
 const weedLog = join(logsDir, "seaweed.log")
 
-if (await isRunning(pidFiles.weed, "weed")) {
+if (await isRunning(pidFiles.weed, "weed"))
 	console.log(`SeaweedFS already running (pid ${await readPid(pidFiles.weed)})`)
-} else {
+else {
 	const pid = await startBackground(
 		[
 			"weed",
@@ -101,9 +101,9 @@ await $`celld deploy ${root} --bucket ${fleetBucket} --endpoint ${s3.endpoint}`
 
 const celldLog = join(logsDir, "celld.log")
 
-if (await isRunning(pidFiles.celld, "celld")) {
+if (await isRunning(pidFiles.celld, "celld"))
 	console.log(`celld already running (pid ${await readPid(pidFiles.celld)}); it adopts the new deployment`)
-} else {
+else {
 	const pid = await startBackground(
 		[
 			"celld",

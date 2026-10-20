@@ -26,14 +26,14 @@ export async function isRunning(pidFile: string, name: string): Promise<boolean>
 	if (pid === undefined || !isAlive(pid)) return false
 
 	// Guard against a recycled pid before we trust or kill it.
-	if (process.platform === "linux") {
+	if (process.platform === "linux")
 		try {
 			const cmdline = await Bun.file(`/proc/${pid}/cmdline`).text()
 			return cmdline.includes(name)
 		} catch {
 			return false
 		}
-	}
+
 	return true
 }
 
