@@ -1,0 +1,20 @@
+#:schema https://schemas.spinframework.dev/spin/manifest-v2/latest.json
+
+spin_manifest_version = 2
+
+[application]
+name = "gotime"
+version = "0.1.0"
+authors = ["Lewin Kelly <heli@odex.cf>"]
+description = ""
+
+[[trigger.http]]
+route = "/..."
+component = "gotime"
+
+[component.gotime]
+source = "main.wasm"
+allowed_outbound_hosts = []
+[component.gotime.build]
+command = "go tool componentize-go build"
+watch = ["**/*.go", "go.mod"]
