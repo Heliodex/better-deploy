@@ -1,6 +1,6 @@
 {
 	"scripts": {
-		"deploy": "celld deploy .",
+		"deploy": "bun --env-file=.env run celld deploy .",
 		"dev": "celld dev",
 		"lint": "oxlint; biome check",
 		"lint:fix": "oxlint --fix; biome check --fix"
