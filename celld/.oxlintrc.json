@@ -14,12 +14,26 @@
 		"builtin": true,
 		"node": true
 	},
-	"ignorePatterns": ["node_modules/**", "public/**"],
+	"ignorePatterns": ["node_modules/**", ".svelte-kit/**", ".celld/**", ".wrangler/**", "build/**"],
 	"options": {
 		"denyWarnings": true,
 		"reportUnusedDisableDirectives": "warn",
 		"typeAware": true
 	},
+	"overrides": [
+		{
+			"files": ["src/lib/index.ts"],
+			"rules": {
+				"unicorn/no-empty-file": "off"
+			}
+		},
+		{
+			"files": ["src/app.d.ts"],
+			"rules": {
+				"unicorn/require-module-specifiers": "off"
+			}
+		}
+	],
 	"plugins": ["eslint", "import", "jsx-a11y", "nextjs", "node", "oxc", "promise", "react", "typescript", "unicorn"],
 	"rules": {
 		"eslint/capitalized-comments": "off",

@@ -23,7 +23,7 @@
 		}
 	},
 	"files": {
-		"includes": ["**/*.ts", "**/*.json"]
+		"includes": ["**/*.ts", "**/*.js", "**/*.svelte", "**/*.json", "!.svelte-kit", "!build", "!.celld", "!.wrangler"]
 	},
 	"formatter": {
 		"indentStyle": "tab",

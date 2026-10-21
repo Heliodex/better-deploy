@@ -1,15 +1,38 @@
 {
+	"name": "celld",
+	"version": "0.0.1",
+	"private": true,
+	"type": "module",
+	"imports": {
+		"#lib": "./src/lib/index.js",
+		"#lib/*": "./src/lib/*"
+	},
 	"scripts": {
-		"deploy": "bun --env-file=.env run celld deploy .",
-		"dev": "celld dev",
+		"build": "vite build && rm -rf build && mkdir -p build && tar -C .svelte-kit/cloudflare --exclude=_worker.js --exclude=_routes.json --exclude=.assetsignore -cf - . | tar -C build -xf -",
+		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+		"deploy": "bun run build && bun --env-file=.env run celld deploy .",
+		"dev": "vite dev",
+		"dev:celld": "bun run build && celld dev",
+		"gen": "wrangler types",
 		"lint": "oxlint; biome check",
-		"lint:fix": "oxlint --fix; biome check --fix"
+		"lint:fix": "oxlint --fix; biome check --fix",
+		"prepare": "svelte-kit sync || echo ''",
+		"preview": "vite preview"
 	},
 	"dependencies": {},
 	"devDependencies": {
 		"@biomejs/biome": "^2.5.15",
 		"@cloudflare/workers-types": "^5.20261019.1",
+		"@sveltejs/adapter-cloudflare": "^8.0.0",
+		"@sveltejs/kit": "^3.0.0",
+		"@sveltejs/vite-plugin-svelte": "^7.2.0",
 		"oxlint": "^1.89.0",
-		"oxlint-tsgolint": "^7.0.2004"
+		"oxlint-tsgolint": "^7.0.2004",
+		"svelte": "^5.57.1",
+		"svelte-check": "^4.6.0",
+		"typescript": "^6.0.3",
+		"vite": "^8.3.0",
+		"wrangler": "^4.97.0"
 	}
 }

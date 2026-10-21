@@ -1,12 +1,8 @@
 {
 	"compilerOptions": {
-		"lib": ["ESNext"],
-		"module": "Preserve",
-		"moduleResolution": "bundler",
-		"noEmit": true,
 		"strict": true,
-		"target": "ESNext",
-		"types": ["@cloudflare/workers-types"]
+		"types": ["$app/types", "./worker-configuration.d.ts"]
 	},
-	"include": ["**/*.ts"]
+	"extends": "$app/tsconfig",
+	"include": ["src", "vite.config.ts"]
 }
