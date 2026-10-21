@@ -34,7 +34,8 @@
 		"experimentalFullSupportEnabled": true,
 		"formatter": {
 			"enabled": true,
-			"indentScriptAndStyle": true		}
+			"indentScriptAndStyle": true
+		}
 	},
 	"javascript": {
 		"formatter": {

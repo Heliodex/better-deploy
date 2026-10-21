@@ -1,7 +1,7 @@
 <script lang="ts">
-	let { greeting = 'Hello from Go!' }: { greeting?: string } = $props();
+	let { greeting = "Hello from Go!" }: { greeting?: string } = $props()
 
-	let count = $state(0);
+	let count = $state(0)
 </script>
 
 <main>
@@ -10,15 +10,15 @@
 
 	<button onclick={() => count++}>
 		Clicked {count}
-		{count === 1 ? 'time' : 'times'}
+		{count === 1 ? "time" : "times"}
 	</button>
 </main>
 
 <style>
 	main {
 		max-width: 40rem;
-		margin: 0 auto;
 		padding: 4rem 1.5rem;
+		margin: 0 auto;
 	}
 
 	h1 {
@@ -34,12 +34,12 @@
 
 	button {
 		padding: 0.6rem 1.1rem;
+		font: inherit;
+		color: inherit;
+		cursor: pointer;
+		background: transparent;
 		border: 1px solid currentColor;
 		border-radius: 0.5rem;
-		background: transparent;
-		color: inherit;
-		font: inherit;
-		cursor: pointer;
 	}
 
 	button:hover {
