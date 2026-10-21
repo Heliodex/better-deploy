@@ -15,8 +15,10 @@ component = "gotime"
 [component.gotime]
 source = "main.wasm"
 allowed_outbound_hosts = []
+key_value_stores = ["default"]
 
 # For HMR, run `bun run dev` in frontend/ and then `spin up -e vite_dev_server=http://localhost:5173`.
+# In production, set a stable session key: `spin up -e session_key=<random-secret>`.
 [component.gotime.build]
 command = "cd frontend && bun install && bun run build && cd .. && go tool componentize-go build"
 watch = ["**/*.go", "go.mod", "app.html", "frontend/src/**", "frontend/package.json", "frontend/vite.config.ts", "frontend/svelte.config.js", "frontend/tsconfig.json"]
