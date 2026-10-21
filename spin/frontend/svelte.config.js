@@ -1,5 +1,7 @@
 import { vitePreprocess } from "@sveltejs/vite-plugin-svelte"
 
-export default {
+const viteConfig = {
 	preprocess: vitePreprocess(),
 }
+
+export default viteConfig

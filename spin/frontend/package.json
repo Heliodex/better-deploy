@@ -6,7 +6,9 @@
 	"scripts": {
 		"build": "vite build && bun -e \"await Bun.write('dist/.gitkeep', '')\"",
 		"check": "svelte-check --tsconfig ./tsconfig.json",
-		"dev": "vite"
+		"dev": "vite",
+		"lint": "oxlint; biome check",
+		"lint:fix": "oxlint --fix; biome check --fix"
 	},
 	"dependencies": {
 		"@inertiajs/svelte": "^3.9.1"

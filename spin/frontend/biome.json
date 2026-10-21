@@ -23,7 +23,7 @@
 		}
 	},
 	"files": {
-		"includes": ["**/*.ts", "**/*.js", "**/*.json", "**/*.svelte"]
+		"includes": ["**/*.ts", "**/*.js", "**/*.json", "**/*.svelte", "!dist", "!node_modules"]
 	},
 	"formatter": {
 		"indentStyle": "tab",

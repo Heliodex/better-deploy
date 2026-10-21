@@ -8,7 +8,7 @@
 	<h1>{greeting}</h1>
 	<p>This page is rendered by Inertia and hydrated by Svelte.</p>
 
-	<button onclick={() => count++}>
+	<button onclick={() => count++} type="button">
 		Clicked {count}
 		{count === 1 ? "time" : "times"}
 	</button>

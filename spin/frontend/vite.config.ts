@@ -6,7 +6,7 @@ export default defineConfig({
 		emptyOutDir: true,
 		manifest: true,
 		outDir: "dist",
-		rollupOptions: {
+		rolldownOptions: {
 			input: "src/main.ts",
 		},
 	},
