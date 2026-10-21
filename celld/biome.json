@@ -89,6 +89,26 @@
 				}
 			},
 			"includes": ["package.json"]
+		},
+		{
+			"includes": ["**/*.svelte"],
+			"linter": {
+				"rules": {
+					"correctness": {
+						"noUnusedImports": "off",
+						"noUnusedLabels": "off",
+						"noUnusedVariables": "off"
+					},
+					"style": {
+						"useConst": "off"
+					},
+					"suspicious": {
+						"noConfusingLabels": "off",
+						"noEvolvingTypes": "off",
+						"noImplicitAnyLet": "off"
+					}
+				}
+			}
 		}
 	]
 }
