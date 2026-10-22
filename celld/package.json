@@ -8,15 +8,15 @@
 		"#lib/*": "./src/lib/*"
 	},
 	"scripts": {
-		"build": "vite build && rm -rf build && mkdir -p build && tar -C .svelte-kit/cloudflare --exclude=_worker.js --exclude=_routes.json --exclude=.assetsignore -cf - . | tar -C build -xf -",
+		"build": "vite build && rm -f build/.assetsignore",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"deploy": "bun run build && bun --env-file=.env run celld deploy .",
 		"dev": "vite dev",
 		"dev:celld": "bun run build && celld dev",
 		"gen": "wrangler types",
-		"lint": "oxlint; biome check",
-		"lint:fix": "oxlint --fix; biome check --fix",
+		"lint": "oxlint && biome check",
+		"lint:fix": "oxlint --fix && biome check --fix",
 		"prepare": "svelte-kit sync || echo ''",
 		"preview": "vite preview"
 	},

@@ -7,5 +7,6 @@
 	"assets": {
 		"binding": "ASSETS",
 		"directory": "./build"
-	}
+	},
+	"kv_namespaces": [{ "binding": "GUESTBOOK", "id": "guestbook" }]
 }

@@ -99,6 +99,68 @@ celld --listen 127.0.0.1:8080
 A running node adopts each new deployment without a restart. See the
 [celld docs](https://celld.dev/docs) for R2, GCS, Azure and fleet settings.
 
+## Persistence
+
+The home page is a guestbook backed by a celld KV namespace. Each note is one
+KV entry (`note:<timestamp>:<random>` holding JSON), listed with a prefix
+scan; signing and deleting notes are form actions calling `put` and `delete`.
+It exercises the whole KV surface: `put`, `get`, `list`, `delete`.
+
+`wrangler.jsonc` declares the binding:
+
+```jsonc
+"kv_namespaces": [{ "binding": "GUESTBOOK", "id": "guestbook" }]
+```
+
+A KV `id` is just the namespace identity and can be any string — two Workers
+naming one `id` share one namespace. Server code reads it from
+`cloudflare:workers` (`src/routes/+page.server.ts`); that is the documented
+way to reach bindings from SvelteKit on Workers — the generated `_worker.js`
+passes `env` to `server.init()`, while `event.platform` stays empty in the
+built worker (the adapter only fills `platform` for `vite dev` via its
+platform proxy).
+
+celld KV notes worth knowing ([docs](https://celld.dev/docs/services/kv)):
+
+- Reads are strongly consistent (they reach the owning cell), unlike
+  Cloudflare's eventually-consistent KV.
+- One writer per namespace: fine for a guestbook, but use a Durable Object
+  for a write-hot value such as a counter.
+- Keys ≤ 512 bytes, values ≤ 25 MiB, metadata ≤ 1024 bytes, minimum 60 s
+  expiration. Values over 1 MiB need a fleet bucket.
+- `list()` returns at most 1000 keys in byte order per page.
+
+Bindings only exist inside a worker, so the guestbook needs
+`bun run dev:celld` (plain `bun dev` shows a hint instead). Note that
+`celld dev` also exposes `.env` entries as worker vars, while
+`celld deploy` does not — `.env` holds bucket credentials for the CLI.
+
+### Which store for what?
+
+celld mirrors Cloudflare's storage services; a typical app combines them,
+each declared as a binding in `wrangler.jsonc`:
+
+- **KV** — small values by key: sessions, config, feature flags, caches,
+  per-item records like these notes. Simple `get`/`put`/`list`/`delete`.
+- **D1** — relational data with SQL: users, posts, anything you filter, sort,
+  join or aggregate. One SQLite database per binding, migrated with
+  `celld d1 migrations apply`. Prefer D1 over KV once you need queries.
+- **R2** — blobs and files: uploads, images, exports. Streamed bodies and
+  multipart uploads, stored under `r2/<bucket>/` in the fleet bucket (so R2
+  needs a bucket configured). No public URLs — serve bytes through the Worker.
+- **Durable Objects ("cells")** — stateful actors with their own SQLite DB,
+  single-threaded JS, WebSockets and alarms: chat rooms, live documents,
+  counters, realtime games, agents (one object per room/user/document). The
+  strongest consistency and coordination primitive.
+- **Queues / Workflows** — background jobs, retries and multi-step durable
+  pipelines, plus **Cron Triggers** for schedules.
+
+SvelteKit caveat, from the
+[adapter docs](https://svelte.dev/docs/kit/adapter-cloudflare): Durable
+Objects and Workflows need custom classes exported from the Worker, which the
+adapter-generated `_worker.js` cannot do — so they are not currently usable
+from the SvelteKit worker itself. KV, D1 and R2 bindings work as shown here.
+
 ## Checks
 
 ```sh
