@@ -90,6 +90,13 @@ are appended to the node command. Pin releases with
 
 ## Worth knowing
 
+- **Behind a TLS-terminating proxy, trust its forwarded headers.** celld builds
+  `request.url` from the plain HTTP it receives, so the Worker sees
+  `http://host` even when the browser used `https://host`. Anything comparing
+  `Origin` — SvelteKit's remote functions are the example — then rejects
+  same-origin requests. Set `CELLD_TRUST_FORWARDED_HEADERS=1` where a trusted
+  proxy replaces both `X-Forwarded-Host` and `X-Forwarded-Proto` (Orchard's
+  ingress does), and the Worker sees the public scheme and host.
 - **One container per volume.** versitygw's default `flock` publish locking is
   only sufficient for one gateway process, and two celld nodes must not share
   `CELLD_WATCH`.
