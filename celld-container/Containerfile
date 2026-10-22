@@ -6,10 +6,10 @@
 #   celld      one node, serving the bucket
 #
 # The application is not baked in. Deploy it into the bucket with `celld deploy` (from the host or another container) pointed at the published gateway port; the running node adopts the deployment within CELLD_DEPLOY_POLL_S seconds (30 by default), without a restart.
-# Two stages so the final image carries no download tools: the base image (78 MB) plus the two stripped binaries (~112 MB) is the floor, since celld publishes glibc builds only and cannot run on Alpine.
+# Two stages so the final image carries no download tools: the base image (81 MB) plus the two stripped binaries (~112 MB) is the floor, since celld publishes glibc builds only and cannot run on Alpine.
 # See README.md for the run command and caveats.
 
-FROM docker.io/library/debian:bookworm-slim AS fetch
+FROM docker.io/library/debian:trixie-slim AS fetch
 
 ARG CELLD_VERSION=v0.6.3
 ARG VGW_VERSION=v1.9.0
@@ -44,7 +44,7 @@ RUN set -eux; \
     rm -rf "/tmp/$vgw_asset" /tmp/vgw.checksums "/tmp/versitygw_${VGW_VERSION}_Linux_x86_64"
 
 # Debian slim rather than Alpine: celld's release binaries need glibc 2.34+ and Alpine's gcompat lacks symbols celld imports (__res_init, fcntl64).
-FROM docker.io/library/debian:bookworm-slim
+FROM docker.io/library/debian:trixie-slim
 
 RUN groupadd --gid 1000 celld \
  && useradd --uid 1000 --gid 1000 --no-create-home --shell /usr/sbin/nologin celld
