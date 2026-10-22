@@ -5,7 +5,10 @@
 set -euo pipefail
 
 log() { printf '%s entrypoint: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2; }
-die() { log "$*"; exit 1; }
+die() {
+	log "$*"
+	exit 1
+}
 
 S3_DATA_DIR=${S3_DATA_DIR:-/var/lib/celld/s3}
 IAM_DIR=${IAM_DIR:-/var/lib/celld/iam}
@@ -48,8 +51,8 @@ data_dirs=("$S3_DATA_DIR/$bucket" "$IAM_DIR" "$CELLD_WATCH" "$SIDECAR_DIR")
 # this because the directories are already writable.
 if [[ $EUID -eq 0 ]]; then
 	mkdir -p "${data_dirs[@]}" || die "cannot create data directories under $S3_DATA_DIR"
-	chown 1000:1000 "$S3_DATA_DIR" "${data_dirs[@]}" \
-		|| die "cannot hand the data directories to uid 1000"
+	chown 1000:1000 "$S3_DATA_DIR" "${data_dirs[@]}" ||
+		die "cannot hand the data directories to uid 1000"
 	exec setpriv --reuid=1000 --regid=1000 --init-groups "$0" "$@"
 fi
 
