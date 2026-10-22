@@ -8,10 +8,12 @@
 		"#lib/*": "./src/lib/*"
 	},
 	"scripts": {
+		"bucket": "mkdir -p .celld/vgw/data/${VGW_BUCKET:-celld} .celld/vgw/iam && versitygw --access \"${VGW_ACCESS_KEY_ID:-testuser}\" --secret \"${VGW_SECRET_ACCESS_KEY:-testsecret}\" --port \":${VGW_PORT:-10000}\" --iam-dir \"$PWD/.celld/vgw/iam\" posix \"$PWD/.celld/vgw/data\"",
 		"build": "vite build && rm -f build/.assetsignore",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"deploy": "bun run build && bun --env-file=.env run celld deploy .",
+		"deploy:bucket": "bun run build && bun --env-file=.env.bucket run celld deploy .",
 		"dev": "vite dev",
 		"dev:celld": "bun run build && celld dev",
 		"gen": "wrangler types",

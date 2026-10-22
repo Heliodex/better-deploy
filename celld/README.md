@@ -100,6 +100,51 @@ celld --listen 127.0.0.1:8080
 A running node adopts each new deployment without a restart. See the
 [celld docs](https://celld.dev/docs) for R2, GCS, Azure and fleet settings.
 
+## Local S3 bucket (production-like deploys)
+
+`celld dev` covers most local work with its built-in object store, but to
+exercise the real fleet-bucket code path (deploy uploads, bucket durability,
+R2 bindings, large values) you need an S3-compatible store. This repo uses
+[Versity Gateway](https://github.com/versity/versitygw): a single static
+binary that serves a local directory over the S3 API, with the conditional
+writes (`If-Match` / `If-None-Match`) celld requires. (MinIO's community
+edition is archived and unmaintained, and Garage documents conditional writes
+as structurally impossible — both verified against
+[what the bucket must provide](https://celld.dev/docs/guarantees#what-the-bucket-must-provide).)
+
+Start the gateway (data lives in git-ignored `.celld/vgw/`, buckets are just
+directories, so the `celld` bucket is created for you):
+
+```sh
+bun run bucket
+```
+
+Verify the store satisfies celld's storage contract before trusting it:
+
+```sh
+bun --env-file=.env.bucket run celld diagnose --bucket s3://celld
+```
+
+Expected: `ok bucket conditional write: create, reject-create, update, reject-stale`.
+`diagnose` exits non-zero and names the store if it accepts a conditional
+write it should have rejected. Every node runs the same test at startup and
+refuses to serve on a violation, so a successful start is itself proof.
+
+Then run a node against it and deploy (same flow as production, different
+bucket). The node reads the same variables, so export the file first:
+
+```sh
+set -a; . ./.env.bucket; set +a
+celld --listen 127.0.0.1:8080
+bun run deploy:bucket
+```
+
+`deploy:bucket` builds and deploys using `.env.bucket`, which holds
+localhost-only test credentials — never use it for anything real. Override
+any value with a real environment variable. Keep to one gateway process (the
+default `flock` publish locking is then sufficient for atomic conditional
+writes).
+
 ## Persistence
 
 The home page is a guestbook backed by a celld KV namespace. Each note is one
