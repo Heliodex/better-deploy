@@ -59,7 +59,6 @@ RUN install -d -o 1000 -g 1000 -m 0755 /var/lib/celld/s3 /var/lib/celld/iam /var
 COPY --from=fetch --chmod=0755 /out/celld /usr/local/bin/celld
 COPY --from=fetch --chmod=0755 /out/versitygw /usr/local/bin/versitygw
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/entrypoint.sh
-COPY --chmod=0755 healthcheck.sh /usr/local/bin/healthcheck.sh
 
 USER 1000:1000
 
