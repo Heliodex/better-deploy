@@ -50,10 +50,11 @@ RUN groupadd --gid 1000 celld \
  && useradd --uid 1000 --gid 1000 --no-create-home --shell /usr/sbin/nologin celld
 
 # One volume holds everything that must survive the container:
-#   s3/    versitygw's posix root (a directory per bucket)
-#   iam/   versitygw's IAM state
-#   work/  celld's local SQLite copies and replication state (CELLD_WATCH)
-RUN install -d -o 1000 -g 1000 -m 0755 /var/lib/celld/s3 /var/lib/celld/iam /var/lib/celld/work
+#   s3/      versitygw's posix root (a directory per bucket)
+#   iam/     versitygw's IAM state
+#   sidecar/ versitygw's metadata (sidecar files instead of user.* xattrs, which some filesystems reject)
+#   work/    celld's local SQLite copies and replication state (CELLD_WATCH)
+RUN install -d -o 1000 -g 1000 -m 0755 /var/lib/celld/s3 /var/lib/celld/iam /var/lib/celld/sidecar /var/lib/celld/work
 
 COPY --from=fetch --chmod=0755 /out/celld /usr/local/bin/celld
 COPY --from=fetch --chmod=0755 /out/versitygw /usr/local/bin/versitygw

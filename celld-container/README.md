@@ -80,6 +80,7 @@ Everything is an environment variable, passed with `podman run -e`:
 | `VGW_REQUEST_LOGS` | `0` | `1` keeps versitygw's per-request access log (noisy: the node polls the bucket) |
 | `S3_DATA_DIR` | `/var/lib/celld/s3` | Gateway's posix root; a directory per bucket |
 | `IAM_DIR` | `/var/lib/celld/iam` | Gateway IAM state |
+| `SIDECAR_DIR` | `/var/lib/celld/sidecar` | Gateway metadata store; sidecar files instead of `user.*` xattrs, which some filesystems (e.g. Orchard's overlay) reject with `operation not supported` |
 | `CELLD_WATCH` | `/var/lib/celld/work` | celld's local SQLite and replication state |
 | `CELLD_ADDR` | `0.0.0.0:8080` | celld's public Worker listener |
 | `CELLD_INTERNAL_ADDR` | `127.0.0.1:8081` | Peer/operator listener, never publish it |

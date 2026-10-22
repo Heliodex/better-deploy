@@ -9,6 +9,7 @@ die() { log "$*"; exit 1; }
 
 S3_DATA_DIR=${S3_DATA_DIR:-/var/lib/celld/s3}
 IAM_DIR=${IAM_DIR:-/var/lib/celld/iam}
+SIDECAR_DIR=${SIDECAR_DIR:-/var/lib/celld/sidecar}
 VGW_PORT=${VGW_PORT:-10000}
 STOP_GRACE_S=${STOP_GRACE_S:-75}
 
@@ -38,7 +39,7 @@ bucket=${CELLD_BUCKET#*://}
 bucket=${bucket%%/*}
 [[ -n $bucket ]] || die "CELLD_BUCKET=$CELLD_BUCKET has no bucket name"
 
-mkdir -p "$S3_DATA_DIR/$bucket" "$IAM_DIR" "$CELLD_WATCH" \
+mkdir -p "$S3_DATA_DIR/$bucket" "$IAM_DIR" "$CELLD_WATCH" "$SIDECAR_DIR" \
 	|| die "cannot create data directories under $S3_DATA_DIR"
 
 vgw_args=(
@@ -48,19 +49,24 @@ vgw_args=(
 	--port "0.0.0.0:$VGW_PORT"
 	--iam-dir "$IAM_DIR"
 )
-# celld proves a write is durable, so an fsync per object is only needed when
-# the container's filesystem itself can lose acknowledged writes.
-if [[ ${VGW_FSYNC:-0} == 1 ]]; then
-	vgw_args+=(--fsync)
-fi
 # The node polls the deployment pointer through the gateway, so request logs
 # are mostly noise; VGW_REQUEST_LOGS=1 keeps them for debugging.
 if [[ ${VGW_REQUEST_LOGS:-0} != 1 ]]; then
 	vgw_args+=(--quiet)
 fi
+# Flags after `posix` belong to the backend, not the gateway itself.
+vgw_posix_args=(
+	# The posix backend keeps checksums and metadata in user.* xattrs by default, which fails on filesystems without xattr support (e.g. some overlay / network volumes) with `user.checksums: operation not supported`. A sidecar directory stores the same metadata as files and works everywhere.
+	--sidecar "$SIDECAR_DIR"
+)
+# celld proves a write is durable, so an fsync per object is only needed when
+# the container's filesystem itself can lose acknowledged writes.
+if [[ ${VGW_FSYNC:-0} == 1 ]]; then
+	vgw_posix_args+=(--fsync)
+fi
 
 log "starting versitygw on :$VGW_PORT, data in $S3_DATA_DIR"
-versitygw "${vgw_args[@]}" posix "$S3_DATA_DIR" &
+versitygw "${vgw_args[@]}" posix "${vgw_posix_args[@]}" "$S3_DATA_DIR" &
 vgw_pid=$!
 
 # A successful TCP connect means the listener is up; the gateway rejects the unauthenticated request afterwards, which is fine. Bash's /dev/tcp keeps curl out of the final image.
