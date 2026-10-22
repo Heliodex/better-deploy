@@ -39,8 +39,21 @@ bucket=${CELLD_BUCKET#*://}
 bucket=${bucket%%/*}
 [[ -n $bucket ]] || die "CELLD_BUCKET=$CELLD_BUCKET has no bucket name"
 
-mkdir -p "$S3_DATA_DIR/$bucket" "$IAM_DIR" "$CELLD_WATCH" "$SIDECAR_DIR" \
-	|| die "cannot create data directories under $S3_DATA_DIR"
+data_dirs=("$S3_DATA_DIR/$bucket" "$IAM_DIR" "$CELLD_WATCH" "$SIDECAR_DIR")
+
+# A mounted volume or PVC arrives owned by root, while the processes run as
+# uid 1000 (see Containerfile). When started as root, create the directories,
+# hand them to that user and re-exec this script as it; everything below then
+# runs unprivileged. An emptyDir, or an image already started as 1000, skips
+# this because the directories are already writable.
+if [[ $EUID -eq 0 ]]; then
+	mkdir -p "${data_dirs[@]}" || die "cannot create data directories under $S3_DATA_DIR"
+	chown 1000:1000 "$S3_DATA_DIR" "${data_dirs[@]}" \
+		|| die "cannot hand the data directories to uid 1000"
+	exec setpriv --reuid=1000 --regid=1000 --init-groups "$0" "$@"
+fi
+
+mkdir -p "${data_dirs[@]}" || die "cannot create data directories under $S3_DATA_DIR"
 
 vgw_args=(
 	--access "$VGW_ACCESS_KEY_ID"

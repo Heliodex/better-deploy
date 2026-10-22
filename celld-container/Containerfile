@@ -60,7 +60,9 @@ COPY --from=fetch --chmod=0755 /out/celld /usr/local/bin/celld
 COPY --from=fetch --chmod=0755 /out/versitygw /usr/local/bin/versitygw
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/entrypoint.sh
 
-USER 1000:1000
+# No USER line: the entrypoint starts as root only long enough to take
+# ownership of a mounted volume (which arrives root-owned), then re-execs
+# itself as uid 1000 (celld) with setpriv before starting anything.
 
 # 8080: celld's public Worker listener (the application)
 # 10000: versitygw's S3 API, needed only for `celld deploy` from outside

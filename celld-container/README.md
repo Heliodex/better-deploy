@@ -14,11 +14,8 @@ to a remote bucket; the sibling `celld/` guestbook is the example used below.
 ## Build
 
 ```sh
-podman build --format docker -t localhost/celld-vgw .
+podman build -t localhost/celld-vgw .
 ```
-
-`--format docker` keeps the image's `HEALTHCHECK`: OCI images cannot store one,
-and podman defaults to OCI. Docker users need no flag.
 
 The image is about 195 MB. Roughly 78 MB is the Debian slim base and 112 MB the
 two stripped binaries — celld's 64 MB (V8 included) and versitygw's 48 MB — so
@@ -55,8 +52,8 @@ bun run deploy:bucket
 ```
 
 The running node adopts the deployment within `CELLD_DEPLOY_POLL_S` (30 s) and
-does not restart. Until a deployment exists, celld holds requests and the health
-check stays `unhealthy`; the log reports `awaiting_initial_deployment`.
+does not restart. Until a deployment exists, celld holds requests; the log
+reports `awaiting_initial_deployment`.
 
 celld subcommands (`d1`, `kv`, `r2`, `cell`, `diagnose`) need a node's internal
 listener, which stays on loopback inside the container. Run them through
@@ -101,12 +98,14 @@ are appended to the node command. Pin releases with
   real credentials. The image defaults are test values.
 - **The internal listener is never published.** It has no authentication and
   peer traffic is not encrypted.
-- **No deployment, no health.** celld holds requests until a deployment exists,
-  so the health check is `unhealthy` until then; then it is 200 and the image
-  turns `healthy`.
+- **No deployment, no app.** celld holds requests until a deployment exists, so
+  the node answers nothing until `celld deploy` has run once.
 - **One node.** There is no peer, so `CELLD_DURABILITY=fleet` (the default)
   waits for the bucket on every write, exactly as `bucket` mode does.
 - **No esbuild in the image.** It is only needed by `celld deploy`, which runs
   outside the container.
-- The image runs as uid 1000. A bind mount for `/var/lib/celld` must be writable
-  by that user; the named volume above is.
+- The image starts as root only long enough to take ownership of a mounted
+  volume, then re-execs the entrypoint with `setpriv` and runs everything as
+  uid 1000. A bind mount for `/var/lib/celld` must be writable by that user; a
+  PVC mounted there is owned by root when it is first attached, which the
+  entrypoint fixes before dropping privileges.
