@@ -26,7 +26,8 @@ bun install
 
 ## Develop
 
-Frontend-only dev server:
+Frontend dev server, with Cloudflare bindings emulated locally from
+`wrangler.jsonc` (persisted under `.wrangler/`, separate from celld state):
 
 ```sh
 bun dev
@@ -103,8 +104,18 @@ A running node adopts each new deployment without a restart. See the
 
 The home page is a guestbook backed by a celld KV namespace. Each note is one
 KV entry (`note:<timestamp>:<random>` holding JSON), listed with a prefix
-scan; signing and deleting notes are form actions calling `put` and `delete`.
-It exercises the whole KV surface: `put`, `get`, `list`, `delete`.
+scan; signing and deleting notes are SvelteKit
+[remote functions](https://svelte.dev/docs/kit/remote-functions) calling `put`
+and `delete`. It exercises the whole KV surface: `put`, `get`, `list`,
+`delete`.
+
+`src/routes/guestbook.remote.ts` holds a `getNotes` query and `addNote` /
+`removeNote` commands; `+page.svelte` awaits the query inside a
+`<svelte:boundary>` and invokes the commands from event handlers. Mutations
+use single-flight refresh (`void getNotes().refresh()` in the handler), so the
+list updates in the same round trip. Remote functions are experimental and
+enabled in `vite.config.ts` (`experimental.remoteFunctions` plus
+`compilerOptions.experimental.async`).
 
 `wrangler.jsonc` declares the binding:
 
@@ -114,11 +125,12 @@ It exercises the whole KV surface: `put`, `get`, `list`, `delete`.
 
 A KV `id` is just the namespace identity and can be any string — two Workers
 naming one `id` share one namespace. Server code reads it from
-`cloudflare:workers` (`src/routes/+page.server.ts`); that is the documented
-way to reach bindings from SvelteKit on Workers — the generated `_worker.js`
-passes `env` to `server.init()`, while `event.platform` stays empty in the
-built worker (the adapter only fills `platform` for `vite dev` via its
-platform proxy).
+`cloudflare:workers`; that is the documented way to reach bindings from
+SvelteKit on Workers. The generated `_worker.js` passes `env` to
+`server.init()` but never sets `event.platform` (the adapter only fills
+`platform` for `vite dev` via its platform proxy), so `platform.env` stays
+empty in the built worker. Without a binding the remote functions throw 503,
+which the boundary renders as an error with a retry button.
 
 celld KV notes worth knowing ([docs](https://celld.dev/docs/services/kv)):
 
@@ -130,10 +142,12 @@ celld KV notes worth knowing ([docs](https://celld.dev/docs/services/kv)):
   expiration. Values over 1 MiB need a fleet bucket.
 - `list()` returns at most 1000 keys in byte order per page.
 
-Bindings only exist inside a worker, so the guestbook needs
-`bun run dev:celld` (plain `bun dev` shows a hint instead). Note that
-`celld dev` also exposes `.env` entries as worker vars, while
-`celld deploy` does not — `.env` holds bucket credentials for the CLI.
+Both dev servers serve the guestbook with real persistence, but separate
+stores: `bun dev` uses Wrangler-emulated bindings (persisted under
+`.wrangler/`), while `bun run dev:celld` uses celld's store (`.celld/dev`).
+Notes written in one are not visible in the other. Note that `celld dev`
+also exposes `.env` entries as worker vars, while `celld deploy` does not —
+`.env` holds bucket credentials for the CLI.
 
 ### Which store for what?
 
