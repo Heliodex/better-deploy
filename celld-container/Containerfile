@@ -6,34 +6,35 @@
 #   celld      one node, serving the bucket
 #
 # The application is not baked in. Deploy it into the bucket with `celld deploy` (from the host or another container) pointed at the published gateway port; the running node adopts the deployment within CELLD_DEPLOY_POLL_S seconds (30 by default), without a restart.
-#
+# Two stages so the final image carries no download tools: the base image (78 MB) plus the two stripped binaries (~112 MB) is the floor, since celld publishes glibc builds only and cannot run on Alpine.
 # See README.md for the run command and caveats.
 
-FROM docker.io/library/debian:bookworm-slim
+FROM docker.io/library/debian:bookworm-slim AS fetch
 
 ARG CELLD_VERSION=v0.6.3
 ARG VGW_VERSION=v1.9.0
 
-# curl: downloading the binaries here, plus the health check and entrypoint.
+# Build-only tools: curl for the downloads, binutils to strip versitygw, ca-certificates for TLS. None of this reaches the final image.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl \
+ && apt-get install -y --no-install-recommends binutils ca-certificates curl \
  && rm -rf /var/lib/apt/lists/*
 
 # celld publishes gnu tarballs but no checksums file; provenance is the per-release build attestation:
 #   gh attestation verify celld-x86_64-unknown-linux-gnu.gz --repo denoland/celld
 RUN set -eux; \
+    mkdir -p /out; \
     case "${TARGETARCH:-amd64}" in \
-      amd64) celld_target=x86_64-unknown-linux-gnu; vgw_target=x86_64 ;; \
-      arm64) celld_target=aarch64-unknown-linux-gnu; vgw_target=arm64 ;; \
+      amd64) celld_target=x86_64-unknown-linux-gnu ;; \
+      arm64) celld_target=aarch64-unknown-linux-gnu ;; \
       *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
     curl -fsSL --retry 3 -o /tmp/celld.gz \
       "https://github.com/denoland/celld/releases/download/${CELLD_VERSION}/celld-${celld_target}.gz"; \
-    gzip -dc /tmp/celld.gz > /usr/local/bin/celld; \
-    chmod 0755 /usr/local/bin/celld; \
+    gzip -dc /tmp/celld.gz > /out/celld; \
+    chmod 0755 /out/celld; \
     rm /tmp/celld.gz
 
-# versitygw publishes checksums.txt next to each release, so verify the tarball.
+# versitygw publishes checksums.txt next to each release, so verify the tarball. Its Linux build is a Go binary with debug info; stripping it saves about 19 MB.
 RUN set -eux; \
     case "${TARGETARCH:-amd64}" in \
       amd64) vgw_target=x86_64 ;; \
@@ -46,9 +47,13 @@ RUN set -eux; \
     curl -fsSL --retry 3 -o /tmp/vgw.checksums "$base/checksums.txt"; \
     (cd /tmp && grep " ${vgw_asset}\$" vgw.checksums | sha256sum -c -); \
     tar -xzf "/tmp/$vgw_asset" -C /tmp; \
+    strip -s "/tmp/versitygw_${VGW_VERSION}_Linux_${vgw_target}/versitygw"; \
     install -m 0755 "/tmp/versitygw_${VGW_VERSION}_Linux_${vgw_target}/versitygw" \
-      /usr/local/bin/versitygw; \
+      /out/versitygw; \
     rm -rf "/tmp/$vgw_asset" /tmp/vgw.checksums "/tmp/versitygw_${VGW_VERSION}_Linux_${vgw_target}"
+
+# Debian slim rather than Alpine: celld's release binaries need glibc 2.34+ and Alpine's gcompat lacks symbols celld imports (__res_init, fcntl64).
+FROM docker.io/library/debian:bookworm-slim
 
 RUN groupadd --gid 1000 celld \
  && useradd --uid 1000 --gid 1000 --no-create-home --shell /usr/sbin/nologin celld
@@ -59,6 +64,8 @@ RUN groupadd --gid 1000 celld \
 #   work/  celld's local SQLite copies and replication state (CELLD_WATCH)
 RUN install -d -o 1000 -g 1000 -m 0755 /var/lib/celld/s3 /var/lib/celld/iam /var/lib/celld/work
 
+COPY --from=fetch --chmod=0755 /out/celld /usr/local/bin/celld
+COPY --from=fetch --chmod=0755 /out/versitygw /usr/local/bin/versitygw
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY --chmod=0755 healthcheck.sh /usr/local/bin/healthcheck.sh
 

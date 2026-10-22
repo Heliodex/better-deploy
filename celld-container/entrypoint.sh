@@ -63,15 +63,15 @@ log "starting versitygw on :$VGW_PORT, data in $S3_DATA_DIR"
 versitygw "${vgw_args[@]}" posix "$S3_DATA_DIR" &
 vgw_pid=$!
 
-# The gateway answers unauthenticated requests with 403; any HTTP answer (or
-# even a bare TCP connect) means the listener is up.
+# A successful TCP connect means the listener is up; the gateway rejects the unauthenticated request afterwards, which is fine. Bash's /dev/tcp keeps curl out of the final image.
 ready=0
 for _ in $(seq 1 300); do
 	if ! kill -0 "$vgw_pid" 2>/dev/null; then
 		wait "$vgw_pid" || true
 		die "versitygw exited while starting"
 	fi
-	if curl -s -o /dev/null --max-time 1 "http://127.0.0.1:$VGW_PORT/"; then
+	if { exec 3<>"/dev/tcp/127.0.0.1/$VGW_PORT"; } 2>/dev/null; then
+		exec 3<&-
 		ready=1
 		break
 	fi
