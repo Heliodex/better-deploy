@@ -21,36 +21,27 @@ RUN apt-get update \
 
 # celld publishes gnu tarballs but no checksums file; provenance is the per-release build attestation:
 #   gh attestation verify celld-x86_64-unknown-linux-gnu.gz --repo denoland/celld
+# x86_64 only: this image targets x86 hosts, so no other release asset is fetched.
 RUN set -eux; \
     mkdir -p /out; \
-    case "${TARGETARCH:-amd64}" in \
-      amd64) celld_target=x86_64-unknown-linux-gnu ;; \
-      arm64) celld_target=aarch64-unknown-linux-gnu ;; \
-      *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
-    esac; \
     curl -fsSL --retry 3 -o /tmp/celld.gz \
-      "https://github.com/denoland/celld/releases/download/${CELLD_VERSION}/celld-${celld_target}.gz"; \
+      "https://github.com/denoland/celld/releases/download/${CELLD_VERSION}/celld-x86_64-unknown-linux-gnu.gz"; \
     gzip -dc /tmp/celld.gz > /out/celld; \
     chmod 0755 /out/celld; \
     rm /tmp/celld.gz
 
 # versitygw publishes checksums.txt next to each release, so verify the tarball. Its Linux build is a Go binary with debug info; stripping it saves about 19 MB.
 RUN set -eux; \
-    case "${TARGETARCH:-amd64}" in \
-      amd64) vgw_target=x86_64 ;; \
-      arm64) vgw_target=arm64 ;; \
-      *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
-    esac; \
-    vgw_asset="versitygw_${VGW_VERSION}_Linux_${vgw_target}.tar.gz"; \
+    vgw_asset="versitygw_${VGW_VERSION}_Linux_x86_64.tar.gz"; \
     base="https://github.com/versity/versitygw/releases/download/${VGW_VERSION}"; \
     curl -fsSL --retry 3 -o "/tmp/$vgw_asset" "$base/$vgw_asset"; \
     curl -fsSL --retry 3 -o /tmp/vgw.checksums "$base/checksums.txt"; \
     (cd /tmp && grep " ${vgw_asset}\$" vgw.checksums | sha256sum -c -); \
     tar -xzf "/tmp/$vgw_asset" -C /tmp; \
-    strip -s "/tmp/versitygw_${VGW_VERSION}_Linux_${vgw_target}/versitygw"; \
-    install -m 0755 "/tmp/versitygw_${VGW_VERSION}_Linux_${vgw_target}/versitygw" \
+    strip -s "/tmp/versitygw_${VGW_VERSION}_Linux_x86_64/versitygw"; \
+    install -m 0755 "/tmp/versitygw_${VGW_VERSION}_Linux_x86_64/versitygw" \
       /out/versitygw; \
-    rm -rf "/tmp/$vgw_asset" /tmp/vgw.checksums "/tmp/versitygw_${VGW_VERSION}_Linux_${vgw_target}"
+    rm -rf "/tmp/$vgw_asset" /tmp/vgw.checksums "/tmp/versitygw_${VGW_VERSION}_Linux_x86_64"
 
 # Debian slim rather than Alpine: celld's release binaries need glibc 2.34+ and Alpine's gcompat lacks symbols celld imports (__res_init, fcntl64).
 FROM docker.io/library/debian:bookworm-slim

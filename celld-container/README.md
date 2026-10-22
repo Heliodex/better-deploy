@@ -20,11 +20,13 @@ podman build --format docker -t localhost/celld-vgw .
 `--format docker` keeps the image's `HEALTHCHECK`: OCI images cannot store one,
 and podman defaults to OCI. Docker users need no flag.
 
-The image is about 190 MB. Roughly 78 MB is the Debian slim base and 112 MB the
+The image is about 195 MB. Roughly 78 MB is the Debian slim base and 112 MB the
 two stripped binaries — celld's 64 MB (V8 included) and versitygw's 48 MB — so
 there is little left to trim without a different celld build. Alpine is not an
 option: celld publishes glibc builds only, and its imports (`__res_init`,
 `fcntl64`) are missing from Alpine's gcompat.
+
+The build is x86_64 only and fetches the `x86_64` release assets.
 
 ## Run
 
