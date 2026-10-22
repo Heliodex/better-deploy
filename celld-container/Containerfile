@@ -71,8 +71,5 @@ EXPOSE 8080 10000
 VOLUME ["/var/lib/celld"]
 
 STOPSIGNAL SIGTERM
-# celld bounds its own drain (`CELLD_SHUTDOWN_TOTAL_MS`, 40s default), so the runtime must give it at least that long: `podman run --stop-timeout 75`.
-HEALTHCHECK --interval=10s --timeout=3s --start-period=90s --retries=6 \
-  CMD ["/usr/local/bin/healthcheck.sh"]
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
