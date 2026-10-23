@@ -1,22 +1,26 @@
 # syntax=docker/dockerfile:1
 #
-# A Spin runtime that serves an application mounted into it.
+# A multi-app Spin runtime. The supervisor starts one `spin up` process per
+# application, writes a Caddy config that routes each hostname to the app's
+# loopback port, and serves the deploy API. Applications and their state live
+# under /var/lib/spin, so the image contains no application.
 #
-# The application is not baked in. Build it on the host (as in the sibling
-# spin/ guestbook), then mount the built directory at /apps, or copy it into a
-# volume there. The entrypoint runs `spin watch --skip-build`, so a rebuilt
-# component is picked up without restarting the container. Runtime state (the
-# default key-value store, SQLite databases, logs) lives in /var/lib/spin rather
-# than next to the manifest, which keeps /apps read-only.
-#
-# See README.md for the run and deploy commands.
+# See README.md for the layout, deploy command and environment.
+
+FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.24-alpine AS supervisor
+ARG TARGETARCH
+WORKDIR /src
+COPY supervisor/ ./
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
+    go build -trimpath -ldflags="-s -w" -o /out/supervisor .
 
 FROM docker.io/library/alpine:3.24 AS fetch
 
 ARG SPIN_VERSION=v4.2.5
 ARG TARGETARCH
 
-# Build-only tools: curl for the download, binutils to strip the binary, ca-certificates for TLS. None of this reaches the final image.
+# Build-only tools: curl for the download, binutils to strip the binary,
+# ca-certificates for TLS. None of this reaches the final image.
 RUN apk add --no-cache binutils ca-certificates curl
 
 # Spin publishes a static Linux build, so the runtime image can be Alpine rather
@@ -43,35 +47,52 @@ RUN set -eux; \
 
 FROM docker.io/library/alpine:3.24
 
-# ca-certificates: outbound HTTPS and registry pulls from components.
+# ca-certificates: outbound HTTPS from components.
 # su-exec: drop from root once a mounted volume has been handed to uid 1000.
-RUN apk add --no-cache bash ca-certificates su-exec \
+# caddy: the public listener and hostname routing.
+RUN apk add --no-cache ca-certificates su-exec caddy tini \
  && addgroup -g 1000 spin \
  && adduser -D -u 1000 -G spin -h /var/lib/spin/home -H -s /sbin/nologin spin \
  && install -d -o 1000 -g 1000 -m 0750 \
-      /var/lib/spin/home /var/lib/spin/state /var/lib/spin/logs /var/lib/spin/cache /var/lib/spin/tmp \
-      /apps
+      /var/lib/spin/home \
+      /var/lib/spin/tmp \
+      /var/lib/spin/apps \
+      /var/lib/spin/state \
+      /var/lib/spin/logs \
+      /var/lib/spin/cache \
+      /var/lib/spin/caddy/data \
+      /var/lib/spin/caddy/config
 
 COPY --from=fetch --chmod=0755 /out/spin /usr/local/bin/spin
+COPY --from=supervisor --chmod=0755 /out/supervisor /usr/local/bin/supervisor
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/entrypoint.sh
 
-# TMPDIR is on the volume so a read-only /apps (and a read-only root
-# filesystem) still have somewhere for Spin's unpacked static assets. HOME holds
-# Wasmtime's compiled-module cache, which makes restarts much faster.
+# HOME holds Wasmtime's compiled-module cache. TMPDIR and the Caddy XDG paths
+# live on the volume, so a read-only root filesystem still works.
 ENV HOME=/var/lib/spin/home \
     TMPDIR=/var/lib/spin/tmp \
-    SPIN_APP=/apps \
-    SPIN_LISTEN=0.0.0.0:3000
+    XDG_DATA_HOME=/var/lib/spin/caddy/data \
+    XDG_CONFIG_HOME=/var/lib/spin/caddy/config \
+    SPIN_APPS_DIR=/var/lib/spin/apps \
+    SPIN_STATE_DIR=/var/lib/spin/state \
+    SPIN_LOG_DIR=/var/lib/spin/logs \
+    SPIN_CACHE_DIR=/var/lib/spin/cache \
+    SPIN_TMP_DIR=/var/lib/spin/tmp \
+    CADDY_CONFIG=/var/lib/spin/caddy/Caddyfile \
+    CADDY_CONFIG_DIR=/var/lib/spin/caddy/config \
+    CADDY_DATA_DIR=/var/lib/spin/caddy/data \
+    CADDY_ADMIN=127.0.0.1:2019 \
+    LISTEN=0.0.0.0:8080 \
+    API_LISTEN=127.0.0.1:9090
 
-# 3000: the HTTP trigger's listener (SPIN_LISTEN)
-EXPOSE 3000
+# 8080: Caddy, the only published port. The deploy API is proxied through it
+# when DEPLOY_HOST is set; otherwise it stays on loopback.
+EXPOSE 8080
 
-# Everything that must survive the container: key-value/SQLite state, component
-# logs, and caches. /apps is deliberately not a volume: mount the application
-# there, so the image carries no application and the source of truth stays
-# outside the container.
+# Everything that must survive the container: app bundles, KV/SQLite state,
+# logs, the Spin cache and the generated Caddy config.
 VOLUME ["/var/lib/spin"]
 
 STOPSIGNAL SIGTERM
 
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/entrypoint.sh"]
