@@ -1,4 +1,5 @@
-// Regenerate the wasi:keyvalue bindings in ./bindings from ./wit.
+// Fetch WIT dependencies and regenerate the wasi:keyvalue bindings in ./bindings.
+//go:generate wash wit fetch
 //go:generate wit-bindgen go --pkg-name example/bindings --out-dir bindings ./wit
 
 package main

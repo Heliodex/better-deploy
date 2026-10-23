@@ -1,0 +1,8 @@
+# Generated Go bindings (go generate / wit-bindgen)
+/bindings/
+
+# Build output
+/build/
+
+# WIT dependencies, restored from wkg.lock by `wash wit fetch`
+/wit/deps/
