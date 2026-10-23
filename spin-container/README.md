@@ -19,9 +19,7 @@ container entrypoint. An application now lives under
 podman build -t localhost/spin-supervisor .
 ```
 
-The image contains Spin, Caddy and a small Go supervisor. It does not contain
-any application. The supervisor is PID 1: on start it creates and chowns the
-volume directories, drops to uid 1000, then runs Caddy and the apps.
+The image contains Spin and a Go supervisor with Caddy linked in. It does not contain any application. The supervisor is PID 1: on start it creates and chowns the volume directories, drops to uid 1000, then runs Caddy and the apps.
 
 ## Run
 
@@ -42,7 +40,7 @@ podman run -d --name spin-supervisor --stop-timeout 30 \
 - `DEPLOY_HOST` makes Caddy route that hostname to the deploy API. Without it,
   the API stays on `127.0.0.1:9090` inside the container.
 - `SUPERVISOR_TOKEN` is required for deploys. Treat it like a password.
-- `/var/lib/spin` holds app bundles, state, logs and Caddy's generated config.
+- `/var/lib/spin` holds app bundles, state and logs.
 - Start the image as root (the default) so the supervisor can chown the volume; it drops to uid 1000 before starting Caddy or any app. If your platform forces a non-root user, the volume must already be writable by uid 1000.
 
 On Orchard, create one deployment with container port `8080`, a PVC mounted at
@@ -68,7 +66,8 @@ total budget.
   logs/<name>/
   cache/
   caddy/
-    Caddyfile
+    data/
+    config/
 ```
 
 `app.json` is optional:
@@ -119,8 +118,8 @@ one; for a new app it creates `{}`. Include every file the manifest references
 not run `spin build`.
 
 The supervisor stops the old process, swaps the app directory, starts the new
-one and lets Caddy reload its route. State under `state/<name>` is untouched.
-The response is the app's current status:
+one and applies the new route through Caddy's API. State under `state/<name>`
+is untouched. The response is the app's current status:
 
 ```json
 {"name":"gotime","host":"gotime.apps.example.com","port":3101,"status":"running","pid":1234}
@@ -160,12 +159,10 @@ later iteration.
 
 Caddy listens on `LISTEN` (default `0.0.0.0:8080`), matches the request
 `Host`, and proxies to the app's loopback port. Unknown hosts get a 404. The
-supervisor rewrites `CADDY_CONFIG` and Caddy's `--watch` reloads it without
-restarting the container or the other apps. The `DEPLOY_HOST` hostname is
-reserved for the API and cannot be used by an app.
-
-The Caddy admin endpoint stays on `CADDY_ADMIN` (default
-`127.0.0.1:2019`). Do not publish it.
+supervisor builds the Caddy config in memory and applies it through Caddy's API,
+without restarting the container or the other apps. There is no Caddyfile and no
+admin listener. The `DEPLOY_HOST` hostname is reserved for the API and cannot be
+used by an app.
 
 `GET /healthz` is routed to the supervisor API on any hostname, so an Orchard
 HTTP health check can use container port `8080` and path `/healthz` without
@@ -184,11 +181,8 @@ directly).
 | `SPIN_CACHE_DIR` | `/var/lib/spin/cache` | Spin's component cache |
 | `SPIN_TMP_DIR` | `/var/lib/spin/tmp` | upload and unpack temporary files |
 | `SPIN_BIN` | `spin` | Spin executable |
-| `CADDY_BIN` | `caddy` | Caddy executable |
-| `CADDY_CONFIG` | `/var/lib/spin/caddy/Caddyfile` | generated Caddyfile |
-| `CADDY_ADMIN` | `127.0.0.1:2019` | Caddy admin listener |
-| `CADDY_DATA_DIR` | `/var/lib/spin/caddy/data` | Caddy data |
-| `CADDY_CONFIG_DIR` | `/var/lib/spin/caddy/config` | Caddy autosave |
+| `CADDY_DATA_DIR` | `/var/lib/spin/caddy/data` | Caddy data storage |
+| `CADDY_CONFIG_DIR` | `/var/lib/spin/caddy/config` | Caddy config storage |
 | `LISTEN` | `0.0.0.0:8080` | Caddy public listener |
 | `API_LISTEN` | `127.0.0.1:9090` | supervisor API |
 | `APPS_DOMAIN` | unset | default host suffix |

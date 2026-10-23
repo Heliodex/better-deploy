@@ -1,6 +1,6 @@
 // Command supervisor runs several Spin applications in one container.
 //
-// It starts one `spin up` process per application, writes a Caddy config that routes each hostname to the app's loopback port, and keeps each app's key-value store and SQLite database in a directory on the volume.
+// It starts one `spin up` process per application, applies a Caddy config that routes each hostname to the app's loopback port, and keeps each app's key-value store and SQLite database in a directory on the volume.
 // New versions arrive as gzipped tarballs over the deploy API.
 package main
 
@@ -29,9 +29,9 @@ type config struct {
 
 	appsDir, stateDir, logDir, cacheDir, tempDir string
 
-	caddyDataDir, caddyConfigDir, caddyConfig, caddyAdmin string
+	caddyDataDir, caddyConfigDir string
 
-	spinBin, caddyBin string
+	spinBin string
 
 	listen, apiListen string
 
@@ -68,9 +68,8 @@ type Supervisor struct {
 	appsMu sync.RWMutex
 	apps   map[string]*App
 
-	caddyMu, deployMu                 sync.Mutex
-	caddyCmd                          *exec.Cmd
-	caddyDone, caddyExited, apiExited chan struct{}
+	caddyMu, deployMu sync.Mutex
+	apiExited         chan struct{}
 
 	api      *http.Server
 	stopping atomic.Bool
@@ -105,10 +104,7 @@ func configFromEnv() config {
 		tempDir:        env("SPIN_TMP_DIR", "/var/lib/spin/tmp"),
 		caddyDataDir:   env("CADDY_DATA_DIR", "/var/lib/spin/caddy/data"),
 		caddyConfigDir: env("CADDY_CONFIG_DIR", "/var/lib/spin/caddy/config"),
-		caddyConfig:    env("CADDY_CONFIG", "/var/lib/spin/caddy/Caddyfile"),
-		caddyAdmin:     env("CADDY_ADMIN", "127.0.0.1:2019"),
 		spinBin:        env("SPIN_BIN", "spin"),
-		caddyBin:       env("CADDY_BIN", "caddy"),
 		listen:         env("LISTEN", "0.0.0.0:8080"),
 		apiListen:      env("API_LISTEN", "127.0.0.1:9090"),
 		appsDomain:     strings.ToLower(strings.TrimSpace(os.Getenv("APPS_DOMAIN"))),
@@ -118,7 +114,7 @@ func configFromEnv() config {
 	}
 }
 
-// minimalEnv keeps the process environment small so container-level secrets such as SUPERVISOR_TOKEN are not inherited by Spin or Caddy.
+// minimalEnv keeps the process environment small so container-level secrets such as SUPERVISOR_TOKEN are not inherited by Spin.
 // Application variables are passed explicitly with -e.
 func minimalEnv(extra ...string) []string {
 	keep := []string{
@@ -169,8 +165,8 @@ func prepareRuntime(cfg config) error {
 
 	setEnvDefault("HOME", "/var/lib/spin/home")
 	setEnvDefault("TMPDIR", cfg.tempDir)
-	setEnvDefault("XDG_DATA_HOME", cfg.caddyDataDir)
-	setEnvDefault("XDG_CONFIG_HOME", cfg.caddyConfigDir)
+	_ = os.Setenv("XDG_DATA_HOME", cfg.caddyDataDir)
+	_ = os.Setenv("XDG_CONFIG_HOME", cfg.caddyConfigDir)
 
 	root, err := runtimeDir(cfg.volumeRoot)
 	if err != nil {
@@ -188,7 +184,6 @@ func prepareRuntime(cfg config) error {
 		cfg.tempDir,
 		cfg.caddyDataDir,
 		cfg.caddyConfigDir,
-		filepath.Dir(cfg.caddyConfig),
 	}
 	for i, dir := range dirs {
 		clean, err := runtimeDir(dir)
@@ -600,98 +595,6 @@ func (s *Supervisor) loadApps() error {
 	return nil
 }
 
-func (s *Supervisor) writeCaddyfile() error {
-	s.caddyMu.Lock()
-	defer s.caddyMu.Unlock()
-
-	s.appsMu.RLock()
-	apps := make([]*App, 0, len(s.apps))
-	for _, app := range s.apps {
-		apps = append(apps, app)
-	}
-	s.appsMu.RUnlock()
-	sort.Slice(apps, func(i, j int) bool { return apps[i].Name < apps[j].Name })
-
-	apiPort := 9090
-	if _, port, err := net.SplitHostPort(s.cfg.apiListen); err == nil {
-		if n, err := strconv.Atoi(port); err == nil {
-			apiPort = n
-		}
-	}
-
-	var b strings.Builder
-	fmt.Fprintf(&b, "{\n\tadmin %s\n\tauto_https off\n}\n\n", s.cfg.caddyAdmin)
-
-	host, port, err := splitListen(s.cfg.listen)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(&b, "http://:%s {\n", port)
-	if host != "" && host != "0.0.0.0" && host != "::" {
-		fmt.Fprintf(&b, "\tbind %s\n", host)
-	}
-	fmt.Fprintf(&b, "\t@health path /healthz\n\thandle @health {\n\t\treverse_proxy 127.0.0.1:%d\n\t}\n", apiPort)
-	if s.cfg.deployHost != "" {
-		fmt.Fprintf(&b, "\t@deploy host %s\n\thandle @deploy {\n\t\treverse_proxy 127.0.0.1:%d\n\t}\n", s.cfg.deployHost, apiPort)
-	}
-	for i, app := range apps {
-		fmt.Fprintf(&b, "\t@app%d host %s\n\thandle @app%d {\n\t\treverse_proxy 127.0.0.1:%d\n\t}\n", i, app.Host, i, app.Port)
-	}
-	b.WriteString("\thandle {\n\t\trespond \"no app for this host\" 404\n\t}\n}\n")
-
-	return os.WriteFile(s.cfg.caddyConfig, []byte(b.String()), 0o644)
-}
-
-func (s *Supervisor) startCaddy() error {
-	cmd := exec.Command(s.cfg.caddyBin,
-		"run",
-		"--config", s.cfg.caddyConfig,
-		"--adapter", "caddyfile",
-		"--watch",
-	)
-	cmd.Env = minimalEnv(
-		"XDG_DATA_HOME="+s.cfg.caddyDataDir,
-		"XDG_CONFIG_HOME="+s.cfg.caddyConfigDir,
-	)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	out := newPrefixWriter("caddy")
-	cmd.Stdout = out
-	cmd.Stderr = out
-
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	s.caddyCmd = cmd
-	s.caddyDone = make(chan struct{})
-
-	go func() {
-		err := cmd.Wait()
-		close(s.caddyDone)
-		if s.stopping.Load() {
-			return
-		}
-		log.Printf("caddy: %v", err)
-		close(s.caddyExited)
-	}()
-
-	log.Printf("caddy started pid %d on %s", cmd.Process.Pid, s.cfg.listen)
-	return nil
-}
-
-func (s *Supervisor) stopCaddy() {
-	cmd := s.caddyCmd
-	if cmd == nil || cmd.Process == nil {
-		return
-	}
-	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
-	select {
-	case <-s.caddyDone:
-	case <-time.After(5 * time.Second):
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		<-s.caddyDone
-	}
-}
-
 func (s *Supervisor) shutdown() {
 	s.stopping.Store(true)
 
@@ -702,10 +605,13 @@ func (s *Supervisor) shutdown() {
 	}
 
 	s.stopApps()
-	s.stopCaddy()
+	if err := stopCaddy(); err != nil {
+		log.Printf("caddy: %v", err)
+	}
 }
 
 func main() {
+	log.SetOutput(os.Stderr)
 	log.SetFlags(log.LstdFlags | log.LUTC)
 	cfg := configFromEnv()
 	for _, check := range []struct {
@@ -727,25 +633,20 @@ func main() {
 	}
 
 	s := &Supervisor{
-		cfg:         cfg,
-		apps:        map[string]*App{},
-		caddyExited: make(chan struct{}),
-		apiExited:   make(chan struct{}),
+		cfg:       cfg,
+		apps:      map[string]*App{},
+		apiExited: make(chan struct{}),
 	}
 
 	if err := s.loadApps(); err != nil {
 		s.shutdown()
 		log.Fatalf("load apps: %v", err)
 	}
-	if err := s.writeCaddyfile(); err != nil {
-		s.shutdown()
-		log.Fatalf("write Caddy config: %v", err)
-	}
 	if err := s.startAPI(); err != nil {
 		s.shutdown()
 		log.Fatalf("start API: %v", err)
 	}
-	if err := s.startCaddy(); err != nil {
+	if err := s.applyCaddyConfig(); err != nil {
 		s.shutdown()
 		log.Fatalf("start Caddy: %v", err)
 	}
@@ -759,9 +660,6 @@ func main() {
 	select {
 	case got := <-sig:
 		log.Printf("received %s, shutting down", got)
-	case <-s.caddyExited:
-		log.Printf("Caddy exited unexpectedly")
-		exit = 1
 	case <-s.apiExited:
 		log.Printf("API server exited unexpectedly")
 		exit = 1

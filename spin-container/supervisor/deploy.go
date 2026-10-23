@@ -312,8 +312,8 @@ func (s *Supervisor) deployApp(name, archive string) (*App, error) {
 	s.appsMu.Unlock()
 
 	s.startApp(app)
-	if err := s.writeCaddyfile(); err != nil {
-		log.Printf("deploy %s: write Caddy config: %v", name, err)
+	if err := s.applyCaddyConfig(); err != nil {
+		log.Printf("deploy %s: apply Caddy config: %v", name, err)
 	}
 
 	return app, nil

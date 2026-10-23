@@ -1,12 +1,14 @@
 # syntax=docker/dockerfile:1
 #
-# A multi-app Spin runtime. The supervisor starts one `spin up` process per application, writes a Caddy config that routes each hostname to the app's loopback port, and serves the deploy API. Applications and their state live under /var/lib/spin, so the image contains no application.
+# A multi-app Spin runtime. The supervisor starts one `spin up` process per application, applies a Caddy config that routes each hostname to the app's loopback port, and serves the deploy API. Applications and their state live under /var/lib/spin, so the image contains no application.
 #
 # See README.md for the layout, deploy command and environment.
 
-FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.24-alpine AS supervisor
+FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.25-alpine AS supervisor
 ARG TARGETARCH
 WORKDIR /src
+COPY supervisor/go.mod supervisor/go.sum ./
+RUN go mod download
 COPY supervisor/ ./
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
     go build -trimpath -ldflags="-s -w" -o /out/supervisor .
@@ -42,8 +44,8 @@ RUN set -eux; \
 FROM docker.io/library/alpine:3.24
 
 # ca-certificates: outbound HTTPS from components.
-# caddy: the public listener and hostname routing.
-RUN apk add --no-cache ca-certificates caddy \
+# Caddy is linked into the supervisor, so the image does not need its CLI package.
+RUN apk add --no-cache ca-certificates \
  && addgroup -g 1000 spin \
  && adduser -D -u 1000 -G spin -h /var/lib/spin/home -H -s /sbin/nologin spin \
  && install -d -o 1000 -g 1000 -m 0750 \
@@ -70,17 +72,15 @@ ENV HOME=/var/lib/spin/home \
     SPIN_LOG_DIR=/var/lib/spin/logs \
     SPIN_CACHE_DIR=/var/lib/spin/cache \
     SPIN_TMP_DIR=/var/lib/spin/tmp \
-    CADDY_CONFIG=/var/lib/spin/caddy/Caddyfile \
     CADDY_CONFIG_DIR=/var/lib/spin/caddy/config \
     CADDY_DATA_DIR=/var/lib/spin/caddy/data \
-    CADDY_ADMIN=127.0.0.1:2019 \
     LISTEN=0.0.0.0:8080 \
     API_LISTEN=127.0.0.1:9090
 
 # 8080: Caddy, the only published port. The deploy API is proxied through it when DEPLOY_HOST is set; otherwise it stays on loopback.
 EXPOSE 8080
 
-# Everything that must survive the container: app bundles, KV/SQLite state, logs, the Spin cache and the generated Caddy config.
+# Everything that must survive the container: app bundles, KV/SQLite state, logs, the Spin cache and Caddy storage.
 VOLUME ["/var/lib/spin"]
 
 STOPSIGNAL SIGTERM

@@ -134,28 +134,23 @@ func TestValidateHost(t *testing.T) {
 	}
 }
 
-func TestWriteCaddyfile(t *testing.T) {
-	dir := t.TempDir()
+func TestCaddyfile(t *testing.T) {
 	s := &Supervisor{
 		cfg: config{
-			caddyConfig: filepath.Join(dir, "Caddyfile"),
-			caddyAdmin:  "127.0.0.1:2019",
-			listen:      "127.0.0.1:8080",
-			apiListen:   "127.0.0.1:9090",
-			deployHost:  "deploy.example.com",
+			listen:     "127.0.0.1:8080",
+			apiListen:  "127.0.0.1:9090",
+			deployHost: "deploy.example.com",
 		},
 		apps: map[string]*App{
 			"gotime": {Name: "gotime", Host: "gotime.example.com", Port: 3100},
 		},
 	}
-	if err := s.writeCaddyfile(); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(s.cfg.caddyConfig)
+	configText, err := s.caddyfile()
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
+		"admin off",
 		"http://:8080",
 		"bind 127.0.0.1",
 		"@health path /healthz",
@@ -163,8 +158,8 @@ func TestWriteCaddyfile(t *testing.T) {
 		"@app0 host gotime.example.com",
 		"reverse_proxy 127.0.0.1:3100",
 	} {
-		if !strings.Contains(string(data), want) {
-			t.Errorf("Caddyfile missing %q:\n%s", want, data)
+		if !strings.Contains(configText, want) {
+			t.Errorf("Caddyfile missing %q:\n%s", want, configText)
 		}
 	}
 }
