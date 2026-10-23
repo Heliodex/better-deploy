@@ -1,79 +1,175 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
-	"sort"
-	"strings"
 
+	// A lightweight, high performance HTTP request router
 	"github.com/julienschmidt/httprouter"
+
+	// Bindings for the wasi:keyvalue/store interface, generated from ./wit by componentize-go.
+	store "example/wasi_keyvalue_store"
+
+	// The wasihttp package enables us to write more idiomatic Go when using wasi:http.
 	"go.bytecodealliance.org/wasi/wasihttp"
-	"go.bytecodealliance.org/wasi/wasilog"
 
 	// Anchor go.wasmcloud.dev/component in go.mod: it carries the wasmCloud worlds' WIT and componentize-go.toml used at build time.
 	_ "go.wasmcloud.dev/component"
 )
 
-const Index = `/error - return a 500 error
-  /form - echo the fields of a POST request
-  /headers - echo your user agent back as a server side header
-  /post - echo the body of a POST request`
+// response is the JSON body of every reply. Value carries the stored JSON document as-is, so it is embedded rather than re-encoded as a string.
+type response struct {
+	Message string          `json:"message"`
+	Value   json.RawMessage `json:"value,omitempty"`
+}
 
 func init() {
+	// Establishes the routes and methods for our key-value operations.
 	router := httprouter.New()
-	router.HandlerFunc(http.MethodGet, "/", indexHandler)
-	router.HandlerFunc(http.MethodGet, "/error", errorHandler)
-	router.HandlerFunc(http.MethodGet, "/headers", headersHandler)
-	router.HandlerFunc(http.MethodPost, "/form", formHandler)
-	router.HandlerFunc(http.MethodPost, "/post", postHandler)
+	router.GET("/", indexHandler)
+	router.POST("/crud/:key", postHandler)
+	router.GET("/crud/:key", getHandler)
+	router.DELETE("/crud/:key", deleteHandler)
 	wasihttp.Handle(router)
 }
 
-func indexHandler(w http.ResponseWriter, r *http.Request) {
-	logger := wasilog.ContextLogger("indexHandler")
-	logger.Info("Request received", "host", r.Host, "agent", r.Header.Get("User-Agent"))
-
-	handlers := []string{"/error", "/form", "/headers", "/post"}
-	sort.Strings(handlers)
-	w.Header().Add("content-type", "text/plain")
-	w.Header().Add("X-Requested-Path", r.URL.Path)
-	w.Header().Add("X-Existing-Paths", strings.Join(handlers, ","))
-	_, _ = w.Write([]byte(Index))
+func indexHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	writeJSON(w, http.StatusOK, response{Message: "GET, POST, or DELETE to /crud/<key> (with JSON payload for POSTs)"})
 }
 
-func headersHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Add("X-Your-User-Agent", r.Header.Get("User-Agent"))
-
-	_, _ = w.Write([]byte("Check headers!"))
-}
-
-func errorHandler(w http.ResponseWriter, _ *http.Request) {
-	http.Error(w, "Something went wrong", http.StatusInternalServerError)
-}
-
-func formHandler(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+// openBucket opens the default keyvalue bucket served by the host.
+func openBucket() (*store.Bucket, error) {
+	res := store.Open("default")
+	if res.IsErr() {
+		return nil, fmt.Errorf("failed to open bucket: %s", errString(res.Err()))
 	}
-
-	for key, values := range r.Form {
-		_, _ = w.Write([]byte(key + ": " + strings.Join(values, ",") + "\n"))
-	}
+	return res.Ok(), nil
 }
 
-func postHandler(w http.ResponseWriter, r *http.Request) {
-	logger := wasilog.ContextLogger("postHandler")
+func postHandler(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+	// Assigns the "key" parameter to the "key" variable.
+	key := ps.ByName("key")
 
-	w.WriteHeader(http.StatusOK)
-
-	n, err := io.Copy(w, r.Body)
+	// Reads the request body and checks that it is a JSON document.
+	// The user will set the value via JSON payload:
+	// curl -X POST 'localhost:8000/crud/key' -d '{"foo": "bar", "woo": "hoo"}'
+	defer r.Body.Close()
+	value, err := io.ReadAll(r.Body)
 	if err != nil {
-		logger.Error("Error copying body", "error", err)
+		errResponseJSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !json.Valid(value) {
+		errResponseJSON(w, http.StatusBadRequest, "request body is not valid JSON")
 		return
 	}
 
-	logger.Info("Copied body", "bytes", n)
+	bucket, err := openBucket()
+	if err != nil {
+		errResponseJSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Sets the value for the key in the current bucket and handles any errors.
+	if kvSet := bucket.Set(key, value); kvSet.IsErr() {
+		errResponseJSON(w, http.StatusBadRequest, errString(kvSet.Err()))
+		return
+	}
+
+	// Confirms set, returning key and value in JSON body.
+	writeJSON(w, http.StatusOK, response{Message: "Set " + key, Value: value})
 }
 
+func getHandler(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+	// Assigns the "key" parameter to the "key" variable.
+	key := ps.ByName("key")
+
+	bucket, err := openBucket()
+	if err != nil {
+		errResponseJSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Gets the value for the defined key.
+	kvGet := bucket.Get(key)
+	if kvGet.IsErr() {
+		errResponseJSON(w, http.StatusBadRequest, errString(kvGet.Err()))
+		return
+	}
+
+	// Returns and reports that key does not exist if no value is found.
+	value := kvGet.Ok()
+	if value.IsNone() {
+		errResponseJSON(w, http.StatusNotFound, fmt.Sprintf("%s does not exist", key))
+		return
+	}
+
+	// Returns key and value in JSON body. Anything this component stored is
+	// JSON already; a value written by something else is returned as a string.
+	stored := json.RawMessage(value.Some())
+	if !json.Valid(stored) {
+		stored, _ = json.Marshal(string(value.Some()))
+	}
+	writeJSON(w, http.StatusOK, response{Message: "Got " + key, Value: stored})
+}
+
+func deleteHandler(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+	// Assigns the "key" parameter to the "key" variable.
+	key := ps.ByName("key")
+
+	bucket, err := openBucket()
+	if err != nil {
+		errResponseJSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Returns and reports that key does not exist if no value is found.
+	kvExists := bucket.Exists(key)
+	if kvExists.IsErr() {
+		errResponseJSON(w, http.StatusBadRequest, errString(kvExists.Err()))
+		return
+	}
+	if !kvExists.Ok() {
+		errResponseJSON(w, http.StatusNotFound, fmt.Sprintf("%s does not exist", key))
+		return
+	}
+
+	// Deletes the entry for the provided key.
+	if kvDel := bucket.Delete(key); kvDel.IsErr() {
+		errResponseJSON(w, http.StatusBadRequest, errString(kvDel.Err()))
+		return
+	}
+
+	// Confirms delete in JSON body.
+	writeJSON(w, http.StatusOK, response{Message: "Deleted " + key})
+}
+
+// errString renders a wasi:keyvalue/store error variant as text.
+func errString(e store.Error) string {
+	switch e.Tag() {
+	case store.ErrorNoSuchStore:
+		return "no such store"
+	case store.ErrorAccessDenied:
+		return "access denied"
+	default:
+		return e.Other()
+	}
+}
+
+// writeJSON encodes body as the JSON response. Headers must be set before WriteHeader, or they are silently dropped.
+func writeJSON(w http.ResponseWriter, code int, body response) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(body)
+}
+
+func errResponseJSON(w http.ResponseWriter, code int, message string) {
+	writeJSON(w, code, response{Message: message})
+}
+
+// Since we don't run this program like a CLI, the `main` function is empty. Instead, we call handler functions when an HTTP request is received.
 func main() {}
