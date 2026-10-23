@@ -71,7 +71,7 @@ func (s *Supervisor) applyCaddyConfig() error {
 
 	adapter := caddyconfig.GetAdapter("caddyfile")
 	if adapter == nil {
-		return fmt.Errorf("Caddyfile adapter is not registered")
+		return fmt.Errorf("caddyfile adapter is not registered")
 	}
 	jsonConfig, warnings, err := adapter.Adapt([]byte(configText), nil)
 	if err != nil {

@@ -141,7 +141,7 @@ func extractTarGz(src, dst string) error {
 			if err := os.MkdirAll(target, 0o755); err != nil {
 				return fmt.Errorf("create directory %s: %w", name, err)
 			}
-		case tar.TypeReg, tar.TypeRegA:
+		case tar.TypeReg:
 			files++
 			if files > maxTarFiles {
 				return fmt.Errorf("archive has too many entries")
@@ -233,7 +233,7 @@ func replaceDir(src, dst string) error {
 
 func (s *Supervisor) deployApp(name, archive string) (*App, error) {
 	if !validName(name) {
-		return nil, fmt.Errorf("invalid app name")
+		return nil, fmt.Errorf("invalid app name %q", name)
 	}
 
 	s.deployMu.Lock()
