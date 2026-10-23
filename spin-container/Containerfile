@@ -42,9 +42,8 @@ RUN set -eux; \
 FROM docker.io/library/alpine:3.24
 
 # ca-certificates: outbound HTTPS from components.
-# su-exec: drop from root once a mounted volume has been handed to uid 1000.
 # caddy: the public listener and hostname routing.
-RUN apk add --no-cache ca-certificates su-exec caddy tini \
+RUN apk add --no-cache ca-certificates caddy \
  && addgroup -g 1000 spin \
  && adduser -D -u 1000 -G spin -h /var/lib/spin/home -H -s /sbin/nologin spin \
  && install -d -o 1000 -g 1000 -m 0750 \
@@ -59,13 +58,13 @@ RUN apk add --no-cache ca-certificates su-exec caddy tini \
 
 COPY --from=fetch --chmod=0755 /out/spin /usr/local/bin/spin
 COPY --from=supervisor --chmod=0755 /out/supervisor /usr/local/bin/supervisor
-COPY --chmod=0755 entrypoint.sh /usr/local/bin/entrypoint.sh
 
 # HOME holds Wasmtime's compiled-module cache. TMPDIR and the Caddy XDG paths live on the volume, so a read-only root filesystem still works.
 ENV HOME=/var/lib/spin/home \
     TMPDIR=/var/lib/spin/tmp \
     XDG_DATA_HOME=/var/lib/spin/caddy/data \
     XDG_CONFIG_HOME=/var/lib/spin/caddy/config \
+    SPIN_VOLUME_ROOT=/var/lib/spin \
     SPIN_APPS_DIR=/var/lib/spin/apps \
     SPIN_STATE_DIR=/var/lib/spin/state \
     SPIN_LOG_DIR=/var/lib/spin/logs \
@@ -86,4 +85,5 @@ VOLUME ["/var/lib/spin"]
 
 STOPSIGNAL SIGTERM
 
-ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/entrypoint.sh"]
+# The supervisor is PID 1. It creates and owns the volume directories, drops to uid 1000, then runs Spin and Caddy.
+ENTRYPOINT ["/usr/local/bin/supervisor"]

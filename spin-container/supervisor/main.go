@@ -25,6 +25,8 @@ import (
 )
 
 type config struct {
+	volumeRoot string
+
 	appsDir, stateDir, logDir, cacheDir, tempDir string
 
 	caddyDataDir, caddyConfigDir, caddyConfig, caddyAdmin string
@@ -95,6 +97,7 @@ func envInt(key string, fallback int) int {
 
 func configFromEnv() config {
 	return config{
+		volumeRoot:     env("SPIN_VOLUME_ROOT", "/var/lib/spin"),
 		appsDir:        env("SPIN_APPS_DIR", "/var/lib/spin/apps"),
 		stateDir:       env("SPIN_STATE_DIR", "/var/lib/spin/state"),
 		logDir:         env("SPIN_LOG_DIR", "/var/lib/spin/logs"),
@@ -131,6 +134,97 @@ func minimalEnv(extra ...string) []string {
 		}
 	}
 	return append(env, extra...)
+}
+
+func setEnvDefault(key, value string) {
+	if os.Getenv(key) == "" {
+		_ = os.Setenv(key, value)
+	}
+}
+
+func runtimeDir(dir string) (string, error) {
+	if dir == "" || !filepath.IsAbs(dir) {
+		return "", fmt.Errorf("runtime path must be absolute: %q", dir)
+	}
+	clean := filepath.Clean(dir)
+	if clean == "/" {
+		return "", fmt.Errorf("runtime path must not be /")
+	}
+	return clean, nil
+}
+
+func chownTree(root string, uid, gid int) error {
+	return filepath.Walk(root, func(path string, _ os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		return os.Lchown(path, uid, gid)
+	})
+}
+
+// prepareRuntime creates the writable directories under the volume root, hands them to the runtime user, and drops root privileges before any child starts.
+// When the container is already running as an unprivileged user it only checks that the directories are writable.
+func prepareRuntime(cfg config) error {
+	const runUID, runGID = 1000, 1000
+
+	setEnvDefault("HOME", "/var/lib/spin/home")
+	setEnvDefault("TMPDIR", cfg.tempDir)
+	setEnvDefault("XDG_DATA_HOME", cfg.caddyDataDir)
+	setEnvDefault("XDG_CONFIG_HOME", cfg.caddyConfigDir)
+
+	root, err := runtimeDir(cfg.volumeRoot)
+	if err != nil {
+		return err
+	}
+
+	dirs := []string{
+		root,
+		os.Getenv("HOME"),
+		os.Getenv("TMPDIR"),
+		cfg.appsDir,
+		cfg.stateDir,
+		cfg.logDir,
+		cfg.cacheDir,
+		cfg.tempDir,
+		cfg.caddyDataDir,
+		cfg.caddyConfigDir,
+		filepath.Dir(cfg.caddyConfig),
+	}
+	for i, dir := range dirs {
+		clean, err := runtimeDir(dir)
+		if err != nil {
+			return err
+		}
+		dirs[i] = clean
+		if err := os.MkdirAll(clean, 0o755); err != nil {
+			return fmt.Errorf("create %s: %w", clean, err)
+		}
+	}
+
+	if os.Geteuid() == 0 {
+		if err := chownTree(root, runUID, runGID); err != nil {
+			return fmt.Errorf("chown %s: %w", root, err)
+		}
+		if err := syscall.Setgroups([]int{runGID}); err != nil {
+			return fmt.Errorf("setgroups: %w", err)
+		}
+		if err := syscall.Setgid(runGID); err != nil {
+			return fmt.Errorf("setgid: %w", err)
+		}
+		if err := syscall.Setuid(runUID); err != nil {
+			return fmt.Errorf("setuid: %w", err)
+		}
+		if os.Geteuid() != runUID {
+			return fmt.Errorf("failed to drop privileges: uid is %d", os.Geteuid())
+		}
+	}
+
+	for _, dir := range dirs {
+		if err := syscall.Access(dir, 0x2); err != nil {
+			return fmt.Errorf("%s is not writable by uid %d", dir, os.Geteuid())
+		}
+	}
+	return nil
 }
 
 func validName(name string) bool {
@@ -381,6 +475,8 @@ func (s *Supervisor) startApp(app *App) {
 
 	go func() {
 		err := cmd.Wait()
+		// A surviving trigger child would keep the app's port, so clean up the process group before restarting.
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		close(done)
 
 		app.mu.Lock()
@@ -626,13 +722,8 @@ func main() {
 		}
 	}
 
-	for _, dir := range []string{
-		cfg.appsDir, cfg.stateDir, cfg.logDir, cfg.cacheDir,
-		cfg.tempDir, cfg.caddyDataDir, cfg.caddyConfigDir,
-	} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			log.Fatalf("create %s: %v", dir, err)
-		}
+	if err := prepareRuntime(cfg); err != nil {
+		log.Fatalf("prepare runtime: %v", err)
 	}
 
 	s := &Supervisor{

@@ -9,7 +9,8 @@ Applications are deployed as gzipped tarballs over a small HTTP API. There is no
 container registry, no per-app container, and no Kubernetes.
 
 This replaces the previous single-application image (`SPIN_APP`, `SPIN_WATCH`,
-`/apps`). The old entrypoint is gone; an application now lives under
+`/apps`). The old single-app entrypoint is gone; the Go supervisor is the
+container entrypoint. An application now lives under
 `/var/lib/spin/apps/<name>/` and is added with the deploy API.
 
 ## Build
@@ -19,7 +20,8 @@ podman build -t localhost/spin-supervisor .
 ```
 
 The image contains Spin, Caddy and a small Go supervisor. It does not contain
-any application.
+any application. The supervisor is PID 1: on start it creates and chowns the
+volume directories, drops to uid 1000, then runs Caddy and the apps.
 
 ## Run
 
@@ -41,6 +43,7 @@ podman run -d --name spin-supervisor --stop-timeout 30 \
   the API stays on `127.0.0.1:9090` inside the container.
 - `SUPERVISOR_TOKEN` is required for deploys. Treat it like a password.
 - `/var/lib/spin` holds app bundles, state, logs and Caddy's generated config.
+- Start the image as root (the default) so the supervisor can chown the volume; it drops to uid 1000 before starting Caddy or any app. If your platform forces a non-root user, the volume must already be writable by uid 1000.
 
 On Orchard, create one deployment with container port `8080`, a PVC mounted at
 `/var/lib/spin`, and one ingress per app hostname (plus one for `DEPLOY_HOST`)
@@ -174,6 +177,7 @@ directly).
 
 | variable | default | purpose |
 | --- | --- | --- |
+| `SPIN_VOLUME_ROOT` | `/var/lib/spin` | root the supervisor chowns when starting as root |
 | `SPIN_APPS_DIR` | `/var/lib/spin/apps` | one directory per app |
 | `SPIN_STATE_DIR` | `/var/lib/spin/state` | per-app KV/SQLite and runtime config |
 | `SPIN_LOG_DIR` | `/var/lib/spin/logs` | Spin component logs |
@@ -191,6 +195,9 @@ directly).
 | `DEPLOY_HOST` | unset | host routed to the API |
 | `SUPERVISOR_TOKEN` | unset | bearer token for deploys |
 | `SPIN_STOP_TIMEOUT_SECONDS` | `10` | SIGTERM grace before SIGKILL |
+
+Only paths under `SPIN_VOLUME_ROOT` are chowned at startup. If you move any
+directory outside it, make that directory writable by uid 1000 yourself.
 
 ## First iteration limits
 
