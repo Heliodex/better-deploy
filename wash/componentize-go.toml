@@ -1,0 +1,3 @@
+# Extra WIT world for this component. componentize-go discovers this file via `go list -m all` and merges this world with the SDK's default wasip2 world, so `go tool componentize-go build` needs no flags for the keyvalue imports.
+worlds = ["wasmcloud:examples/http-keyvalue-crud"]
+wit_paths = ["wit"]

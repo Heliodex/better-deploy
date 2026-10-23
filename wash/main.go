@@ -1,3 +1,6 @@
+// Regenerate the wasi:keyvalue bindings in ./bindings from ./wit.
+//go:generate wit-bindgen go --pkg-name example/bindings --out-dir bindings ./wit
+
 package main
 
 import (
@@ -9,8 +12,8 @@ import (
 	// A lightweight, high performance HTTP request router
 	"github.com/julienschmidt/httprouter"
 
-	// Bindings for the wasi:keyvalue/store interface, generated from ./wit by componentize-go.
-	store "example/wasi_keyvalue_store"
+	// Bindings for the wasi:keyvalue/store interface, generated from ./wit by wit-bindgen.
+	store "example/bindings/imports/wasi_keyvalue_store"
 
 	// The wasihttp package enables us to write more idiomatic Go when using wasi:http.
 	"go.bytecodealliance.org/wasi/wasihttp"
@@ -149,9 +152,9 @@ func deleteHandler(w http.ResponseWriter, r *http.Request, ps httprouter.Params)
 // errString renders a wasi:keyvalue/store error variant as text.
 func errString(e store.Error) string {
 	switch e.Tag() {
-	case store.ErrorNoSuchStore:
+	case store.Error_NoSuchStore:
 		return "no such store"
-	case store.ErrorAccessDenied:
+	case store.Error_AccessDenied:
 		return "access denied"
 	default:
 		return e.Other()
