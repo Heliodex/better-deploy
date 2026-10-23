@@ -7,8 +7,7 @@ import (
 	"sync"
 )
 
-// prefixWriter splits a child process's output into lines and logs each with
-// the process name, so a container with several Spin apps stays readable.
+// prefixWriter splits a child process's output into lines and logs each with the process name, so a container with several Spin apps stays readable.
 type prefixWriter struct {
 	name string
 	mu   sync.Mutex

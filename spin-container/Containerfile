@@ -1,9 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# A multi-app Spin runtime. The supervisor starts one `spin up` process per
-# application, writes a Caddy config that routes each hostname to the app's
-# loopback port, and serves the deploy API. Applications and their state live
-# under /var/lib/spin, so the image contains no application.
+# A multi-app Spin runtime. The supervisor starts one `spin up` process per application, writes a Caddy config that routes each hostname to the app's loopback port, and serves the deploy API. Applications and their state live under /var/lib/spin, so the image contains no application.
 #
 # See README.md for the layout, deploy command and environment.
 
@@ -19,13 +16,10 @@ FROM docker.io/library/alpine:3.24 AS fetch
 ARG SPIN_VERSION=v4.2.5
 ARG TARGETARCH
 
-# Build-only tools: curl for the download, binutils to strip the binary,
-# ca-certificates for TLS. None of this reaches the final image.
+# Build-only tools: curl for the download, binutils to strip the binary, and ca-certificates for TLS. None of this reaches the final image.
 RUN apk add --no-cache binutils ca-certificates curl
 
-# Spin publishes a static Linux build, so the runtime image can be Alpine rather
-# than carrying a glibc base. The tarball is large because the CLI embeds
-# Wasmtime; stripping removes about 50 MB of symbols from the ~163 MB binary.
+# Spin publishes a static Linux build, so the runtime image can be Alpine rather than carrying a glibc base. The tarball is large because the CLI embeds Wasmtime; stripping removes about 50 MB of symbols from the ~163 MB binary.
 # Checksums are published next to each release, so verify the asset.
 RUN set -eux; \
     case "$TARGETARCH" in \
@@ -67,8 +61,7 @@ COPY --from=fetch --chmod=0755 /out/spin /usr/local/bin/spin
 COPY --from=supervisor --chmod=0755 /out/supervisor /usr/local/bin/supervisor
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/entrypoint.sh
 
-# HOME holds Wasmtime's compiled-module cache. TMPDIR and the Caddy XDG paths
-# live on the volume, so a read-only root filesystem still works.
+# HOME holds Wasmtime's compiled-module cache. TMPDIR and the Caddy XDG paths live on the volume, so a read-only root filesystem still works.
 ENV HOME=/var/lib/spin/home \
     TMPDIR=/var/lib/spin/tmp \
     XDG_DATA_HOME=/var/lib/spin/caddy/data \
@@ -85,12 +78,10 @@ ENV HOME=/var/lib/spin/home \
     LISTEN=0.0.0.0:8080 \
     API_LISTEN=127.0.0.1:9090
 
-# 8080: Caddy, the only published port. The deploy API is proxied through it
-# when DEPLOY_HOST is set; otherwise it stays on loopback.
+# 8080: Caddy, the only published port. The deploy API is proxied through it when DEPLOY_HOST is set; otherwise it stays on loopback.
 EXPOSE 8080
 
-# Everything that must survive the container: app bundles, KV/SQLite state,
-# logs, the Spin cache and the generated Caddy config.
+# Everything that must survive the container: app bundles, KV/SQLite state, logs, the Spin cache and the generated Caddy config.
 VOLUME ["/var/lib/spin"]
 
 STOPSIGNAL SIGTERM
