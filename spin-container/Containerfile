@@ -1,0 +1,77 @@
+# syntax=docker/dockerfile:1
+#
+# A Spin runtime that serves an application mounted into it.
+#
+# The application is not baked in. Build it on the host (as in the sibling
+# spin/ guestbook), then mount the built directory at /apps, or copy it into a
+# volume there. The entrypoint runs `spin watch --skip-build`, so a rebuilt
+# component is picked up without restarting the container. Runtime state (the
+# default key-value store, SQLite databases, logs) lives in /var/lib/spin rather
+# than next to the manifest, which keeps /apps read-only.
+#
+# See README.md for the run and deploy commands.
+
+FROM docker.io/library/alpine:3.24 AS fetch
+
+ARG SPIN_VERSION=v4.2.5
+ARG TARGETARCH
+
+# Build-only tools: curl for the download, binutils to strip the binary, ca-certificates for TLS. None of this reaches the final image.
+RUN apk add --no-cache binutils ca-certificates curl
+
+# Spin publishes a static Linux build, so the runtime image can be Alpine rather
+# than carrying a glibc base. The tarball is large because the CLI embeds
+# Wasmtime; stripping removes about 50 MB of symbols from the ~163 MB binary.
+# Checksums are published next to each release, so verify the asset.
+RUN set -eux; \
+    case "$TARGETARCH" in \
+      amd64) arch=amd64 ;; \
+      arm64) arch=aarch64 ;; \
+      *) echo "unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;; \
+    esac; \
+    asset="spin-${SPIN_VERSION}-static-linux-${arch}.tar.gz"; \
+    base="https://github.com/spinframework/spin/releases/download/${SPIN_VERSION}"; \
+    curl -fsSL --retry 3 -o "/tmp/$asset" "$base/$asset"; \
+    curl -fsSL --retry 3 -o /tmp/checksums.txt "$base/checksums-${SPIN_VERSION}.txt"; \
+    sum=$(grep " $asset\$" /tmp/checksums.txt) || { echo "no checksum for $asset" >&2; exit 1; }; \
+    printf '%s\n' "$sum" | (cd /tmp && sha256sum -c -); \
+    tar -xzf "/tmp/$asset" -C /tmp spin; \
+    strip -s /tmp/spin; \
+    mkdir -p /out; \
+    install -m 0755 /tmp/spin /out/spin; \
+    rm -rf "/tmp/$asset" /tmp/checksums.txt
+
+FROM docker.io/library/alpine:3.24
+
+# ca-certificates: outbound HTTPS and registry pulls from components.
+# su-exec: drop from root once a mounted volume has been handed to uid 1000.
+RUN apk add --no-cache bash ca-certificates su-exec \
+ && addgroup -g 1000 spin \
+ && adduser -D -u 1000 -G spin -h /var/lib/spin/home -H -s /sbin/nologin spin \
+ && install -d -o 1000 -g 1000 -m 0750 \
+      /var/lib/spin/home /var/lib/spin/state /var/lib/spin/logs /var/lib/spin/cache /var/lib/spin/tmp \
+      /apps
+
+COPY --from=fetch --chmod=0755 /out/spin /usr/local/bin/spin
+COPY --chmod=0755 entrypoint.sh /usr/local/bin/entrypoint.sh
+
+# TMPDIR is on the volume so a read-only /apps (and a read-only root
+# filesystem) still have somewhere for Spin's unpacked static assets. HOME holds
+# Wasmtime's compiled-module cache, which makes restarts much faster.
+ENV HOME=/var/lib/spin/home \
+    TMPDIR=/var/lib/spin/tmp \
+    SPIN_APP=/apps \
+    SPIN_LISTEN=0.0.0.0:3000
+
+# 3000: the HTTP trigger's listener (SPIN_LISTEN)
+EXPOSE 3000
+
+# Everything that must survive the container: key-value/SQLite state, component
+# logs, and caches. /apps is deliberately not a volume: mount the application
+# there, so the image carries no application and the source of truth stays
+# outside the container.
+VOLUME ["/var/lib/spin"]
+
+STOPSIGNAL SIGTERM
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
