@@ -4,19 +4,17 @@
 #
 # See README.md for the layout, deploy command and environment.
 
-FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.25-alpine AS supervisor
-ARG TARGETARCH
+FROM docker.io/library/golang:1.25-alpine AS supervisor
 WORKDIR /src
 COPY supervisor/go.mod supervisor/go.sum ./
 RUN go mod download
 COPY supervisor/ ./
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -trimpath -ldflags="-s -w" -o /out/supervisor .
 
 FROM docker.io/library/alpine:3.24 AS fetch
 
 ARG SPIN_VERSION=v4.2.5
-ARG TARGETARCH
 
 # Build-only tools: curl for the download, binutils to strip the binary, and ca-certificates for TLS. None of this reaches the final image.
 RUN apk add --no-cache binutils ca-certificates curl
@@ -24,12 +22,7 @@ RUN apk add --no-cache binutils ca-certificates curl
 # Spin publishes a static Linux build, so the runtime image can be Alpine rather than carrying a glibc base. The tarball is large because the CLI embeds Wasmtime; stripping removes about 50 MB of symbols from the ~163 MB binary.
 # Checksums are published next to each release, so verify the asset.
 RUN set -eux; \
-    case "$TARGETARCH" in \
-      amd64) arch=amd64 ;; \
-      arm64) arch=aarch64 ;; \
-      *) echo "unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;; \
-    esac; \
-    asset="spin-${SPIN_VERSION}-static-linux-${arch}.tar.gz"; \
+    asset="spin-${SPIN_VERSION}-static-linux-amd64.tar.gz"; \
     base="https://github.com/spinframework/spin/releases/download/${SPIN_VERSION}"; \
     curl -fsSL --retry 3 -o "/tmp/$asset" "$base/$asset"; \
     curl -fsSL --retry 3 -o /tmp/checksums.txt "$base/checksums-${SPIN_VERSION}.txt"; \
