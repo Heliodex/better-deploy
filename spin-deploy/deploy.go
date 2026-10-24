@@ -53,12 +53,55 @@ func defaultAppName(dir string) (string, error) {
 	return "", fmt.Errorf("no application name found in spin.toml")
 }
 
+func parseDotEnvLine(line string) (string, string, bool) {
+	line = strings.TrimSpace(line)
+	if line == "" || strings.HasPrefix(line, "#") {
+		return "", "", false
+	}
+	if fields := strings.Fields(line); len(fields) > 0 && fields[0] == "export" {
+		line = strings.TrimSpace(strings.TrimPrefix(line, "export"))
+	}
+	key, value, ok := strings.Cut(line, "=")
+	if !ok {
+		return "", "", false
+	}
+	key = strings.TrimSpace(key)
+	if key == "" || strings.ContainsAny(key, " \t") {
+		return "", "", false
+	}
+	value = strings.TrimSpace(value)
+	if len(value) >= 2 {
+		if (value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'') {
+			value = value[1 : len(value)-1]
+		}
+	}
+	return key, value, true
+}
+
+func loadDotEnv(dir string) map[string]string {
+	vars := map[string]string{}
+	data, err := os.ReadFile(filepath.Join(dir, ".env"))
+	if err != nil {
+		return vars
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		key, value, ok := parseDotEnvLine(line)
+		if !ok {
+			continue
+		}
+		if _, exists := vars[key]; !exists {
+			vars[key] = value
+		}
+	}
+	return vars
+}
+
 func resolveDeployConfig(args []string) (*deployConfig, error) {
 	fs := flag.NewFlagSet("deploy", flag.ContinueOnError)
 	dir := fs.String("dir", ".", "application directory containing spin.toml")
-	app := fs.String("app", os.Getenv("APP"), "app name on the supervisor (default: spin.toml application name)")
-	host := fs.String("deploy-host", os.Getenv("DEPLOY_HOST"), "supervisor host, e.g. deploy.apps.example.com")
-	token := fs.String("token", os.Getenv("SUPERVISOR_TOKEN"), "bearer token for the deploy API")
+	fs.String("app", "", "app name on the supervisor (default: APP, .env APP, spin.toml application name)")
+	fs.String("deploy-host", "", "supervisor host, e.g. deploy.apps.example.com (default: DEPLOY_HOST, .env DEPLOY_HOST)")
+	fs.String("token", "", "bearer token for the deploy API (default: SUPERVISOR_TOKEN, .env SUPERVISOR_TOKEN)")
 	skipBuild := fs.Bool("skip-build", false, "skip spin build and upload the current build output")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -69,7 +112,19 @@ func resolveDeployConfig(args []string) (*deployConfig, error) {
 	if fs.NArg() > 0 {
 		return nil, fmt.Errorf("unexpected argument %q", fs.Arg(0))
 	}
-	cfg := &deployConfig{dir: *dir, app: *app, host: *host, token: *token, skipBuild: *skipBuild}
+	set := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	fileVars := loadDotEnv(*dir)
+	value := func(name, envKey string) string {
+		if set[name] {
+			return fs.Lookup(name).Value.String()
+		}
+		if v := os.Getenv(envKey); v != "" {
+			return v
+		}
+		return fileVars[envKey]
+	}
+	cfg := &deployConfig{dir: *dir, app: value("app", "APP"), host: value("deploy-host", "DEPLOY_HOST"), token: value("token", "SUPERVISOR_TOKEN"), skipBuild: *skipBuild}
 	if cfg.dir == "" {
 		return nil, fmt.Errorf("dir must not be empty")
 	}

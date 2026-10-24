@@ -113,3 +113,96 @@ func TestDefaultAppNameMissing(t *testing.T) {
 		t.Fatal("expected error for missing application name")
 	}
 }
+
+func TestParseDotEnvLine(t *testing.T) {
+	for _, tc := range []struct {
+		line       string
+		key, value string
+		ok         bool
+	}{
+		{"DEPLOY_HOST=deploy.example.com", "DEPLOY_HOST", "deploy.example.com", true},
+		{"  APP = gotime  ", "APP", "gotime", true},
+		{`TOKEN="quoted value"`, "TOKEN", "quoted value", true},
+		{"TOKEN='single quoted'", "TOKEN", "single quoted", true},
+		{"export APP=gotime", "APP", "gotime", true},
+		{"PASSWORD=a=b=c", "PASSWORD", "a=b=c", true},
+		{"HASH=abc#def", "HASH", "abc#def", true},
+		{"EMPTY=", "EMPTY", "", true},
+		{"", "", "", false},
+		{"# a comment", "", "", false},
+		{"no-equals-here", "", "", false},
+		{"=no-key", "", "", false},
+		{"BAD KEY=value", "", "", false},
+	} {
+		key, value, ok := parseDotEnvLine(tc.line)
+		if key != tc.key || value != tc.value || ok != tc.ok {
+			t.Errorf("%q = %q, %q, %v; want %q, %q, %v", tc.line, key, value, ok, tc.key, tc.value, tc.ok)
+		}
+	}
+}
+
+func TestLoadDotEnv(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, ".env", "# comment\n\nAPP=first\nAPP=second\nTOKEN=secret\n")
+
+	vars := loadDotEnv(dir)
+	if vars["APP"] != "first" {
+		t.Errorf("APP = %q, want first value to win", vars["APP"])
+	}
+	if vars["TOKEN"] != "secret" {
+		t.Errorf("TOKEN = %q", vars["TOKEN"])
+	}
+}
+
+func TestLoadDotEnvMissing(t *testing.T) {
+	if vars := loadDotEnv(t.TempDir()); len(vars) != 0 {
+		t.Errorf("vars = %v, want empty", vars)
+	}
+}
+
+func TestResolveDeployConfigPrecedence(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "spin.toml", "[application]\nname = \"toml-app\"\n")
+	writeTestFile(t, dir, ".env", "APP=file-app\nDEPLOY_HOST=file.example.com\nSUPERVISOR_TOKEN=file-token\n")
+
+	t.Setenv("APP", "env-app")
+	t.Setenv("DEPLOY_HOST", "env.example.com")
+	t.Setenv("SUPERVISOR_TOKEN", "env-token")
+
+	cfg, err := resolveDeployConfig([]string{"--dir", dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.app != "env-app" || cfg.host != "env.example.com" || cfg.token != "env-token" {
+		t.Errorf("cfg = %+v, want process env to beat .env", cfg)
+	}
+
+	cfg, err = resolveDeployConfig([]string{"--dir", dir, "--app", "flag-app", "--deploy-host", "flag.example.com", "--token", "flag-token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.app != "flag-app" || cfg.host != "flag.example.com" || cfg.token != "flag-token" {
+		t.Errorf("cfg = %+v, want flags to beat env and .env", cfg)
+	}
+}
+
+func TestResolveDeployConfigDotEnvFallback(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "spin.toml", "[application]\nname = \"toml-app\"\n")
+	writeTestFile(t, dir, ".env", "DEPLOY_HOST=file.example.com\nSUPERVISOR_TOKEN=file-token\n")
+
+	t.Setenv("APP", "")
+	t.Setenv("DEPLOY_HOST", "")
+	t.Setenv("SUPERVISOR_TOKEN", "")
+
+	cfg, err := resolveDeployConfig([]string{"--dir", dir, "--app", "flag-app"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.app != "flag-app" {
+		t.Errorf("app = %q, want flag-app", cfg.app)
+	}
+	if cfg.host != "file.example.com" || cfg.token != "file-token" {
+		t.Errorf("cfg = %+v, want .env fallback", cfg)
+	}
+}

@@ -13,15 +13,29 @@ spin-deploy deploy
 spin-deploy deploy --dir ./spin --app gotime --deploy-host deploy.apps.example.com
 ```
 
-Configuration comes from flags, falling back to the environment:
+Configuration comes from flags, falling back to the environment, then to a
+`.env` file in the application directory:
 
-| flag | env | default | purpose |
+| flag | env | `.env` key | purpose |
 | --- | --- | --- | --- |
-| `--dir` | | `.` | application directory |
-| `--app` | `APP` | `spin.toml` application name | app name on the supervisor |
-| `--deploy-host` | `DEPLOY_HOST` | | supervisor host |
-| `--token` | `SUPERVISOR_TOKEN` | | bearer token for the deploy API |
-| `--skip-build` | | `false` | upload the current build output without running `spin build` |
+| `--dir` | | | application directory (default `.`) |
+| `--app` | `APP` | `APP` | app name (default: `spin.toml` application name) |
+| `--deploy-host` | `DEPLOY_HOST` | `DEPLOY_HOST` | supervisor host |
+| `--token` | `SUPERVISOR_TOKEN` | `SUPERVISOR_TOKEN` | bearer token for the deploy API |
+| `--skip-build` | | | upload the current build output without running `spin build` |
+
+Precedence is flags, then process environment, then `.env`, then the
+`spin.toml` default (for the app name only). An example `.env`:
+
+```sh
+DEPLOY_HOST=deploy.apps.example.com
+SUPERVISOR_TOKEN=replace-with-a-real-token
+APP=gotime
+```
+
+`spin/.gitignore` excludes `.env`, since it holds the token. The parser handles
+`KEY=value` lines, `export` prefixes, full-line `#` comments, and single or
+double quotes.
 
 `--deploy-host` accepts a bare host (https is assumed) or a full URL, so
 `http://127.0.0.1:8080` works for a local container.
