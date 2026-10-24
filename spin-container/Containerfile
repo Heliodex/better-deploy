@@ -4,7 +4,7 @@
 #
 # See README.md for the layout, deploy command and environment.
 
-FROM docker.io/library/golang:1.25-alpine AS supervisor
+FROM docker.io/library/golang:alpine AS supervisor
 WORKDIR /src
 COPY supervisor/go.mod supervisor/go.sum ./
 RUN go mod download
