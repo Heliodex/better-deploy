@@ -12,7 +12,7 @@ COPY supervisor/ ./
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -trimpath -ldflags="-s -w" -o /out/supervisor .
 
-FROM docker.io/library/alpine:3.24 AS fetch
+FROM docker.io/library/alpine:3 AS fetch
 
 ARG SPIN_VERSION=v4.2.5
 
@@ -34,7 +34,7 @@ RUN set -eux; \
     install -m 0755 /tmp/spin /out/spin; \
     rm -rf "/tmp/$asset" /tmp/checksums.txt
 
-FROM docker.io/library/alpine:3.24
+FROM docker.io/library/alpine:3
 
 # ca-certificates: outbound HTTPS from components.
 # Caddy is linked into the supervisor, so the image does not need its CLI package.
