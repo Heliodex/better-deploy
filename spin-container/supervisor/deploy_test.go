@@ -3,6 +3,7 @@ package main
 import (
 	"archive/tar"
 	"compress/gzip"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -134,7 +135,7 @@ func TestValidateHost(t *testing.T) {
 	}
 }
 
-func TestCaddyfile(t *testing.T) {
+func TestBuildConfig(t *testing.T) {
 	s := &Supervisor{
 		cfg: config{
 			listen:     "127.0.0.1:8080",
@@ -145,21 +146,26 @@ func TestCaddyfile(t *testing.T) {
 			"gotime": {Name: "gotime", Host: "gotime.example.com", Port: 3100},
 		},
 	}
-	configText, err := s.caddyfile()
+	cfg, err := s.buildConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"admin off",
-		"http://:8080",
-		"bind 127.0.0.1",
-		"@health path /healthz",
-		"@deploy host deploy.example.com",
-		"@app0 host gotime.example.com",
-		"reverse_proxy 127.0.0.1:3100",
+		`"disabled":true`,
+		`"listen":["127.0.0.1:8080"]`,
+		`"/healthz"`,
+		`"deploy.example.com"`,
+		`"gotime.example.com"`,
+		`"dial":"127.0.0.1:3100"`,
+		`"dial":"127.0.0.1:9090"`,
+		`"no app for this host"`,
 	} {
-		if !strings.Contains(configText, want) {
-			t.Errorf("Caddyfile missing %q:\n%s", want, configText)
+		if !strings.Contains(string(data), want) {
+			t.Errorf("Caddy config missing %q:\n%s", want, data)
 		}
 	}
 }
