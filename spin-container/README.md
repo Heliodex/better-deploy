@@ -96,20 +96,22 @@ already used by another app.
 
 ## Deploy
 
-Build the app on the host, then upload it:
+Build the app on the host, then upload it. The app declares its scripts in
+`spin/package.json`, mirroring the `celld` app:
 
 ```sh
 cp spin-container/app.example.json spin/app.json
 $EDITOR spin/app.json   # set host and session_key
 
 cd spin
-spin build
-
-tar -czf /tmp/gotime.tgz -C . spin.toml main.wasm app.json
-curl -fsS -X POST "https://deploy.apps.example.com/apps/gotime" \
-  -H "Authorization: Bearer $SUPERVISOR_TOKEN" \
-  -F "artifact=@/tmp/gotime.tgz"
+DEPLOY_HOST=deploy.apps.example.com SUPERVISOR_TOKEN="$SUPERVISOR_TOKEN" bun run deploy
 ```
+
+`bun run deploy` runs `spin/deploy.sh`, which builds, packs `spin.toml`,
+`main.wasm` and `app.json` into a tarball, and posts it to
+`https://$DEPLOY_HOST/apps/$APP` (`APP` defaults to `gotime`). `spin build` on
+its own only builds; there is no manifest-declared deploy hook in Spin itself
+(`spin deploy` just forwards to a deployment plugin).
 
 The tarball must contain `spin.toml` at its root. `main.wasm` and `app.json`
 sit beside it. If an update omits `app.json`, the supervisor keeps the existing

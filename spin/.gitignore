@@ -3,3 +3,4 @@ main.wasm
 frontend/node_modules/
 frontend/dist/*
 !frontend/dist/.gitkeep
+app.json

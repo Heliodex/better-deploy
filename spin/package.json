@@ -1,0 +1,9 @@
+{
+	"name": "gotime",
+	"version": "0.1.0",
+	"private": true,
+	"scripts": {
+		"build": "spin build",
+		"deploy": "sh ./deploy.sh"
+	}
+}
