@@ -107,11 +107,12 @@ cd spin
 DEPLOY_HOST=deploy.apps.example.com SUPERVISOR_TOKEN="$SUPERVISOR_TOKEN" bun run deploy
 ```
 
-`bun run deploy` runs `spin/deploy.sh`, which builds, packs `spin.toml`,
-`main.wasm` and `app.json` into a tarball, and posts it to
-`https://$DEPLOY_HOST/apps/$APP` (`APP` defaults to `gotime`). `spin build` on
-its own only builds; there is no manifest-declared deploy hook in Spin itself
-(`spin deploy` just forwards to a deployment plugin).
+`bun run deploy` runs the `spin-deploy` CLI (`spin-deploy/`), which builds,
+packs `spin.toml`, `main.wasm` and `app.json` into a tarball, and posts it to
+`https://$DEPLOY_HOST/apps/$APP` (`APP` defaults to the `spin.toml` application
+name). `spin build` on its own only builds; there is no manifest-declared
+deploy hook in Spin itself (`spin deploy` just forwards to a deployment
+plugin).
 
 The tarball must contain `spin.toml` at its root. `main.wasm` and `app.json`
 sit beside it. If an update omits `app.json`, the supervisor keeps the existing

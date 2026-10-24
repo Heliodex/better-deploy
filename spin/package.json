@@ -4,6 +4,6 @@
 	"private": true,
 	"scripts": {
 		"build": "spin build",
-		"deploy": "sh ./deploy.sh"
+		"deploy": "go -C ../spin-deploy run . deploy --dir \"$PWD\""
 	}
 }
