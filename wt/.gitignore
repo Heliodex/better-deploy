@@ -1,0 +1,6 @@
+example/*/main.wasm
+example/*/main.cwasm
+example/binding/
+apps/
+state/
+example/tmp/

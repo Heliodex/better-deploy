@@ -1,0 +1,6 @@
+{
+	"name": "hello",
+	"host": "hello.localhost",
+	"health": "/",
+	"build": "../generate.sh && go tool componentize-go -d ../wit -w wt:app/app build"
+}

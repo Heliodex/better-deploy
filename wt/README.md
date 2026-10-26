@@ -1,0 +1,151 @@
+# wt
+
+A prototype of a small Wasm deploy platform built directly on
+[wasmtime](https://wasmtime.dev), with no Spin and no container image.
+
+The point is to move the expensive part (compiling wasm to native code) into
+the deploy artifact:
+
+```text
+wt-deploy:  build (componentize-go) → wasmtime compile → upload
+supervisor: Caddy-less Go reverse proxy + one `wasmtime serve` per app
+runtime:    wasmtime 50 loads the precompiled .cwasm (fallback: main.wasm)
+storage:    a WASI preopened directory per app (/data)
+```
+
+The first request for a precompiled Go component is tens of milliseconds on a
+laptop. Nothing is compiled on the serving node, and the app is a standard
+`wasi:http/service@0.3.0` component.
+
+## Layout
+
+- `example/` – the Go module for apps, generated WASI bindings and a small
+  `net/http` adapter.
+  - `example/hello` – returns the method and path.
+  - `example/notes` – JSON notes persisted to `/data/notes.json` (WASI FS).
+  - `example/binding` – generated bindings for `wt:app/app` (not tracked).
+  - `example/wasihttp` – the `net/http` adapter (adapted from spin-go-sdk).
+- `supervisor/` – runs apps, proxies by `Host`, deploys bundles blue/green.
+- `deploy/` – builds, precompiles and uploads an app.
+
+## Requirements
+
+- Go 1.27.1 or newer. `componentize-go` is a Go tool in `example/go.mod`; it
+  downloads the patched Go it needs for async components.
+- wasmtime **50.0.0** on the machine running `wt-deploy` and on the machine
+  running the supervisor. The precompiled artifact is tied to that version.
+- The example WIT is the final `wasi:http@0.3.0` from wasmtime v50
+  (`crates/wasi-http/src/p3/wit`), plus `wasi:cli/imports`.
+
+## Build the supervisor and CLI
+
+```sh
+cd wt/supervisor && go build -o /tmp/wt-supervisor .
+cd wt/deploy && go build -o /tmp/wt-deploy .
+```
+
+## Run the supervisor
+
+```sh
+mkdir -p /tmp/wt/apps /tmp/wt/state
+WT_APPS_DIR=/tmp/wt/apps \
+WT_STATE_DIR=/tmp/wt/state \
+WT_LISTEN=127.0.0.1:8080 \
+WT_WASMTIME=/path/to/wasmtime \
+WT_TOKEN=dev \
+/tmp/wt-supervisor
+```
+
+The supervisor scans `WT_APPS_DIR` at boot, starts every app found there, and
+serves `GET /apps`, `GET /apps/<name>` and `POST /apps/<name>` (deploy, bearer
+token). `/healthz` is the supervisor's own health check.
+
+## Deploy an example
+
+```sh
+/tmp/wt-deploy deploy \
+  --dir wt/example/hello \
+  --host http://127.0.0.1:8080 \
+  --token dev \
+  --wasmtime /path/to/wasmtime
+
+curl -H 'Host: hello.localhost' http://127.0.0.1:8080/hello
+# hello from wt
+# method=GET
+# path=/hello
+```
+
+`wt-deploy` reads `app.json`, runs its `build` command, precompiles
+`main.wasm` with `wasmtime compile`, and uploads `app.json`, `main.wasm` and
+`main.cwasm` as a gzipped tarball. The supervisor starts the new version on a
+new loopback port while the old one serves, waits for its health path, swaps
+the host route and stops the old process.
+
+The notes example persists through the supervisor's state directory:
+
+```sh
+/tmp/wt-deploy deploy --dir wt/example/notes --host http://127.0.0.1:8080 \
+  --token dev --wasmtime /path/to/wasmtime
+
+curl -H 'Host: notes.localhost' -X POST --data 'hello from wasmtime' \
+  http://127.0.0.1:8080/notes
+curl -H 'Host: notes.localhost' http://127.0.0.1:8080/notes
+cat /tmp/wt/state/notes/notes.json
+```
+
+## What each app runs
+
+```sh
+wasmtime serve -Scli -Sp3 -W component-model-async=y \
+  --allow-precompiled \
+  --addr 127.0.0.1:<port> \
+  --dir /tmp/wt/state/<name>::/data \
+  --env KEY=VALUE \
+  main.cwasm
+```
+
+`app.json` carries `name`, `host`, `health`, `env` and the local `build`
+command. If `main.cwasm` is missing or incompatible, the supervisor falls back
+to `main.wasm` (JIT compilation, which takes much longer, especially on a small
+CPU quota).
+
+## Bindings
+
+The generated bindings under `example/binding` target the world:
+
+```wit
+package wt:app;
+
+world app {
+  include wasi:cli/imports@0.3.0;
+  include wasi:http/service@0.3.0;
+}
+```
+
+They are **not tracked**: `example/generate.sh` regenerates them from
+`example/wit` with `componentize-go bindings`. The example apps' `build`
+commands run that script first, so a fresh clone builds on its first deploy.
+
+The WIT comes from wasmtime v50's `crates/wasi-http/src/p3/wit` and the world
+file is ours. If you bump wasmtime, update the WIT and run the generator again;
+the export stub is written by the script.
+
+The `net/http` adapter in `example/wasihttp` is adapted from
+[spin-go-sdk v3](https://github.com/spinframework/spin-go-sdk) (Apache-2.0,
+see `example/wasihttp/LICENSE`). The generated bindings and the adapter are
+what let an app keep normal `http.HandlerFunc` code.
+
+## Limits of this prototype
+
+- One `wasmtime serve` process per app; no auto-restart after a crash.
+- No TLS or Caddy in the supervisor. Terminate TLS in front, or use it on
+  loopback.
+- No shared KV/SQL service. Apps get a per-app WASI preopen at `/data`; the
+  notes example stores JSON there. A SQLite-over-HTTP service or a custom host
+  ABI is the next step.
+- The deploy POST waits for the new version; there are no deploy records or
+  long-polling yet. Startup is fast enough that this is usually not noticeable.
+- `.cwasm` is native code. Only load artifacts produced by your own deploy
+  pipeline; the deploy endpoint is the trust boundary.
+- `Pdeathsig` (Linux) stops app processes if the supervisor dies; adjust for
+  other platforms.
