@@ -50,6 +50,8 @@ type config struct {
 	domain        string
 	wasmtime      string
 	token         string
+	tlsCert       string
+	tlsKey        string
 }
 
 type appConfig struct {
@@ -100,6 +102,8 @@ func configFromEnv() config {
 		domain:        env("WT_APPS_DOMAIN", "localhost"),
 		wasmtime:      env("WT_WASMTIME", "wasmtime"),
 		token:         os.Getenv("WT_TOKEN"),
+		tlsCert:       os.Getenv("WT_TLS_CERT"),
+		tlsKey:        os.Getenv("WT_TLS_KEY"),
 	}
 }
 
@@ -342,8 +346,17 @@ func (s *supervisor) newProxy(a *app) *httputil.ReverseProxy {
 	director := proxy.Director
 	proxy.Director = func(r *http.Request) {
 		host := r.Host
+		proto := r.Header.Get("X-Forwarded-Proto")
+		if proto == "" {
+			proto = "http"
+			if r.TLS != nil {
+				proto = "https"
+			}
+		}
 		director(r)
 		r.Host = host
+		r.Header.Set("X-Forwarded-Host", host)
+		r.Header.Set("X-Forwarded-Proto", proto)
 	}
 	proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, err error) {
 		log.Printf("app %s: proxy: %v", a.name, err)
@@ -794,6 +807,8 @@ func main() {
 	flag.StringVar(&cfg.domain, "domain", cfg.domain, "default app host suffix")
 	flag.StringVar(&cfg.wasmtime, "wasmtime", cfg.wasmtime, "wasmtime binary")
 	flag.StringVar(&cfg.token, "token", cfg.token, "deploy bearer token (empty disables auth)")
+	flag.StringVar(&cfg.tlsCert, "tls-cert", cfg.tlsCert, "TLS certificate (with --tls-key)")
+	flag.StringVar(&cfg.tlsKey, "tls-key", cfg.tlsKey, "TLS private key (with --tls-cert)")
 	flag.Parse()
 
 	absoluteApps, err := filepath.Abs(cfg.appsDir)
@@ -830,6 +845,8 @@ func main() {
 		Addr:              cfg.listen,
 		Handler:           s.handler(),
 		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	stop := make(chan os.Signal, 1)
@@ -840,8 +857,15 @@ func main() {
 		_ = server.Close()
 	}()
 
+	if (cfg.tlsCert == "") != (cfg.tlsKey == "") {
+		log.Fatalf("--tls-cert and --tls-key must be set together")
+	}
 	log.Printf("supervisor listening on %s with %d app(s)", cfg.listen, len(s.apps))
-	err = server.ListenAndServe()
+	if cfg.tlsCert != "" {
+		err = server.ListenAndServeTLS(cfg.tlsCert, cfg.tlsKey)
+	} else {
+		err = server.ListenAndServe()
+	}
 	s.stopAll()
 	storage.close()
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {

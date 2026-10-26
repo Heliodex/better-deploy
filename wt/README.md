@@ -56,6 +56,12 @@ WT_TOKEN=dev \
 /tmp/wt-supervisor
 ```
 
+The supervisor speaks plain HTTP by default; set `WT_TLS_CERT` and
+`WT_TLS_KEY` (or `--tls-cert`/`--tls-key`) to terminate TLS itself. Behind the
+Orchard ingress, leave TLS to the ingress and keep the supervisor on HTTP.
+The proxy preserves the original `Host` and sets `X-Forwarded-Host` and
+`X-Forwarded-Proto` for the app.
+
 The supervisor scans `WT_APPS_DIR` at boot, starts every app found there, and
 serves `GET /apps`, `GET /apps/<name>` and `POST /apps/<name>` (deploy, bearer
 token). `/healthz` is the supervisor's own health check.
@@ -162,8 +168,8 @@ what let an app keep normal `http.HandlerFunc` code.
 ## Limits of this prototype
 
 - One `wasmtime serve` process per app; no auto-restart after a crash.
-- No TLS or Caddy in the supervisor. Terminate TLS in front, or use it on
-  loopback.
+- TLS is optional and basic (certificate files); use the Orchard ingress for
+  real certificates and wildcard hosts.
 - Storage is a per-app key-value API, not general SQL. The SQLite file is
   private to the supervisor; apps get a preopen at `/data` as well.
 - Outbound network is granted to every app (`-S inherit-network`), including
