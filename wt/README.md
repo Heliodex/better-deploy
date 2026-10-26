@@ -10,7 +10,7 @@ the deploy artifact:
 wt-deploy:  build (componentize-go) → wasmtime compile → upload
 supervisor: Caddy-less Go reverse proxy + one `wasmtime serve` per app
 runtime:    wasmtime 50 loads the precompiled .cwasm (fallback: main.wasm)
-storage:    a WASI preopened directory per app (/data)
+storage:    a per-app SQLite key-value service on loopback, plus /data via WASI
 ```
 
 The first request for a precompiled Go component is tens of milliseconds on a
@@ -22,7 +22,7 @@ laptop. Nothing is compiled on the serving node, and the app is a standard
 - `example/` – the Go module for apps, generated WASI bindings and a small
   `net/http` adapter.
   - `example/hello` – returns the method and path.
-  - `example/notes` – JSON notes persisted to `/data/notes.json` (WASI FS).
+  - `example/notes` – JSON notes persisted through the supervisor's storage service.
   - `example/binding` – generated bindings for `wt:app/app` (not tracked).
   - `example/wasihttp` – the `net/http` adapter (adapted from spin-go-sdk).
 - `supervisor/` – runs apps, proxies by `Host`, deploys bundles blue/green.
@@ -81,7 +81,7 @@ curl -H 'Host: hello.localhost' http://127.0.0.1:8080/hello
 new loopback port while the old one serves, waits for its health path, swaps
 the host route and stops the old process.
 
-The notes example persists through the supervisor's state directory:
+The notes example uses the per-app storage service:
 
 ```sh
 /tmp/wt-deploy deploy --dir wt/example/notes --host http://127.0.0.1:8080 \
@@ -90,17 +90,19 @@ The notes example persists through the supervisor's state directory:
 curl -H 'Host: notes.localhost' -X POST --data 'hello from wasmtime' \
   http://127.0.0.1:8080/notes
 curl -H 'Host: notes.localhost' http://127.0.0.1:8080/notes
-cat /tmp/wt/state/notes/notes.json
+# data lives in /tmp/wt/state/.storage/notes/storage.db
 ```
 
 ## What each app runs
 
 ```sh
-wasmtime serve -Scli -Sp3 -W component-model-async=y \
+wasmtime serve -Scli -Sp3 -S inherit-network -W component-model-async=y \
   --allow-precompiled \
   --addr 127.0.0.1:<port> \
   --dir /tmp/wt/state/<name>::/data \
   --env KEY=VALUE \
+  --env WT_STORAGE_URL=http://127.0.0.1:<storage-port> \
+  --env WT_STORAGE_TOKEN=<token> \
   main.cwasm
 ```
 
@@ -108,6 +110,28 @@ wasmtime serve -Scli -Sp3 -W component-model-async=y \
 command. If `main.cwasm` is missing or incompatible, the supervisor falls back
 to `main.wasm` (JIT compilation, which takes much longer, especially on a small
 CPU quota).
+
+## Storage
+
+The supervisor starts a loopback SQLite service and gives every app a token
+and URL through `WT_STORAGE_URL` and `WT_STORAGE_TOKEN`. The API is a small
+key-value store:
+
+```text
+GET    /v1/kv/<key>          bytes, 404 if missing
+PUT    /v1/kv/<key>          raw body (up to 1 MiB)
+DELETE /v1/kv/<key>
+GET    /v1/kv?prefix=<p>     JSON {"keys":[...]}
+```
+
+Every app gets its own database at `WT_STATE_DIR/.storage/<app>/storage.db`,
+outside its `/data` preopen, so apps cannot touch the file directly. The
+example module's `storage` package is the client; it takes an `*http.Client`,
+and the apps pass `wasihttp.NewClient()` for outbound `wasi:http`.
+
+The supervisor grants outbound network with `-S inherit-network` so apps can
+reach that loopback endpoint. A production version would scope outbound
+access per app.
 
 ## Bindings
 
@@ -140,9 +164,10 @@ what let an app keep normal `http.HandlerFunc` code.
 - One `wasmtime serve` process per app; no auto-restart after a crash.
 - No TLS or Caddy in the supervisor. Terminate TLS in front, or use it on
   loopback.
-- No shared KV/SQL service. Apps get a per-app WASI preopen at `/data`; the
-  notes example stores JSON there. A SQLite-over-HTTP service or a custom host
-  ABI is the next step.
+- Storage is a per-app key-value API, not general SQL. The SQLite file is
+  private to the supervisor; apps get a preopen at `/data` as well.
+- Outbound network is granted to every app (`-S inherit-network`), including
+  the loopback storage service.
 - The deploy POST waits for the new version; there are no deploy records or
   long-polling yet. Startup is fast enough that this is usually not noticeable.
 - `.cwasm` is native code. Only load artifacts produced by your own deploy

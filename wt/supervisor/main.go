@@ -43,12 +43,13 @@ const (
 )
 
 type config struct {
-	appsDir  string
-	stateDir string
-	listen   string
-	domain   string
-	wasmtime string
-	token    string
+	appsDir       string
+	stateDir      string
+	listen        string
+	storageListen string
+	domain        string
+	wasmtime      string
+	token         string
 }
 
 type appConfig struct {
@@ -73,7 +74,8 @@ type app struct {
 }
 
 type supervisor struct {
-	cfg config
+	cfg     config
+	storage *storageServer
 
 	mu    sync.RWMutex
 	apps  map[string]*app
@@ -91,12 +93,13 @@ func env(key, fallback string) string {
 
 func configFromEnv() config {
 	return config{
-		appsDir:  env("WT_APPS_DIR", "./apps"),
-		stateDir: env("WT_STATE_DIR", "./state"),
-		listen:   env("WT_LISTEN", "127.0.0.1:8080"),
-		domain:   env("WT_APPS_DOMAIN", "localhost"),
-		wasmtime: env("WT_WASMTIME", "wasmtime"),
-		token:    os.Getenv("WT_TOKEN"),
+		appsDir:       env("WT_APPS_DIR", "./apps"),
+		stateDir:      env("WT_STATE_DIR", "./state"),
+		listen:        env("WT_LISTEN", "127.0.0.1:8080"),
+		storageListen: env("WT_STORAGE_LISTEN", "127.0.0.1:0"),
+		domain:        env("WT_APPS_DOMAIN", "localhost"),
+		wasmtime:      env("WT_WASMTIME", "wasmtime"),
+		token:         os.Getenv("WT_TOKEN"),
 	}
 }
 
@@ -217,6 +220,7 @@ func (s *supervisor) appArgs(a *app, source string, allowPrecompiled bool) []str
 		"serve",
 		"-Scli",
 		"-Sp3",
+		"-S", "inherit-network",
 		"-W", "component-model-async=y",
 		"--addr", fmt.Sprintf("127.0.0.1:%d", a.port),
 	}
@@ -227,6 +231,12 @@ func (s *supervisor) appArgs(a *app, source string, allowPrecompiled bool) []str
 	args = append(args, "--dir", stateDir+"::/data")
 	for _, key := range sortedKeys(a.cfg.Env) {
 		args = append(args, "--env", key+"="+a.cfg.Env[key])
+	}
+	if s.storage != nil {
+		args = append(args,
+			"--env", "WT_STORAGE_URL="+s.storage.url(),
+			"--env", "WT_STORAGE_TOKEN="+s.storage.tokenFor(a.name),
+		)
 	}
 	return append(args, source)
 }
@@ -802,10 +812,15 @@ func main() {
 		log.Fatalf("state dir: %v", err)
 	}
 
+	storage, err := newStorageServer(filepath.Join(cfg.stateDir, ".storage"), cfg.storageListen)
+	if err != nil {
+		log.Fatalf("storage: %v", err)
+	}
 	s := &supervisor{
-		cfg:   cfg,
-		apps:  map[string]*app{},
-		hosts: map[string]*app{},
+		cfg:     cfg,
+		storage: storage,
+		apps:    map[string]*app{},
+		hosts:   map[string]*app{},
 	}
 	if err := s.loadApps(); err != nil {
 		log.Fatalf("load apps: %v", err)
@@ -828,6 +843,7 @@ func main() {
 	log.Printf("supervisor listening on %s with %d app(s)", cfg.listen, len(s.apps))
 	err = server.ListenAndServe()
 	s.stopAll()
+	storage.close()
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("listen: %v", err)
 	}

@@ -7,16 +7,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"time"
 
+	"wt.example/storage"
 	wasihttp "wt.example/wasihttp"
 )
 
 const (
-	dataFile    = "/data/notes.json"
+	notesKey    = "notes"
 	maxNotes    = 50
 	maxNoteBody = 2 << 10
 )
@@ -27,13 +27,23 @@ type note struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
-var mu sync.Mutex
+var (
+	mu       sync.Mutex
+	store    *storage.Client
+	storeErr error
+)
 
 func init() {
+	store, storeErr = storage.New(wasihttp.NewClient())
 	wasihttp.Handle(handle)
 }
 
 func handle(w http.ResponseWriter, r *http.Request) {
+	if storeErr != nil {
+		http.Error(w, "storage unavailable: "+storeErr.Error(), http.StatusServiceUnavailable)
+		return
+	}
+
 	switch {
 	case r.URL.Path == "/" || r.URL.Path == "":
 		w.Header().Set("content-type", "text/plain; charset=utf-8")
@@ -87,12 +97,12 @@ func handle(w http.ResponseWriter, r *http.Request) {
 }
 
 func loadNotes() ([]note, error) {
-	data, err := os.ReadFile(dataFile)
-	if os.IsNotExist(err) {
-		return []note{}, nil
-	}
+	data, ok, err := store.Get(notesKey)
 	if err != nil {
 		return nil, err
+	}
+	if !ok {
+		return []note{}, nil
 	}
 	var notes []note
 	if err := json.Unmarshal(data, &notes); err != nil {
@@ -106,7 +116,7 @@ func saveNotes(notes []note) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(dataFile, data, 0o644)
+	return store.Put(notesKey, data)
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"net/http"
 
-	wasi "wt.example/binding/imports/wasi_http_0_3_0_types"
 	wit "go.bytecodealliance.org/pkg/wit/types"
+	wasi "wt.example/binding/imports/wasi_http_0_3_0_types"
 )
 
 // convert the wasi.Request to an http.Request
