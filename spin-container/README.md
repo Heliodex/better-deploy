@@ -120,9 +120,14 @@ one; for a new app it creates `{}`. Include every file the manifest references
 (`component.files`, static assets and so on) in the tarball; the supervisor does
 not run `spin build`.
 
-The supervisor stops the old process, swaps the app directory, starts the new
-one and applies the new route through Caddy's API. State under `state/<name>`
-is untouched. The response is the app's current status:
+The supervisor starts the new version on a second loopback port while the old
+process keeps serving, waits for the new one to answer its health path, then
+switches the Caddy route and stops the old process. The response is sent only
+once the new version is serving, and the old one stays up if it never becomes
+ready. A changed component takes a while on first start because Spin compiles
+the Wasm module; the deploy request waits for that (`DEPLOY_READY_TIMEOUT_SECONDS`,
+default 180). State under `state/<name>` is untouched. The response is the app's
+current status:
 
 ```json
 {"name":"gotime","host":"gotime.apps.example.com","port":3101,"status":"running","pid":1234}
@@ -192,6 +197,7 @@ directly).
 | `DEPLOY_HOST` | unset | host routed to the API |
 | `SUPERVISOR_TOKEN` | unset | bearer token for deploys |
 | `SPIN_STOP_TIMEOUT_SECONDS` | `10` | SIGTERM grace before SIGKILL |
+| `DEPLOY_READY_TIMEOUT_SECONDS` | `180` | how long a deploy waits for the new version to answer its health path |
 
 Only paths under `SPIN_VOLUME_ROOT` are chowned at startup. If you move any
 directory outside it, make that directory writable by uid 1000 yourself.
@@ -200,8 +206,11 @@ directory outside it, make that directory writable by uid 1000 yourself.
 
 This is deliberately small:
 
-- **No blue/green or rollback.** A deploy stops the app, replaces its files and
-  starts it again. Expect a short gap for that app.
+- **No rollback.** A deploy switches traffic only after the new version answers
+  its health path, but there is no history to roll back to: deploy the previous
+  build again. Both versions run at once for a few seconds around the switch,
+  so they share the app's state directory and a request served by the old
+  process may read `component.files` from the new directory.
 - **No delete or restart endpoint.** Deploy again, or restart the container, to
   rescan `SPIN_APPS_DIR`.
 - **No per-app CPU or memory cap.** The container's resource request is the

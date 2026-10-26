@@ -41,9 +41,11 @@ double quotes.
 `http://127.0.0.1:8080` works for a local container.
 
 `deploy` runs `spin build`, packs `spin.toml`, `main.wasm` and `app.json` (if
-present) into a tarball, and posts it to the supervisor. It prints the
-supervisor's JSON response. The app's `spin/package.json` wires this up as
-`bun run deploy`.
+present) into a tarball, and posts it to the supervisor. It waits for the
+supervisor to report the new version running, which can take a minute on the
+first start of a changed component while Spin compiles the Wasm module. It
+prints the supervisor's JSON response. The app's `spin/package.json` wires this
+up as `bun run deploy`.
 
 ## Development
 

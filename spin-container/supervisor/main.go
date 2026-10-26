@@ -37,7 +37,7 @@ type config struct {
 
 	appsDomain, deployHost, token string
 
-	stopTimeout time.Duration
+	stopTimeout, deployReadyTimeout time.Duration
 }
 
 type appConfigFile struct {
@@ -111,6 +111,8 @@ func configFromEnv() config {
 		deployHost:     strings.ToLower(strings.TrimSpace(os.Getenv("DEPLOY_HOST"))),
 		token:          os.Getenv("SUPERVISOR_TOKEN"),
 		stopTimeout:    time.Duration(envInt("SPIN_STOP_TIMEOUT_SECONDS", 10)) * time.Second,
+
+		deployReadyTimeout: time.Duration(envInt("DEPLOY_READY_TIMEOUT_SECONDS", 180)) * time.Second,
 	}
 }
 
@@ -392,24 +394,42 @@ func (s *Supervisor) spinArgs(app *App) []string {
 	return append(args, app.Args...)
 }
 
-func (s *Supervisor) waitReady(app *App) {
+// awaitApp polls the app's health path until it answers, the process exits, the supervisor stops, or the timeout elapses.
+// Spin compiles the Wasm component on first start, which can take a minute or more on a small CPU quota.
+func (s *Supervisor) awaitApp(app *App, timeout time.Duration) error {
 	client := &http.Client{Timeout: 500 * time.Millisecond}
 	url := fmt.Sprintf("http://127.0.0.1:%d%s", app.Port, app.Health)
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(timeout)
 
-	for time.Now().Before(deadline) {
+	for {
 		if s.stopping.Load() {
-			return
+			return fmt.Errorf("supervisor is shutting down")
 		}
 		resp, err := client.Get(url)
 		if err == nil {
 			resp.Body.Close()
-			log.Printf("app %s: responding on %s", app.Name, url)
-			return
+			return nil
+		}
+
+		app.mu.Lock()
+		running := app.cmd != nil
+		app.mu.Unlock()
+		if !running {
+			return fmt.Errorf("process exited before it answered %s", url)
+		}
+		if !time.Now().Before(deadline) {
+			return fmt.Errorf("no response on %s within %s", url, timeout)
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	log.Printf("app %s: no response on %s yet (still running)", app.Name, url)
+}
+
+func (s *Supervisor) waitReady(app *App) {
+	if err := s.awaitApp(app, 10*time.Second); err != nil {
+		log.Printf("app %s: not ready: %v", app.Name, err)
+		return
+	}
+	log.Printf("app %s: responding on http://127.0.0.1:%d%s", app.Name, app.Port, app.Health)
 }
 
 func (s *Supervisor) retireApp(app *App) {
@@ -425,6 +445,11 @@ func (s *Supervisor) unretireApp(app *App) {
 }
 
 func (s *Supervisor) startApp(app *App) {
+	s.startAppWait(app, true)
+}
+
+// startAppWait starts the app's process and, unless a caller waits for readiness itself, logs when it answers.
+func (s *Supervisor) startAppWait(app *App, watchReady bool) {
 	app.mu.Lock()
 	if app.cmd != nil || app.retired || s.stopping.Load() {
 		app.mu.Unlock()
@@ -507,7 +532,9 @@ func (s *Supervisor) startApp(app *App) {
 		})
 	}()
 
-	go s.waitReady(app)
+	if watchReady {
+		go s.waitReady(app)
+	}
 }
 
 func (s *Supervisor) stopApp(app *App) {

@@ -24,7 +24,11 @@ const (
 	maxUploadBytes  = 256 << 20
 	maxExtractBytes = 512 << 20
 	maxTarFiles     = 10_000
+
+	deployDrain = 2 * time.Second
 )
+
+var errDeployNotReady = errors.New("new version did not become ready")
 
 type appInfo struct {
 	Name      string    `json:"name"`
@@ -271,35 +275,16 @@ func (s *Supervisor) deployApp(name, archive string) (*App, error) {
 		return nil, fmt.Errorf("host %q is already used by %s", ac.Host, other)
 	}
 
-	port := 0
-	if old != nil {
-		port = old.Port
-	} else {
-		port, err = freePort()
-		if err != nil {
-			return nil, fmt.Errorf("allocate port: %w", err)
-		}
-	}
-
-	if old != nil {
-		s.retireApp(old)
-		s.stopApp(old)
-	}
-
-	finalDir := filepath.Join(s.cfg.appsDir, name)
-	if err := replaceDir(tmp, finalDir); err != nil {
-		if old != nil {
-			s.unretireApp(old)
-			s.startApp(old)
-		}
-		return nil, err
+	port, err := freePort()
+	if err != nil {
+		return nil, fmt.Errorf("allocate port: %w", err)
 	}
 
 	app := &App{
 		Name:     name,
 		Host:     ac.Host,
 		Port:     port,
-		Dir:      finalDir,
+		Dir:      tmp,
 		StateDir: filepath.Join(s.cfg.stateDir, name),
 		Health:   ac.Health,
 		Env:      ac.Env,
@@ -307,13 +292,47 @@ func (s *Supervisor) deployApp(name, archive string) (*App, error) {
 		delay:    time.Second,
 	}
 
+	// Blue/green: the new version starts on its own port and compiles its Wasm while the old one keeps serving.
+	// Caddy only switches to the new port once it answers its health path, so requests never hit a dead upstream.
+	if old != nil {
+		s.retireApp(old)
+	}
+	s.startAppWait(app, false)
+	if err := s.awaitApp(app, s.cfg.deployReadyTimeout); err != nil {
+		s.retireApp(app)
+		s.stopApp(app)
+		if old != nil {
+			s.unretireApp(old)
+			s.startApp(old)
+		}
+		return nil, fmt.Errorf("%w: %v", errDeployNotReady, err)
+	}
+
+	finalDir := filepath.Join(s.cfg.appsDir, name)
+	if err := replaceDir(tmp, finalDir); err != nil {
+		s.retireApp(app)
+		s.stopApp(app)
+		if old != nil {
+			s.unretireApp(old)
+			s.startApp(old)
+		}
+		return nil, err
+	}
+	app.mu.Lock()
+	app.Dir = finalDir
+	app.mu.Unlock()
+
 	s.appsMu.Lock()
 	s.apps[name] = app
 	s.appsMu.Unlock()
 
-	s.startApp(app)
 	if err := s.applyCaddyConfig(); err != nil {
 		log.Printf("deploy %s: apply Caddy config: %v", name, err)
+	}
+	if old != nil {
+		// Give Caddy a moment to send new requests to the new port before the old process goes away.
+		time.Sleep(deployDrain)
+		s.stopApp(old)
 	}
 
 	return app, nil
@@ -367,7 +386,11 @@ func (s *Supervisor) handleDeploy(w http.ResponseWriter, r *http.Request, name s
 	app, err := s.deployApp(name, tmpName)
 	if err != nil {
 		log.Printf("deploy %s: %v", name, err)
-		writeError(w, http.StatusBadRequest, err.Error())
+		status := http.StatusBadRequest
+		if errors.Is(err, errDeployNotReady) {
+			status = http.StatusGatewayTimeout
+		}
+		writeError(w, status, err.Error())
 		return
 	}
 

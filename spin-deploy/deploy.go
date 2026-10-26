@@ -226,7 +226,7 @@ func uploadBundle(cfg *deployConfig, bundle []byte) error {
 	req.Header.Set("Authorization", "Bearer "+cfg.token)
 	req.Header.Set("Content-Type", form.FormDataContentType())
 
-	client := &http.Client{Timeout: 120 * time.Second}
+	client := &http.Client{Timeout: 5 * time.Minute}
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("post bundle: %w", err)
