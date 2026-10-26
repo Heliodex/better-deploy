@@ -33,7 +33,10 @@ laptop. Nothing is compiled on the serving node, and the app is a standard
 - Go 1.27.1 or newer. `componentize-go` is a Go tool in `example/go.mod`; it
   downloads the patched Go it needs for async components.
 - wasmtime **50.0.0** on the machine running `wt-deploy` and on the machine
-  running the supervisor. The precompiled artifact is tied to that version.
+  running the supervisor. The precompiled artifact is tied to that version and
+  to the target triple. Both default to `x86_64-unknown-linux-gnu`; use
+  `--target` / `WT_WASMTIME_TARGET` on the CLI and supervisor for another
+  architecture.
 - The example WIT is the final `wasi:http@0.3.0` from wasmtime v50
   (`crates/wasi-http/src/p3/wit`), plus `wasi:cli/imports`.
 
@@ -202,7 +205,8 @@ what let an app keep normal `http.HandlerFunc` code.
 - The deploy POST waits for the new version; there are no deploy records or
   long-polling yet. Startup is fast enough that this is usually not noticeable.
 - `.cwasm` is native code. Only load artifacts produced by your own deploy
-  pipeline; the deploy endpoint is the trust boundary.
+  pipeline; the deploy endpoint is the trust boundary. The CLI and supervisor
+  must agree on the wasmtime version and target triple.
 - The container runs as root and has no per-app CPU limits.
 - `Pdeathsig` (Linux) stops app processes if the supervisor dies; adjust for
   other platforms.

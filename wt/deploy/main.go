@@ -34,6 +34,7 @@ type deployConfig struct {
 	host        string
 	token       string
 	wasmtime    string
+	target      string
 	skipBuild   bool
 	skipCompile bool
 	appHost     string
@@ -53,6 +54,7 @@ func resolveConfig(args []string) (*deployConfig, error) {
 	host := flags.String("host", env("WT_DEPLOY_HOST", ""), "supervisor URL, e.g. http://127.0.0.1:8080")
 	token := flags.String("token", env("WT_TOKEN", ""), "deploy bearer token")
 	wasmtime := flags.String("wasmtime", env("WT_WASMTIME", "wasmtime"), "wasmtime binary")
+	target := flags.String("target", env("WT_WASMTIME_TARGET", "x86_64-unknown-linux-gnu"), "wasmtime compile target")
 	appHost := flags.String("app-host", "", "override the app host in the uploaded app.json")
 	skipBuild := flags.Bool("skip-build", false, "skip running app.json's build command")
 	skipCompile := flags.Bool("skip-compile", false, "reuse an existing main.cwasm")
@@ -71,6 +73,7 @@ func resolveConfig(args []string) (*deployConfig, error) {
 		host:        *host,
 		token:       *token,
 		wasmtime:    *wasmtime,
+		target:      *target,
 		skipBuild:   *skipBuild,
 		skipCompile: *skipCompile,
 		appHost:     *appHost,
@@ -140,7 +143,7 @@ func runCompile(cfg *deployConfig) error {
 		return nil
 	}
 	cwasm := filepath.Join(cfg.dir, "main.cwasm")
-	cmd := exec.Command(cfg.wasmtime, "compile", "-W", "component-model-async=y", wasm, "-o", cwasm)
+	cmd := exec.Command(cfg.wasmtime, "compile", "--target", cfg.target, "-W", "component-model-async=y", wasm, "-o", cwasm)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {

@@ -44,15 +44,16 @@ const (
 )
 
 type config struct {
-	appsDir       string
-	stateDir      string
-	listen        string
-	storageListen string
-	domain        string
-	wasmtime      string
-	token         string
-	tlsCert       string
-	tlsKey        string
+	appsDir        string
+	stateDir       string
+	listen         string
+	storageListen  string
+	domain         string
+	wasmtime       string
+	wasmtimeTarget string
+	token          string
+	tlsCert        string
+	tlsKey         string
 }
 
 type appConfig struct {
@@ -101,15 +102,16 @@ func env(key, fallback string) string {
 
 func configFromEnv() config {
 	return config{
-		appsDir:       env("WT_APPS_DIR", "./apps"),
-		stateDir:      env("WT_STATE_DIR", "./state"),
-		listen:        env("WT_LISTEN", "127.0.0.1:8080"),
-		storageListen: env("WT_STORAGE_LISTEN", "127.0.0.1:0"),
-		domain:        env("WT_APPS_DOMAIN", "localhost"),
-		wasmtime:      env("WT_WASMTIME", "wasmtime"),
-		token:         os.Getenv("WT_TOKEN"),
-		tlsCert:       os.Getenv("WT_TLS_CERT"),
-		tlsKey:        os.Getenv("WT_TLS_KEY"),
+		appsDir:        env("WT_APPS_DIR", "./apps"),
+		stateDir:       env("WT_STATE_DIR", "./state"),
+		listen:         env("WT_LISTEN", "127.0.0.1:8080"),
+		storageListen:  env("WT_STORAGE_LISTEN", "127.0.0.1:0"),
+		domain:         env("WT_APPS_DOMAIN", "localhost"),
+		wasmtime:       env("WT_WASMTIME", "wasmtime"),
+		wasmtimeTarget: env("WT_WASMTIME_TARGET", "x86_64-unknown-linux-gnu"),
+		token:          os.Getenv("WT_TOKEN"),
+		tlsCert:        os.Getenv("WT_TLS_CERT"),
+		tlsKey:         os.Getenv("WT_TLS_KEY"),
 	}
 }
 
@@ -232,6 +234,7 @@ func (s *supervisor) appArgs(a *app, source string, allowPrecompiled bool) []str
 		"-Sp3",
 		"-S", "inherit-network",
 		"-W", "component-model-async=y",
+		"--target", s.cfg.wasmtimeTarget,
 		"--addr", fmt.Sprintf("127.0.0.1:%d", a.port),
 	}
 	if allowPrecompiled {
@@ -926,6 +929,7 @@ func main() {
 	flag.StringVar(&cfg.stateDir, "state", cfg.stateDir, "per-app state directory")
 	flag.StringVar(&cfg.domain, "domain", cfg.domain, "default app host suffix")
 	flag.StringVar(&cfg.wasmtime, "wasmtime", cfg.wasmtime, "wasmtime binary")
+	flag.StringVar(&cfg.wasmtimeTarget, "wasmtime-target", cfg.wasmtimeTarget, "wasmtime target triple (must match the compiler)")
 	flag.StringVar(&cfg.token, "token", cfg.token, "deploy bearer token (empty disables auth)")
 	flag.StringVar(&cfg.tlsCert, "tls-cert", cfg.tlsCert, "TLS certificate (with --tls-key)")
 	flag.StringVar(&cfg.tlsKey, "tls-key", cfg.tlsKey, "TLS private key (with --tls-cert)")
