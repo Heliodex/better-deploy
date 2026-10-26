@@ -122,12 +122,17 @@ not run `spin build`.
 
 The supervisor starts the new version on a second loopback port while the old
 process keeps serving, waits for the new one to answer its health path, then
-switches the Caddy route and stops the old process. The response is sent only
-once the new version is serving, and the old one stays up if it never becomes
-ready. A changed component takes a while on first start because Spin compiles
-the Wasm module; the deploy request waits for that (`DEPLOY_READY_TIMEOUT_SECONDS`,
-default 180). State under `state/<name>` is untouched. The response is the app's
-current status:
+switches the Caddy route, drains for two seconds and stops the old process.
+A changed component takes a while on first start because Spin compiles the Wasm
+module, so the deploy answers `200` with the app status only if that all
+finishes within five seconds. Otherwise it answers `202` with
+`{"name":"gotime","status":"starting"}` and carries on in the background:
+poll `GET /apps/<name>` until the reported `pid`/`startedAt` is the new process
+and `status` is `running`. If the new version never becomes ready (or its
+process exits), the old one stays up, and a deploy that fails within the five
+second window answers `504`. The readiness timeout is
+`DEPLOY_READY_TIMEOUT_SECONDS` (default 180). State under `state/<name>` is
+untouched. Once serving, the response is the app's current status:
 
 ```json
 {"name":"gotime","host":"gotime.apps.example.com","port":3101,"status":"running","pid":1234}

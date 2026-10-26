@@ -43,9 +43,11 @@ double quotes.
 `deploy` runs `spin build`, packs `spin.toml`, `main.wasm` and `app.json` (if
 present) into a tarball, and posts it to the supervisor. It waits for the
 supervisor to report the new version running, which can take a minute on the
-first start of a changed component while Spin compiles the Wasm module. It
-prints the supervisor's JSON response. The app's `spin/package.json` wires this
-up as `bun run deploy`.
+first start of a changed component while Spin compiles the Wasm module. When
+the supervisor answers `202` (or a proxy in front of it times out first), the
+CLI polls `GET /apps/<name>` until the app reports a new running process, for
+up to five minutes. It prints the app's JSON status. The app's
+`spin/package.json` wires this up as `bun run deploy`.
 
 ## Development
 

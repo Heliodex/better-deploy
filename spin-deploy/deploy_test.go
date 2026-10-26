@@ -5,9 +5,12 @@ import (
 	"bytes"
 	"compress/gzip"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func writeTestFile(t *testing.T, dir, name, body string) {
@@ -157,6 +160,39 @@ func TestLoadDotEnv(t *testing.T) {
 func TestLoadDotEnvMissing(t *testing.T) {
 	if vars := loadDotEnv(t.TempDir()); len(vars) != 0 {
 		t.Errorf("vars = %v, want empty", vars)
+	}
+}
+
+func TestNewerVersion(t *testing.T) {
+	started := time.Date(2026, 10, 26, 15, 0, 0, 0, time.UTC)
+	before := &appState{PID: 10, StartedAt: started}
+
+	if !newerVersion(nil, before) {
+		t.Error("a new app should count as newer when there was no previous version")
+	}
+	if newerVersion(before, &appState{PID: 10, StartedAt: started}) {
+		t.Error("the same process should not count as a new version")
+	}
+	if !newerVersion(before, &appState{PID: 11, StartedAt: started}) {
+		t.Error("a new pid should count as a new version")
+	}
+	if !newerVersion(before, &appState{PID: 10, StartedAt: started.Add(time.Second)}) {
+		t.Error("a new start time should count as a new version")
+	}
+}
+
+func TestFetchAppStateMissing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.NotFound(w, nil)
+	}))
+	defer server.Close()
+
+	state, err := fetchAppState(&deployConfig{host: server.URL, app: "gotime"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state != nil {
+		t.Errorf("state = %+v, want nil for a missing app", state)
 	}
 }
 

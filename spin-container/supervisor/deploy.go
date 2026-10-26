@@ -26,6 +26,9 @@ const (
 	maxTarFiles     = 10_000
 
 	deployDrain = 2 * time.Second
+	// deployRespondAfter keeps the request inside proxy timeouts. A cold Wasm compile takes longer than that, so the
+	// deploy carries on in the background and clients poll GET /apps/<name> until the app reports the new process.
+	deployRespondAfter = 5 * time.Second
 )
 
 var errDeployNotReady = errors.New("new version did not become ready")
@@ -338,6 +341,22 @@ func (s *Supervisor) deployApp(name, archive string) (*App, error) {
 	return app, nil
 }
 
+func (s *Supervisor) beginDeploy(name string) bool {
+	s.deployingMu.Lock()
+	defer s.deployingMu.Unlock()
+	if s.deploying[name] {
+		return false
+	}
+	s.deploying[name] = true
+	return true
+}
+
+func (s *Supervisor) endDeploy(name string) {
+	s.deployingMu.Lock()
+	delete(s.deploying, name)
+	s.deployingMu.Unlock()
+}
+
 func (s *Supervisor) handleDeploy(w http.ResponseWriter, r *http.Request, name string) {
 	if s.cfg.token == "" {
 		writeError(w, http.StatusServiceUnavailable, "deploy disabled: SUPERVISOR_TOKEN is not set")
@@ -371,31 +390,56 @@ func (s *Supervisor) handleDeploy(w http.ResponseWriter, r *http.Request, name s
 		return
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
 
 	if _, err := io.Copy(tmp, io.LimitReader(file, maxUploadBytes)); err != nil {
 		tmp.Close()
+		os.Remove(tmpName)
 		writeError(w, http.StatusBadRequest, "read artifact: "+err.Error())
 		return
 	}
 	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
 		writeError(w, http.StatusInternalServerError, "close temp file")
 		return
 	}
 
-	app, err := s.deployApp(name, tmpName)
-	if err != nil {
-		log.Printf("deploy %s: %v", name, err)
-		status := http.StatusBadRequest
-		if errors.Is(err, errDeployNotReady) {
-			status = http.StatusGatewayTimeout
-		}
-		writeError(w, status, err.Error())
+	if !s.beginDeploy(name) {
+		os.Remove(tmpName)
+		writeError(w, http.StatusConflict, "a deploy for this app is already in progress")
 		return
 	}
 
-	log.Printf("deploy %s: now %s at https://%s (127.0.0.1:%d)", name, app.Dir, app.Host, app.Port)
-	writeJSON(w, http.StatusOK, appInfoFor(app))
+	type deployResult struct {
+		app *App
+		err error
+	}
+	result := make(chan deployResult, 1)
+	go func() {
+		defer s.endDeploy(name)
+		defer os.Remove(tmpName)
+		app, err := s.deployApp(name, tmpName)
+		if err != nil {
+			log.Printf("deploy %s: %v", name, err)
+		}
+		result <- deployResult{app: app, err: err}
+	}()
+
+	select {
+	case res := <-result:
+		if res.err != nil {
+			status := http.StatusBadRequest
+			if errors.Is(res.err, errDeployNotReady) {
+				status = http.StatusGatewayTimeout
+			}
+			writeError(w, status, res.err.Error())
+			return
+		}
+		log.Printf("deploy %s: now %s at https://%s (127.0.0.1:%d)", name, res.app.Dir, res.app.Host, res.app.Port)
+		writeJSON(w, http.StatusOK, appInfoFor(res.app))
+	case <-time.After(deployRespondAfter):
+		log.Printf("deploy %s: still starting; the old version keeps serving", name)
+		writeJSON(w, http.StatusAccepted, map[string]string{"name": name, "status": "starting"})
+	}
 }
 
 func (s *Supervisor) handleApp(w http.ResponseWriter, r *http.Request) {

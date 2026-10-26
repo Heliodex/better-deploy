@@ -71,6 +71,9 @@ type Supervisor struct {
 	caddyMu, deployMu sync.Mutex
 	apiExited         chan struct{}
 
+	deployingMu sync.Mutex
+	deploying   map[string]bool
+
 	api      *http.Server
 	stopping atomic.Bool
 }
@@ -662,6 +665,7 @@ func main() {
 	s := &Supervisor{
 		cfg:       cfg,
 		apps:      map[string]*App{},
+		deploying: map[string]bool{},
 		apiExited: make(chan struct{}),
 	}
 
