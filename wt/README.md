@@ -131,9 +131,14 @@ podman run -d --name wt-demo -p 127.0.0.1:8080:8080 \
   -e WT_TOKEN=dev -v "$PWD/wt-state:/var/lib/wt" wt-demo
 ```
 
-The image contains the supervisor and wasmtime 50.0.0 (the release is glibc,
-so the base is Debian rather than Alpine). It runs as root for the prototype;
-the volume at `/var/lib/wt` holds apps and state.
+The image contains the supervisor and wasmtime 50.0.0. The wasmtime release is
+glibc, so the base is Debian slim; Alpine's gcompat fails on the resolver
+symbols. The build strips the wasmtime CLI (68 → 45 MB) and copies the CA bundle
+from the fetch stage instead of installing `ca-certificates`, which brings the
+image to about 141 MB. The C API tarball is a shared library for embedding, not
+a server, and still links glibc and includes the compiler, so it does not make
+this image smaller. It runs as root for the prototype; the volume at
+`/var/lib/wt` holds apps and state.
 
 On Orchard, create a GitHub-built deployment from this repository with
 `dockerfilePath: wt/Containerfile`, `buildFromRoot: true`, port `8080`, and a

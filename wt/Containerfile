@@ -18,35 +18,39 @@ ARG WASMTIME_VERSION=v50.0.0
 
 RUN mkdir -p /out
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl xz-utils \
+ && apt-get install -y --no-install-recommends binutils ca-certificates curl xz-utils \
  && rm -rf /var/lib/apt/lists/*
 
-# Wasmtime's Linux builds link glibc, so the runtime stage is Debian rather
-# than Alpine. The version must match the one wt-deploy uses to precompile.
+# Wasmtime's Linux builds link glibc, so the runtime stage is Debian rather than
+# Alpine. The version must match the one wt-deploy uses to precompile. The C
+# API release is a shared library for embedding, not a server, so it does not
+# replace this CLI in the runtime image.
 RUN set -eux; \
     arch="x86_64"; \
     asset="wasmtime-${WASMTIME_VERSION}-${arch}-linux.tar.xz"; \
     base="https://github.com/bytecodealliance/wasmtime/releases/download/${WASMTIME_VERSION}"; \
     curl -fsSL --retry 3 -o "/tmp/${asset}" "${base}/${asset}"; \
     tar -xJf "/tmp/${asset}" -C /tmp; \
+    strip -s "/tmp/wasmtime-${WASMTIME_VERSION}-${arch}-linux/wasmtime"; \
     install -m 0755 "/tmp/wasmtime-${WASMTIME_VERSION}-${arch}-linux/wasmtime" /out/wasmtime
 
+# The runtime only needs glibc, libgcc and the CA bundle. Copy the bundle
+# from the fetch stage instead of installing ca-certificates, and let the
+# supervisor create its app/state directories.
 FROM docker.io/library/debian:trixie-slim
-
-RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates \
- && rm -rf /var/lib/apt/lists/* \
- && mkdir -p /var/lib/wt/apps /var/lib/wt/state
 
 COPY --from=build /out/wt-supervisor /usr/local/bin/wt-supervisor
 COPY --from=wasmtime /out/wasmtime /usr/local/bin/wasmtime
+COPY --from=wasmtime /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 
 ENV WT_APPS_DIR=/var/lib/wt/apps \
     WT_STATE_DIR=/var/lib/wt/state \
     WT_LISTEN=0.0.0.0:8080 \
     WT_WASMTIME=/usr/local/bin/wasmtime \
-    WT_APPS_DOMAIN=localhost
+    WT_APPS_DOMAIN=localhost \
+    TMPDIR=/var/lib/wt
 
+WORKDIR /var/lib/wt
 EXPOSE 8080
 VOLUME ["/var/lib/wt"]
 
