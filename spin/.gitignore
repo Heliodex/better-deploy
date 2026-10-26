@@ -1,7 +1,6 @@
 main.wasm
 .spin/
 frontend/node_modules/
-frontend/dist/*
-!frontend/dist/.gitkeep
+frontend/dist/
 app.json
 .env
