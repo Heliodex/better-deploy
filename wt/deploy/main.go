@@ -20,11 +20,12 @@ import (
 )
 
 type manifest struct {
-	Name   string            `json:"name"`
-	Host   string            `json:"host"`
-	Health string            `json:"health"`
-	Env    map[string]string `json:"env"`
-	Build  string            `json:"build"`
+	Name     string            `json:"name"`
+	Host     string            `json:"host"`
+	Health   string            `json:"health"`
+	Env      map[string]string `json:"env"`
+	Build    string            `json:"build"`
+	MemoryMB int               `json:"memory_mb,omitempty"`
 }
 
 type deployConfig struct {
@@ -35,6 +36,7 @@ type deployConfig struct {
 	wasmtime    string
 	skipBuild   bool
 	skipCompile bool
+	appHost     string
 }
 
 func env(key, fallback string) string {
@@ -51,6 +53,7 @@ func resolveConfig(args []string) (*deployConfig, error) {
 	host := flags.String("host", env("WT_DEPLOY_HOST", ""), "supervisor URL, e.g. http://127.0.0.1:8080")
 	token := flags.String("token", env("WT_TOKEN", ""), "deploy bearer token")
 	wasmtime := flags.String("wasmtime", env("WT_WASMTIME", "wasmtime"), "wasmtime binary")
+	appHost := flags.String("app-host", "", "override the app host in the uploaded app.json")
 	skipBuild := flags.Bool("skip-build", false, "skip running app.json's build command")
 	skipCompile := flags.Bool("skip-compile", false, "reuse an existing main.cwasm")
 	if err := flags.Parse(args); err != nil {
@@ -70,6 +73,7 @@ func resolveConfig(args []string) (*deployConfig, error) {
 		wasmtime:    *wasmtime,
 		skipBuild:   *skipBuild,
 		skipCompile: *skipCompile,
+		appHost:     *appHost,
 	}, nil
 }
 
@@ -145,26 +149,40 @@ func runCompile(cfg *deployConfig) error {
 	return nil
 }
 
-func bundle(dir string) ([]byte, error) {
+func bundle(dir string, m manifest) ([]byte, error) {
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
 
-	entries := []string{"app.json", "main.wasm", "main.cwasm"}
-	for _, name := range entries {
-		full := filepath.Join(dir, name)
-		data, err := os.ReadFile(full)
+	appJSON, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	entries := []struct {
+		name string
+		data []byte
+	}{
+		{"app.json", append(appJSON, '\n')},
+	}
+	for _, name := range []string{"main.wasm", "main.cwasm"} {
+		data, err := os.ReadFile(filepath.Join(dir, name))
 		if os.IsNotExist(err) && name == "main.cwasm" {
 			continue
 		}
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", name, err)
 		}
-		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(data))}); err != nil {
-			return nil, fmt.Errorf("write %s: %w", name, err)
+		entries = append(entries, struct {
+			name string
+			data []byte
+		}{name, data})
+	}
+	for _, entry := range entries {
+		if err := tw.WriteHeader(&tar.Header{Name: entry.name, Mode: 0o644, Size: int64(len(entry.data))}); err != nil {
+			return nil, fmt.Errorf("write %s: %w", entry.name, err)
 		}
-		if _, err := tw.Write(data); err != nil {
-			return nil, fmt.Errorf("write %s: %w", name, err)
+		if _, err := tw.Write(entry.data); err != nil {
+			return nil, fmt.Errorf("write %s: %w", entry.name, err)
 		}
 	}
 	if err := tw.Close(); err != nil {
@@ -239,13 +257,16 @@ func deploy(args []string) error {
 		}
 		m.Name = cfg.app
 	}
+	if cfg.appHost != "" {
+		m.Host = cfg.appHost
+	}
 	if err := runBuild(cfg, m); err != nil {
 		return err
 	}
 	if err := runCompile(cfg); err != nil {
 		return err
 	}
-	bundle, err := bundle(cfg.dir)
+	bundle, err := bundle(cfg.dir, m)
 	if err != nil {
 		return err
 	}

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -22,7 +23,7 @@ func TestBundle(t *testing.T) {
 		}
 	}
 
-	data, err := bundle(dir)
+	data, err := bundle(dir, manifest{Name: "hello"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +49,7 @@ func TestBundle(t *testing.T) {
 		}
 		entries[header.Name] = string(body)
 	}
-	if entries["app.json"] != `{"name":"hello"}` || entries["main.wasm"] != "wasm" || entries["main.cwasm"] != "cwasm" {
+	if !strings.Contains(entries["app.json"], `"name": "hello"`) || entries["main.wasm"] != "wasm" || entries["main.cwasm"] != "cwasm" {
 		t.Errorf("entries = %v", entries)
 	}
 }

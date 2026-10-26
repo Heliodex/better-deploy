@@ -83,7 +83,9 @@ curl -H 'Host: hello.localhost' http://127.0.0.1:8080/hello
 
 `wt-deploy` reads `app.json`, runs its `build` command, precompiles
 `main.wasm` with `wasmtime compile`, and uploads `app.json`, `main.wasm` and
-`main.cwasm` as a gzipped tarball. The supervisor starts the new version on a
+`main.cwasm` as a gzipped tarball. `--app-host` overrides the host written
+into the uploaded `app.json`, which is useful when the supervisor sits behind
+a real ingress domain. The supervisor starts the new version on a
 new loopback port while the old one serves, waits for its health path, swaps
 the host route and stops the old process.
 
@@ -117,6 +119,25 @@ wasmtime serve -Scli -Sp3 -S inherit-network -W component-model-async=y \
 `-W max-memory-size`. If `main.cwasm` is missing or incompatible, the
 supervisor falls back to `main.wasm` (JIT compilation, which takes much longer,
 especially on a small CPU quota).
+
+## Container
+
+```sh
+podman build -f wt/Containerfile -t wt-demo .
+podman run -d --name wt-demo -p 127.0.0.1:8080:8080 \
+  -e WT_TOKEN=dev -v "$PWD/wt-state:/var/lib/wt" wt-demo
+```
+
+The image contains the supervisor and wasmtime 50.0.0 (the release is glibc,
+so the base is Debian rather than Alpine). It runs as root for the prototype;
+the volume at `/var/lib/wt` holds apps and state.
+
+On Orchard, create a GitHub-built deployment from this repository with
+`dockerfilePath: wt/Containerfile`, `buildFromRoot: true`, port `8080`, and a
+`WT_TOKEN` environment variable. Add an ingress for the deployment, then
+deploy an app with `--host https://<ingress-host> --app-host <ingress-host>`.
+The supervisor serves the deploy API at `/apps/...` on that same host and
+routes `/` to the app.
 
 ## Storage
 
@@ -182,5 +203,6 @@ what let an app keep normal `http.HandlerFunc` code.
   long-polling yet. Startup is fast enough that this is usually not noticeable.
 - `.cwasm` is native code. Only load artifacts produced by your own deploy
   pipeline; the deploy endpoint is the trust boundary.
+- The container runs as root and has no per-app CPU limits.
 - `Pdeathsig` (Linux) stops app processes if the supervisor dies; adjust for
   other platforms.
