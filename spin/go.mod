@@ -1,6 +1,6 @@
 module github.com/gotime
 
-go 1.25.5
+go 1.27.3
 
 require (
 	github.com/inertia-go/inertia-go v0.10.0
