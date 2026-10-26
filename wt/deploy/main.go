@@ -80,7 +80,7 @@ func resolveConfig(args []string) (*deployConfig, error) {
 	host := flags.String("host", env("WT_DEPLOY_HOST", ""), "supervisor URL, e.g. http://127.0.0.1:8080")
 	token := flags.String("token", env("WT_TOKEN", ""), "deploy bearer token")
 	wasmtime := flags.String("wasmtime", env("WT_WASMTIME", "wasmtime"), "wasmtime binary")
-	target := flags.String("target", env("WT_WASMTIME_TARGET", "x86_64-unknown-linux-gnu"), "wasmtime compile target")
+	target := flags.String("target", env("WT_WASMTIME_TARGET", "x86_64-unknown-linux-musl"), "wasmtime compile target")
 	appHost := flags.String("app-host", "", "override the app host in the uploaded app.json")
 	skipBuild := flags.Bool("skip-build", false, "skip running app.json's build command")
 	skipCompile := flags.Bool("skip-compile", false, "reuse an existing main.cwasm")

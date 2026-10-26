@@ -9,7 +9,7 @@ the deploy artifact:
 ```text
 wt-deploy:  build (componentize-go) → wasmtime compile → upload
 supervisor: Caddy-less Go reverse proxy + one `wasmtime serve` per app
-runtime:    wasmtime 50 loads the precompiled .cwasm (fallback: main.wasm)
+runtime:    a runtime-only wasmtime 50 loads the precompiled .cwasm
 storage:    a per-app SQLite key-value service on loopback, plus /data via WASI
 ```
 
@@ -32,11 +32,11 @@ laptop. Nothing is compiled on the serving node, and the app is a standard
 
 - Go 1.27.1 or newer. `componentize-go` is a Go tool in `example/go.mod`; it
   downloads the patched Go it needs for async components.
-- wasmtime **50.0.0** on the machine running `wt-deploy` and on the machine
-  running the supervisor. The precompiled artifact is tied to that version and
-  to the target triple. Both default to `x86_64-unknown-linux-gnu`; use
-  `--target` / `WT_WASMTIME_TARGET` on the CLI and supervisor for another
-  architecture.
+- wasmtime **50.0.0** on the machine running `wt-deploy` to compile the
+  artifact. The precompiled artifact is tied to that version and target triple.
+  The client and supervisor both default to `x86_64-unknown-linux-musl`, which
+  is what the runtime-only image can execute; a different target needs a
+  matching runtime build.
 - The example WIT is the final `wasi:http@0.3.0` from wasmtime v50
   (`crates/wasi-http/src/p3/wit`), plus `wasi:cli/imports`.
 
@@ -119,9 +119,9 @@ wasmtime serve -Scli -Sp3 -S inherit-network -W component-model-async=y \
 
 `app.json` carries `name`, `host`, `health`, `env`, `memory_mb` and the local
 `build` command. `memory_mb`, when set, becomes wasmtime's
-`-W max-memory-size`. If `main.cwasm` is missing or incompatible, the
-supervisor falls back to `main.wasm` (JIT compilation, which takes much longer,
-especially on a small CPU quota).
+`-W max-memory-size`. The runtime-only image has no compiler, so `main.wasm`
+cannot run there: `main.cwasm` is required. If it is missing or incompatible,
+the deploy fails and the old version keeps serving.
 
 ## Container
 
@@ -131,14 +131,18 @@ podman run -d --name wt-demo -p 127.0.0.1:8080:8080 \
   -e WT_TOKEN=dev -v "$PWD/wt-state:/var/lib/wt" wt-demo
 ```
 
-The image contains the supervisor and wasmtime 50.0.0. The wasmtime release is
-glibc, so the base is Debian slim; Alpine's gcompat fails on the resolver
-symbols. The build strips the wasmtime CLI (68 → 45 MB) and copies the CA bundle
-from the fetch stage instead of installing `ca-certificates`, which brings the
-image to about 141 MB. The C API tarball is a shared library for embedding, not
-a server, and still links glibc and includes the compiler, so it does not make
-this image smaller. It runs as root for the prototype; the volume at
-`/var/lib/wt` holds apps and state.
+The image is built entirely by `wt/Containerfile`: a Rust stage compiles
+wasmtime from the v50.0.0 source with `--no-default-features` and only the
+serve/run, component-model-async, pooling, GC/threads and WASI HTTP features,
+then strips it. There is no Cranelift or Winch in the serving image because it
+only deserializes `.cwasm` files. The musl build is static and the final stage
+is `scratch`, so the image is about **33 MB** (down from 168 MB with the full
+release on Debian).
+
+The C API tarball is a shared library for embedding, not a server, and still
+contains the compiler, so it does not replace this runtime-only CLI. The image
+runs as root for the prototype; the volume at `/var/lib/wt` holds apps and
+state.
 
 On Orchard, create a GitHub-built deployment from this repository with
 `dockerfilePath: wt/Containerfile`, `buildFromRoot: true`, port `8080`, and a
@@ -217,7 +221,8 @@ what let an app keep normal `http.HandlerFunc` code.
   long-polling yet. Startup is fast enough that this is usually not noticeable.
 - `.cwasm` is native code. Only load artifacts produced by your own deploy
   pipeline; the deploy endpoint is the trust boundary. The CLI and supervisor
-  must agree on the wasmtime version and target triple.
+  must agree on the wasmtime version and target triple; the runtime-only image
+  is musl and accepts only `x86_64-unknown-linux-musl` artifacts.
 - The container runs as root and has no per-app CPU limits.
 - `Pdeathsig` (Linux) stops app processes if the supervisor dies; adjust for
   other platforms.

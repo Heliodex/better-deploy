@@ -94,7 +94,7 @@ func configFromEnv() config {
 		storageListen:  env("WT_STORAGE_LISTEN", "127.0.0.1:0"),
 		domain:         env("WT_APPS_DOMAIN", "localhost"),
 		wasmtime:       env("WT_WASMTIME", "wasmtime"),
-		wasmtimeTarget: env("WT_WASMTIME_TARGET", "x86_64-unknown-linux-gnu"),
+		wasmtimeTarget: env("WT_WASMTIME_TARGET", "x86_64-unknown-linux-musl"),
 		token:          os.Getenv("WT_TOKEN"),
 		tlsCert:        os.Getenv("WT_TLS_CERT"),
 		tlsKey:         os.Getenv("WT_TLS_KEY"),

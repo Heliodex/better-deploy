@@ -1,9 +1,9 @@
 # syntax=docker/dockerfile:1
 #
-# The wt runtime image: the supervisor plus a pinned wasmtime. Apps are
+# The wt runtime image: a runtime-only wasmtime and the supervisor. Apps are
 # uploaded later; the image contains no applications.
 
-FROM docker.io/library/golang:1.27-alpine AS build
+FROM docker.io/library/golang:1.27-alpine AS supervisor
 WORKDIR /src
 RUN mkdir -p /out
 COPY wt/supervisor/go.mod wt/supervisor/go.sum ./
@@ -12,41 +12,36 @@ COPY wt/supervisor/ ./
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -trimpath -ldflags="-s -w" -o /out/wt-supervisor .
 
-FROM docker.io/library/debian:trixie-slim AS wasmtime
+# Build wasmtime without Cranelift/Winch: the serving side only deserializes
+# the .cwasm files produced by wt-deploy. The musl build is fully static, so
+# the final image can be scratch.
+FROM docker.io/library/rust:1.97-slim AS wasmtime
 
 ARG WASMTIME_VERSION=v50.0.0
 
-RUN mkdir -p /out
 RUN apt-get update \
- && apt-get install -y --no-install-recommends binutils ca-certificates curl xz-utils \
+ && apt-get install -y --no-install-recommends build-essential cmake pkg-config curl ca-certificates xz-utils binutils musl-tools \
  && rm -rf /var/lib/apt/lists/*
+RUN rustup target add x86_64-unknown-linux-musl
 
-# Wasmtime's Linux builds link glibc, so the runtime stage is Debian rather than
-# Alpine. The version must match the one wt-deploy uses to precompile. The C
-# API release is a shared library for embedding, not a server, so it does not
-# replace this CLI in the runtime image.
-RUN set -eux; \
-    arch="x86_64"; \
-    asset="wasmtime-${WASMTIME_VERSION}-${arch}-linux.tar.xz"; \
-    base="https://github.com/bytecodealliance/wasmtime/releases/download/${WASMTIME_VERSION}"; \
-    curl -fsSL --retry 3 -o "/tmp/${asset}" "${base}/${asset}"; \
-    tar -xJf "/tmp/${asset}" -C /tmp; \
-    strip -s "/tmp/wasmtime-${WASMTIME_VERSION}-${arch}-linux/wasmtime"; \
-    install -m 0755 "/tmp/wasmtime-${WASMTIME_VERSION}-${arch}-linux/wasmtime" /out/wasmtime
+WORKDIR /src
+RUN curl -fsSL "https://github.com/bytecodealliance/wasmtime/archive/refs/tags/${WASMTIME_VERSION}.tar.gz" | tar -xz
+WORKDIR /src/wasmtime-50.0.0
+RUN cargo build --release --locked --target x86_64-unknown-linux-musl --bin wasmtime --no-default-features \
+    --features "serve,run,component-model-async,pooling-allocator,threads,gc,gc-drc,gc-null,gc-copying,stack-switching,logging,clap/default,clap/wrap_help"
+RUN strip -s target/x86_64-unknown-linux-musl/release/wasmtime
 
-# The runtime only needs glibc, libgcc and the CA bundle. Copy the bundle
-# from the fetch stage instead of installing ca-certificates, and let the
-# supervisor create its app/state directories.
-FROM docker.io/library/debian:trixie-slim
+FROM scratch
 
-COPY --from=build /out/wt-supervisor /usr/local/bin/wt-supervisor
-COPY --from=wasmtime /out/wasmtime /usr/local/bin/wasmtime
+COPY --from=wasmtime /src/wasmtime-50.0.0/target/x86_64-unknown-linux-musl/release/wasmtime /usr/local/bin/wasmtime
 COPY --from=wasmtime /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=supervisor /out/wt-supervisor /usr/local/bin/wt-supervisor
 
 ENV WT_APPS_DIR=/var/lib/wt/apps \
     WT_STATE_DIR=/var/lib/wt/state \
     WT_LISTEN=0.0.0.0:8080 \
     WT_WASMTIME=/usr/local/bin/wasmtime \
+    WT_WASMTIME_TARGET=x86_64-unknown-linux-musl \
     WT_APPS_DOMAIN=localhost \
     TMPDIR=/var/lib/wt
 
