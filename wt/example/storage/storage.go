@@ -1,5 +1,4 @@
-// Package storage is a small client for the supervisor's per-app key-value
-// service. It reads WT_STORAGE_URL and WT_STORAGE_TOKEN from the environment.
+// Package storage is a small client for the supervisor's per-app key-value service. It reads WT_STORAGE_URL and WT_STORAGE_TOKEN from the environment.
 package storage
 
 import (
@@ -14,13 +13,12 @@ import (
 )
 
 type Client struct {
-	baseURL string
-	token   string
-	http    *http.Client
+	baseURL, token string
+	http           *http.Client
 }
 
-// New creates a client using the supplied transport. A wasi:http transport is
-// used in components; tests can pass a normal http.Client.
+// New creates a client using the supplied transport. A wasi:http transport is used in components; tests can pass a normal http.Client.
+
 func New(httpClient *http.Client) (*Client, error) {
 	baseURL := strings.TrimSuffix(os.Getenv("WT_STORAGE_URL"), "/")
 	token := os.Getenv("WT_STORAGE_TOKEN")
@@ -31,6 +29,27 @@ func New(httpClient *http.Client) (*Client, error) {
 		httpClient = http.DefaultClient
 	}
 	return &Client{baseURL: baseURL, token: token, http: httpClient}, nil
+}
+
+func (c *Client) request(method, key, prefix string) (*http.Request, error) {
+	target := c.baseURL + "/v1/kv"
+	if key != "" {
+		target += "/" + url.PathEscape(key)
+	}
+	if prefix != "" {
+		target += "?prefix=" + url.QueryEscape(prefix)
+	}
+	req, err := http.NewRequest(method, target, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	return req, nil
+}
+
+func responseError(resp *http.Response) error {
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<10))
+	return fmt.Errorf("storage: %s: %s", resp.Status, strings.TrimSpace(string(body)))
 }
 
 func (c *Client) Get(key string) ([]byte, bool, error) {
@@ -110,25 +129,4 @@ func (c *Client) List(prefix string) ([]string, error) {
 		return nil, err
 	}
 	return out.Keys, nil
-}
-
-func (c *Client) request(method, key, prefix string) (*http.Request, error) {
-	target := c.baseURL + "/v1/kv"
-	if key != "" {
-		target += "/" + url.PathEscape(key)
-	}
-	if prefix != "" {
-		target += "?prefix=" + url.QueryEscape(prefix)
-	}
-	req, err := http.NewRequest(method, target, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	return req, nil
-}
-
-func responseError(resp *http.Response) error {
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<10))
-	return fmt.Errorf("storage: %s: %s", resp.Status, strings.TrimSpace(string(body)))
 }

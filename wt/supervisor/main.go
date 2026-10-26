@@ -1,10 +1,6 @@
-// Command wt-supervisor runs WASI HTTP components with wasmtime and routes
-// requests by host.
+// Command wt-supervisor runs WASI HTTP components with wasmtime and routes requests by host.
 //
-// Each app lives in its own directory under WT_APPS_DIR with an app.json, a
-// main.wasm and optionally a precompiled main.cwasm. The supervisor starts one
-// `wasmtime serve` process per app on a loopback port, proxies by Host, and
-// deploys new bundles blue/green.
+// Each app lives in its own directory under WT_APPS_DIR with an app.json, a main.wasm and optionally a precompiled main.cwasm. The supervisor starts one `wasmtime serve` process per app on a loopback port, proxies by Host, and deploys new bundles blue/green.
 package main
 
 import (
@@ -44,16 +40,8 @@ const (
 )
 
 type config struct {
-	appsDir        string
-	stateDir       string
-	listen         string
-	storageListen  string
-	domain         string
-	wasmtime       string
-	wasmtimeTarget string
-	token          string
-	tlsCert        string
-	tlsKey         string
+	appsDir, stateDir, listen, storageListen, domain string
+	wasmtime, wasmtimeTarget, token, tlsCert, tlsKey string
 }
 
 type appConfig struct {
@@ -65,14 +53,13 @@ type appConfig struct {
 }
 
 type app struct {
-	name    string
-	dir     string
-	port    int
-	cfg     appConfig
-	proxy   *httputil.ReverseProxy
-	started time.Time
-	delay   time.Duration
-	timer   *time.Timer
+	name, dir string
+	port      int
+	cfg       appConfig
+	proxy     *httputil.ReverseProxy
+	started   time.Time
+	delay     time.Duration
+	timer     *time.Timer
 
 	mu      sync.Mutex
 	cmd     *exec.Cmd
@@ -85,9 +72,8 @@ type supervisor struct {
 	cfg     config
 	storage *storageServer
 
-	mu    sync.RWMutex
-	apps  map[string]*app
-	hosts map[string]*app
+	mu          sync.RWMutex
+	apps, hosts map[string]*app
 
 	deployMu sync.Mutex
 	stopping atomic.Bool
@@ -155,6 +141,13 @@ func defaultHost(name, domain string) string {
 	return name + ".localhost"
 }
 
+func validateAppHost(host string) error {
+	if !validHost(host) {
+		return fmt.Errorf("invalid host %q", host)
+	}
+	return nil
+}
+
 func readAppConfig(dir, name, domain string) (appConfig, error) {
 	cfg := appConfig{Name: name, Env: map[string]string{}}
 
@@ -189,13 +182,6 @@ func readAppConfig(dir, name, domain string) (appConfig, error) {
 		cfg.Env = map[string]string{}
 	}
 	return cfg, nil
-}
-
-func validateAppHost(host string) error {
-	if !validHost(host) {
-		return fmt.Errorf("invalid host %q", host)
-	}
-	return nil
 }
 
 func freePort() (int, error) {
@@ -257,43 +243,153 @@ func (s *supervisor) appArgs(a *app, source string, allowPrecompiled bool) []str
 	return append(args, source)
 }
 
-func (s *supervisor) spawn(name, dir string, cfg appConfig, port int) (*app, error) {
-	if err := os.MkdirAll(filepath.Join(s.cfg.stateDir, name), 0o755); err != nil {
-		return nil, fmt.Errorf("state dir: %w", err)
+func (s *supervisor) newProxy(a *app) *httputil.ReverseProxy {
+	target := &url.URL{Scheme: "http", Host: fmt.Sprintf("127.0.0.1:%d", a.port)}
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	director := proxy.Director
+	proxy.Director = func(r *http.Request) {
+		host := r.Host
+		proto := r.Header.Get("X-Forwarded-Proto")
+		if proto == "" {
+			proto = "http"
+			if r.TLS != nil {
+				proto = "https"
+			}
+		}
+		director(r)
+		r.Host = host
+		r.Header.Set("X-Forwarded-Host", host)
+		r.Header.Set("X-Forwarded-Proto", proto)
+	}
+	proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, err error) {
+		log.Printf("app %s: proxy: %v", a.name, err)
+		http.Error(w, "app unavailable", http.StatusBadGateway)
+	}
+	return proxy
+}
+
+func (s *supervisor) waitReady(a *app, done <-chan struct{}) error {
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	target := fmt.Sprintf("http://127.0.0.1:%d%s", a.port, a.cfg.Health)
+	deadline := time.Now().Add(readyTimeout)
+
+	for {
+		select {
+		case <-done:
+			return fmt.Errorf("wasmtime exited before %s answered", target)
+		default:
+		}
+		resp, err := client.Get(target)
+		if err == nil {
+			resp.Body.Close()
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("no response on %s within %s", target, readyTimeout)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func (s *supervisor) kill(a *app) {
+	a.mu.Lock()
+	cmd := a.cmd
+	done := a.done
+	a.mu.Unlock()
+	if cmd == nil || cmd.Process == nil {
+		return
 	}
 
-	newApp := func() *app {
-		return &app{
-			name:    name,
-			dir:     dir,
-			port:    port,
-			cfg:     cfg,
-			done:    make(chan struct{}),
-			started: time.Now().UTC(),
-			delay:   time.Second,
-		}
+	log.Printf("app %s: stopping pid %d", a.name, cmd.Process.Pid)
+	_ = cmd.Process.Signal(syscall.SIGTERM)
+	select {
+	case <-done:
+	case <-time.After(stopTimeout):
+		_ = cmd.Process.Kill()
+		<-done
 	}
+}
+
+func (s *supervisor) stop(a *app) {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	a.retired = true
+	if a.timer != nil {
+		a.timer.Stop()
+		a.timer = nil
+	}
+	a.mu.Unlock()
+	s.kill(a)
+}
+
+func (s *supervisor) cancelRestart(a *app) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.timer != nil {
+		a.timer.Stop()
+		a.timer = nil
+	}
+}
+
+func (s *supervisor) scheduleRestart(a *app, delay time.Duration) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.retired || s.stopping.Load() {
+		return
+	}
+	if a.timer != nil {
+		a.timer.Stop()
+	}
+	a.timer = time.AfterFunc(delay, func() {
+		if !s.stopping.Load() {
+			s.restart(a)
+		}
+	})
+}
+
+func (s *supervisor) scheduleRetry(a *app) {
+	a.mu.Lock()
+	delay := a.delay
+	if delay < time.Second {
+		delay = time.Second
+	}
+	a.mu.Unlock()
+	s.scheduleRestart(a, delay)
+}
+
+func (s *supervisor) restart(a *app) {
+	a.mu.Lock()
+	if a.retired || s.stopping.Load() || a.cmd != nil {
+		a.mu.Unlock()
+		return
+	}
+	dir := a.dir
+	a.mu.Unlock()
 
 	cwasm := filepath.Join(dir, "main.cwasm")
 	wasm := filepath.Join(dir, "main.wasm")
 	if _, err := os.Stat(cwasm); err == nil {
-		a := newApp()
-		if err := s.launch(a, cwasm, true); err == nil {
-			return a, nil
-		} else {
-			log.Printf("app %s: precompiled component did not start, falling back to wasm: %v", name, err)
-			s.stop(a)
+		err := s.launch(a, cwasm, true)
+		if err == nil {
+			return
 		}
+		log.Printf("app %s: precompiled component did not restart, falling back to wasm: %v", a.name, err)
+		s.kill(a)
+		s.cancelRestart(a)
 	}
 	if _, err := os.Stat(wasm); err != nil {
-		return nil, fmt.Errorf("read main.wasm: %w", err)
+		log.Printf("app %s: restart: %v", a.name, err)
+		s.scheduleRetry(a)
+		return
 	}
-	a := newApp()
 	if err := s.launch(a, wasm, false); err != nil {
-		s.stop(a)
-		return nil, err
+		log.Printf("app %s: restart: %v", a.name, err)
+		s.kill(a)
+		s.cancelRestart(a)
+		s.scheduleRetry(a)
 	}
-	return a, nil
 }
 
 func (s *supervisor) launch(a *app, source string, allowPrecompiled bool) error {
@@ -362,153 +458,43 @@ func (s *supervisor) launch(a *app, source string, allowPrecompiled bool) error 
 	return nil
 }
 
-func (s *supervisor) waitReady(a *app, done <-chan struct{}) error {
-	client := &http.Client{Timeout: 500 * time.Millisecond}
-	target := fmt.Sprintf("http://127.0.0.1:%d%s", a.port, a.cfg.Health)
-	deadline := time.Now().Add(readyTimeout)
+func (s *supervisor) spawn(name, dir string, cfg appConfig, port int) (*app, error) {
+	if err := os.MkdirAll(filepath.Join(s.cfg.stateDir, name), 0o755); err != nil {
+		return nil, fmt.Errorf("state dir: %w", err)
+	}
 
-	for {
-		select {
-		case <-done:
-			return fmt.Errorf("wasmtime exited before %s answered", target)
-		default:
+	newApp := func() *app {
+		return &app{
+			name:    name,
+			dir:     dir,
+			port:    port,
+			cfg:     cfg,
+			done:    make(chan struct{}),
+			started: time.Now().UTC(),
+			delay:   time.Second,
 		}
-		resp, err := client.Get(target)
-		if err == nil {
-			resp.Body.Close()
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("no response on %s within %s", target, readyTimeout)
-		}
-		time.Sleep(50 * time.Millisecond)
 	}
-}
-
-func (s *supervisor) scheduleRestart(a *app, delay time.Duration) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.retired || s.stopping.Load() {
-		return
-	}
-	if a.timer != nil {
-		a.timer.Stop()
-	}
-	a.timer = time.AfterFunc(delay, func() {
-		if !s.stopping.Load() {
-			s.restart(a)
-		}
-	})
-}
-
-func (s *supervisor) cancelRestart(a *app) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.timer != nil {
-		a.timer.Stop()
-		a.timer = nil
-	}
-}
-
-func (s *supervisor) restart(a *app) {
-	a.mu.Lock()
-	if a.retired || s.stopping.Load() || a.cmd != nil {
-		a.mu.Unlock()
-		return
-	}
-	dir := a.dir
-	a.mu.Unlock()
 
 	cwasm := filepath.Join(dir, "main.cwasm")
 	wasm := filepath.Join(dir, "main.wasm")
-	if _, err := os.Stat(cwasm); err == nil {
-		if err := s.launch(a, cwasm, true); err == nil {
-			return
-		} else {
-			log.Printf("app %s: precompiled component did not restart, falling back to wasm: %v", a.name, err)
-			s.kill(a)
-			s.cancelRestart(a)
+	if _, statErr := os.Stat(cwasm); statErr == nil {
+		a := newApp()
+		err := s.launch(a, cwasm, true)
+		if err == nil {
+			return a, nil
 		}
+		log.Printf("app %s: precompiled component did not start, falling back to wasm: %v", name, err)
+		s.stop(a)
 	}
 	if _, err := os.Stat(wasm); err != nil {
-		log.Printf("app %s: restart: %v", a.name, err)
-		s.scheduleRetry(a)
-		return
+		return nil, fmt.Errorf("read main.wasm: %w", err)
 	}
+	a := newApp()
 	if err := s.launch(a, wasm, false); err != nil {
-		log.Printf("app %s: restart: %v", a.name, err)
-		s.kill(a)
-		s.cancelRestart(a)
-		s.scheduleRetry(a)
+		s.stop(a)
+		return nil, err
 	}
-}
-
-func (s *supervisor) scheduleRetry(a *app) {
-	a.mu.Lock()
-	delay := a.delay
-	if delay < time.Second {
-		delay = time.Second
-	}
-	a.mu.Unlock()
-	s.scheduleRestart(a, delay)
-}
-
-func (s *supervisor) newProxy(a *app) *httputil.ReverseProxy {
-	target := &url.URL{Scheme: "http", Host: fmt.Sprintf("127.0.0.1:%d", a.port)}
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	director := proxy.Director
-	proxy.Director = func(r *http.Request) {
-		host := r.Host
-		proto := r.Header.Get("X-Forwarded-Proto")
-		if proto == "" {
-			proto = "http"
-			if r.TLS != nil {
-				proto = "https"
-			}
-		}
-		director(r)
-		r.Host = host
-		r.Header.Set("X-Forwarded-Host", host)
-		r.Header.Set("X-Forwarded-Proto", proto)
-	}
-	proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, err error) {
-		log.Printf("app %s: proxy: %v", a.name, err)
-		http.Error(w, "app unavailable", http.StatusBadGateway)
-	}
-	return proxy
-}
-
-func (s *supervisor) stop(a *app) {
-	if a == nil {
-		return
-	}
-	a.mu.Lock()
-	a.retired = true
-	if a.timer != nil {
-		a.timer.Stop()
-		a.timer = nil
-	}
-	a.mu.Unlock()
-	s.kill(a)
-}
-
-func (s *supervisor) kill(a *app) {
-	a.mu.Lock()
-	cmd := a.cmd
-	done := a.done
-	a.mu.Unlock()
-	if cmd == nil || cmd.Process == nil {
-		return
-	}
-
-	log.Printf("app %s: stopping pid %d", a.name, cmd.Process.Pid)
-	_ = cmd.Process.Signal(syscall.SIGTERM)
-	select {
-	case <-done:
-	case <-time.After(stopTimeout):
-		_ = cmd.Process.Kill()
-		<-done
-	}
+	return a, nil
 }
 
 func (s *supervisor) register(a *app) {
@@ -520,6 +506,17 @@ func (s *supervisor) register(a *app) {
 	}
 	s.apps[a.name] = a
 	s.hosts[a.cfg.Host] = a
+}
+
+func (s *supervisor) hostTaken(host, except string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for name, a := range s.apps {
+		if name != except && a.cfg.Host == host {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *supervisor) loadApps() error {
@@ -561,17 +558,6 @@ func (s *supervisor) loadApps() error {
 	return nil
 }
 
-func (s *supervisor) hostTaken(host, except string) bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for name, a := range s.apps {
-		if name != except && a.cfg.Host == host {
-			return true
-		}
-	}
-	return false
-}
-
 func (s *supervisor) authorized(r *http.Request) bool {
 	if s.cfg.token == "" {
 		return true
@@ -585,82 +571,14 @@ func (s *supervisor) authorized(r *http.Request) bool {
 	return subtle.ConstantTimeCompare([]byte(got), []byte(s.cfg.token)) == 1
 }
 
-func (s *supervisor) handler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("content-type", "text/plain; charset=utf-8")
-		_, _ = io.WriteString(w, "ok\n")
-	})
-	mux.HandleFunc("/apps", s.handleApps)
-	mux.HandleFunc("/apps/", s.handleApp)
-	mux.HandleFunc("/", s.handleProxy)
-	return mux
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
 }
 
-func (s *supervisor) handleApps(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	s.mu.RLock()
-	apps := make([]*app, 0, len(s.apps))
-	for _, a := range s.apps {
-		apps = append(apps, a)
-	}
-	s.mu.RUnlock()
-	sort.Slice(apps, func(i, j int) bool { return apps[i].name < apps[j].name })
-
-	out := make([]appInfo, 0, len(apps))
-	for _, a := range apps {
-		out = append(out, s.info(a))
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
-func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
-	name := strings.TrimPrefix(r.URL.Path, "/apps/")
-	if name == "" || strings.Contains(name, "/") || !validName(name) {
-		http.Error(w, "invalid app name", http.StatusBadRequest)
-		return
-	}
-
-	switch r.Method {
-	case http.MethodGet:
-		s.mu.RLock()
-		a := s.apps[name]
-		s.mu.RUnlock()
-		if a == nil {
-			http.Error(w, "app not found", http.StatusNotFound)
-			return
-		}
-		writeJSON(w, http.StatusOK, s.info(a))
-	case http.MethodPost:
-		if !s.authorized(r) {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="wt-supervisor"`)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		s.deploy(w, r, name)
-	default:
-		w.Header().Set("Allow", "GET, POST")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-	}
-}
-
-func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
-	host := strings.ToLower(r.Host)
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		host = h
-	}
-	s.mu.RLock()
-	a := s.hosts[host]
-	s.mu.RUnlock()
-	if a == nil {
-		http.Error(w, "no app for this host", http.StatusNotFound)
-		return
-	}
-	a.proxy.ServeHTTP(w, r)
+func writeError(w http.ResponseWriter, status int, message string) {
+	writeJSON(w, status, map[string]string{"error": message})
 }
 
 type appInfo struct {
@@ -683,113 +601,6 @@ func (s *supervisor) info(a *app) appInfo {
 		info.Status = "stopped"
 	}
 	return info
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
-}
-
-func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, map[string]string{"error": message})
-}
-
-func (s *supervisor) deploy(w http.ResponseWriter, r *http.Request, name string) {
-	s.deployMu.Lock()
-	defer s.deployMu.Unlock()
-
-	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
-	if err := r.ParseMultipartForm(16 << 20); err != nil {
-		writeError(w, http.StatusBadRequest, "parse multipart: "+err.Error())
-		return
-	}
-	if r.MultipartForm != nil {
-		defer r.MultipartForm.RemoveAll()
-	}
-
-	file, _, err := r.FormFile("artifact")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "missing artifact field")
-		return
-	}
-	defer file.Close()
-
-	archive, err := os.CreateTemp(s.cfg.appsDir, ".upload-*.tar.gz")
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "create temp file")
-		return
-	}
-	archiveName := archive.Name()
-	defer os.Remove(archiveName)
-	if _, err := io.Copy(archive, io.LimitReader(file, maxUploadBytes)); err != nil {
-		archive.Close()
-		writeError(w, http.StatusBadRequest, "read artifact: "+err.Error())
-		return
-	}
-	if err := archive.Close(); err != nil {
-		writeError(w, http.StatusInternalServerError, "close temp file")
-		return
-	}
-
-	tmpDir, err := os.MkdirTemp(s.cfg.appsDir, "."+name+".upload-")
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "create upload directory")
-		return
-	}
-	defer os.RemoveAll(tmpDir)
-
-	if err := extractTarGz(archiveName, tmpDir); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if _, err := os.Stat(filepath.Join(tmpDir, "main.wasm")); err != nil {
-		writeError(w, http.StatusBadRequest, "archive must contain main.wasm")
-		return
-	}
-
-	cfg, err := readAppConfig(tmpDir, name, s.cfg.domain)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	cfg.Name = name
-	if s.hostTaken(cfg.Host, name) {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("host %q is already used by another app", cfg.Host))
-		return
-	}
-
-	s.mu.RLock()
-	old := s.apps[name]
-	s.mu.RUnlock()
-
-	port, err := freePort()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "allocate port")
-		return
-	}
-	next, err := s.spawn(name, tmpDir, cfg, port)
-	if err != nil {
-		log.Printf("deploy %s: %v", name, err)
-		writeError(w, http.StatusBadGateway, "new version did not start: "+err.Error())
-		return
-	}
-
-	finalDir := filepath.Join(s.cfg.appsDir, name)
-	if err := replaceDir(tmpDir, finalDir); err != nil {
-		s.stop(next)
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	next.dir = finalDir
-
-	s.register(next)
-	if old != nil {
-		s.stop(old)
-	}
-
-	log.Printf("deployed %s at %s (127.0.0.1:%d)", name, cfg.Host, port)
-	writeJSON(w, http.StatusOK, s.info(next))
 }
 
 func replaceDir(src, dst string) error {
@@ -899,6 +710,181 @@ func extractTarGz(src, dst string) error {
 		}
 	}
 	return nil
+}
+
+func (s *supervisor) deploy(w http.ResponseWriter, r *http.Request, name string) {
+	s.deployMu.Lock()
+	defer s.deployMu.Unlock()
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
+	if err := r.ParseMultipartForm(16 << 20); err != nil {
+		writeError(w, http.StatusBadRequest, "parse multipart: "+err.Error())
+		return
+	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
+	}
+
+	file, _, err := r.FormFile("artifact")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "missing artifact field")
+		return
+	}
+	defer file.Close()
+
+	archive, err := os.CreateTemp(s.cfg.appsDir, ".upload-*.tar.gz")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "create temp file")
+		return
+	}
+	archiveName := archive.Name()
+	defer os.Remove(archiveName)
+	if _, err := io.Copy(archive, io.LimitReader(file, maxUploadBytes)); err != nil {
+		archive.Close()
+		writeError(w, http.StatusBadRequest, "read artifact: "+err.Error())
+		return
+	}
+	if err := archive.Close(); err != nil {
+		writeError(w, http.StatusInternalServerError, "close temp file")
+		return
+	}
+
+	tmpDir, err := os.MkdirTemp(s.cfg.appsDir, "."+name+".upload-")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "create upload directory")
+		return
+	}
+	defer os.RemoveAll(tmpDir)
+
+	if err := extractTarGz(archiveName, tmpDir); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if _, err := os.Stat(filepath.Join(tmpDir, "main.wasm")); err != nil {
+		writeError(w, http.StatusBadRequest, "archive must contain main.wasm")
+		return
+	}
+
+	cfg, err := readAppConfig(tmpDir, name, s.cfg.domain)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	cfg.Name = name
+	if s.hostTaken(cfg.Host, name) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("host %q is already used by another app", cfg.Host))
+		return
+	}
+
+	s.mu.RLock()
+	old := s.apps[name]
+	s.mu.RUnlock()
+
+	port, err := freePort()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "allocate port")
+		return
+	}
+	next, err := s.spawn(name, tmpDir, cfg, port)
+	if err != nil {
+		log.Printf("deploy %s: %v", name, err)
+		writeError(w, http.StatusBadGateway, "new version did not start: "+err.Error())
+		return
+	}
+
+	finalDir := filepath.Join(s.cfg.appsDir, name)
+	if err := replaceDir(tmpDir, finalDir); err != nil {
+		s.stop(next)
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	next.dir = finalDir
+
+	s.register(next)
+	if old != nil {
+		s.stop(old)
+	}
+
+	log.Printf("deployed %s at %s (127.0.0.1:%d)", name, cfg.Host, port)
+	writeJSON(w, http.StatusOK, s.info(next))
+}
+
+func (s *supervisor) handleApps(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	s.mu.RLock()
+	apps := make([]*app, 0, len(s.apps))
+	for _, a := range s.apps {
+		apps = append(apps, a)
+	}
+	s.mu.RUnlock()
+	sort.Slice(apps, func(i, j int) bool { return apps[i].name < apps[j].name })
+
+	out := make([]appInfo, 0, len(apps))
+	for _, a := range apps {
+		out = append(out, s.info(a))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, "/apps/")
+	if name == "" || strings.Contains(name, "/") || !validName(name) {
+		http.Error(w, "invalid app name", http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		s.mu.RLock()
+		a := s.apps[name]
+		s.mu.RUnlock()
+		if a == nil {
+			http.Error(w, "app not found", http.StatusNotFound)
+			return
+		}
+		writeJSON(w, http.StatusOK, s.info(a))
+	case http.MethodPost:
+		if !s.authorized(r) {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="wt-supervisor"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		s.deploy(w, r, name)
+	default:
+		w.Header().Set("Allow", "GET, POST")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
+	host := strings.ToLower(r.Host)
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	s.mu.RLock()
+	a := s.hosts[host]
+	s.mu.RUnlock()
+	if a == nil {
+		http.Error(w, "no app for this host", http.StatusNotFound)
+		return
+	}
+	a.proxy.ServeHTTP(w, r)
+}
+
+func (s *supervisor) handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("content-type", "text/plain; charset=utf-8")
+		_, _ = io.WriteString(w, "ok\n")
+	})
+	mux.HandleFunc("/apps", s.handleApps)
+	mux.HandleFunc("/apps/", s.handleApp)
+	mux.HandleFunc("/", s.handleProxy)
+	return mux
 }
 
 func (s *supervisor) stopAll() {

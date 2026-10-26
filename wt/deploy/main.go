@@ -1,5 +1,4 @@
-// Command wt-deploy builds a WASI HTTP component, precompiles it with
-// wasmtime, and uploads it to a wt-supervisor.
+// Command wt-deploy builds a WASI HTTP component, precompiles it with wasmtime, and uploads it to a wt-supervisor.
 package main
 
 import (
@@ -29,15 +28,8 @@ type manifest struct {
 }
 
 type deployConfig struct {
-	dir         string
-	app         string
-	host        string
-	token       string
-	wasmtime    string
-	target      string
-	skipBuild   bool
-	skipCompile bool
-	appHost     string
+	dir, app, host, token, wasmtime, target, appHost string
+	skipBuild, skipCompile                           bool
 }
 
 func env(key, fallback string) string {
@@ -45,6 +37,40 @@ func env(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func validName(name string) bool {
+	if len(name) == 0 || len(name) > 63 {
+		return false
+	}
+	for i, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= '0' && r <= '9':
+		case r == '-' && i > 0 && i < len(name)-1:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func readManifest(dir string) (manifest, error) {
+	var m manifest
+	data, err := os.ReadFile(filepath.Join(dir, "app.json"))
+	if err != nil {
+		return m, fmt.Errorf("read app.json: %w", err)
+	}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return m, fmt.Errorf("app.json: %w", err)
+	}
+	if m.Name == "" {
+		m.Name = filepath.Base(filepath.Clean(dir))
+	}
+	if !validName(m.Name) {
+		return m, fmt.Errorf("invalid app name %q", m.Name)
+	}
+	return m, nil
 }
 
 func resolveConfig(args []string) (*deployConfig, error) {
@@ -78,40 +104,6 @@ func resolveConfig(args []string) (*deployConfig, error) {
 		skipCompile: *skipCompile,
 		appHost:     *appHost,
 	}, nil
-}
-
-func readManifest(dir string) (manifest, error) {
-	var m manifest
-	data, err := os.ReadFile(filepath.Join(dir, "app.json"))
-	if err != nil {
-		return m, fmt.Errorf("read app.json: %w", err)
-	}
-	if err := json.Unmarshal(data, &m); err != nil {
-		return m, fmt.Errorf("app.json: %w", err)
-	}
-	if m.Name == "" {
-		m.Name = filepath.Base(filepath.Clean(dir))
-	}
-	if !validName(m.Name) {
-		return m, fmt.Errorf("invalid app name %q", m.Name)
-	}
-	return m, nil
-}
-
-func validName(name string) bool {
-	if len(name) == 0 || len(name) > 63 {
-		return false
-	}
-	for i, r := range name {
-		switch {
-		case r >= 'a' && r <= 'z':
-		case r >= '0' && r <= '9':
-		case r == '-' && i > 0 && i < len(name)-1:
-		default:
-			return false
-		}
-	}
-	return true
 }
 
 func runBuild(cfg *deployConfig, m manifest) error {
@@ -197,6 +189,13 @@ func bundle(dir string, m manifest) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+func baseURL(host string) string {
+	if strings.HasPrefix(host, "http://") || strings.HasPrefix(host, "https://") {
+		return strings.TrimSuffix(host, "/")
+	}
+	return "https://" + host
+}
+
 func upload(cfg *deployConfig, m manifest, bundle []byte) error {
 	var body bytes.Buffer
 	form := multipart.NewWriter(&body)
@@ -236,13 +235,6 @@ func upload(cfg *deployConfig, m manifest, bundle []byte) error {
 	}
 	fmt.Println(strings.TrimSpace(string(respBody)))
 	return nil
-}
-
-func baseURL(host string) string {
-	if strings.HasPrefix(host, "http://") || strings.HasPrefix(host, "https://") {
-		return strings.TrimSuffix(host, "/")
-	}
-	return "https://" + host
 }
 
 func deploy(args []string) error {

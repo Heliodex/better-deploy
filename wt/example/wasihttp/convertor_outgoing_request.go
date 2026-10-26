@@ -9,7 +9,32 @@ import (
 	wasi "wt.example/binding/imports/wasi_http_0_3_0_types"
 )
 
-// convert the http.Request to a wasi.Request
+func toWasiMethod(s string) wasi.Method {
+	switch s {
+	case http.MethodConnect:
+		return wasi.MakeMethodConnect()
+	case http.MethodDelete:
+		return wasi.MakeMethodDelete()
+	case http.MethodGet:
+		return wasi.MakeMethodGet()
+	case http.MethodHead:
+		return wasi.MakeMethodHead()
+	case http.MethodOptions:
+		return wasi.MakeMethodOptions()
+	case http.MethodPatch:
+		return wasi.MakeMethodPatch()
+	case http.MethodPost:
+		return wasi.MakeMethodPost()
+	case http.MethodPut:
+		return wasi.MakeMethodPut()
+	case http.MethodTrace:
+		return wasi.MakeMethodTrace()
+	default:
+		return wasi.MakeMethodOther(s)
+	}
+}
+
+// newOutgoingHttpRequest converts an http.Request to a wasi.Request.
 func newOutgoingHttpRequest(req *http.Request) (*wasi.Request, error) {
 	headers, err := toWasiHeaders(req.Header)
 	if err != nil {
@@ -62,29 +87,4 @@ func newOutgoingHttpRequest(req *http.Request) (*wasi.Request, error) {
 	}
 
 	return request, nil
-}
-
-func toWasiMethod(s string) wasi.Method {
-	switch s {
-	case http.MethodConnect:
-		return wasi.MakeMethodConnect()
-	case http.MethodDelete:
-		return wasi.MakeMethodDelete()
-	case http.MethodGet:
-		return wasi.MakeMethodGet()
-	case http.MethodHead:
-		return wasi.MakeMethodHead()
-	case http.MethodOptions:
-		return wasi.MakeMethodOptions()
-	case http.MethodPatch:
-		return wasi.MakeMethodPatch()
-	case http.MethodPost:
-		return wasi.MakeMethodPost()
-	case http.MethodPut:
-		return wasi.MakeMethodPut()
-	case http.MethodTrace:
-		return wasi.MakeMethodTrace()
-	default:
-		return wasi.MakeMethodOther(s)
-	}
 }

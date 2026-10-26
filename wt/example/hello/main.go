@@ -14,6 +14,5 @@ func init() {
 	})
 }
 
-// main is required to build, but the component's entry point is the exported
-// wasi:http handler.
+// main is required to build, but the component's entry point is the exported wasi:http handler.
 func main() {}

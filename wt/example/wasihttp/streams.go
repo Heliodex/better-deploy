@@ -17,14 +17,15 @@ type bodyReader struct {
 	trailers *wit.FutureReader[wit.Result[wit.Option[*wasi.Fields], wasi.ErrorCode]]
 }
 
-func (self *bodyReader) Close() error {
-	if self.stream != nil {
-		self.stream.Drop()
-	}
+func (self *bodyReader) takeError() error {
 	if self.trailers != nil {
-		self.trailers.Drop()
+		trailers := self.trailers.Read()
+		self.trailers = nil
+		if trailers.IsErr() {
+			return fmt.Errorf("failed to read from HTTP body stream: %s", errorString(trailers.Err()))
+		}
 	}
-	return nil
+	return io.EOF
 }
 
 func (self *bodyReader) Read(p []byte) (n int, err error) {
@@ -40,18 +41,17 @@ func (self *bodyReader) Read(p []byte) (n int, err error) {
 	return int(count), nil
 }
 
-func (self *bodyReader) takeError() error {
-	if self.trailers != nil {
-		trailers := self.trailers.Read()
-		self.trailers = nil
-		if trailers.IsErr() {
-			return fmt.Errorf("failed to read from HTTP body stream: %s", errorString(trailers.Err()))
-		}
+func (self *bodyReader) Close() error {
+	if self.stream != nil {
+		self.stream.Drop()
 	}
-	return io.EOF
+	if self.trailers != nil {
+		self.trailers.Drop()
+	}
+	return nil
 }
 
-// create an io.Reader from the input stream
+// newReader creates an io.Reader from the input stream.
 func newReader(
 	stream *wit.StreamReader[uint8],
 	trailers *wit.FutureReader[wit.Result[wit.Option[*wasi.Fields], wasi.ErrorCode]],

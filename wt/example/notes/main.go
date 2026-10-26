@@ -33,9 +33,41 @@ var (
 	storeErr error
 )
 
-func init() {
-	store, storeErr = storage.New(wasihttp.NewClient())
-	wasihttp.Handle(handle)
+func loadNotes() ([]note, error) {
+	data, ok, err := store.Get(notesKey)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return []note{}, nil
+	}
+	var notes []note
+	if err := json.Unmarshal(data, &notes); err != nil {
+		return nil, err
+	}
+	return notes, nil
+}
+
+func saveNotes(notes []note) error {
+	data, err := json.Marshal(notes)
+	if err != nil {
+		return err
+	}
+	return store.Put(notesKey, data)
+}
+
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("content-type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
+}
+
+func newID() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b[:])
 }
 
 func handle(w http.ResponseWriter, r *http.Request) {
@@ -96,41 +128,9 @@ func handle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func loadNotes() ([]note, error) {
-	data, ok, err := store.Get(notesKey)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return []note{}, nil
-	}
-	var notes []note
-	if err := json.Unmarshal(data, &notes); err != nil {
-		return nil, err
-	}
-	return notes, nil
-}
-
-func saveNotes(notes []note) error {
-	data, err := json.Marshal(notes)
-	if err != nil {
-		return err
-	}
-	return store.Put(notesKey, data)
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("content-type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
-}
-
-func newID() string {
-	var b [8]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return fmt.Sprintf("%d", time.Now().UnixNano())
-	}
-	return hex.EncodeToString(b[:])
+func init() {
+	store, storeErr = storage.New(wasihttp.NewClient())
+	wasihttp.Handle(handle)
 }
 
 func main() {}

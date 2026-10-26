@@ -26,14 +26,11 @@ const (
 	maxStorageKeys  = 1000
 )
 
-// storageServer is a tiny per-app key-value API backed by SQLite. It listens on
-// loopback and authenticates apps with a token, so app processes never touch
-// the database files directly.
+// storageServer is a tiny per-app key-value API backed by SQLite. It listens on loopback and authenticates apps with a token, so app processes never touch the database files directly.
 type storageServer struct {
-	dir      string
-	baseURL  string
-	listener net.Listener
-	server   *http.Server
+	dir, baseURL string
+	listener     net.Listener
+	server       *http.Server
 
 	mu     sync.Mutex
 	tokens map[string]string // token -> app name
@@ -146,47 +143,6 @@ func (s *storageServer) dbFor(app string) (*sql.DB, error) {
 	return db, nil
 }
 
-func (s *storageServer) handle(w http.ResponseWriter, r *http.Request) {
-	app, ok := s.appFor(r)
-	if !ok {
-		w.Header().Set("WWW-Authenticate", `Bearer realm="wt-storage"`)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	if r.URL.Path == "/v1/kv" {
-		if r.Method != http.MethodGet {
-			w.Header().Set("Allow", http.MethodGet)
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		s.list(w, r, app)
-		return
-	}
-	if !strings.HasPrefix(r.URL.Path, "/v1/kv/") {
-		http.NotFound(w, r)
-		return
-	}
-
-	key, err := url.PathUnescape(strings.TrimPrefix(r.URL.EscapedPath(), "/v1/kv/"))
-	if err != nil || key == "" {
-		http.Error(w, "invalid key", http.StatusBadRequest)
-		return
-	}
-
-	switch r.Method {
-	case http.MethodGet:
-		s.get(w, r, app, key)
-	case http.MethodPut:
-		s.put(w, r, app, key)
-	case http.MethodDelete:
-		s.delete(w, app, key)
-	default:
-		w.Header().Set("Allow", "GET, PUT, DELETE")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-	}
-}
-
 func (s *storageServer) get(w http.ResponseWriter, _ *http.Request, app, key string) {
 	db, err := s.dbFor(app)
 	if err != nil {
@@ -282,4 +238,45 @@ func (s *storageServer) list(w http.ResponseWriter, r *http.Request, app string)
 	}
 	w.Header().Set("content-type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(map[string][]string{"keys": keys})
+}
+
+func (s *storageServer) handle(w http.ResponseWriter, r *http.Request) {
+	app, ok := s.appFor(r)
+	if !ok {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="wt-storage"`)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if r.URL.Path == "/v1/kv" {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		s.list(w, r, app)
+		return
+	}
+	if !strings.HasPrefix(r.URL.Path, "/v1/kv/") {
+		http.NotFound(w, r)
+		return
+	}
+
+	key, err := url.PathUnescape(strings.TrimPrefix(r.URL.EscapedPath(), "/v1/kv/"))
+	if err != nil || key == "" {
+		http.Error(w, "invalid key", http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		s.get(w, r, app, key)
+	case http.MethodPut:
+		s.put(w, r, app, key)
+	case http.MethodDelete:
+		s.delete(w, app, key)
+	default:
+		w.Header().Set("Allow", "GET, PUT, DELETE")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }

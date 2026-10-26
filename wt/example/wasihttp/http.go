@@ -1,5 +1,4 @@
-// Package http contains the helper functions for writing Spin HTTP components
-// in Go, as well as for sending outbound HTTP requests.
+// Package wasihttp contains the helper functions for writing WASI HTTP components in Go, as well as for sending outbound HTTP requests.
 package wasihttp
 
 import (
@@ -14,10 +13,6 @@ import (
 	wasi "wt.example/binding/imports/wasi_http_0_3_0_types"
 )
 
-func init() {
-	handler.Exports.Handle = wasiHandle
-}
-
 const (
 	// HeaderBasePath is the application base path.
 	HeaderBasePath = "spin-base-path"
@@ -25,29 +20,25 @@ const (
 	HeaderComponentRoot = "spin-component-route"
 	// HeaderFullUrl is the full URL of the request, including full host and scheme information.
 	HeaderFullUrl = "spin-full-url"
-	// HeaderMatchedRoute is the part of the request path that was matched by the route,
-	// including the base and wildcard indicator if present.
+	// HeaderMatchedRoute is the part of the request path that was matched by the route, including the base and wildcard indicator if present.
 	HeaderMatchedRoute = "spin-matched-route"
 	// HeaderPathInfo is the request path relative to the component route, including any base.
 	HeaderPathInfo = "spin-path-info"
-	// HeaderRawComponentRoot is the component route pattern matched, as written in the component
-	// manifest. It excludes the base but includes the wildcard indicator if present.
+	// HeaderRawComponentRoot is the component route pattern matched, as written in the component manifest. It excludes the base but includes the wildcard indicator if present.
 	HeaderRawComponentRoot = "spin-raw-component-route"
 	// HeaderClientAddr is the client address for the request.
 	HeaderClientAddr = "spin-client-addr"
 )
 
-// the function that will be called by the http trigger in Spin.
-var handlerFn = defaultHandler
-
-// defaultHandler is a placeholder for returning a useful error to stderr when
-// the handler is not set.
+// defaultHandler is a placeholder for returning a useful error to stderr when the handler is not set.
 var defaultHandler = func(http.ResponseWriter, *http.Request) {
 	fmt.Fprintln(os.Stderr, "http handler undefined")
 }
 
-// Handle sets the handler function for the http trigger.
-// It must be set in an init() function.
+// handlerFn is the function called by the HTTP trigger.
+var handlerFn = defaultHandler
+
+// Handle sets the handler function for the http trigger. It must be set in an init() function.
 func Handle(fn func(http.ResponseWriter, *http.Request)) {
 	handlerFn = fn
 }
@@ -73,8 +64,7 @@ var wasiHandle = func(request *wasi.Request) wit.Result[*wasi.Response, wasi.Err
 			// run the user's handler
 			handlerFn(httpRes, httpReq)
 
-			// if the user's handler never sent a response, we'll
-			// send a default one here:
+			// If the user's handler never sent a response, send a default one here.
 			if err := httpRes.send(); err != nil {
 				httpRes.channel <- wit.Err[*wasi.Response, wasi.ErrorCode](
 					wasi.MakeErrorCodeInternalError(wit.Some(fmt.Sprintf(
@@ -87,6 +77,10 @@ var wasiHandle = func(request *wasi.Request) wit.Result[*wasi.Response, wasi.Err
 	}()
 
 	return (<-httpRes.channel)
+}
+
+func init() {
+	handler.Exports.Handle = wasiHandle
 }
 
 func toWasiHeaders(headers http.Header) (*wasi.Fields, error) {
@@ -130,6 +124,20 @@ func unitFuture() *wit.FutureReader[wit.Result[wit.Unit, wasi.ErrorCode]] {
 	tx, rx := wasi.MakeFutureResultUnitErrorCode()
 	go tx.Write(wit.Ok[wit.Unit, wasi.ErrorCode](wit.Unit{}))
 	return rx
+}
+
+func fieldSizeString(p wasi.FieldSizePayload) string {
+	var parts []string
+	if p.FieldName.IsSome() {
+		parts = append(parts, fmt.Sprintf("field-name=%s", p.FieldName.Some()))
+	}
+	if p.FieldSize.IsSome() {
+		parts = append(parts, fmt.Sprintf("field-size=%d", p.FieldSize.Some()))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "(" + strings.Join(parts, ", ") + ")"
 }
 
 func errorString(code wasi.ErrorCode) string {
@@ -277,18 +285,4 @@ func errorString(code wasi.ErrorCode) string {
 	default:
 		return fmt.Sprintf("unknown error code: %d", code.Tag())
 	}
-}
-
-func fieldSizeString(p wasi.FieldSizePayload) string {
-	var parts []string
-	if p.FieldName.IsSome() {
-		parts = append(parts, fmt.Sprintf("field-name=%s", p.FieldName.Some()))
-	}
-	if p.FieldSize.IsSome() {
-		parts = append(parts, fmt.Sprintf("field-size=%d", p.FieldSize.Some()))
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return "(" + strings.Join(parts, ", ") + ")"
 }

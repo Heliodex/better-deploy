@@ -24,36 +24,16 @@ type responseWriter struct {
 	statusCode int
 }
 
+func newHttpResponseWriter() *responseWriter {
+	return &responseWriter{
+		channel:    make(chan wit.Result[*wasi.Response, wasi.ErrorCode]),
+		headers:    http.Header{},
+		statusCode: 200,
+	}
+}
+
 func (self *responseWriter) Header() http.Header {
 	return self.headers
-}
-
-func (self *responseWriter) Write(buf []byte) (int, error) {
-	err := self.send()
-	if err != nil {
-		return 0, err
-	}
-
-	count := self.stream.Write(buf)
-
-	if count == 0 && self.stream.ReaderDropped() {
-		return 0, self.takeError()
-	}
-
-	return int(count), nil
-}
-
-func (self *responseWriter) WriteHeader(statusCode int) {
-	self.statusCode = statusCode
-}
-
-func (self *responseWriter) close() {
-	if self.stream != nil {
-		self.stream.Drop()
-	}
-	if self.streamResult != nil {
-		self.streamResult.Drop()
-	}
 }
 
 func (self *responseWriter) send() error {
@@ -101,10 +81,30 @@ func (r *responseWriter) takeError() error {
 	return nil
 }
 
-func newHttpResponseWriter() *responseWriter {
-	return &responseWriter{
-		channel:    make(chan wit.Result[*wasi.Response, wasi.ErrorCode]),
-		headers:    http.Header{},
-		statusCode: 200,
+func (self *responseWriter) Write(buf []byte) (int, error) {
+	err := self.send()
+	if err != nil {
+		return 0, err
+	}
+
+	count := self.stream.Write(buf)
+
+	if count == 0 && self.stream.ReaderDropped() {
+		return 0, self.takeError()
+	}
+
+	return int(count), nil
+}
+
+func (self *responseWriter) WriteHeader(statusCode int) {
+	self.statusCode = statusCode
+}
+
+func (self *responseWriter) close() {
+	if self.stream != nil {
+		self.stream.Drop()
+	}
+	if self.streamResult != nil {
+		self.streamResult.Drop()
 	}
 }
