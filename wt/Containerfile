@@ -12,7 +12,7 @@ COPY wt/supervisor/ ./
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -trimpath -ldflags="-s -w" -o /out/wt-supervisor .
 
-FROM docker.io/library/debian:bookworm-slim AS wasmtime
+FROM docker.io/library/debian:trixie-slim AS wasmtime
 
 ARG WASMTIME_VERSION=v50.0.0
 
@@ -31,7 +31,7 @@ RUN set -eux; \
     tar -xJf "/tmp/${asset}" -C /tmp; \
     install -m 0755 "/tmp/wasmtime-${WASMTIME_VERSION}-${arch}-linux/wasmtime" /out/wasmtime
 
-FROM docker.io/library/debian:bookworm-slim
+FROM docker.io/library/debian:trixie-slim
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates \
