@@ -137,10 +137,16 @@ the volume at `/var/lib/wt` holds apps and state.
 
 On Orchard, create a GitHub-built deployment from this repository with
 `dockerfilePath: wt/Containerfile`, `buildFromRoot: true`, port `8080`, and a
-`WT_TOKEN` environment variable. Add an ingress for the deployment, then
-deploy an app with `--host https://<ingress-host> --app-host <ingress-host>`.
-The supervisor serves the deploy API at `/apps/...` on that same host and
-routes `/` to the app.
+`WT_TOKEN` environment variable. Mount a PVC at `/var/lib/wt` so apps and the
+storage databases survive a pod roll. Create one ingress per app host, all
+targeting port `8080`, then deploy with
+`--host https://<ingress-host> --app-host <ingress-host>`. The supervisor
+routes by `Host`, so `/apps/...` (the deploy API) and `/` (the app) share the
+same ingress host; each app needs its own host.
+
+The deployment can run on a small CPU request because it never compiles: in
+the demo deployment two apps start from `.cwasm` files rebuilt on a laptop,
+and the notes database survives a pod roll on the PVC.
 
 ## Storage
 
