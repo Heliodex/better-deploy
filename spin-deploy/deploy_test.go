@@ -4,13 +4,15 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"encoding/hex"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
-	"time"
 )
 
 func writeTestFile(t *testing.T, dir, name, body string) {
@@ -163,36 +165,56 @@ func TestLoadDotEnvMissing(t *testing.T) {
 	}
 }
 
-func TestNewerVersion(t *testing.T) {
-	started := time.Date(2026, 10, 26, 15, 0, 0, 0, time.UTC)
-	before := &appState{PID: 10, StartedAt: started}
+func TestNewDeployID(t *testing.T) {
+	first := newDeployID()
+	second := newDeployID()
 
-	if !newerVersion(nil, before) {
-		t.Error("a new app should count as newer when there was no previous version")
+	if len(first) != 16 {
+		t.Errorf("id %q is %d chars, want 16", first, len(first))
 	}
-	if newerVersion(before, &appState{PID: 10, StartedAt: started}) {
-		t.Error("the same process should not count as a new version")
+	if _, err := hex.DecodeString(first); err != nil {
+		t.Errorf("id %q is not hex: %v", first, err)
 	}
-	if !newerVersion(before, &appState{PID: 11, StartedAt: started}) {
-		t.Error("a new pid should count as a new version")
-	}
-	if !newerVersion(before, &appState{PID: 10, StartedAt: started.Add(time.Second)}) {
-		t.Error("a new start time should count as a new version")
+	if first == second {
+		t.Errorf("two ids were equal: %q", first)
 	}
 }
 
-func TestFetchAppStateMissing(t *testing.T) {
+func TestWaitForDeploy(t *testing.T) {
+	var calls int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.NotFound(w, nil)
+		calls++
+		if calls == 1 {
+			fmt.Fprint(w, `{"id":"abc12345","app":"gotime","status":"starting"}`)
+			return
+		}
+		fmt.Fprint(w, `{"id":"abc12345","app":"gotime","status":"ready","state":{"name":"gotime","port":3100,"status":"running","pid":42}}`)
 	}))
 	defer server.Close()
 
-	state, err := fetchAppState(&deployConfig{host: server.URL, app: "gotime"})
+	cfg := &deployConfig{host: server.URL, app: "gotime", token: "t"}
+	state, err := waitForDeploy(cfg, "abc12345")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state != nil {
-		t.Errorf("state = %+v, want nil for a missing app", state)
+	if state.PID != 42 || state.Status != "running" {
+		t.Errorf("state = %+v", state)
+	}
+	if calls != 2 {
+		t.Errorf("calls = %d, want 2", calls)
+	}
+}
+
+func TestWaitForDeployFailed(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `{"id":"abc12345","app":"gotime","status":"failed","error":"process exited before it answered"}`)
+	}))
+	defer server.Close()
+
+	cfg := &deployConfig{host: server.URL, app: "gotime", token: "t"}
+	_, err := waitForDeploy(cfg, "abc12345")
+	if err == nil || !strings.Contains(err.Error(), "process exited") {
+		t.Fatalf("error = %v, want the deploy failure", err)
 	}
 }
 

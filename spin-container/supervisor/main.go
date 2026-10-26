@@ -74,6 +74,10 @@ type Supervisor struct {
 	deployingMu sync.Mutex
 	deploying   map[string]bool
 
+	deploysMu   sync.Mutex
+	deploys     map[string]*deployRecord
+	deployOrder []string
+
 	api      *http.Server
 	stopping atomic.Bool
 }
@@ -666,6 +670,7 @@ func main() {
 		cfg:       cfg,
 		apps:      map[string]*App{},
 		deploying: map[string]bool{},
+		deploys:   map[string]*deployRecord{},
 		apiExited: make(chan struct{}),
 	}
 

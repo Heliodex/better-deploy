@@ -409,6 +409,19 @@ func (s *Supervisor) handleDeploy(w http.ResponseWriter, r *http.Request, name s
 		return
 	}
 
+	id := r.URL.Query().Get("deploy")
+	if id == "" {
+		id = randomDeployID()
+	}
+	if !validDeployID(id) {
+		s.endDeploy(name)
+		os.Remove(tmpName)
+		writeError(w, http.StatusBadRequest, "invalid deploy id")
+		return
+	}
+	record := s.newDeploy(id, name)
+	w.Header().Set("Location", "/deploys/"+id)
+
 	type deployResult struct {
 		app *App
 		err error
@@ -419,7 +432,13 @@ func (s *Supervisor) handleDeploy(w http.ResponseWriter, r *http.Request, name s
 		defer os.Remove(tmpName)
 		app, err := s.deployApp(name, tmpName)
 		if err != nil {
-			log.Printf("deploy %s: %v", name, err)
+			log.Printf("deploy %s (%s): %v", id, name, err)
+		}
+		if err == nil {
+			info := appInfoFor(app)
+			s.finishDeploy(record, &info, nil)
+		} else {
+			s.finishDeploy(record, nil, err)
 		}
 		result <- deployResult{app: app, err: err}
 	}()
@@ -437,8 +456,8 @@ func (s *Supervisor) handleDeploy(w http.ResponseWriter, r *http.Request, name s
 		log.Printf("deploy %s: now %s at https://%s (127.0.0.1:%d)", name, res.app.Dir, res.app.Host, res.app.Port)
 		writeJSON(w, http.StatusOK, appInfoFor(res.app))
 	case <-time.After(deployRespondAfter):
-		log.Printf("deploy %s: still starting; the old version keeps serving", name)
-		writeJSON(w, http.StatusAccepted, map[string]string{"name": name, "status": "starting"})
+		log.Printf("deploy %s (%s): still starting; the old version keeps serving", id, name)
+		writeJSON(w, http.StatusAccepted, map[string]string{"id": id, "name": name, "status": deployStarting})
 	}
 }
 
@@ -495,6 +514,7 @@ func (s *Supervisor) startAPI() error {
 	})
 	mux.HandleFunc("/apps", s.handleApps)
 	mux.HandleFunc("/apps/", s.handleApp)
+	mux.HandleFunc("/deploys/", s.handleDeployStatus)
 
 	listener, err := net.Listen("tcp", s.cfg.apiListen)
 	if err != nil {

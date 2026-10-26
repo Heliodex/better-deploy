@@ -4,6 +4,8 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -14,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -220,74 +223,90 @@ type appState struct {
 	StartedAt time.Time `json:"startedAt"`
 }
 
+type deployRecord struct {
+	ID     string    `json:"id"`
+	App    string    `json:"app"`
+	Status string    `json:"status"`
+	Error  string    `json:"error,omitempty"`
+	State  *appState `json:"state,omitempty"`
+}
+
 type deployResponse struct {
 	status      int
 	body        []byte
 	contentType string
 }
 
-// fetchAppState reads the supervisor's view of the app, or nil when the app does not exist yet.
-func fetchAppState(cfg *deployConfig) (*appState, error) {
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Get(baseURL(cfg.host) + "/apps/" + cfg.app)
+func newDeployID() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return strconv.FormatInt(time.Now().UnixNano(), 36)
+	}
+	return hex.EncodeToString(b[:])
+}
+
+// waitForDeploy follows a deploy record until it reports ready or failed. The supervisor holds each request for up
+// to 20 seconds, so a cold compile costs a handful of requests rather than one every two seconds.
+func waitForDeploy(cfg *deployConfig, id string) (*appState, error) {
+	client := &http.Client{Timeout: 30 * time.Second}
+	deadline := time.Now().Add(deployTimeout)
+	var last error
+
+	for {
+		record, err := fetchDeploy(cfg, client, id)
+		switch {
+		case err != nil:
+			last = err
+		case record.Status == "ready":
+			if record.State == nil {
+				return nil, fmt.Errorf("deploy %s is ready but reported no app state", id)
+			}
+			return record.State, nil
+		case record.Status == "failed":
+			return nil, fmt.Errorf("deploy %s failed: %s", id, record.Error)
+		}
+
+		if time.Now().After(deadline) {
+			if last != nil {
+				return nil, fmt.Errorf("wait for deploy %s: %w", id, last)
+			}
+			return nil, fmt.Errorf("deploy %s did not finish within %s", id, deployTimeout)
+		}
+		if err != nil {
+			time.Sleep(pollInterval)
+		}
+	}
+}
+
+func fetchDeploy(cfg *deployConfig, client *http.Client, id string) (*deployRecord, error) {
+	req, err := http.NewRequest(http.MethodGet, baseURL(cfg.host)+"/deploys/"+id, nil)
 	if err != nil {
-		return nil, fmt.Errorf("get app state: %w", err)
+		return nil, fmt.Errorf("create deploy request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+cfg.token)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("get deploy: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return nil, fmt.Errorf("read app state: %w", err)
-	}
-	if resp.StatusCode == http.StatusNotFound {
-		return nil, nil
+		return nil, fmt.Errorf("read deploy: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("get app state: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		return nil, fmt.Errorf("get deploy: %s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
 
-	var state appState
-	if err := json.Unmarshal(body, &state); err != nil {
-		return nil, fmt.Errorf("decode app state: %w", err)
+	var record deployRecord
+	if err := json.Unmarshal(body, &record); err != nil {
+		return nil, fmt.Errorf("decode deploy: %w", err)
 	}
-	return &state, nil
+	return &record, nil
 }
 
-// newerVersion reports whether state describes a different process than before.
-func newerVersion(before, state *appState) bool {
-	if before == nil {
-		return true
-	}
-	return state.PID != before.PID || !state.StartedAt.Equal(before.StartedAt)
-}
-
-// waitForDeploy polls the app until the supervisor reports a new running process, which happens only after the new
-// version answered its health path. The old version keeps serving until then.
-func waitForDeploy(cfg *deployConfig, before *appState) (*appState, error) {
-	deadline := time.Now().Add(deployTimeout)
-	var last error
-
-	for {
-		time.Sleep(pollInterval)
-		state, err := fetchAppState(cfg)
-		if err != nil {
-			last = err
-		} else if state != nil && state.Status == "running" && newerVersion(before, state) {
-			return state, nil
-		}
-		if time.Now().After(deadline) {
-			if last != nil {
-				return nil, fmt.Errorf("wait for %s: %w", cfg.app, last)
-			}
-			if state == nil {
-				return nil, fmt.Errorf("app %s did not start within %s", cfg.app, deployTimeout)
-			}
-			return nil, fmt.Errorf("app %s did not start within %s (status %s); the previous version is still serving if there was one", cfg.app, deployTimeout, state.Status)
-		}
-	}
-}
-
-func uploadBundle(cfg *deployConfig, bundle []byte) (deployResponse, error) {
+func uploadBundle(cfg *deployConfig, id string, bundle []byte) (deployResponse, error) {
 	var body bytes.Buffer
 	form := multipart.NewWriter(&body)
 	part, err := form.CreateFormFile("artifact", "app.tgz")
@@ -301,7 +320,8 @@ func uploadBundle(cfg *deployConfig, bundle []byte) (deployResponse, error) {
 		return deployResponse{}, fmt.Errorf("close form: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, baseURL(cfg.host)+"/apps/"+cfg.app, &body)
+	url := baseURL(cfg.host) + "/apps/" + cfg.app + "?deploy=" + id
+	req, err := http.NewRequest(http.MethodPost, url, &body)
 	if err != nil {
 		return deployResponse{}, fmt.Errorf("create request: %w", err)
 	}
@@ -346,28 +366,25 @@ func runDeploy(args []string) error {
 		return err
 	}
 
-	before, err := fetchAppState(cfg)
-	if err != nil {
-		before = nil
-	}
-
-	resp, err := uploadBundle(cfg, bundle)
+	// The client picks the id, so the deploy can be followed even if the POST response is lost to a proxy timeout.
+	id := newDeployID()
+	resp, err := uploadBundle(cfg, id, bundle)
 	switch {
 	case err != nil:
-		fmt.Fprintf(os.Stderr, "deploy: %v; waiting for the new version to serve\n", err)
+		fmt.Fprintf(os.Stderr, "deploy: %v; following deploy %s\n", err, id)
 	case resp.status == http.StatusAccepted:
-		fmt.Fprintln(os.Stderr, "deploy started; waiting for the new version to serve")
+		fmt.Fprintf(os.Stderr, "deploy started; following deploy %s\n", id)
 	case resp.status >= 200 && resp.status < 300:
 		fmt.Print(string(resp.body))
 		return nil
 	case resp.status >= 500 && !strings.Contains(resp.contentType, "json"):
 		// A proxy in front of the supervisor gave up waiting; the deploy carries on in the background.
-		fmt.Fprintf(os.Stderr, "deploy: proxy answered %d; waiting for the new version to serve\n", resp.status)
+		fmt.Fprintf(os.Stderr, "deploy: proxy answered %d; following deploy %s\n", resp.status, id)
 	default:
-		return fmt.Errorf("deploy failed with status %d: %s", resp.status, strings.TrimSpace(string(resp.body)))
+		return fmt.Errorf("deploy %s failed with status %d: %s", id, resp.status, strings.TrimSpace(string(resp.body)))
 	}
 
-	state, err := waitForDeploy(cfg, before)
+	state, err := waitForDeploy(cfg, id)
 	if err != nil {
 		return err
 	}

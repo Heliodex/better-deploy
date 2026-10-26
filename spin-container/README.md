@@ -126,13 +126,28 @@ switches the Caddy route, drains for two seconds and stops the old process.
 A changed component takes a while on first start because Spin compiles the Wasm
 module, so the deploy answers `200` with the app status only if that all
 finishes within five seconds. Otherwise it answers `202` with
-`{"name":"gotime","status":"starting"}` and carries on in the background:
-poll `GET /apps/<name>` until the reported `pid`/`startedAt` is the new process
-and `status` is `running`. If the new version never becomes ready (or its
-process exits), the old one stays up, and a deploy that fails within the five
-second window answers `504`. The readiness timeout is
-`DEPLOY_READY_TIMEOUT_SECONDS` (default 180). State under `state/<name>` is
-untouched. Once serving, the response is the app's current status:
+`{"id":"…","name":"gotime","status":"starting"}` and carries on in the
+background. The readiness timeout is `DEPLOY_READY_TIMEOUT_SECONDS` (default
+180); if the new version never becomes ready (or its process exits), the old
+one stays up and a deploy that fails within the five second window answers
+`504`.
+
+Follow a running deploy with `GET /deploys/<id>` (Bearer token required). The
+supervisor holds the request for up to 20 seconds, returning as soon as the
+deploy finishes, so a cold compile costs a handful of requests:
+
+```json
+{"id":"a1b2c3d4e5f60718","app":"gotime","status":"ready",
+ "startedAt":"2026-10-26T15:00:00Z","finishedAt":"2026-10-26T15:01:20Z",
+ "state":{"name":"gotime","host":"gotime.apps.example.com","port":3101,
+          "status":"running","pid":1234}}
+```
+
+`status` is `starting`, `ready` or `failed`; a failed deploy carries `error`.
+The last 64 records are kept in memory. A client may choose the id itself with
+`POST /apps/<name>?deploy=<id>`, which lets it follow the deploy even if the
+POST response is lost to a proxy timeout. State under `state/<name>` is
+untouched. Once serving, the app status is:
 
 ```json
 {"name":"gotime","host":"gotime.apps.example.com","port":3101,"status":"running","pid":1234}

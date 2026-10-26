@@ -41,13 +41,13 @@ double quotes.
 `http://127.0.0.1:8080` works for a local container.
 
 `deploy` runs `spin build`, packs `spin.toml`, `main.wasm` and `app.json` (if
-present) into a tarball, and posts it to the supervisor. It waits for the
-supervisor to report the new version running, which can take a minute on the
-first start of a changed component while Spin compiles the Wasm module. When
-the supervisor answers `202` (or a proxy in front of it times out first), the
-CLI polls `GET /apps/<name>` until the app reports a new running process, for
-up to five minutes. It prints the app's JSON status. The app's
-`spin/package.json` wires this up as `bun run deploy`.
+present) into a tarball, and posts it to the supervisor with a deploy id it
+generated. A new version takes a while to start because Spin compiles the Wasm
+module, so the CLI follows `GET /deploys/<id>`, which the supervisor long-polls
+for 20 seconds at a time, until the deploy is `ready` or `failed`. A failed
+deploy prints the supervisor's error, and the previous version keeps serving.
+It prints the app's JSON status. The app's `spin/package.json` wires this up as
+`bun run deploy`.
 
 ## Development
 
