@@ -30,6 +30,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -55,10 +56,11 @@ type config struct {
 }
 
 type appConfig struct {
-	Name   string            `json:"name"`
-	Host   string            `json:"host"`
-	Health string            `json:"health"`
-	Env    map[string]string `json:"env"`
+	Name     string            `json:"name"`
+	Host     string            `json:"host"`
+	Health   string            `json:"health"`
+	Env      map[string]string `json:"env"`
+	MemoryMB int               `json:"memory_mb,omitempty"`
 }
 
 type app struct {
@@ -68,11 +70,14 @@ type app struct {
 	cfg     appConfig
 	proxy   *httputil.ReverseProxy
 	started time.Time
+	delay   time.Duration
+	timer   *time.Timer
 
-	mu     sync.Mutex
-	cmd    *exec.Cmd
-	done   chan struct{}
-	exited bool
+	mu      sync.Mutex
+	cmd     *exec.Cmd
+	done    chan struct{}
+	exited  bool
+	retired bool
 }
 
 type supervisor struct {
@@ -84,6 +89,7 @@ type supervisor struct {
 	hosts map[string]*app
 
 	deployMu sync.Mutex
+	stopping atomic.Bool
 }
 
 func env(key, fallback string) string {
@@ -236,6 +242,9 @@ func (s *supervisor) appArgs(a *app, source string, allowPrecompiled bool) []str
 	for _, key := range sortedKeys(a.cfg.Env) {
 		args = append(args, "--env", key+"="+a.cfg.Env[key])
 	}
+	if a.cfg.MemoryMB > 0 {
+		args = append(args, "-W", fmt.Sprintf("max-memory-size=%d", a.cfg.MemoryMB<<20))
+	}
 	if s.storage != nil {
 		args = append(args,
 			"--env", "WT_STORAGE_URL="+s.storage.url(),
@@ -258,6 +267,7 @@ func (s *supervisor) spawn(name, dir string, cfg appConfig, port int) (*app, err
 			cfg:     cfg,
 			done:    make(chan struct{}),
 			started: time.Now().UTC(),
+			delay:   time.Second,
 		}
 	}
 
@@ -293,23 +303,55 @@ func (s *supervisor) launch(a *app, source string, allowPrecompiled bool) error 
 		return fmt.Errorf("start wasmtime: %w", err)
 	}
 
+	done := make(chan struct{})
 	a.mu.Lock()
 	a.cmd = cmd
+	a.done = done
 	a.exited = false
+	a.started = time.Now().UTC()
+	if a.timer != nil {
+		a.timer.Stop()
+		a.timer = nil
+	}
 	a.mu.Unlock()
 
 	go func() {
 		err := cmd.Wait()
 		a.mu.Lock()
+		if a.cmd != cmd {
+			a.mu.Unlock()
+			close(done)
+			return
+		}
+		a.cmd = nil
 		a.exited = true
+		ran := time.Since(a.started)
+		if ran > 30*time.Second {
+			a.delay = time.Second
+		} else {
+			a.delay *= 2
+			if a.delay > 30*time.Second {
+				a.delay = 30 * time.Second
+			} else if a.delay < time.Second {
+				a.delay = time.Second
+			}
+		}
+		retired := a.retired
+		delay := a.delay
 		a.mu.Unlock()
-		close(a.done)
+		close(done)
+
 		if err != nil {
 			log.Printf("app %s: wasmtime exited: %v", a.name, err)
 		}
+		if retired || s.stopping.Load() {
+			return
+		}
+		log.Printf("app %s: restarting in %s", a.name, delay)
+		s.scheduleRestart(a, delay)
 	}()
 
-	if err := s.waitReady(a); err != nil {
+	if err := s.waitReady(a, done); err != nil {
 		return err
 	}
 	a.proxy = s.newProxy(a)
@@ -317,14 +359,14 @@ func (s *supervisor) launch(a *app, source string, allowPrecompiled bool) error 
 	return nil
 }
 
-func (s *supervisor) waitReady(a *app) error {
+func (s *supervisor) waitReady(a *app, done <-chan struct{}) error {
 	client := &http.Client{Timeout: 500 * time.Millisecond}
 	target := fmt.Sprintf("http://127.0.0.1:%d%s", a.port, a.cfg.Health)
 	deadline := time.Now().Add(readyTimeout)
 
 	for {
 		select {
-		case <-a.done:
+		case <-done:
 			return fmt.Errorf("wasmtime exited before %s answered", target)
 		default:
 		}
@@ -338,6 +380,74 @@ func (s *supervisor) waitReady(a *app) error {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+}
+
+func (s *supervisor) scheduleRestart(a *app, delay time.Duration) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.retired || s.stopping.Load() {
+		return
+	}
+	if a.timer != nil {
+		a.timer.Stop()
+	}
+	a.timer = time.AfterFunc(delay, func() {
+		if !s.stopping.Load() {
+			s.restart(a)
+		}
+	})
+}
+
+func (s *supervisor) cancelRestart(a *app) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.timer != nil {
+		a.timer.Stop()
+		a.timer = nil
+	}
+}
+
+func (s *supervisor) restart(a *app) {
+	a.mu.Lock()
+	if a.retired || s.stopping.Load() || a.cmd != nil {
+		a.mu.Unlock()
+		return
+	}
+	dir := a.dir
+	a.mu.Unlock()
+
+	cwasm := filepath.Join(dir, "main.cwasm")
+	wasm := filepath.Join(dir, "main.wasm")
+	if _, err := os.Stat(cwasm); err == nil {
+		if err := s.launch(a, cwasm, true); err == nil {
+			return
+		} else {
+			log.Printf("app %s: precompiled component did not restart, falling back to wasm: %v", a.name, err)
+			s.kill(a)
+			s.cancelRestart(a)
+		}
+	}
+	if _, err := os.Stat(wasm); err != nil {
+		log.Printf("app %s: restart: %v", a.name, err)
+		s.scheduleRetry(a)
+		return
+	}
+	if err := s.launch(a, wasm, false); err != nil {
+		log.Printf("app %s: restart: %v", a.name, err)
+		s.kill(a)
+		s.cancelRestart(a)
+		s.scheduleRetry(a)
+	}
+}
+
+func (s *supervisor) scheduleRetry(a *app) {
+	a.mu.Lock()
+	delay := a.delay
+	if delay < time.Second {
+		delay = time.Second
+	}
+	a.mu.Unlock()
+	s.scheduleRestart(a, delay)
 }
 
 func (s *supervisor) newProxy(a *app) *httputil.ReverseProxy {
@@ -370,9 +480,19 @@ func (s *supervisor) stop(a *app) {
 		return
 	}
 	a.mu.Lock()
+	a.retired = true
+	if a.timer != nil {
+		a.timer.Stop()
+		a.timer = nil
+	}
+	a.mu.Unlock()
+	s.kill(a)
+}
+
+func (s *supervisor) kill(a *app) {
+	a.mu.Lock()
 	cmd := a.cmd
 	done := a.done
-	a.cmd = nil
 	a.mu.Unlock()
 	if cmd == nil || cmd.Process == nil {
 		return
@@ -853,6 +973,7 @@ func main() {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-stop
+		s.stopping.Store(true)
 		log.Printf("shutting down")
 		_ = server.Close()
 	}()

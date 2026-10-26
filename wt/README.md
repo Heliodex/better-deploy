@@ -112,10 +112,11 @@ wasmtime serve -Scli -Sp3 -S inherit-network -W component-model-async=y \
   main.cwasm
 ```
 
-`app.json` carries `name`, `host`, `health`, `env` and the local `build`
-command. If `main.cwasm` is missing or incompatible, the supervisor falls back
-to `main.wasm` (JIT compilation, which takes much longer, especially on a small
-CPU quota).
+`app.json` carries `name`, `host`, `health`, `env`, `memory_mb` and the local
+`build` command. `memory_mb`, when set, becomes wasmtime's
+`-W max-memory-size`. If `main.cwasm` is missing or incompatible, the
+supervisor falls back to `main.wasm` (JIT compilation, which takes much longer,
+especially on a small CPU quota).
 
 ## Storage
 
@@ -167,7 +168,10 @@ what let an app keep normal `http.HandlerFunc` code.
 
 ## Limits of this prototype
 
-- One `wasmtime serve` process per app; no auto-restart after a crash.
+- One `wasmtime serve` process per app. A crashed app restarts with exponential
+  backoff (2s up to 30s), reusing its port and proxy route.
+- `memory_mb` is a per-app linear-memory cap; CPU stays a container-level
+  concern.
 - TLS is optional and basic (certificate files); use the Orchard ingress for
   real certificates and wildcard hosts.
 - Storage is a per-app key-value API, not general SQL. The SQLite file is
