@@ -5,7 +5,8 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"flag"
 	"fmt"
 	"io"
@@ -149,7 +150,7 @@ func bundle(dir string, m manifest) ([]byte, error) {
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
 
-	appJSON, err := json.MarshalIndent(m, "", "  ")
+	appJSON, err := json.Marshal(m, jsontext.WithIndent("  "))
 	if err != nil {
 		return nil, err
 	}

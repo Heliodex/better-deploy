@@ -7,7 +7,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"crypto/subtle"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"flag"
 	"fmt"
@@ -49,6 +49,7 @@ type appConfig struct {
 	Host     string            `json:"host"`
 	Health   string            `json:"health"`
 	Env      map[string]string `json:"env"`
+	Build    string            `json:"build,omitempty"`
 	MemoryMB int               `json:"memory_mb,omitempty"`
 }
 
@@ -574,7 +575,8 @@ func (s *supervisor) authorized(r *http.Request) bool {
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
+	data, _ := json.Marshal(value)
+	_, _ = w.Write(append(data, '\n'))
 }
 
 func writeError(w http.ResponseWriter, status int, message string) {

@@ -4,7 +4,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -237,7 +237,8 @@ func (s *storageServer) list(w http.ResponseWriter, r *http.Request, app string)
 		return
 	}
 	w.Header().Set("content-type", "application/json; charset=utf-8")
-	_ = json.NewEncoder(w).Encode(map[string][]string{"keys": keys})
+	data, _ := json.Marshal(map[string][]string{"keys": keys})
+	_, _ = w.Write(append(data, '\n'))
 }
 
 func (s *storageServer) handle(w http.ResponseWriter, r *http.Request) {

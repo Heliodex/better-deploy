@@ -3,7 +3,7 @@ package storage
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -125,7 +125,7 @@ func (c *Client) List(prefix string) ([]string, error) {
 	var out struct {
 		Keys []string `json:"keys"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out); err != nil {
+	if err := json.UnmarshalRead(io.LimitReader(resp.Body, 1<<20), &out); err != nil {
 		return nil, err
 	}
 	return out.Keys, nil
