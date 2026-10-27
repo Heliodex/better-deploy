@@ -32,7 +32,16 @@
 			"!build",
 			"!.celld",
 			"!.wrangler",
-			"**/*.html"
+			"**/*.html",
+			"!**/node_modules",
+			"!**/.svelte-kit",
+			"!**/build",
+			"!**/dist",
+			"!**/.wrangler",
+			"!packages/binding",
+			"!example/guestbook/static",
+			"!apps",
+			"!state"
 		]
 	},
 	"formatter": {
@@ -96,11 +105,12 @@
 			"assist": {
 				"actions": {
 					"source": {
-						"useSortedKeys": "off"
+						"useSortedKeys": "off",
+						"useSortedPackageJson": "off"
 					}
 				}
 			},
-			"includes": ["package.json"]
+			"includes": ["**/package.json"]
 		},
 		{
 			"includes": ["**/*.svelte"],
@@ -112,6 +122,7 @@
 						"noUnusedVariables": "off"
 					},
 					"style": {
+						"noDescendingSpecificity": "off",
 						"useConst": "off"
 					},
 					"suspicious": {

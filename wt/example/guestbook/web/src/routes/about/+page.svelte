@@ -123,7 +123,7 @@ code {
 	margin-top: 24px;
 }
 
-.stack span {
+.about .stack span {
 	padding: 5px 10px;
 	font-size: 0.76rem;
 	font-weight: 650;

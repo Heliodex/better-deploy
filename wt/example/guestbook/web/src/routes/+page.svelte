@@ -131,7 +131,7 @@ async function react(message: Message, reaction: Reaction): Promise<void> {
 			other people are building.
 		</p>
 	</div>
-	<div aria-label="Wall activity" class="scoreboard">
+	<div class="scoreboard">
 		<div><strong>{messages.length}</strong><span>notes</span></div>
 		<div><strong>{totalReactions}</strong><span>reactions</span></div>
 	</div>
@@ -179,7 +179,7 @@ async function react(message: Message, reaction: Reaction): Promise<void> {
 	</div>
 
 	{#if loading}
-		<div aria-label="Loading the wall" class="skeleton">
+		<div aria-label="Loading the wall" class="skeleton" role="status">
 			<div></div>
 			<div></div>
 			<div></div>
@@ -203,7 +203,7 @@ async function react(message: Message, reaction: Reaction): Promise<void> {
 						</div>
 					</header>
 					<p>{message.body}</p>
-					<div aria-label={`Reactions from ${message.name}`} class="reactions">
+					<div class="reactions">
 						{#each reactionOptions as option (option.key)}
 							<button
 								aria-label={`React with ${option.label}`}
@@ -326,7 +326,7 @@ label {
 	gap: 6px;
 }
 
-label > span {
+.fields label > span {
 	font-size: 0.68rem;
 	font-weight: 650;
 	color: var(--muted);
