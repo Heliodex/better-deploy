@@ -105,8 +105,7 @@
 			"assist": {
 				"actions": {
 					"source": {
-						"useSortedKeys": "off",
-						"useSortedPackageJson": "off"
+						"useSortedKeys": "off"
 					}
 				}
 			},
