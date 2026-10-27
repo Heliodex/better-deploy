@@ -1,22 +1,17 @@
 <script lang="ts">
 import { onMount } from "svelte"
+import { createMessage, fetchMessages, type Message, type Reaction, reactToMessage } from "../lib/api"
 
 const reactionOptions = [
 	{ emoji: "🚀", key: "rocket", label: "rocket" },
 	{ emoji: "🧡", key: "heart", label: "heart" },
 	{ emoji: "👀", key: "eyes", label: "eyes" },
 	{ emoji: "🧠", key: "brain", label: "brain" },
-] as const
-
-type Reaction = (typeof reactionOptions)[number]["key"]
-
-interface Message {
-	body: string
-	createdAt: string
-	id: string
-	name: string
-	reactions: Record<Reaction, number>
-}
+] as const satisfies readonly {
+	key: Reaction
+	emoji: string
+	label: string
+}[]
 
 let messages = $state<Message[]>([])
 let name = $state("")
@@ -44,11 +39,7 @@ function formatTime(value: string): string {
 
 async function loadMessages(): Promise<void> {
 	try {
-		const response = await fetch("/api/messages?limit=50")
-		if (!response.ok) throw new Error(`The wall API returned ${response.status}`)
-
-		const data = (await response.json()) as { messages: Message[] }
-		messages = data.messages ?? []
+		messages = await fetchMessages(50)
 		error = ""
 	} catch (err) {
 		error = err instanceof Error ? err.message : "Could not reach the wall API."
@@ -75,15 +66,8 @@ async function submit(event: SubmitEvent): Promise<void> {
 	sending = true
 	error = ""
 	try {
-		const response = await fetch("/api/messages", {
-			body: JSON.stringify({ body: trimmedBody, name: trimmedName }),
-			headers: { "content-type": "application/json" },
-			method: "POST",
-		})
-		const data = (await response.json().catch(() => null)) as { error?: string } | null
-		if (!response.ok) throw new Error(data?.error ?? `The wall API returned ${response.status}`)
-
-		messages = [data as Message, ...messages]
+		const entry = await createMessage(trimmedName, trimmedBody)
+		messages = [entry, ...messages]
 		name = ""
 		body = ""
 	} catch (err) {
@@ -97,15 +81,8 @@ async function react(message: Message, reaction: Reaction): Promise<void> {
 	const previous = message.reactions[reaction]
 	message.reactions[reaction] = previous + 1
 	try {
-		const response = await fetch(`/api/messages/${message.id}/react`, {
-			body: JSON.stringify({ reaction }),
-			headers: { "content-type": "application/json" },
-			method: "POST",
-		})
-		const data = (await response.json().catch(() => null)) as { count?: number; error?: string } | null
-		if (!response.ok) throw new Error(data?.error ?? `The wall API returned ${response.status}`)
-
-		if (typeof data?.count === "number") message.reactions[reaction] = data.count
+		const result = await reactToMessage(message.id, reaction)
+		message.reactions[reaction] = result.count
 	} catch (err) {
 		message.reactions[reaction] = previous
 		error = err instanceof Error ? err.message : "Could not add that reaction."
