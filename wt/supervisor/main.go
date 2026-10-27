@@ -246,25 +246,27 @@ func (s *supervisor) appArgs(a *app, source string, allowPrecompiled bool) []str
 
 func (s *supervisor) newProxy(a *app) *httputil.ReverseProxy {
 	target := &url.URL{Scheme: "http", Host: fmt.Sprintf("127.0.0.1:%d", a.port)}
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	director := proxy.Director
-	proxy.Director = func(r *http.Request) {
-		host := r.Host
-		proto := r.Header.Get("X-Forwarded-Proto")
-		if proto == "" {
-			proto = "http"
-			if r.TLS != nil {
-				proto = "https"
+	proxy := &httputil.ReverseProxy{
+		Rewrite: func(r *httputil.ProxyRequest) {
+			host := r.In.Host
+			proto := r.In.Header.Get("X-Forwarded-Proto")
+			if proto == "" {
+				proto = "http"
+				if r.In.TLS != nil {
+					proto = "https"
+				}
 			}
-		}
-		director(r)
-		r.Host = host
-		r.Header.Set("X-Forwarded-Host", host)
-		r.Header.Set("X-Forwarded-Proto", proto)
-	}
-	proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, err error) {
-		log.Printf("app %s: proxy: %v", a.name, err)
-		http.Error(w, "app unavailable", http.StatusBadGateway)
+			r.SetURL(target)
+			r.Out.Header["X-Forwarded-For"] = r.In.Header["X-Forwarded-For"]
+			r.SetXForwarded()
+			r.Out.Host = host
+			r.Out.Header.Set("X-Forwarded-Host", host)
+			r.Out.Header.Set("X-Forwarded-Proto", proto)
+		},
+		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
+			log.Printf("app %s: proxy: %v", a.name, err)
+			http.Error(w, "app unavailable", http.StatusBadGateway)
+		},
 	}
 	return proxy
 }
@@ -352,10 +354,7 @@ func (s *supervisor) scheduleRestart(a *app, delay time.Duration) {
 
 func (s *supervisor) scheduleRetry(a *app) {
 	a.mu.Lock()
-	delay := a.delay
-	if delay < time.Second {
-		delay = time.Second
-	}
+	delay := max(a.delay, time.Second)
 	a.mu.Unlock()
 	s.scheduleRestart(a, delay)
 }
@@ -429,12 +428,7 @@ func (s *supervisor) launch(a *app, source string, allowPrecompiled bool) error 
 		if ran > 30*time.Second {
 			a.delay = time.Second
 		} else {
-			a.delay *= 2
-			if a.delay > 30*time.Second {
-				a.delay = 30 * time.Second
-			} else if a.delay < time.Second {
-				a.delay = time.Second
-			}
+			a.delay = min(max(a.delay*2, time.Second), 30*time.Second)
 		}
 		retired := a.retired
 		delay := a.delay
@@ -589,7 +583,7 @@ type appInfo struct {
 	Port      int       `json:"port"`
 	Status    string    `json:"status"`
 	PID       int       `json:"pid,omitempty"`
-	StartedAt time.Time `json:"startedAt,omitempty"`
+	StartedAt time.Time `json:"startedAt"`
 }
 
 func (s *supervisor) info(a *app) appInfo {

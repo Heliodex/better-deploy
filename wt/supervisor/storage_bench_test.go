@@ -87,8 +87,7 @@ func BenchmarkStorageQueryHTTP(b *testing.B) {
 	client := benchmarkHTTPClient()
 	body := `{"sql":"` + benchmarkNotesQuery + `","max_rows":100}`
 	b.ReportAllocs()
-	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		benchmarkStoragePost(b, client, s.url()+"/v1/query", token, body)
 	}
 }
@@ -98,8 +97,7 @@ func BenchmarkStoragePointQueryHTTP(b *testing.B) {
 	client := benchmarkHTTPClient()
 	body := `{"sql":"select id, body, created_at from notes where id = ?","params":["id-00"]}`
 	b.ReportAllocs()
-	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		benchmarkStoragePost(b, client, s.url()+"/v1/query", token, body)
 	}
 }
@@ -109,8 +107,7 @@ func BenchmarkStorageExecHTTP(b *testing.B) {
 	client := benchmarkHTTPClient()
 	body := `{"sql":"insert or replace into notes (id, body, created_at) values ('bench', 'value', '2026-01-01T00:00:00Z')"}`
 	b.ReportAllocs()
-	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		benchmarkStoragePost(b, client, s.url()+"/v1/exec", token, body)
 	}
 }
@@ -127,8 +124,7 @@ func BenchmarkSQLiteQueryDirect(b *testing.B) {
 	}
 	seedStorageDB(b, db)
 
-	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		var id, body, createdAt string
 		if err := db.QueryRow(`select id, body, created_at from notes where id = ?`, "id-00").Scan(&id, &body, &createdAt); err != nil {
 			b.Fatal(err)
@@ -155,8 +151,7 @@ func BenchmarkSQLiteQueryConfiguredConn(b *testing.B) {
 	}
 	defer conn.Close()
 
-	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		if err := configureStorageConn(ctx, conn); err != nil {
 			b.Fatal(err)
 		}

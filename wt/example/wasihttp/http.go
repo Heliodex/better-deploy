@@ -43,6 +43,9 @@ func Handle(fn func(http.ResponseWriter, *http.Request)) {
 	handlerFn = fn
 }
 
+// handleErr is wit.Err instantiated for the handler result, so the call sites don't need explicit type arguments.
+var handleErr = wit.Err[*wasi.Response, wasi.ErrorCode]
+
 var wasiHandle = func(request *wasi.Request) wit.Result[*wasi.Response, wasi.ErrorCode] {
 	httpRes := newHttpResponseWriter()
 
@@ -52,7 +55,7 @@ var wasiHandle = func(request *wasi.Request) wit.Result[*wasi.Response, wasi.Err
 		// convert the incoming request to go's net/http type
 		httpReq, err := newHttpRequest(request)
 		if err != nil {
-			httpRes.channel <- wit.Err[*wasi.Response, wasi.ErrorCode](
+			httpRes.channel <- handleErr(
 				wasi.MakeErrorCodeInternalError(wit.Some(fmt.Sprintf(
 					"failed to convert WASI Request to http.Request: %v\n",
 					err,
@@ -66,7 +69,7 @@ var wasiHandle = func(request *wasi.Request) wit.Result[*wasi.Response, wasi.Err
 
 			// If the user's handler never sent a response, send a default one here.
 			if err := httpRes.send(); err != nil {
-				httpRes.channel <- wit.Err[*wasi.Response, wasi.ErrorCode](
+				httpRes.channel <- handleErr(
 					wasi.MakeErrorCodeInternalError(wit.Some(fmt.Sprintf(
 						"failed to produce a response: %v\n",
 						err,
