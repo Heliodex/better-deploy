@@ -43,7 +43,7 @@ Client page chunks for the guestbook page:
 | Client | Page chunk | Gzipped |
 |---|---:|---:|
 | Valibot, response validation only (before) | 11.14 KB | 4.18 KB |
-| Valibot, request and response validation (implemented) | 12.88 KB | 4.69 KB |
+| Valibot, request and response validation (implemented) | 13.02 KB | 4.71 KB |
 | Hey API SDK generated from OpenAPI | 25.86 KB | 8.54 KB |
 
 ## Validation behaviour
@@ -84,12 +84,31 @@ Connect also drops unknown JSON fields silently and omits zero-valued proto fiel
 
 1. **Keep the HTTP JSON API.** Switching protocols would add a runtime, a code generator and a second error model before it added any validation.
 
-2. **Request validation is implemented in the client.** `createMessageInput` and `reactMessageInput` live in `web/src/lib/api.ts` next to the response schemas, run before `fetch`, and throw a `ValidationError` with per-field messages. The form shows them under each input and clears them on typing. The page chunk is 12.88 KB / 4.69 KB gzip, about 0.5 KB over the previous build. The server keeps its existing string error body; upgrading it to `{error:{code,field,message}}` would let the form show server-side field errors too.
+2. **Request validation is implemented in the client.** `createMessageSchema`, `reactMessageSchema` and `reactMessageInput` live in `web/src/lib/contract.ts`, run before `fetch`, and throw a `ValidationError` with per-field messages. The form shows them under each input and clears them on typing. The page chunk is 13.02 KB / 4.71 KB gzip, about 0.5 KB over the previous build. The server keeps its existing string error body; upgrading it to `{error:{code,field,message}}` would let the form show server-side field errors too.
 
 3. **Share test vectors between the two sides.** A small JSON file of valid and invalid payloads, run against the Go handlers and against the Valibot schemas, catches drift without a framework. This is the cheapest way to keep the manual rules honest.
 
 4. **If you want one source of truth, choose one of these:**
-   - **Lean:** Valibot schemas to JSON Schema at build time, then `go-jsonschema` generated Go types and `UnmarshalJSON` validation. +0.57 MB wasm, no runtime, client unchanged. Requires handling transforms and unknown fields explicitly.
+   - **Lean (implemented):** Valibot schemas to JSON Schema at build time, then `go-jsonschema` generated Go types and `UnmarshalJSON` validation. +0.6 MB wasm, no runtime schema library, client unchanged. `contract/generate.sh` runs as part of the app build; the generated JSON Schema and Go file are ignored.
    - **Full:** Huma on the server and Hey API with Valibot on the client. +2.2 MB wasm and +4.4 KB gzip, but validation, OpenAPI docs and the client SDK all come from the Go types. Best developer experience; most framework.
+
+The guestbook build pipeline is:
+
+```text
+web/src/lib/contract.ts
+  -> bun run contract
+  -> contract/schemas/*.json
+  -> go tool go-jsonschema
+  -> contract/contract.gen.go
+```
+
+`contract/generate.sh` runs the two steps, and `app.json` calls it before
+componentizing. The generated Go code uses only the standard library, so no
+schema validator is linked into the Wasm component.
+
+One mismatch remains: Valibot counts string length in UTF-16 code units, while
+JSON Schema and the generated Go code count code points, so astral characters
+(emoji) reach the client limit sooner. If that matters, count grapheme clusters
+on both sides or exclude emoji from the limited fields.
 
 The prototypes live in `/tmp/opencode/contract-bench` (server variants, client entries, benchmark and validation scripts).

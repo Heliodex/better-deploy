@@ -40,6 +40,7 @@
 			"!**/.wrangler",
 			"!packages/binding",
 			"!example/guestbook/static",
+			"!example/guestbook/contract/schemas",
 			"!apps",
 			"!state"
 		]
@@ -293,6 +294,16 @@
 						"noConfusingLabels": "off",
 						"noEvolvingTypes": "off",
 						"noImplicitAnyLet": "off"
+					}
+				}
+			}
+		},
+		{
+			"includes": ["example/guestbook/web/scripts/**"],
+			"linter": {
+				"rules": {
+					"correctness": {
+						"noNodejsModules": "off"
 					}
 				}
 			}

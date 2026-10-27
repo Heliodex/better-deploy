@@ -4,27 +4,15 @@ import {
 	type GenericSchema,
 	type InferOutput,
 	integer,
-	maxLength,
 	minLength,
 	minValue,
 	number,
 	object,
-	picklist,
 	pipe,
 	safeParse,
 	string,
-	trim,
 } from "valibot"
-
-// Keep these in sync with maxName and maxMessage in main.go.
-export const maxName = 40
-export const maxMessage = 280
-
-export const reactions = ["rocket", "heart", "eyes", "brain"] as const
-
-export type Reaction = (typeof reactions)[number]
-
-const reactionSchema = picklist(reactions)
+import { createMessageSchema, type Reaction, reactionSchema, reactMessageInput } from "./contract"
 
 const countSchema = pipe(number(), integer(), minValue(0))
 
@@ -54,26 +42,6 @@ const reactResponseSchema = object({
 
 const errorResponseSchema = object({
 	error: string(),
-})
-
-const createMessageInput = object({
-	body: pipe(
-		string(),
-		trim(),
-		minLength(1, "Please write a message."),
-		maxLength(maxMessage, `Messages are limited to ${maxMessage} characters.`),
-	),
-	name: pipe(
-		string(),
-		trim(),
-		minLength(1, "Please enter your name."),
-		maxLength(maxName, `Names are limited to ${maxName} characters.`),
-	),
-})
-
-const reactMessageInput = object({
-	id: pipe(string(), minLength(1)),
-	reaction: reactionSchema,
 })
 
 // ValidationError carries per-field messages so the form can show them next to
@@ -118,7 +86,7 @@ export async function fetchMessages(limit = 50): Promise<Message[]> {
 }
 
 export async function createMessage(name: string, body: string): Promise<Message> {
-	const input = safeParse(createMessageInput, { body, name })
+	const input = safeParse(createMessageSchema, { body: body.trim(), name: name.trim() })
 	if (!input.success) throw toValidationError(input.issues)
 
 	const response = await fetch("/api/messages", {

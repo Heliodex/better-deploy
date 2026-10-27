@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"wt.example/guestbook/contract"
 	"wt.packages/storage"
 	wasihttp "wt.packages/wasihttp"
 )
@@ -21,8 +22,6 @@ import (
 const (
 	timeFormat     = "2006-01-02T15:04:05.000000000Z07:00"
 	maxBody        = 16 << 10
-	maxName        = 40
-	maxMessage     = 280
 	defaultLimit   = 50
 	maxLimit       = 100
 	reactionRocket = "rocket"
@@ -56,15 +55,6 @@ type messagesResponse struct {
 type statsResponse struct {
 	Messages  int64 `json:"messages"`
 	Reactions int64 `json:"reactions"`
-}
-
-type createRequest struct {
-	Name string `json:"name"`
-	Body string `json:"body"`
-}
-
-type reactRequest struct {
-	Reaction string `json:"reaction"`
 }
 
 type reactResponse struct {
@@ -271,31 +261,15 @@ func handleListMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleCreateMessage(w http.ResponseWriter, r *http.Request) {
-	var request createRequest
+	var request contract.CreateMessageRequest
 	if !readJSON(w, r, &request) {
-		return
-	}
-	name := strings.TrimSpace(request.Name)
-	body := strings.TrimSpace(request.Body)
-	switch {
-	case name == "":
-		writeError(w, http.StatusBadRequest, "name is required")
-		return
-	case len(name) > maxName:
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("name must be at most %d characters", maxName))
-		return
-	case body == "":
-		writeError(w, http.StatusBadRequest, "message is required")
-		return
-	case len(body) > maxMessage:
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("message must be at most %d characters", maxMessage))
 		return
 	}
 
 	item := message{
 		ID:        newID(),
-		Name:      name,
-		Body:      body,
+		Name:      strings.TrimSpace(request.Name),
+		Body:      strings.TrimSpace(request.Body),
 		CreatedAt: time.Now().UTC().Format(timeFormat),
 	}
 	if _, err := store.Exec(r.Context(), `insert into messages (id, name, body, created_at) values (?, ?, ?, ?)`,
@@ -312,14 +286,11 @@ func handleReact(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "message not found")
 		return
 	}
-	var request reactRequest
+	var request contract.ReactMessageRequest
 	if !readJSON(w, r, &request) {
 		return
 	}
-	if !validReaction(request.Reaction) {
-		writeError(w, http.StatusBadRequest, "unknown reaction")
-		return
-	}
+	reaction := string(request.Reaction)
 
 	var exists int64
 	if err := store.QueryRow(r.Context(), `select count(*) from messages where id = ?`, id).Scan(&exists); err != nil {
@@ -332,18 +303,18 @@ func handleReact(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := store.Exec(r.Context(), `insert into reactions (message_id, reaction, count) values (?, ?, 1)
-		on conflict(message_id, reaction) do update set count = count + 1`, id, request.Reaction); err != nil {
+		on conflict(message_id, reaction) do update set count = count + 1`, id, reaction); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	var count int64
 	if err := store.QueryRow(r.Context(), `select count from reactions where message_id = ? and reaction = ?`,
-		id, request.Reaction).Scan(&count); err != nil {
+		id, reaction).Scan(&count); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, reactResponse{Reaction: request.Reaction, Count: count})
+	writeJSON(w, http.StatusOK, reactResponse{Reaction: reaction, Count: count})
 }
 
 func handleStats(w http.ResponseWriter, r *http.Request) {
@@ -358,22 +329,41 @@ func handleStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, stats)
 }
 
-func validReaction(value string) bool {
-	switch value {
-	case reactionRocket, reactionHeart, reactionEyes, reactionBrain:
-		return true
-	default:
-		return false
-	}
-}
-
 func readJSON(w http.ResponseWriter, r *http.Request, out any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
 	if err := json.UnmarshalRead(r.Body, out); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, requestError(err))
 		return false
 	}
 	return true
+}
+
+// requestError trims the encoding/json/v2 wrapper from a generated validation
+// error, leaving the field and the rule that failed.
+func requestError(err error) string {
+	message := err.Error()
+	if index := strings.Index(message, ": field "); index >= 0 {
+		return lowerFieldName(message[index+2:])
+	}
+	if index := strings.Index(message, ": invalid value"); index >= 0 {
+		return "field reaction: " + message[index+2:]
+	}
+	if index := strings.LastIndex(message, ": "); index >= 0 {
+		return message[index+2:]
+	}
+	return message
+}
+
+func lowerFieldName(message string) string {
+	const prefix = "field "
+	if !strings.HasPrefix(message, prefix) {
+		return message
+	}
+	rest := message[len(prefix):]
+	if rest == "" {
+		return message
+	}
+	return prefix + strings.ToLower(rest[:1]) + rest[1:]
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

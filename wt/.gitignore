@@ -9,3 +9,5 @@ example/guestbook/static/
 example/guestbook/web/build/
 example/guestbook/web/.svelte-kit/
 example/guestbook/web/node_modules/
+example/guestbook/contract/*.gen.go
+example/guestbook/contract/schemas/

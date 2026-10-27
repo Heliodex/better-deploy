@@ -1,15 +1,7 @@
 <script lang="ts">
 import { onMount } from "svelte"
-import {
-	createMessage,
-	fetchMessages,
-	type Message,
-	maxMessage,
-	maxName,
-	type Reaction,
-	reactToMessage,
-	ValidationError,
-} from "../lib/api"
+import { createMessage, fetchMessages, type Message, reactToMessage, ValidationError } from "../lib/api"
+import { maxMessage, maxName, type Reaction } from "../lib/contract"
 
 const reactionOptions = [
 	{ emoji: "🚀", key: "rocket", label: "rocket" },
