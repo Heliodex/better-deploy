@@ -31,6 +31,8 @@ laptop. Nothing is compiled on the serving node, and the app is a standard
     the supervisor's SQLite service.
   - `example/shelf` – link shelf with tags, search, pagination and click
     analytics.
+  - `example/guestbook` – SvelteKit static frontend with a Go JSON API,
+    embedded into one wasm component.
 - `supervisor/` – runs apps, proxies by `Host`, deploys bundles blue/green.
 - `deploy/` – builds, precompiles and uploads an app.
 
@@ -39,6 +41,8 @@ laptop. Nothing is compiled on the serving node, and the app is a standard
 - Go 1.27.1 or newer. `componentize-go` is declared as a tool in both
   `packages/go.mod` (binding generation) and `example/go.mod` (app builds); it
   downloads the patched Go it needs for async components.
+- The `example/guestbook` build also needs Bun. It runs `bun install` and
+  `bun run build` in `example/guestbook/web`, then embeds the static output.
 - wasmtime **50.0.0** on the machine running `wt-deploy` to compile the
   artifact. The precompiled artifact is tied to that version and target triple.
   The client and supervisor both default to `x86_64-unknown-linux-musl`, which

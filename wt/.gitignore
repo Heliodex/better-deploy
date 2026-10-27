@@ -5,3 +5,7 @@ packages/tmp/
 apps/
 state/
 LICENSE
+example/guestbook/static/
+example/guestbook/web/build/
+example/guestbook/web/.svelte-kit/
+example/guestbook/web/node_modules/
