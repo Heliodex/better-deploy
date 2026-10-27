@@ -17,10 +17,9 @@ import (
 )
 
 const (
-	legacyNotesKey = "notes"
-	maxNotes       = 50
-	maxNoteBody    = 2 << 10
-	// Fixed-width UTC timestamps keep text ordering identical to chronological ordering, including rows migrated from the old JSON array.
+	maxNotes    = 50
+	maxNoteBody = 2 << 10
+	// Fixed-width UTC timestamps keep text ordering identical to chronological ordering, including rows migrated from earlier versions.
 	noteTimeFormat = "2006-01-02T15:04:05.000000000Z07:00"
 )
 
@@ -44,15 +43,6 @@ func ensureSchema(ctx context.Context) error {
 	if schemaReady {
 		return nil
 	}
-	if err := migrate(ctx); err != nil {
-		return err
-	}
-	schemaReady = true
-	return nil
-}
-
-// migrate creates the notes table and moves the old single-key JSON array into rows. It is idempotent: insert or ignore skips notes that were already migrated.
-func migrate(ctx context.Context) error {
 	if _, err := store.Exec(ctx, `create table if not exists notes (
 		id text primary key,
 		body text not null,
@@ -60,56 +50,8 @@ func migrate(ctx context.Context) error {
 	)`); err != nil {
 		return err
 	}
-
-	var legacyTable int64
-	if err := store.QueryRow(ctx, `select count(*) from sqlite_master where type = 'table' and name = 'kv'`).Scan(&legacyTable); err != nil {
-		return err
-	}
-	if legacyTable == 0 {
-		return nil
-	}
-
-	rows, err := store.Query(ctx, `select value from kv where key = ?`, legacyNotesKey)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	if !rows.Next() {
-		return rows.Err()
-	}
-	var raw []byte
-	if err := rows.Scan(&raw); err != nil {
-		return err
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
-
-	var legacy []note
-	if err := json.Unmarshal(raw, &legacy); err != nil {
-		return fmt.Errorf("legacy notes: %w", err)
-	}
-	if len(legacy) == 0 {
-		_, err := store.Exec(ctx, `delete from kv where key = ?`, legacyNotesKey)
-		return err
-	}
-
-	statements := make([]storage.Statement, 0, len(legacy)+1)
-	for _, entry := range legacy {
-		if entry.CreatedAt.IsZero() {
-			entry.CreatedAt = time.Now().UTC()
-		}
-		statements = append(statements, storage.Statement{
-			SQL:  `insert or ignore into notes (id, body, created_at) values (?, ?, ?)`,
-			Args: []any{entry.ID, entry.Body, entry.CreatedAt.UTC().Format(noteTimeFormat)},
-		})
-	}
-	statements = append(statements, storage.Statement{
-		SQL:  `delete from kv where key = ?`,
-		Args: []any{legacyNotesKey},
-	})
-	_, err = store.Batch(ctx, statements...)
-	return err
+	schemaReady = true
+	return nil
 }
 
 func loadNotes(ctx context.Context) ([]note, error) {

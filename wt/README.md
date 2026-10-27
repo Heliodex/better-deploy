@@ -197,10 +197,9 @@ _, err = store.Batch(ctx,
 )
 ```
 
-The notes example uses a real `notes` table. Its first request migrates the old
-`kv` row containing the JSON array, so an existing database survives the
-upgrade. The supervisor still exposes the old `/v1/kv` endpoints for
-compatibility with already-deployed bundles; new apps should use SQL.
+The notes example uses a real `notes` table. The one-time migration from the
+old JSON value has already run on the demo deployment, and the old `/v1/kv`
+endpoints have been removed.
 
 ### Why not a WIT storage import?
 

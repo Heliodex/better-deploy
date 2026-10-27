@@ -62,61 +62,6 @@ func storageResultOf(t *testing.T, resp *http.Response) storageResult {
 	return result
 }
 
-func TestStorage(t *testing.T) {
-	s, err := newStorageServer(t.TempDir(), "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.close()
-
-	token := s.tokenFor("notes")
-	base := s.url() + "/v1/kv/"
-
-	if resp := storageDo(t, http.MethodGet, base+"missing", token, ""); resp.StatusCode != http.StatusNotFound {
-		t.Errorf("missing: %d, want 404", resp.StatusCode)
-	}
-	if resp := storageDo(t, http.MethodGet, base+"missing", "", ""); resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("no token: %d, want 401", resp.StatusCode)
-	}
-	if resp := storageDo(t, http.MethodPut, base+"greeting", token, "hello"); resp.StatusCode != http.StatusNoContent {
-		t.Errorf("put: %d, want 204", resp.StatusCode)
-	}
-	resp := storageDo(t, http.MethodGet, base+"greeting", token, "")
-	if resp.StatusCode != http.StatusOK || readBody(t, resp) != "hello" {
-		t.Errorf("get: %d, want 200 hello", resp.StatusCode)
-	}
-	if resp := storageDo(t, http.MethodGet, s.url()+"/v1/kv", token, ""); resp.StatusCode != http.StatusOK {
-		t.Errorf("list: %d, want 200", resp.StatusCode)
-	} else if body := readBody(t, resp); !strings.Contains(body, "greeting") {
-		t.Errorf("list body = %q", body)
-	}
-	if resp := storageDo(t, http.MethodDelete, base+"greeting", token, ""); resp.StatusCode != http.StatusNoContent {
-		t.Errorf("delete: %d, want 204", resp.StatusCode)
-	}
-	if resp := storageDo(t, http.MethodGet, base+"greeting", token, ""); resp.StatusCode != http.StatusNotFound {
-		t.Errorf("after delete: %d, want 404", resp.StatusCode)
-	}
-}
-
-func TestStorageIsolation(t *testing.T) {
-	s, err := newStorageServer(t.TempDir(), "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.close()
-
-	one := s.tokenFor("one")
-	two := s.tokenFor("two")
-	url := s.url() + "/v1/kv/shared"
-
-	if resp := storageDo(t, http.MethodPut, url, one, "one"); resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("put: %d", resp.StatusCode)
-	}
-	if resp := storageDo(t, http.MethodGet, url, two, ""); resp.StatusCode != http.StatusNotFound {
-		t.Errorf("other app saw the key: %d", resp.StatusCode)
-	}
-}
-
 func TestStorageSQL(t *testing.T) {
 	s, err := newStorageServer(t.TempDir(), "127.0.0.1:0")
 	if err != nil {
