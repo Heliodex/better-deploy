@@ -321,14 +321,6 @@ label {
 	gap: 6px;
 }
 
-.fields label > span {
-	font-size: 0.68rem;
-	font-weight: 650;
-	color: var(--muted);
-	text-transform: uppercase;
-	letter-spacing: 0.1em;
-}
-
 input,
 textarea {
 	width: 100%;
@@ -514,6 +506,14 @@ textarea:focus {
 .empty span {
 	font-size: 0.86rem;
 	color: var(--muted);
+}
+
+.fields label > span {
+	font-size: 0.68rem;
+	font-weight: 650;
+	color: var(--muted);
+	text-transform: uppercase;
+	letter-spacing: 0.1em;
 }
 
 @keyframes shimmer {
