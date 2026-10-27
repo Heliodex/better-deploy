@@ -30,11 +30,10 @@ type note struct {
 }
 
 var (
-	mu          sync.Mutex
-	schemaMu    sync.Mutex
-	schemaReady bool
-	store       *storage.Client
-	storeErr    error
+	mu, schemaMu sync.Mutex
+	schemaReady  bool
+	store        *storage.Client
+	storeErr     error
 )
 
 func ensureSchema(ctx context.Context) error {
