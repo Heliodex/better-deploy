@@ -10,7 +10,7 @@ the deploy artifact:
 wt-deploy:  build (componentize-go) → wasmtime compile → upload
 supervisor: Caddy-less Go reverse proxy + one `wasmtime serve` per app
 runtime:    a runtime-only wasmtime 50 loads the precompiled .cwasm
-storage:    a per-app SQLite key-value service on loopback, plus /data via WASI
+storage:    a per-app SQLite SQL service on loopback, plus /data via WASI
 ```
 
 The first request for a precompiled Go component is tens of milliseconds on a
@@ -22,7 +22,8 @@ laptop. Nothing is compiled on the serving node, and the app is a standard
 - `example/` – the Go module for apps, generated WASI bindings and a small
   `net/http` adapter.
   - `example/hello` – returns the method and path.
-  - `example/notes` – JSON notes persisted through the supervisor's storage service.
+  - `example/notes` – JSON notes persisted in a real `notes` table through
+    the supervisor's SQLite service.
   - `example/binding` – generated bindings for `wt:app/app` (not tracked).
   - `example/wasihttp` – the `net/http` adapter (adapted from spin-go-sdk).
 - `supervisor/` – runs apps, proxies by `Host`, deploys bundles blue/green.
@@ -160,20 +161,68 @@ and the notes database survives a pod roll on the PVC.
 ## Storage
 
 The supervisor starts a loopback SQLite service and gives every app a token
-and URL through `WT_STORAGE_URL` and `WT_STORAGE_TOKEN`. The API is a small
-key-value store:
+and URL through `WT_STORAGE_URL` and `WT_STORAGE_TOKEN`. Every app gets its own
+database at `WT_STATE_DIR/.storage/<app>/storage.db`, outside its `/data`
+preopen, so apps cannot touch the file directly.
+
+The API is deliberately small SQL rather than a key-value shim:
 
 ```text
-GET    /v1/kv/<key>          bytes, 404 if missing
-PUT    /v1/kv/<key>          raw body (up to 1 MiB)
-DELETE /v1/kv/<key>
-GET    /v1/kv?prefix=<p>     JSON {"keys":[...]}
+POST /v1/query   {"sql": "...", "params": [...], "max_rows": 1000}
+POST /v1/exec    {"sql": "...", "params": [...]}
+POST /v1/batch   {"statements": [{"sql": "...", "params": [...]}, ...]}
 ```
 
-Every app gets its own database at `WT_STATE_DIR/.storage/<app>/storage.db`,
-outside its `/data` preopen, so apps cannot touch the file directly. The
-example module's `storage` package is the client; it takes an `*http.Client`,
-and the apps pass `wasihttp.NewClient()` for outbound `wasi:http`.
+`query` returns `{"columns": [...], "rows": [[...]], "truncated": false}`.
+`exec` returns `{"rows_affected": n, "last_insert_id": n}`. `batch` runs every
+write statement in one transaction and returns one result per statement; use
+`query` for reads (it also runs `INSERT ... RETURNING`). Values are JSON
+scalars; blobs are `{"$b64": "..."}`. Parameters are bound, not interpolated.
+A few SQLite features are blocked (`ATTACH`, `VACUUM INTO`, `PRAGMA`,
+`load_extension`, `readfile`, `writefile`, transaction-control statements) and
+`SQLITE_LIMIT_ATTACHED` is zero, so a component cannot read another app's
+database or write files through SQL. Queries time out after five seconds and
+are capped at 10,000 rows, 1 MiB per value and 8 MiB per response.
+
+The example module's `storage` package is the client; it takes an
+`*http.Client`, and the apps pass `wasihttp.NewClient()` for outbound
+`wasi:http`:
+
+```go
+rows, err := store.Query(ctx, `select id, body, created_at from notes order by created_at`)
+// ...
+_, err = store.Batch(ctx,
+    storage.Statement{SQL: `insert into notes (id, body, created_at) values (?, ?, ?)`, Args: []any{id, body, at}},
+    storage.Statement{SQL: `delete from notes where id not in (select id from notes order by created_at desc, id desc limit ?)`, Args: []any{50}},
+)
+```
+
+The notes example uses a real `notes` table. Its first request migrates the old
+`kv` row containing the JSON array, so an existing database survives the
+upgrade. The supervisor still exposes the old `/v1/kv` endpoints for
+compatibility with already-deployed bundles; new apps should use SQL.
+
+### Why not a WIT storage import?
+
+There is no durable, standard WASI storage interface to target in this setup:
+
+- `wasmtime serve` 50 can enable the experimental `wasi:keyvalue` API, but its
+  only provider is in-memory and per-instance. Writes do not survive the
+  instance or the process, so it cannot back the notes app.
+- `wasi:sql` is a Phase 1 proposal with no implementation in wasmtime.
+- Guest-side SQLite is not practical from Go: `modernc.org/sqlite` does not
+  build for `wasip1`, and `ncruces/go-sqlite3` adds a nested wazero runtime
+  (about 10 MB) with a separate VFS, so it cannot simply use the outer
+  `wasi:filesystem` preopen. WASI preview1 also does not give SQLite the file
+  locking it needs across component instances.
+- A custom host import would mean replacing `wasmtime serve` with an embedded
+  runtime (a fork of its p3 serve path) or composing an adapter component at
+  deploy time. Both add more moving parts than the loopback service and still
+  need the same host-side SQLite database.
+
+The app still uses a WASI API for transport: `wasi:http` over loopback. If
+wasmtime grows a persistent `wasi:keyvalue` or `wasi:sql` provider, the client
+package can switch without changing the app's SQL.
 
 The supervisor grants outbound network with `-S inherit-network` so apps can
 reach that loopback endpoint. A production version would scope outbound
@@ -213,8 +262,9 @@ what let an app keep normal `http.HandlerFunc` code.
   concern.
 - TLS is optional and basic (certificate files); use the Orchard ingress for
   real certificates and wildcard hosts.
-- Storage is a per-app key-value API, not general SQL. The SQLite file is
-  private to the supervisor; apps get a preopen at `/data` as well.
+- Storage is a per-app SQLite SQL service, not a standard WASI import. The
+  SQLite file is private to the supervisor; apps get a preopen at `/data` as
+  well.
 - Outbound network is granted to every app (`-S inherit-network`), including
   the loopback storage service.
 - The deploy POST waits for the new version; there are no deploy records or

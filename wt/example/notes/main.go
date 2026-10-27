@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json/v2"
@@ -16,9 +17,11 @@ import (
 )
 
 const (
-	notesKey    = "notes"
-	maxNotes    = 50
-	maxNoteBody = 2 << 10
+	legacyNotesKey = "notes"
+	maxNotes       = 50
+	maxNoteBody    = 2 << 10
+	// Fixed-width UTC timestamps keep text ordering identical to chronological ordering, including rows migrated from the old JSON array.
+	noteTimeFormat = "2006-01-02T15:04:05.000000000Z07:00"
 )
 
 type note struct {
@@ -28,32 +31,121 @@ type note struct {
 }
 
 var (
-	mu       sync.Mutex
-	store    *storage.Client
-	storeErr error
+	mu          sync.Mutex
+	schemaMu    sync.Mutex
+	schemaReady bool
+	store       *storage.Client
+	storeErr    error
 )
 
-func loadNotes() ([]note, error) {
-	data, ok, err := store.Get(notesKey)
-	if err != nil {
-		return nil, err
+func ensureSchema(ctx context.Context) error {
+	schemaMu.Lock()
+	defer schemaMu.Unlock()
+	if schemaReady {
+		return nil
 	}
-	if !ok {
-		return []note{}, nil
+	if err := migrate(ctx); err != nil {
+		return err
 	}
-	var notes []note
-	if err := json.Unmarshal(data, &notes); err != nil {
-		return nil, err
-	}
-	return notes, nil
+	schemaReady = true
+	return nil
 }
 
-func saveNotes(notes []note) error {
-	data, err := json.Marshal(notes)
+// migrate creates the notes table and moves the old single-key JSON array into rows. It is idempotent: insert or ignore skips notes that were already migrated.
+func migrate(ctx context.Context) error {
+	if _, err := store.Exec(ctx, `create table if not exists notes (
+		id text primary key,
+		body text not null,
+		created_at text not null
+	)`); err != nil {
+		return err
+	}
+
+	var legacyTable int64
+	if err := store.QueryRow(ctx, `select count(*) from sqlite_master where type = 'table' and name = 'kv'`).Scan(&legacyTable); err != nil {
+		return err
+	}
+	if legacyTable == 0 {
+		return nil
+	}
+
+	rows, err := store.Query(ctx, `select value from kv where key = ?`, legacyNotesKey)
 	if err != nil {
 		return err
 	}
-	return store.Put(notesKey, data)
+	defer rows.Close()
+	if !rows.Next() {
+		return rows.Err()
+	}
+	var raw []byte
+	if err := rows.Scan(&raw); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+
+	var legacy []note
+	if err := json.Unmarshal(raw, &legacy); err != nil {
+		return fmt.Errorf("legacy notes: %w", err)
+	}
+	if len(legacy) == 0 {
+		_, err := store.Exec(ctx, `delete from kv where key = ?`, legacyNotesKey)
+		return err
+	}
+
+	statements := make([]storage.Statement, 0, len(legacy)+1)
+	for _, entry := range legacy {
+		if entry.CreatedAt.IsZero() {
+			entry.CreatedAt = time.Now().UTC()
+		}
+		statements = append(statements, storage.Statement{
+			SQL:  `insert or ignore into notes (id, body, created_at) values (?, ?, ?)`,
+			Args: []any{entry.ID, entry.Body, entry.CreatedAt.UTC().Format(noteTimeFormat)},
+		})
+	}
+	statements = append(statements, storage.Statement{
+		SQL:  `delete from kv where key = ?`,
+		Args: []any{legacyNotesKey},
+	})
+	_, err = store.Batch(ctx, statements...)
+	return err
+}
+
+func loadNotes(ctx context.Context) ([]note, error) {
+	rows, err := store.Query(ctx, `select id, body, created_at from notes order by created_at asc, id asc`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	notes := []note{}
+	for rows.Next() {
+		var entry note
+		if err := rows.Scan(&entry.ID, &entry.Body, &entry.CreatedAt); err != nil {
+			return nil, err
+		}
+		notes = append(notes, entry)
+	}
+	return notes, rows.Err()
+}
+
+func addNote(ctx context.Context, body string) (note, error) {
+	entry := note{ID: newID(), Body: body, CreatedAt: time.Now().UTC()}
+	_, err := store.Batch(ctx,
+		storage.Statement{
+			SQL:  `insert into notes (id, body, created_at) values (?, ?, ?)`,
+			Args: []any{entry.ID, entry.Body, entry.CreatedAt.UTC().Format(noteTimeFormat)},
+		},
+		storage.Statement{
+			SQL:  `delete from notes where id not in (select id from notes order by created_at desc, id desc limit ?)`,
+			Args: []any{maxNotes},
+		},
+	)
+	if err != nil {
+		return note{}, err
+	}
+	return entry, nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -85,9 +177,14 @@ func handle(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "POST /notes (body is the note text)")
 
 	case r.URL.Path == "/notes" && r.Method == http.MethodGet:
+		ctx := r.Context()
+		if err := ensureSchema(ctx); err != nil {
+			http.Error(w, "storage schema: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 		mu.Lock()
 		defer mu.Unlock()
-		notes, err := loadNotes()
+		notes, err := loadNotes(ctx)
 		if err != nil {
 			http.Error(w, "load notes: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -106,19 +203,15 @@ func handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		mu.Lock()
-		defer mu.Unlock()
-		notes, err := loadNotes()
-		if err != nil {
-			http.Error(w, "load notes: "+err.Error(), http.StatusInternalServerError)
+		ctx := r.Context()
+		if err := ensureSchema(ctx); err != nil {
+			http.Error(w, "storage schema: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		entry := note{ID: newID(), Body: text, CreatedAt: time.Now().UTC()}
-		notes = append(notes, entry)
-		if len(notes) > maxNotes {
-			notes = notes[len(notes)-maxNotes:]
-		}
-		if err := saveNotes(notes); err != nil {
+		mu.Lock()
+		defer mu.Unlock()
+		entry, err := addNote(ctx, text)
+		if err != nil {
 			http.Error(w, "save notes: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
