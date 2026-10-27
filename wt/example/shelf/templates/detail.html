@@ -1,42 +1,64 @@
 {{define "content"}}
 <a class="back" href="/">← all links</a>
 <section class="detail">
-  <div class="detail-head">
-    <div>
-      <p class="eyebrow">{{.Link.Host}}</p>
-      <h1>{{.Link.Title}}</h1>
-      <p class="url"><a href="{{.Link.URL}}" target="_blank" rel="noopener">{{.Link.URL}}</a></p>
-    </div>
-    <div class="detail-stats">
-      <div><strong>{{.Link.Clicks}}</strong><span>clicks</span></div>
-      <div><strong>{{formatTime .Link.LastClickedAt}}</strong><span>last click</span></div>
-    </div>
-  </div>
-  {{if .Link.Description}}<p class="description">{{.Link.Description}}</p>{{end}}
-  {{if .Link.Tags}}<div class="chips">{{range .Link.Tags}}<a class="chip" href="{{call $.TagURL .}}">#{{.}}</a>{{end}}</div>{{end}}
-  <div class="actions">
-    <a class="primary" href="/go/{{.Link.ID}}" target="_blank" rel="noopener">Visit link ↗</a>
-    <form method="post" action="/links/{{.Link.ID}}/delete" onsubmit="return confirm('Remove this link?')">
-      <button class="danger" type="submit">Delete</button>
-    </form>
-  </div>
+	<div class="detail-head">
+		<div>
+			<p class="eyebrow">{{.Link.Host}}</p>
+			<h1>{{.Link.Title}}</h1>
+			<p class="url"><a href="{{.Link.URL}}" target="_blank" rel="noopener">{{.Link.URL}}</a></p>
+		</div>
+		<div class="detail-stats">
+			<div><strong>{{.Link.Clicks}}</strong><span>clicks</span></div>
+			<div><strong>{{formatTime .Link.LastClickedAt}}</strong><span>last click</span></div>
+		</div>
+	</div>
+	{{if .Link.Description}}
+	<p class="description">{{.Link.Description}}</p>
+	{{end}} {{if .Link.Tags}}
+	<div class="chips">{{range .Link.Tags}}<a class="chip" href="{{call $.TagURL .}}">#{{.}}</a>{{end}}</div>
+	{{end}}
+	<div class="actions">
+		<a class="primary" href="/go/{{.Link.ID}}" target="_blank" rel="noopener">Visit link ↗</a>
+		<form method="post" action="/links/{{.Link.ID}}/delete" onsubmit="return confirm('Remove this link?')">
+			<button class="danger" type="submit">Delete</button>
+		</form>
+	</div>
 </section>
 
 <section class="panel">
-  <h2>Last 14 days</h2>
-  {{if .Days}}
-  <div class="bars">
-    {{range .Days}}<div class="bar"><b>{{.Count}}</b><span style="height:{{.Percent}}%"></span><small>{{shortDate .Day}}</small></div>{{end}}
-  {{else}}<p class="clear">No clicks recorded yet.</p>{{end}}
+	<h2>Last 14 days</h2>
+	{{if .Days}}
+	<div class="bars">
+		{{range .Days}}
+		<div class="bar">
+			<b>{{.Count}}</b><span style="height:{{.Percent}}%"></span><small>{{shortDate .Day}}</small>
+		</div>
+		{{end}}
+	</div>
+	{{else}}
+	<p class="clear">No clicks recorded yet.</p>
+	{{end}}
 </section>
 
 <section class="panel">
-  <h2>Recent clicks</h2>
-  {{if .Clicks}}
-  <table>
-    <thead><tr><th>When</th></tr></thead>
-    <tbody>{{range .Clicks}}<tr><td>{{formatTime .At}}</td></tr>{{end}}</tbody>
-  </table>
-  {{else}}<p class="clear">No clicks recorded yet.</p>{{end}}
+	<h2>Recent clicks</h2>
+	{{if .Clicks}}
+	<table>
+		<thead>
+			<tr>
+				<th>When</th>
+			</tr>
+		</thead>
+		<tbody>
+			{{range .Clicks}}
+			<tr>
+				<td>{{formatTime .At}}</td>
+			</tr>
+			{{end}}
+		</tbody>
+	</table>
+	{{else}}
+	<p class="clear">No clicks recorded yet.</p>
+	{{end}}
 </section>
 {{end}}

@@ -1,81 +1,98 @@
 {{define "content"}}
 <section class="hero">
-  <div>
-    <h1>Keep the good links.</h1>
-    <p>Save a URL, give it a few tags, and let the shelf remember what you found. Click tracking and a small analytics view are built in.</p>
-  </div>
-  <div class="stats">
-    <div class="stat"><strong>{{.Stats.Links}}</strong> links</div>
-    <div class="stat"><strong>{{.Stats.Clicks}}</strong> clicks</div>
-    <div class="stat"><strong>{{.Stats.Tags}}</strong> tags</div>
-  </div>
+	<div>
+		<h1>Keep the good links.</h1>
+		<p>
+			Save a URL, give it a few tags, and let the shelf remember what you found. Click tracking and a small
+			analytics view are built in.
+		</p>
+	</div>
+	<div class="stats">
+		<div class="stat"><strong>{{.Stats.Links}}</strong> links</div>
+		<div class="stat"><strong>{{.Stats.Clicks}}</strong> clicks</div>
+		<div class="stat"><strong>{{.Stats.Tags}}</strong> tags</div>
+	</div>
 </section>
-{{if .Error}}<div class="flash error">{{.Error}}</div>{{end}}
-{{if .Added}}<div class="flash success">Link added to the shelf.</div>{{end}}
-{{if .Deleted}}<div class="flash success">Link removed.</div>{{end}}
+{{if .Error}}
+<div class="flash error">{{.Error}}</div>
+{{end}} {{if .Added}}
+<div class="flash success">Link added to the shelf.</div>
+{{end}} {{if .Deleted}}
+<div class="flash success">Link removed.</div>
+{{end}}
 
 <form class="add" method="post" action="/links">
-  <div class="add-head">
-    <h2>Add a link</h2>
-    <span>Tags are comma-separated; title falls back to the host.</span>
-  </div>
-  <div class="form-grid">
-    <label class="field wide"><span>URL</span><input name="url" type="url" placeholder="https://example.com" required></label>
-    <label class="field"><span>Title</span><input name="title" placeholder="Optional"></label>
-    <label class="field"><span>Tags</span><input name="tags" placeholder="wasm, reading, tools"></label>
-    <label class="field wide"><span>Description</span><input name="description" placeholder="Why is it worth keeping?"></label>
-    <button class="primary" type="submit">Add to shelf</button>
-  </div>
+	<div class="add-head">
+		<h2>Add a link</h2>
+		<span>Tags are comma-separated; title falls back to the host.</span>
+	</div>
+	<div class="form-grid">
+		<label class="field wide"
+			><span>URL</span><input name="url" type="url" placeholder="https://example.com" required></label
+		>
+		<label class="field"><span>Title</span><input name="title" placeholder="Optional"></label>
+		<label class="field"><span>Tags</span><input name="tags" placeholder="wasm, reading, tools"></label>
+		<label class="field wide"
+			><span>Description</span><input name="description" placeholder="Why is it worth keeping?"></label
+		>
+		<button class="primary" type="submit">Add to shelf</button>
+	</div>
 </form>
 
 <div class="toolbar">
-  <form class="search" method="get" action="/">
-    <input type="search" name="q" value="{{.Q}}" placeholder="Search title, URL, or description…">
-    {{if .Tag}}<input type="hidden" name="tag" value="{{.Tag}}">{{end}}
-    <button type="submit">Search</button>
-  </form>
-  {{if .Tag}}<a class="clear" href="{{.ClearURL}}">tag: #{{.Tag}} ×</a>{{end}}
+	<form class="search" method="get" action="/">
+		<input type="search" name="q" value="{{.Q}}" placeholder="Search title, URL, or description…">
+		{{if .Tag}}<input type="hidden" name="tag" value="{{.Tag}}">{{end}}
+		<button type="submit">Search</button>
+	</form>
+	{{if .Tag}}<a class="clear" href="{{.ClearURL}}">tag: #{{.Tag}} ×</a>{{end}}
 </div>
 
 <div class="columns">
-  <aside class="tags-panel">
-    <h2>Tags</h2>
-    {{if .Tags}}<div class="tag-list">
-      {{range .Tags}}<a class="tag-item" href="{{.URL}}">#{{.Tag}} <span>{{.Count}}</span></a>{{end}}
-    </div>{{else}}<p class="clear">No tags yet.</p>{{end}}
-  </aside>
+	<aside class="tags-panel">
+		<h2>Tags</h2>
+		{{if .Tags}}
+		<div class="tag-list">
+			{{range .Tags}}<a class="tag-item" href="{{.URL}}">#{{.Tag}} <span>{{.Count}}</span></a>{{end}}
+		</div>
+		{{else}}
+		<p class="clear">No tags yet.</p>
+		{{end}}
+	</aside>
 
-  <section class="links">
-    {{if .Links}}
-      {{range .Links}}
-      <article class="card">
-        <div class="card-top">
-          <a class="card-title" href="/links/{{.ID}}">{{.Title}}</a>
-          <span class="host">{{.Host}}</span>
-        </div>
-        {{if .Description}}<p>{{.Description}}</p>{{end}}
-        {{if .Tags}}<div class="chips">{{range .Tags}}<a class="chip" href="{{call $.TagURL .}}">#{{.}}</a>{{end}}</div>{{end}}
-        <div class="meta">
-          <span><strong>{{.Clicks}}</strong> clicks</span>
-          <span>last {{formatTime .LastClickedAt}}</span>
-          <a class="visit" href="/go/{{.ID}}" target="_blank" rel="noopener">visit ↗</a>
-          <form method="post" action="/links/{{.ID}}/delete" onsubmit="return confirm('Remove this link?')">
-            <button class="danger" type="submit">delete</button>
-          </form>
-        </div>
-      </article>
-      {{end}}
-    {{else}}
-      <div class="empty">No links match this view. Add one above, or clear the filters.</div>
-    {{end}}
+	<section class="links">
+		{{if .Links}} {{range .Links}}
+		<article class="card">
+			<div class="card-top">
+				<a class="card-title" href="/links/{{.ID}}">{{.Title}}</a>
+				<span class="host">{{.Host}}</span>
+			</div>
+			{{if .Description}}
+			<p>{{.Description}}</p>
+			{{end}} {{if .Tags}}
+			<div class="chips">{{range .Tags}}<a class="chip" href="{{call $.TagURL .}}">#{{.}}</a>{{end}}</div>
+			{{end}}
+			<div class="meta">
+				<span><strong>{{.Clicks}}</strong> clicks</span>
+				<span>last {{formatTime .LastClickedAt}}</span>
+				<a class="visit" href="/go/{{.ID}}" target="_blank" rel="noopener">visit ↗</a>
+				<form method="post" action="/links/{{.ID}}/delete" onsubmit="return confirm('Remove this link?')">
+					<button class="danger" type="submit">delete</button>
+				</form>
+			</div>
+		</article>
+		{{end}} {{else}}
+		<div class="empty">No links match this view. Add one above, or clear the filters.</div>
+		{{end}}
 
-    <div class="pagination">
-      <span>{{.Total}} links · page {{.Page}} of {{.Pages}}</span>
-      <span>
-        {{if .PrevURL}}<a href="{{.PrevURL}}">← previous</a>{{end}}
-        {{if .NextURL}}<a href="{{.NextURL}}">next →</a>{{end}}
-      </span>
-    </div>
-  </section>
+		<div class="pagination">
+			<span>{{.Total}} links · page {{.Page}} of {{.Pages}}</span>
+			<span>
+				{{if .PrevURL}}<a href="{{.PrevURL}}">← previous</a>{{end}} {{if .NextURL}}<a href="{{.NextURL}}"
+					>next →</a
+				>{{end}}
+			</span>
+		</div>
+	</section>
 </div>
 {{end}}
