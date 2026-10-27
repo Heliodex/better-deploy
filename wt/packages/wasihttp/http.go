@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	wit "go.bytecodealliance.org/pkg/wit/types"
-	handler "wt.example/binding/exports/export_wasi_http_0_3_0_handler"
-	_ "wt.example/binding/exports/wit_exports"
-	wasi "wt.example/binding/imports/wasi_http_0_3_0_types"
+	handler "wt.packages/binding/exports/export_wasi_http_0_3_0_handler"
+	_ "wt.packages/binding/exports/wit_exports"
+	wasi "wt.packages/binding/imports/wasi_http_0_3_0_types"
 )
 
 const (

@@ -1,7 +1,7 @@
 example/*/main.wasm
 example/*/main.cwasm
-example/binding/
+packages/binding/
+packages/tmp/
 apps/
 state/
-example/tmp/
 LICENSE

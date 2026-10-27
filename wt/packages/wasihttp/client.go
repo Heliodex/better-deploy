@@ -5,8 +5,8 @@ import (
 	"io"
 	"net/http"
 
-	client "wt.example/binding/imports/wasi_http_0_3_0_client"
-	wasi "wt.example/binding/imports/wasi_http_0_3_0_types"
+	client "wt.packages/binding/imports/wasi_http_0_3_0_client"
+	wasi "wt.packages/binding/imports/wasi_http_0_3_0_types"
 )
 
 // Transport implements [http.RoundTripper] using wasi:http.

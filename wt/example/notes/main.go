@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"wt.example/storage"
-	wasihttp "wt.example/wasihttp"
+	"wt.packages/storage"
+	wasihttp "wt.packages/wasihttp"
 )
 
 const (

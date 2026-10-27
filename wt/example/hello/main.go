@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
-	wasihttp "wt.example/wasihttp"
+	wasihttp "wt.packages/wasihttp"
 )
 
 func init() {

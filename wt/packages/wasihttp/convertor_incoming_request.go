@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	wit "go.bytecodealliance.org/pkg/wit/types"
-	wasi "wt.example/binding/imports/wasi_http_0_3_0_types"
+	wasi "wt.packages/binding/imports/wasi_http_0_3_0_types"
 )
 
 func methodToString(m wasi.Method) (string, error) {

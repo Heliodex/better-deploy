@@ -19,26 +19,30 @@ laptop. Nothing is compiled on the serving node, and the app is a standard
 
 ## Layout
 
-- `example/` – the Go module for apps, generated WASI bindings and a small
-  `net/http` adapter.
+- `packages/` – the shared Go module for the app SDK.
+  - `packages/storage` – client for the supervisor's SQLite service.
+  - `packages/wasihttp` – the `net/http` adapter (adapted from spin-go-sdk).
+  - `packages/binding` – generated bindings for `wt:app/app` (not tracked).
+  - `packages/wit` – the `wt:app/app` world and WASI 0.3 WIT dependencies.
+  - `packages/generate.sh` – regenerates `packages/binding`.
+- `example/` – example apps only.
   - `example/hello` – returns the method and path.
   - `example/notes` – JSON notes persisted in a real `notes` table through
     the supervisor's SQLite service.
-  - `example/binding` – generated bindings for `wt:app/app` (not tracked).
-  - `example/wasihttp` – the `net/http` adapter (adapted from spin-go-sdk).
 - `supervisor/` – runs apps, proxies by `Host`, deploys bundles blue/green.
 - `deploy/` – builds, precompiles and uploads an app.
 
 ## Requirements
 
-- Go 1.27.1 or newer. `componentize-go` is a Go tool in `example/go.mod`; it
+- Go 1.27.1 or newer. `componentize-go` is declared as a tool in both
+  `packages/go.mod` (binding generation) and `example/go.mod` (app builds); it
   downloads the patched Go it needs for async components.
 - wasmtime **50.0.0** on the machine running `wt-deploy` to compile the
   artifact. The precompiled artifact is tied to that version and target triple.
   The client and supervisor both default to `x86_64-unknown-linux-musl`, which
   is what the runtime-only image can execute; a different target needs a
   matching runtime build.
-- The example WIT is the final `wasi:http@0.3.0` from wasmtime v50
+- The WIT in `packages/wit` is the final `wasi:http@0.3.0` from wasmtime v50
   (`crates/wasi-http/src/p3/wit`), plus `wasi:cli/imports`.
 
 ## Build the supervisor and CLI
@@ -184,7 +188,7 @@ A few SQLite features are blocked (`ATTACH`, `VACUUM INTO`, `PRAGMA`,
 database or write files through SQL. Queries time out after five seconds and
 are capped at 10,000 rows, 1 MiB per value and 8 MiB per response.
 
-The example module's `storage` package is the client; it takes an
+The shared `packages/storage` package is the client; it takes an
 `*http.Client`, and the apps pass `wasihttp.NewClient()` for outbound
 `wasi:http`:
 
@@ -229,7 +233,7 @@ access per app.
 
 ## Bindings
 
-The generated bindings under `example/binding` target the world:
+The generated bindings under `packages/binding` target the world:
 
 ```wit
 package wt:app;
@@ -240,18 +244,18 @@ world app {
 }
 ```
 
-They are **not tracked**: `example/generate.sh` regenerates them from
-`example/wit` with `componentize-go bindings`. The example apps' `build`
+They are **not tracked**: `packages/generate.sh` regenerates them from
+`packages/wit` with `componentize-go bindings`. The example apps' `build`
 commands run that script first, so a fresh clone builds on its first deploy.
 
 The WIT comes from wasmtime v50's `crates/wasi-http/src/p3/wit` and the world
 file is ours. If you bump wasmtime, update the WIT and run the generator again;
 the export stub is written by the script.
 
-The `net/http` adapter in `example/wasihttp` is adapted from
-[spin-go-sdk v3](https://github.com/spinframework/spin-go-sdk) (Apache-2.0,
-see `example/wasihttp/LICENSE`). The generated bindings and the adapter are
-what let an app keep normal `http.HandlerFunc` code.
+The `net/http` adapter in `packages/wasihttp` is adapted from
+[spin-go-sdk v3](https://github.com/spinframework/spin-go-sdk) (Apache-2.0).
+The generated bindings and the adapter are what let an app keep normal
+`http.HandlerFunc` code.
 
 ## Limits of this prototype
 

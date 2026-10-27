@@ -5,7 +5,7 @@ import (
 	"io"
 
 	wit "go.bytecodealliance.org/pkg/wit/types"
-	wasi "wt.example/binding/imports/wasi_http_0_3_0_types"
+	wasi "wt.packages/binding/imports/wasi_http_0_3_0_types"
 )
 
 // Assert `bodyReader` implements the required interfaces
