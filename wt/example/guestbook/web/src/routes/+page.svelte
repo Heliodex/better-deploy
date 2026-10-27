@@ -10,11 +10,11 @@ const reactionOptions = [
 
 type Reaction = (typeof reactionOptions)[number]["key"]
 
-type Message = {
-	id: string
-	name: string
+interface Message {
 	body: string
 	createdAt: string
+	id: string
+	name: string
 	reactions: Record<Reaction, number>
 }
 
@@ -45,9 +45,8 @@ function formatTime(value: string): string {
 async function loadMessages(): Promise<void> {
 	try {
 		const response = await fetch("/api/messages?limit=50")
-		if (!response.ok) {
-			throw new Error(`The wall API returned ${response.status}`)
-		}
+		if (!response.ok) throw new Error(`The wall API returned ${response.status}`)
+
 		const data = (await response.json()) as { messages: Message[] }
 		messages = data.messages ?? []
 		error = ""
@@ -82,9 +81,8 @@ async function submit(event: SubmitEvent): Promise<void> {
 			method: "POST",
 		})
 		const data = (await response.json().catch(() => null)) as { error?: string } | null
-		if (!response.ok) {
-			throw new Error(data?.error ?? `The wall API returned ${response.status}`)
-		}
+		if (!response.ok) throw new Error(data?.error ?? `The wall API returned ${response.status}`)
+
 		messages = [data as Message, ...messages]
 		name = ""
 		body = ""
@@ -105,12 +103,9 @@ async function react(message: Message, reaction: Reaction): Promise<void> {
 			method: "POST",
 		})
 		const data = (await response.json().catch(() => null)) as { count?: number; error?: string } | null
-		if (!response.ok) {
-			throw new Error(data?.error ?? `The wall API returned ${response.status}`)
-		}
-		if (typeof data?.count === "number") {
-			message.reactions[reaction] = data.count
-		}
+		if (!response.ok) throw new Error(data?.error ?? `The wall API returned ${response.status}`)
+
+		if (typeof data?.count === "number") message.reactions[reaction] = data.count
 	} catch (err) {
 		message.reactions[reaction] = previous
 		error = err instanceof Error ? err.message : "Could not add that reaction."
