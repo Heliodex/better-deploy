@@ -1,52 +1,67 @@
-import { z } from "zod"
+import {
+	array,
+	type GenericSchema,
+	type InferOutput,
+	integer,
+	minLength,
+	minValue,
+	number,
+	object,
+	picklist,
+	pipe,
+	safeParse,
+	string,
+} from "valibot"
 
 export const reactions = ["rocket", "heart", "eyes", "brain"] as const
 
 export type Reaction = (typeof reactions)[number]
 
-const reactionSchema = z.enum(reactions)
+const reactionSchema = picklist(reactions)
 
-const messageSchema = z.object({
-	body: z.string().min(1),
-	createdAt: z.string().min(1),
-	id: z.string().min(1),
-	name: z.string().min(1),
-	reactions: z.object({
-		brain: z.number().int().nonnegative(),
-		eyes: z.number().int().nonnegative(),
-		heart: z.number().int().nonnegative(),
-		rocket: z.number().int().nonnegative(),
+const countSchema = pipe(number(), integer(), minValue(0))
+
+const messageSchema = object({
+	body: pipe(string(), minLength(1)),
+	createdAt: pipe(string(), minLength(1)),
+	id: pipe(string(), minLength(1)),
+	name: pipe(string(), minLength(1)),
+	reactions: object({
+		brain: countSchema,
+		eyes: countSchema,
+		heart: countSchema,
+		rocket: countSchema,
 	}),
 })
 
-export type Message = z.infer<typeof messageSchema>
+export type Message = InferOutput<typeof messageSchema>
 
-const messagesResponseSchema = z.object({
-	messages: z.array(messageSchema),
+const messagesResponseSchema = object({
+	messages: array(messageSchema),
 })
 
-const reactResponseSchema = z.object({
-	count: z.number().int().nonnegative(),
+const reactResponseSchema = object({
+	count: countSchema,
 	reaction: reactionSchema,
 })
 
-const errorResponseSchema = z.object({
-	error: z.string(),
+const errorResponseSchema = object({
+	error: string(),
 })
 
-async function parseJSON<T>(response: Response, schema: z.ZodType<T>): Promise<T> {
+async function parseJSON<T>(response: Response, schema: GenericSchema<T>): Promise<T> {
 	const data: unknown = await response.json().catch(() => null)
 
 	if (!response.ok) {
-		const error = errorResponseSchema.safeParse(data)
-		throw new Error(error.success ? error.data.error : `The wall API returned ${response.status}`)
+		const error = safeParse(errorResponseSchema, data)
+		throw new Error(error.success ? error.output.error : `The wall API returned ${response.status}`)
 	}
 
-	const parsed = schema.safeParse(data)
+	const parsed = safeParse(schema, data)
 	if (!parsed.success) {
 		throw new Error("The wall API returned an unexpected response shape.")
 	}
-	return parsed.data
+	return parsed.output
 }
 
 export async function fetchMessages(limit = 50): Promise<Message[]> {
