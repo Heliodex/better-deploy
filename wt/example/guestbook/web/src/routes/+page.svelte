@@ -1,6 +1,15 @@
 <script lang="ts">
 import { onMount } from "svelte"
-import { createMessage, fetchMessages, type Message, type Reaction, reactToMessage } from "../lib/api"
+import {
+	createMessage,
+	fetchMessages,
+	type Message,
+	maxMessage,
+	maxName,
+	type Reaction,
+	reactToMessage,
+	ValidationError,
+} from "../lib/api"
 
 const reactionOptions = [
 	{ emoji: "🚀", key: "rocket", label: "rocket" },
@@ -19,6 +28,7 @@ let body = $state("")
 let loading = $state(true)
 let sending = $state(false)
 let error = $state("")
+let fieldErrors = $state<Record<string, string>>({})
 
 let totalReactions = $derived(
 	messages.reduce(
@@ -54,24 +64,29 @@ onMount(() => {
 	return () => clearInterval(timer)
 })
 
+function clearFieldError(field: string): void {
+	if (!(field in fieldErrors)) return
+
+	const next = { ...fieldErrors }
+	delete next[field]
+	fieldErrors = next
+}
+
 async function submit(event: SubmitEvent): Promise<void> {
 	event.preventDefault()
-	const trimmedName = name.trim()
-	const trimmedBody = body.trim()
-	if (!trimmedName || !trimmedBody) {
-		error = "A name and a message are both required."
-		return
-	}
-
 	sending = true
 	error = ""
+	fieldErrors = {}
 	try {
-		const entry = await createMessage(trimmedName, trimmedBody)
+		const entry = await createMessage(name, body)
 		messages = [entry, ...messages]
 		name = ""
 		body = ""
 	} catch (err) {
-		error = err instanceof Error ? err.message : "Could not post to the wall."
+		if (err instanceof ValidationError) {
+			fieldErrors = err.fields
+			if (Object.keys(err.fields).length === 0) error = err.message
+		} else error = err instanceof Error ? err.message : "Could not post to the wall."
 	} finally {
 		sending = false
 	}
@@ -114,25 +129,43 @@ async function react(message: Message, reaction: Reaction): Promise<void> {
 		<h2 id="composer-title">Sign the wall</h2>
 		<span>Keep it kind. Keep it short.</span>
 	</div>
-	<form onsubmit={submit}>
+	<form novalidate onsubmit={submit}>
 		<div class="fields">
 			<label class="name-field">
 				<span>Name</span>
-				<input autocomplete="name" maxlength="40" placeholder="Your name" required bind:value={name}>
+				<input
+					aria-describedby={fieldErrors.name ? "name-error" : undefined}
+					aria-invalid={fieldErrors.name ? "true" : undefined}
+					autocomplete="name"
+					maxlength={maxName}
+					oninput={() => clearFieldError("name")}
+					placeholder="Your name"
+					required
+					bind:value={name}
+				>
+				{#if fieldErrors.name}
+					<small class="field-error" id="name-error">{fieldErrors.name}</small>
+				{/if}
 			</label>
 			<label class="message-field">
 				<span>Message</span>
 				<textarea
-					maxlength="280"
+					aria-describedby={fieldErrors.body ? "body-error" : undefined}
+					aria-invalid={fieldErrors.body ? "true" : undefined}
+					maxlength={maxMessage}
+					oninput={() => clearFieldError("body")}
 					placeholder="What are you building?"
 					required
 					rows="3"
 					bind:value={body}
 				></textarea>
+				{#if fieldErrors.body}
+					<small class="field-error" id="body-error">{fieldErrors.body}</small>
+				{/if}
 			</label>
 		</div>
 		<div class="composer-foot">
-			<span>{body.length} / 280</span>
+			<span>{body.length} / {maxMessage}</span>
 			<button disabled={sending} type="submit">
 				{sending ? "Posting…" : "Post to the wall"}
 			</button>
@@ -314,6 +347,18 @@ input:focus,
 textarea:focus {
 	border-color: var(--accent);
 	box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+input[aria-invalid="true"],
+textarea[aria-invalid="true"] {
+	background: #fff8f4;
+	border-color: var(--accent);
+}
+
+.field-error {
+	font-size: 0.72rem;
+	font-weight: 550;
+	color: var(--accent-deep);
 }
 
 .composer-foot {
