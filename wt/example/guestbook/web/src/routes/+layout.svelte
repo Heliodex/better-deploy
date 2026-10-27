@@ -1,11 +1,12 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import '../app.css';
 	import type { LayoutProps } from './$types';
 
 	let { children }: LayoutProps = $props();
 </script>
 
 <svelte:head>
+	<link rel="icon" href="/favicon.svg" />
 	<meta name="description" content="A small guestbook on a static SvelteKit wall, backed by a Go API." />
 </svelte:head>
 
