@@ -1,7 +1,7 @@
 {
-	"name": "guestbook",
-	"host": "guestbook.localhost",
-	"health": "/",
 	"build": "cd web && bun install --frozen-lockfile && bun run build && cd .. && rm -rf static && cp -r web/build static && ../../packages/generate.sh && go tool componentize-go -d ../../packages/wit -w wt:app/app build",
-	"memory_mb": 128
+	"health": "/",
+	"host": "guestbook.localhost",
+	"memory_mb": 128,
+	"name": "guestbook"
 }

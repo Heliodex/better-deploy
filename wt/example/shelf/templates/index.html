@@ -21,14 +21,14 @@
 <div class="flash success">Link removed.</div>
 {{end}}
 
-<form class="add" method="post" action="/links">
+<form action="/links" class="add" method="post">
 	<div class="add-head">
 		<h2>Add a link</h2>
 		<span>Tags are comma-separated; title falls back to the host.</span>
 	</div>
 	<div class="form-grid">
 		<label class="field wide"
-			><span>URL</span><input name="url" type="url" placeholder="https://example.com" required></label
+			><span>URL</span><input name="url" placeholder="https://example.com" required type="url"></label
 		>
 		<label class="field"><span>Title</span><input name="title" placeholder="Optional"></label>
 		<label class="field"><span>Tags</span><input name="tags" placeholder="wasm, reading, tools"></label>
@@ -40,9 +40,9 @@
 </form>
 
 <div class="toolbar">
-	<form class="search" method="get" action="/">
-		<input type="search" name="q" value="{{.Q}}" placeholder="Search title, URL, or description…">
-		{{if .Tag}}<input type="hidden" name="tag" value="{{.Tag}}">{{end}}
+	<form action="/" class="search" method="get">
+		<input name="q" placeholder="Search title, URL, or description…" type="search" value="{{.Q}}">
+		{{if .Tag}}<input name="tag" type="hidden" value="{{.Tag}}">{{end}}
 		<button type="submit">Search</button>
 	</form>
 	{{if .Tag}}<a class="clear" href="{{.ClearURL}}">tag: #{{.Tag}} ×</a>{{end}}
@@ -75,8 +75,8 @@
 			<div class="meta">
 				<span><strong>{{.Clicks}}</strong> clicks</span>
 				<span>last {{formatTime .LastClickedAt}}</span>
-				<a class="visit" href="/go/{{.ID}}" target="_blank" rel="noopener">visit ↗</a>
-				<form method="post" action="/links/{{.ID}}/delete" onsubmit="return confirm('Remove this link?')">
+				<a class="visit" href="/go/{{.ID}}" rel="noopener" target="_blank">visit ↗</a>
+				<form action="/links/{{.ID}}/delete" method="post" onsubmit="return confirm('Remove this link?')">
 					<button class="danger" type="submit">delete</button>
 				</form>
 			</div>

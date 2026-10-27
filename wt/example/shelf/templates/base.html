@@ -2,7 +2,7 @@
 <html lang="en">
 	<head>
 		<meta charset="utf-8">
-		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<meta content="width=device-width, initial-scale=1" name="viewport">
 		<title>{{.Title}}</title>
 		<style>
 		:root {
@@ -28,10 +28,10 @@
 		}
 		body {
 			margin: 0;
-			background: var(--paper);
-			color: var(--ink);
 			font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 			line-height: 1.5;
+			color: var(--ink);
+			background: var(--paper);
 		}
 		a {
 			color: var(--accent);
@@ -53,30 +53,30 @@
 		}
 		.top {
 			display: flex;
+			flex-wrap: wrap;
+			gap: 24px;
 			align-items: flex-end;
 			justify-content: space-between;
-			gap: 24px;
-			flex-wrap: wrap;
 			padding: 30px 0 18px;
 			border-bottom: 1px solid var(--line);
 		}
 		.brand {
 			font-size: 1.65rem;
 			font-weight: 800;
-			letter-spacing: -0.045em;
 			color: var(--ink);
+			letter-spacing: -0.045em;
 		}
 		.brand span {
 			color: var(--accent);
 		}
 		.tagline {
-			color: var(--muted);
-			font-size: 0.88rem;
 			margin-top: 2px;
+			font-size: 0.88rem;
+			color: var(--muted);
 		}
 		.top-note {
-			color: var(--muted);
 			font-size: 0.76rem;
+			color: var(--muted);
 			text-transform: uppercase;
 			letter-spacing: 0.12em;
 		}
@@ -86,13 +86,13 @@
 		h1,
 		h2,
 		h3 {
-			letter-spacing: -0.025em;
-			line-height: 1.15;
 			margin: 0;
+			line-height: 1.15;
+			letter-spacing: -0.025em;
 		}
 		h1 {
-			font-size: clamp(2rem, 5vw, 3.4rem);
 			max-width: 720px;
+			font-size: clamp(2rem, 5vw, 3.4rem);
 		}
 		h2 {
 			font-size: 1.15rem;
@@ -102,70 +102,70 @@
 		}
 		.hero {
 			display: flex;
-			justify-content: space-between;
-			align-items: flex-end;
-			gap: 24px;
 			flex-wrap: wrap;
+			gap: 24px;
+			align-items: flex-end;
+			justify-content: space-between;
 			margin-bottom: 26px;
 		}
 		.hero p {
-			color: var(--muted);
 			max-width: 620px;
 			margin-top: 10px;
+			color: var(--muted);
 		}
 		.stats {
 			display: flex;
-			gap: 8px;
 			flex-wrap: wrap;
+			gap: 8px;
 		}
 		.stat {
-			background: var(--card);
-			border: 1px solid var(--line);
-			border-radius: 999px;
 			padding: 7px 13px;
 			font-size: 0.78rem;
 			color: var(--muted);
+			background: var(--card);
+			border: 1px solid var(--line);
+			border-radius: 999px;
 		}
 		.stat strong {
-			color: var(--ink);
 			font-variant-numeric: tabular-nums;
+			color: var(--ink);
 		}
 		.flash {
-			border-radius: 12px;
 			padding: 11px 14px;
 			margin-bottom: 16px;
 			font-size: 0.9rem;
 			border: 1px solid;
+			border-radius: 12px;
 		}
 		.flash.success {
+			color: #174b4b;
 			background: var(--teal-soft);
 			border-color: #b9d8d5;
-			color: #174b4b;
 		}
 		.flash.error {
+			color: #7d2a12;
 			background: #fbe4de;
 			border-color: #edc0b4;
-			color: #7d2a12;
 		}
 		.add {
+			padding: 20px;
+			margin-bottom: 26px;
 			background: var(--card);
 			border: 1px solid var(--line);
 			border-radius: var(--radius);
-			padding: 20px;
 			box-shadow: var(--shadow);
-			margin-bottom: 26px;
 		}
 		.add-head {
 			display: flex;
+			flex-wrap: wrap;
+			gap: 16px;
 			align-items: baseline;
 			justify-content: space-between;
-			gap: 16px;
-			flex-wrap: wrap;
 			margin-bottom: 14px;
 		}
 		.add-head span {
-			color: var(--muted);
 			font-size: 0.8rem;
+			color: var(--muted);
 		}
 		.form-grid {
 			display: grid;
@@ -182,19 +182,19 @@
 			grid-column: span 2;
 		}
 		.field span {
-			color: var(--muted);
 			font-size: 0.72rem;
+			color: var(--muted);
 			text-transform: uppercase;
 			letter-spacing: 0.09em;
 		}
 		.field input {
 			width: 100%;
-			border: 1px solid var(--line);
-			border-radius: 10px;
-			background: #fff;
 			padding: 10px 12px;
 			color: var(--ink);
 			outline: none;
+			background: #fff;
+			border: 1px solid var(--line);
+			border-radius: 10px;
 		}
 		.field input:focus {
 			border-color: var(--accent);
@@ -203,38 +203,38 @@
 		.primary,
 		.secondary,
 		.danger {
+			padding: 10px 15px;
+			font-size: 0.85rem;
+			font-weight: 700;
 			border: 0;
 			border-radius: 10px;
-			padding: 10px 15px;
-			font-weight: 700;
-			font-size: 0.85rem;
 		}
 		.primary {
-			background: var(--accent);
 			color: #fff;
+			background: var(--accent);
 		}
 		.primary:hover {
-			background: var(--accent-deep);
 			text-decoration: none;
+			background: var(--accent-deep);
 		}
 		.secondary {
-			background: var(--paper-deep);
 			color: var(--ink);
+			background: var(--paper-deep);
 		}
 		.danger {
-			background: transparent;
-			color: #9b2f1a;
-			border: 1px solid #e2b5a8;
 			padding: 7px 11px;
+			color: #9b2f1a;
+			background: transparent;
+			border: 1px solid #e2b5a8;
 		}
 		.danger:hover {
 			background: #fbe4de;
 		}
 		.toolbar {
 			display: flex;
-			align-items: center;
-			gap: 12px;
 			flex-wrap: wrap;
+			gap: 12px;
+			align-items: center;
 			margin-bottom: 22px;
 		}
 		.search {
@@ -244,22 +244,22 @@
 		}
 		.search input {
 			flex: 1;
-			border: 1px solid var(--line);
-			border-radius: 999px;
-			background: var(--card);
 			padding: 11px 16px;
 			outline: none;
+			background: var(--card);
+			border: 1px solid var(--line);
+			border-radius: 999px;
 		}
 		.search input:focus {
 			border-color: var(--accent);
 			box-shadow: 0 0 0 3px var(--accent-soft);
 		}
 		.search button {
-			border: 1px solid var(--line);
-			background: var(--card);
-			border-radius: 999px;
 			padding: 0 18px;
 			font-weight: 650;
+			background: var(--card);
+			border: 1px solid var(--line);
+			border-radius: 999px;
 		}
 		.clear {
 			font-size: 0.82rem;
@@ -276,11 +276,11 @@
 			top: 18px;
 		}
 		.tags-panel h2 {
+			margin-bottom: 10px;
 			font-size: 0.74rem;
+			color: var(--muted);
 			text-transform: uppercase;
 			letter-spacing: 0.12em;
-			color: var(--muted);
-			margin-bottom: 10px;
 		}
 		.tag-list {
 			display: flex;
@@ -289,32 +289,32 @@
 		}
 		.tag-item {
 			display: inline-flex;
-			align-items: center;
 			gap: 6px;
-			border: 1px solid var(--line);
-			background: var(--card);
-			border-radius: 999px;
+			align-items: center;
 			padding: 4px 9px;
 			font-size: 0.76rem;
 			color: var(--ink);
+			background: var(--card);
+			border: 1px solid var(--line);
+			border-radius: 999px;
 		}
 		.tag-item span {
-			color: var(--muted);
 			font-variant-numeric: tabular-nums;
+			color: var(--muted);
 		}
 		.tag-item:hover {
-			border-color: var(--accent);
 			text-decoration: none;
+			border-color: var(--accent);
 		}
 		.links {
 			display: grid;
 			gap: 12px;
 		}
 		.card {
+			padding: 17px 18px;
 			background: var(--card);
 			border: 1px solid var(--line);
 			border-radius: var(--radius);
-			padding: 17px 18px;
 			box-shadow: 0 4px 14px rgba(60, 45, 20, 0.035);
 		}
 		.card:hover {
@@ -322,29 +322,29 @@
 		}
 		.card-top {
 			display: flex;
-			align-items: baseline;
-			gap: 10px;
-			justify-content: space-between;
 			flex-wrap: wrap;
+			gap: 10px;
+			align-items: baseline;
+			justify-content: space-between;
 		}
 		.card-title {
 			font-size: 1.08rem;
 			font-weight: 750;
-			letter-spacing: -0.02em;
 			color: var(--ink);
+			letter-spacing: -0.02em;
 		}
 		.card-title:hover {
 			color: var(--accent);
 			text-decoration: none;
 		}
 		.host {
-			color: var(--muted);
 			font-size: 0.74rem;
+			color: var(--muted);
 		}
 		.card p {
-			color: var(--muted);
-			font-size: 0.9rem;
 			margin-top: 6px;
+			font-size: 0.9rem;
+			color: var(--muted);
 		}
 		.chips {
 			display: flex;
@@ -354,12 +354,12 @@
 		}
 		.chip {
 			display: inline-block;
-			background: var(--teal-soft);
-			color: var(--teal);
-			border-radius: 999px;
 			padding: 2px 8px;
 			font-size: 0.72rem;
 			font-weight: 650;
+			color: var(--teal);
+			background: var(--teal-soft);
+			border-radius: 999px;
 		}
 		.chip:hover {
 			text-decoration: none;
@@ -367,18 +367,18 @@
 		}
 		.meta {
 			display: flex;
-			align-items: center;
-			gap: 14px;
 			flex-wrap: wrap;
-			margin-top: 13px;
+			gap: 14px;
+			align-items: center;
 			padding-top: 11px;
-			border-top: 1px dashed var(--line);
-			color: var(--muted);
+			margin-top: 13px;
 			font-size: 0.76rem;
+			color: var(--muted);
+			border-top: 1px dashed var(--line);
 		}
 		.meta strong {
-			color: var(--ink);
 			font-variant-numeric: tabular-nums;
+			color: var(--ink);
 		}
 		.meta form {
 			margin-left: auto;
@@ -387,27 +387,27 @@
 			font-weight: 700;
 		}
 		.empty {
+			padding: 34px;
+			color: var(--muted);
+			text-align: center;
 			background: var(--card);
 			border: 1px dashed var(--line);
 			border-radius: var(--radius);
-			padding: 34px;
-			text-align: center;
-			color: var(--muted);
 		}
 		.pagination {
 			display: flex;
+			gap: 12px;
 			align-items: center;
 			justify-content: space-between;
-			gap: 12px;
 			margin-top: 18px;
-			color: var(--muted);
 			font-size: 0.82rem;
+			color: var(--muted);
 		}
 		.pagination a {
+			padding: 7px 12px;
 			background: var(--card);
 			border: 1px solid var(--line);
 			border-radius: 9px;
-			padding: 7px 12px;
 		}
 		.pagination a:hover {
 			text-decoration: none;
@@ -416,36 +416,36 @@
 		.back {
 			display: inline-block;
 			margin-bottom: 18px;
-			color: var(--muted);
 			font-size: 0.85rem;
+			color: var(--muted);
 		}
 		.detail {
+			padding: 26px;
 			background: var(--card);
 			border: 1px solid var(--line);
 			border-radius: var(--radius);
-			padding: 26px;
 			box-shadow: var(--shadow);
 		}
 		.detail-head {
 			display: flex;
-			justify-content: space-between;
-			gap: 24px;
 			flex-wrap: wrap;
+			gap: 24px;
+			justify-content: space-between;
 		}
 		.eyebrow {
-			color: var(--muted);
 			font-size: 0.74rem;
+			color: var(--muted);
 			text-transform: uppercase;
 			letter-spacing: 0.11em;
 		}
 		.detail h1 {
-			font-size: clamp(1.8rem, 4vw, 2.8rem);
 			margin-top: 4px;
+			font-size: clamp(1.8rem, 4vw, 2.8rem);
 		}
 		.detail .url {
-			color: var(--muted);
-			font-size: 0.86rem;
 			margin-top: 8px;
+			font-size: 0.86rem;
+			color: var(--muted);
 			word-break: break-all;
 		}
 		.detail-stats {
@@ -462,52 +462,52 @@
 			font-variant-numeric: tabular-nums;
 		}
 		.detail-stats span {
-			color: var(--muted);
 			font-size: 0.72rem;
+			color: var(--muted);
 			text-transform: uppercase;
 			letter-spacing: 0.08em;
 		}
 		.description {
-			color: var(--muted);
-			margin-top: 16px;
 			max-width: 760px;
+			margin-top: 16px;
+			color: var(--muted);
 		}
 		.detail .chips {
 			margin-top: 16px;
 		}
 		.actions {
 			display: flex;
-			align-items: center;
-			gap: 10px;
-			margin-top: 20px;
 			flex-wrap: wrap;
+			gap: 10px;
+			align-items: center;
+			margin-top: 20px;
 		}
 		.panel {
+			padding: 20px;
+			margin-top: 18px;
 			background: var(--card);
 			border: 1px solid var(--line);
 			border-radius: var(--radius);
-			padding: 20px;
-			margin-top: 18px;
 		}
 		.panel h2 {
 			margin-bottom: 14px;
 		}
 		.bars {
 			display: flex;
-			align-items: flex-end;
 			gap: 5px;
+			align-items: flex-end;
 			height: 110px;
 			padding-top: 8px;
 		}
 		.bar {
+			display: flex;
 			flex: 1;
+			flex-direction: column;
+			gap: 5px;
+			align-items: center;
+			justify-content: flex-end;
 			min-width: 8px;
 			height: 100%;
-			display: flex;
-			flex-direction: column;
-			justify-content: flex-end;
-			align-items: center;
-			gap: 5px;
 		}
 		.bar span {
 			display: block;
@@ -522,27 +522,27 @@
 			color: var(--ink);
 		}
 		.bar small {
-			color: var(--muted);
 			font-size: 0.63rem;
+			color: var(--muted);
 			white-space: nowrap;
 		}
 		table {
 			width: 100%;
-			border-collapse: collapse;
 			font-size: 0.85rem;
+			border-collapse: collapse;
 		}
 		th,
 		td {
-			text-align: left;
 			padding: 8px 0;
+			text-align: left;
 			border-bottom: 1px solid var(--line);
 		}
 		th {
-			color: var(--muted);
 			font-size: 0.7rem;
+			font-weight: 650;
+			color: var(--muted);
 			text-transform: uppercase;
 			letter-spacing: 0.08em;
-			font-weight: 650;
 		}
 		tr:last-child td {
 			border-bottom: 0;

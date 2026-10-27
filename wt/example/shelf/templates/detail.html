@@ -5,7 +5,7 @@
 		<div>
 			<p class="eyebrow">{{.Link.Host}}</p>
 			<h1>{{.Link.Title}}</h1>
-			<p class="url"><a href="{{.Link.URL}}" target="_blank" rel="noopener">{{.Link.URL}}</a></p>
+			<p class="url"><a href="{{.Link.URL}}" rel="noopener" target="_blank">{{.Link.URL}}</a></p>
 		</div>
 		<div class="detail-stats">
 			<div><strong>{{.Link.Clicks}}</strong><span>clicks</span></div>
@@ -18,8 +18,8 @@
 	<div class="chips">{{range .Link.Tags}}<a class="chip" href="{{call $.TagURL .}}">#{{.}}</a>{{end}}</div>
 	{{end}}
 	<div class="actions">
-		<a class="primary" href="/go/{{.Link.ID}}" target="_blank" rel="noopener">Visit link ↗</a>
-		<form method="post" action="/links/{{.Link.ID}}/delete" onsubmit="return confirm('Remove this link?')">
+		<a class="primary" href="/go/{{.Link.ID}}" rel="noopener" target="_blank">Visit link ↗</a>
+		<form action="/links/{{.Link.ID}}/delete" method="post" onsubmit="return confirm('Remove this link?')">
 			<button class="danger" type="submit">Delete</button>
 		</form>
 	</div>

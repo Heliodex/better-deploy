@@ -1,8 +1,8 @@
 <svelte:head>
 	<title>About · Wasm Wall</title>
 	<meta
-		name="description"
 		content="How the Wasm Wall demo combines a prerendered SvelteKit frontend with a Go and SQLite API."
+		name="description"
 	>
 </svelte:head>
 
@@ -56,32 +56,32 @@
 }
 
 .eyebrow {
-	color: var(--accent);
+	margin-bottom: 10px;
 	font-size: 0.72rem;
 	font-weight: 750;
-	letter-spacing: 0.13em;
+	color: var(--accent);
 	text-transform: uppercase;
-	margin-bottom: 10px;
+	letter-spacing: 0.13em;
 }
 
 h1 {
-	font-size: clamp(2.2rem, 6vw, 3.8rem);
 	max-width: 760px;
+	font-size: clamp(2.2rem, 6vw, 3.8rem);
 }
 
 .lede {
 	max-width: 720px;
 	margin-top: 16px;
-	color: var(--muted);
 	font-size: 1.02rem;
+	color: var(--muted);
 }
 
 code {
+	padding: 1px 5px;
 	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 	font-size: 0.9em;
 	background: var(--paper-deep);
 	border-radius: 5px;
-	padding: 1px 5px;
 }
 
 .facts {
@@ -92,16 +92,16 @@ code {
 }
 
 .facts article {
+	padding: 20px;
 	background: var(--card);
 	border: 1px solid var(--line);
 	border-radius: var(--radius);
-	padding: 20px;
 }
 
 .facts article > span {
-	color: var(--accent);
 	font-size: 0.72rem;
 	font-weight: 750;
+	color: var(--accent);
 	letter-spacing: 0.12em;
 }
 
@@ -112,8 +112,8 @@ code {
 
 .facts p {
 	margin-top: 8px;
-	color: var(--muted);
 	font-size: 0.88rem;
+	color: var(--muted);
 }
 
 .stack {
@@ -124,13 +124,13 @@ code {
 }
 
 .stack span {
-	border: 1px solid var(--line);
-	border-radius: 999px;
-	background: var(--card);
-	color: var(--teal);
 	padding: 5px 10px;
 	font-size: 0.76rem;
 	font-weight: 650;
+	color: var(--teal);
+	background: var(--card);
+	border: 1px solid var(--line);
+	border-radius: 999px;
 }
 
 .back {

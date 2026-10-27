@@ -6,8 +6,8 @@ let { children }: LayoutProps = $props()
 </script>
 
 <svelte:head>
-	<link rel="icon" href="/favicon.svg">
-	<meta name="description" content="A small guestbook on a static SvelteKit wall, backed by a Go API.">
+	<link href="/favicon.svg" rel="icon">
+	<meta content="A small guestbook on a static SvelteKit wall, backed by a Go API." name="description">
 </svelte:head>
 
 <div class="page">
@@ -32,26 +32,26 @@ let { children }: LayoutProps = $props()
 
 <style>
 .page {
-	width: min(1080px, calc(100% - 36px));
-	margin: 0 auto;
-	min-height: 100vh;
 	display: flex;
 	flex-direction: column;
+	width: min(1080px, calc(100% - 36px));
+	min-height: 100vh;
+	margin: 0 auto;
 }
 
 .site-header {
 	display: flex;
+	gap: 20px;
 	align-items: center;
 	justify-content: space-between;
-	gap: 20px;
 	padding: 28px 0 20px;
 	border-bottom: 1px solid var(--line);
 }
 
 .brand {
-	color: var(--ink);
 	font-size: 1.55rem;
 	font-weight: 800;
+	color: var(--ink);
 	letter-spacing: -0.05em;
 }
 
@@ -89,23 +89,23 @@ footer {
 	flex-wrap: wrap;
 	gap: 10px 20px;
 	padding: 18px 0 26px;
-	border-top: 1px solid var(--line);
-	color: var(--muted);
 	font-size: 0.74rem;
+	color: var(--muted);
 	text-transform: uppercase;
 	letter-spacing: 0.09em;
+	border-top: 1px solid var(--line);
 }
 
 footer span + span::before {
-	content: "·";
 	margin-right: 20px;
 	color: var(--line);
+	content: "·";
 }
 
 @media (max-width: 560px) {
 	.site-header {
-		align-items: flex-start;
 		flex-direction: column;
+		align-items: flex-start;
 	}
 
 	footer span + span::before {

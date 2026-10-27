@@ -1,7 +1,7 @@
 {
-	"name": "notes",
-	"host": "notes.localhost",
-	"health": "/",
 	"build": "../../packages/generate.sh && go tool componentize-go -d ../../packages/wit -w wt:app/app build",
-	"memory_mb": 128
+	"health": "/",
+	"host": "notes.localhost",
+	"memory_mb": 128,
+	"name": "notes"
 }

@@ -2,10 +2,10 @@
 import { onMount } from "svelte"
 
 const reactionOptions = [
-	{ key: "rocket", emoji: "🚀", label: "rocket" },
-	{ key: "heart", emoji: "🧡", label: "heart" },
-	{ key: "eyes", emoji: "👀", label: "eyes" },
-	{ key: "brain", emoji: "🧠", label: "brain" },
+	{ emoji: "🚀", key: "rocket", label: "rocket" },
+	{ emoji: "🧡", key: "heart", label: "heart" },
+	{ emoji: "👀", key: "eyes", label: "eyes" },
+	{ emoji: "🧠", key: "brain", label: "brain" },
 ] as const
 
 type Reaction = (typeof reactionOptions)[number]["key"]
@@ -77,9 +77,9 @@ async function submit(event: SubmitEvent): Promise<void> {
 	error = ""
 	try {
 		const response = await fetch("/api/messages", {
-			method: "POST",
+			body: JSON.stringify({ body: trimmedBody, name: trimmedName }),
 			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ name: trimmedName, body: trimmedBody }),
+			method: "POST",
 		})
 		const data = (await response.json().catch(() => null)) as { error?: string } | null
 		if (!response.ok) {
@@ -100,9 +100,9 @@ async function react(message: Message, reaction: Reaction): Promise<void> {
 	message.reactions[reaction] = previous + 1
 	try {
 		const response = await fetch(`/api/messages/${message.id}/react`, {
-			method: "POST",
-			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ reaction }),
+			headers: { "content-type": "application/json" },
+			method: "POST",
 		})
 		const data = (await response.json().catch(() => null)) as { count?: number; error?: string } | null
 		if (!response.ok) {
@@ -131,13 +131,13 @@ async function react(message: Message, reaction: Reaction): Promise<void> {
 			other people are building.
 		</p>
 	</div>
-	<div class="scoreboard" aria-label="Wall activity">
+	<div aria-label="Wall activity" class="scoreboard">
 		<div><strong>{messages.length}</strong><span>notes</span></div>
 		<div><strong>{totalReactions}</strong><span>reactions</span></div>
 	</div>
 </section>
 
-<section class="composer" aria-labelledby="composer-title">
+<section aria-labelledby="composer-title" class="composer">
 	<div class="section-head">
 		<h2 id="composer-title">Sign the wall</h2>
 		<span>Keep it kind. Keep it short.</span>
@@ -146,22 +146,22 @@ async function react(message: Message, reaction: Reaction): Promise<void> {
 		<div class="fields">
 			<label class="name-field">
 				<span>Name</span>
-				<input bind:value={name} maxlength="40" placeholder="Your name" autocomplete="name" required>
+				<input autocomplete="name" maxlength="40" placeholder="Your name" required bind:value={name}>
 			</label>
 			<label class="message-field">
 				<span>Message</span>
 				<textarea
-					bind:value={body}
 					maxlength="280"
-					rows="3"
 					placeholder="What are you building?"
 					required
+					rows="3"
+					bind:value={body}
 				></textarea>
 			</label>
 		</div>
 		<div class="composer-foot">
 			<span>{body.length} / 280</span>
-			<button type="submit" disabled={sending}>
+			<button disabled={sending} type="submit">
 				{sending ? "Posting…" : "Post to the wall"}
 			</button>
 		</div>
@@ -172,14 +172,14 @@ async function react(message: Message, reaction: Reaction): Promise<void> {
 	<div class="error" role="alert">{error}</div>
 {/if}
 
-<section class="wall" aria-labelledby="wall-title" aria-live="polite" aria-busy={loading}>
+<section aria-busy={loading} aria-labelledby="wall-title" aria-live="polite" class="wall">
 	<div class="wall-head">
 		<h2 id="wall-title">The wall</h2>
 		<span>{messages.length} {messages.length === 1 ? "note" : "notes"}</span>
 	</div>
 
 	{#if loading}
-		<div class="skeleton" aria-label="Loading the wall">
+		<div aria-label="Loading the wall" class="skeleton">
 			<div></div>
 			<div></div>
 			<div></div>
@@ -194,7 +194,7 @@ async function react(message: Message, reaction: Reaction): Promise<void> {
 			{#each messages as message (message.id)}
 				<article class="message">
 					<header>
-						<div class="avatar" aria-hidden="true">
+						<div aria-hidden="true" class="avatar">
 							{message.name.charAt(0).toUpperCase()}
 						</div>
 						<div>
@@ -203,13 +203,13 @@ async function react(message: Message, reaction: Reaction): Promise<void> {
 						</div>
 					</header>
 					<p>{message.body}</p>
-					<div class="reactions" aria-label={`Reactions from ${message.name}`}>
+					<div aria-label={`Reactions from ${message.name}`} class="reactions">
 						{#each reactionOptions as option (option.key)}
 							<button
-								type="button"
-								onclick={() => react(message, option.key)}
 								aria-label={`React with ${option.label}`}
+								onclick={() => react(message, option.key)}
 								title={`React with ${option.label}`}
+								type="button"
 							>
 								<span aria-hidden="true">{option.emoji}</span>
 								<span>{message.reactions[option.key]}</span>
@@ -225,20 +225,20 @@ async function react(message: Message, reaction: Reaction): Promise<void> {
 <style>
 .hero {
 	display: flex;
+	flex-wrap: wrap;
+	gap: 28px;
 	align-items: flex-end;
 	justify-content: space-between;
-	gap: 28px;
-	flex-wrap: wrap;
 	margin-bottom: 30px;
 }
 
 .eyebrow {
-	color: var(--accent);
+	margin-bottom: 10px;
 	font-size: 0.72rem;
 	font-weight: 750;
-	letter-spacing: 0.13em;
+	color: var(--accent);
 	text-transform: uppercase;
-	margin-bottom: 10px;
+	letter-spacing: 0.13em;
 }
 
 h1 {
@@ -247,15 +247,15 @@ h1 {
 }
 
 h1 em {
-	color: var(--accent);
 	font-style: normal;
+	color: var(--accent);
 }
 
 .lede {
 	max-width: 620px;
 	margin-top: 14px;
-	color: var(--muted);
 	font-size: 1.02rem;
+	color: var(--muted);
 }
 
 .scoreboard {
@@ -266,10 +266,10 @@ h1 em {
 .scoreboard div {
 	min-width: 92px;
 	padding: 13px 16px;
+	text-align: center;
 	background: var(--card);
 	border: 1px solid var(--line);
 	border-radius: 14px;
-	text-align: center;
 	box-shadow: 0 8px 20px rgba(60, 45, 20, 0.04);
 }
 
@@ -281,27 +281,27 @@ h1 em {
 }
 
 .scoreboard span {
-	color: var(--muted);
 	font-size: 0.68rem;
-	letter-spacing: 0.1em;
+	color: var(--muted);
 	text-transform: uppercase;
+	letter-spacing: 0.1em;
 }
 
 .composer {
+	padding: 22px;
+	margin-bottom: 22px;
 	background: var(--card);
 	border: 1px solid var(--line);
 	border-radius: var(--radius);
-	padding: 22px;
 	box-shadow: var(--shadow);
-	margin-bottom: 22px;
 }
 
 .section-head {
 	display: flex;
+	flex-wrap: wrap;
+	gap: 16px;
 	align-items: baseline;
 	justify-content: space-between;
-	gap: 16px;
-	flex-wrap: wrap;
 	margin-bottom: 14px;
 }
 
@@ -310,8 +310,8 @@ h1 em {
 }
 
 .section-head span {
-	color: var(--muted);
 	font-size: 0.78rem;
+	color: var(--muted);
 }
 
 .fields {
@@ -327,23 +327,23 @@ label {
 }
 
 label > span {
-	color: var(--muted);
 	font-size: 0.68rem;
 	font-weight: 650;
-	letter-spacing: 0.1em;
+	color: var(--muted);
 	text-transform: uppercase;
+	letter-spacing: 0.1em;
 }
 
 input,
 textarea {
 	width: 100%;
+	padding: 10px 12px;
+	color: var(--ink);
+	resize: vertical;
+	outline: none;
+	background: #fff;
 	border: 1px solid var(--line);
 	border-radius: 11px;
-	background: #fff;
-	color: var(--ink);
-	padding: 10px 12px;
-	outline: none;
-	resize: vertical;
 }
 
 input:focus,
@@ -354,26 +354,26 @@ textarea:focus {
 
 .composer-foot {
 	display: flex;
+	gap: 16px;
 	align-items: center;
 	justify-content: space-between;
-	gap: 16px;
 	margin-top: 12px;
 }
 
 .composer-foot > span {
-	color: var(--muted);
 	font-size: 0.74rem;
 	font-variant-numeric: tabular-nums;
+	color: var(--muted);
 }
 
 .composer-foot button {
-	border: 0;
-	border-radius: 10px;
-	background: var(--accent);
-	color: #fff;
 	padding: 10px 16px;
 	font-size: 0.84rem;
 	font-weight: 750;
+	color: #fff;
+	background: var(--accent);
+	border: 0;
+	border-radius: 10px;
 }
 
 .composer-foot button:hover {
@@ -386,20 +386,20 @@ textarea:focus {
 }
 
 .error {
-	margin-bottom: 22px;
 	padding: 11px 14px;
+	margin-bottom: 22px;
+	font-size: 0.88rem;
+	color: #7d2a12;
+	background: #fbe5df;
 	border: 1px solid #e9b9aa;
 	border-radius: 12px;
-	background: #fbe5df;
-	color: #7d2a12;
-	font-size: 0.88rem;
 }
 
 .wall-head {
 	display: flex;
+	gap: 16px;
 	align-items: baseline;
 	justify-content: space-between;
-	gap: 16px;
 	margin-bottom: 12px;
 }
 
@@ -408,8 +408,8 @@ textarea:focus {
 }
 
 .wall-head span {
-	color: var(--muted);
 	font-size: 0.78rem;
+	color: var(--muted);
 }
 
 .messages {
@@ -418,17 +418,17 @@ textarea:focus {
 }
 
 .message {
+	padding: 18px 19px;
 	background: var(--card);
 	border: 1px solid var(--line);
 	border-radius: var(--radius);
-	padding: 18px 19px;
 	box-shadow: 0 4px 14px rgba(60, 45, 20, 0.035);
 }
 
 .message header {
 	display: flex;
-	align-items: center;
 	gap: 11px;
+	align-items: center;
 	margin-bottom: 10px;
 }
 
@@ -437,11 +437,11 @@ textarea:focus {
 	place-items: center;
 	width: 36px;
 	height: 36px;
-	border-radius: 50%;
-	background: var(--teal-soft);
-	color: var(--teal);
-	font-weight: 800;
 	font-size: 0.95rem;
+	font-weight: 800;
+	color: var(--teal);
+	background: var(--teal-soft);
+	border-radius: 50%;
 }
 
 .message h3 {
@@ -450,44 +450,44 @@ textarea:focus {
 
 .message time {
 	display: block;
-	color: var(--muted);
-	font-size: 0.72rem;
 	margin-top: 1px;
+	font-size: 0.72rem;
+	color: var(--muted);
 }
 
 .message > p {
-	color: #364043;
 	font-size: 0.95rem;
-	white-space: pre-wrap;
+	color: #364043;
 	overflow-wrap: anywhere;
+	white-space: pre-wrap;
 }
 
 .reactions {
 	display: flex;
-	gap: 7px;
 	flex-wrap: wrap;
-	margin-top: 14px;
+	gap: 7px;
 	padding-top: 12px;
+	margin-top: 14px;
 	border-top: 1px dashed var(--line);
 }
 
 .reactions button {
 	display: inline-flex;
-	align-items: center;
 	gap: 6px;
-	border: 1px solid var(--line);
-	border-radius: 999px;
-	background: transparent;
-	color: var(--muted);
+	align-items: center;
 	padding: 4px 9px;
 	font-size: 0.78rem;
 	font-variant-numeric: tabular-nums;
+	color: var(--muted);
+	background: transparent;
+	border: 1px solid var(--line);
+	border-radius: 999px;
 }
 
 .reactions button:hover {
-	border-color: var(--accent);
-	background: var(--accent-soft);
 	color: var(--accent-deep);
+	background: var(--accent-soft);
+	border-color: var(--accent);
 }
 
 .skeleton {
@@ -497,19 +497,19 @@ textarea:focus {
 
 .skeleton div {
 	height: 124px;
-	border-radius: var(--radius);
 	background: linear-gradient(90deg, var(--card), var(--paper-deep), var(--card));
 	background-size: 200% 100%;
-	animation: shimmer 1.4s infinite;
 	border: 1px solid var(--line);
+	border-radius: var(--radius);
+	animation: shimmer 1.4s infinite;
 }
 
 .empty {
 	padding: 38px;
+	text-align: center;
+	background: var(--card);
 	border: 1px dashed var(--line);
 	border-radius: var(--radius);
-	background: var(--card);
-	text-align: center;
 }
 
 .empty p {
@@ -517,8 +517,8 @@ textarea:focus {
 }
 
 .empty span {
-	color: var(--muted);
 	font-size: 0.86rem;
+	color: var(--muted);
 }
 
 @keyframes shimmer {
