@@ -29,6 +29,8 @@ laptop. Nothing is compiled on the serving node, and the app is a standard
   - `example/hello` – returns the method and path.
   - `example/notes` – JSON notes persisted in a real `notes` table through
     the supervisor's SQLite service.
+  - `example/shelf` – link shelf with tags, search, pagination and click
+    analytics.
 - `supervisor/` – runs apps, proxies by `Host`, deploys bundles blue/green.
 - `deploy/` – builds, precompiles and uploads an app.
 
