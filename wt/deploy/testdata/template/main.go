@@ -2,25 +2,22 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"embed"
-	"encoding/hex"
 	"encoding/json/v2"
 	"fmt"
 	"io/fs"
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"__CONTRACT_IMPORT__"
+	"wt.packages/app"
 	"wt.packages/storage"
 	wasihttp "wt.packages/wasihttp"
 )
 
 const (
-	timeFormat   = "2006-01-02T15:04:05.000000000Z07:00"
 	maxBody      = 16 << 10
 	defaultLimit = 50
 	maxLimit     = 100
@@ -40,30 +37,9 @@ type notesResponse struct {
 }
 
 var (
-	store       *storage.Client
-	storeErr    error
-	schemaMu    sync.Mutex
-	schemaReady bool
+	store    *storage.Client
+	storeErr error
 )
-
-func newID() string {
-	var b [8]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return fmt.Sprintf("%d", time.Now().UnixNano())
-	}
-	return hex.EncodeToString(b[:])
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("content-type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	data, _ := json.Marshal(value)
-	_, _ = w.Write(append(data, '\n'))
-}
-
-func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, map[string]string{"error": message})
-}
 
 func lowerFieldName(message string) string {
 	const prefix = "field "
@@ -95,18 +71,13 @@ func requestError(err error) string {
 func readJSON(w http.ResponseWriter, r *http.Request, out any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
 	if err := json.UnmarshalRead(r.Body, out); err != nil {
-		writeError(w, http.StatusBadRequest, requestError(err))
+		app.WriteError(w, http.StatusBadRequest, requestError(err))
 		return false
 	}
 	return true
 }
 
-func ensureSchema(ctx context.Context) error {
-	schemaMu.Lock()
-	defer schemaMu.Unlock()
-	if schemaReady {
-		return nil
-	}
+func migrate(ctx context.Context) error {
 	_, err := store.Exec(ctx, `create table if not exists notes (
 		id text primary key,
 		text text not null,
@@ -119,8 +90,7 @@ func ensureSchema(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	schemaReady = true
-	return nil
+	return err
 }
 
 func handleListNotes(w http.ResponseWriter, r *http.Request) {
@@ -128,7 +98,7 @@ func handleListNotes(w http.ResponseWriter, r *http.Request) {
 	if value := r.URL.Query().Get("limit"); value != "" {
 		parsed, err := strconv.Atoi(value)
 		if err != nil || parsed < 1 {
-			writeError(w, http.StatusBadRequest, "limit must be a positive integer")
+			app.WriteError(w, http.StatusBadRequest, "limit must be a positive integer")
 			return
 		}
 		limit = min(parsed, maxLimit)
@@ -136,7 +106,7 @@ func handleListNotes(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := store.Query(r.Context(), `select id, text, created_at from notes order by created_at desc limit ?`, limit)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		app.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer rows.Close()
@@ -145,16 +115,16 @@ func handleListNotes(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var item note
 		if err := rows.Scan(&item.ID, &item.Text, &item.CreatedAt); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			app.WriteError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		out = append(out, item)
 	}
 	if err := rows.Err(); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		app.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, notesResponse{Notes: out})
+	app.WriteJSON(w, http.StatusOK, notesResponse{Notes: out})
 }
 
 func handleCreateNote(w http.ResponseWriter, r *http.Request) {
@@ -164,16 +134,16 @@ func handleCreateNote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	item := note{
-		ID:        newID(),
+		ID:        app.NewID(),
 		Text:      strings.TrimSpace(request.Text),
-		CreatedAt: time.Now().UTC().Format(timeFormat),
+		CreatedAt: time.Now().UTC().Format(app.TimestampFormat),
 	}
 	if _, err := store.Exec(r.Context(), `insert into notes (id, text, created_at) values (?, ?, ?)`,
 		item.ID, item.Text, item.CreatedAt); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		app.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusCreated, item)
+	app.WriteJSON(w, http.StatusCreated, item)
 }
 
 func init() {
@@ -198,17 +168,7 @@ func init() {
 		files.ServeHTTP(w, r)
 	}))
 
-	wasihttp.Handle(func(w http.ResponseWriter, r *http.Request) {
-		if storeErr != nil {
-			http.Error(w, "storage unavailable: "+storeErr.Error(), http.StatusServiceUnavailable)
-			return
-		}
-		if err := ensureSchema(r.Context()); err != nil {
-			http.Error(w, "storage schema: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		mux.ServeHTTP(w, r)
-	})
+	wasihttp.Handle(app.ServeStorage(storeErr, migrate, mux))
 }
 
 func main() {}

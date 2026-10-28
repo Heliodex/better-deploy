@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"wt.packages/app"
 )
 
 //go:embed templates/*.html
@@ -35,7 +37,7 @@ func templateFuncs() template.FuncMap {
 			if value == "" {
 				return "never"
 			}
-			parsed, err := time.Parse(timeFormat, value)
+			parsed, err := time.Parse(app.TimestampFormat, value)
 			if err != nil {
 				return value
 			}

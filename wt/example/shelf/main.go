@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -12,15 +10,14 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
+	"wt.packages/app"
 	"wt.packages/storage"
 	wasihttp "wt.packages/wasihttp"
 )
 
 const (
-	timeFormat     = "2006-01-02T15:04:05.000000000Z07:00"
 	pageSize       = 12
 	maxTags        = 8
 	maxTitle       = 200
@@ -98,11 +95,9 @@ type detailData struct {
 }
 
 var (
-	store       *storage.Client
-	storeErr    error
-	schemaMu    sync.Mutex
-	schemaReady bool
-	mux         *http.ServeMux
+	store    *storage.Client
+	storeErr error
+	mux      *http.ServeMux
 )
 
 func init() {
@@ -115,27 +110,12 @@ func init() {
 	mux.HandleFunc("POST /links/{id}/delete", handleDelete)
 	mux.HandleFunc("GET /go/{id}", handleGo)
 
-	wasihttp.Handle(func(w http.ResponseWriter, r *http.Request) {
-		if storeErr != nil {
-			http.Error(w, "storage unavailable: "+storeErr.Error(), http.StatusServiceUnavailable)
-			return
-		}
-		if err := ensureSchema(r.Context()); err != nil {
-			http.Error(w, "storage schema: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		mux.ServeHTTP(w, r)
-	})
+	wasihttp.Handle(app.ServeStorage(storeErr, migrate, mux).ServeHTTP)
 }
 
 func main() {}
 
-func ensureSchema(ctx context.Context) error {
-	schemaMu.Lock()
-	defer schemaMu.Unlock()
-	if schemaReady {
-		return nil
-	}
+func migrate(ctx context.Context) error {
 	_, err := store.Batch(ctx,
 		storage.Statement{SQL: `create table if not exists links (
 			id text primary key,
@@ -165,11 +145,7 @@ func ensureSchema(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := seed(ctx); err != nil {
-		return err
-	}
-	schemaReady = true
-	return nil
+	return seed(ctx)
 }
 
 func seed(ctx context.Context) error {
@@ -204,7 +180,7 @@ func seed(ctx context.Context) error {
 
 	statements := make([]storage.Statement, 0, 64)
 	for i, seed := range seeds {
-		createdAt := now.Add(-time.Duration(i*2) * 24 * time.Hour).Format(timeFormat)
+		createdAt := now.Add(-time.Duration(i*2) * 24 * time.Hour).Format(app.TimestampFormat)
 		statements = append(statements, storage.Statement{
 			SQL:  `insert or ignore into links (id, url, title, description, created_at) values (?, ?, ?, ?, ?)`,
 			Args: []any{seed.id, seed.url, seed.title, seed.description, createdAt},
@@ -216,7 +192,7 @@ func seed(ctx context.Context) error {
 			})
 		}
 		for n := range seed.clicks {
-			clickedAt := now.Add(-time.Duration(((n/2)*3+i)%14) * 24 * time.Hour).Add(time.Duration(n) * time.Hour).Format(timeFormat)
+			clickedAt := now.Add(-time.Duration(((n/2)*3+i)%14) * 24 * time.Hour).Add(time.Duration(n) * time.Hour).Format(app.TimestampFormat)
 			statements = append(statements, storage.Statement{
 				SQL:  `insert or ignore into clicks (id, link_id, clicked_at) values (?, ?, ?)`,
 				Args: []any{fmt.Sprintf("seed-%s-%d", seed.id, n), seed.id, clickedAt},
@@ -359,11 +335,11 @@ func handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := newID()
+	id := app.NewID()
 	statements := make([]storage.Statement, 0, 1+len(input.Tags))
 	statements = append(statements, storage.Statement{
 		SQL:  `insert into links (id, url, title, description, created_at) values (?, ?, ?, ?, ?)`,
-		Args: []any{id, input.URL, input.Title, input.Description, time.Now().UTC().Format(timeFormat)},
+		Args: []any{id, input.URL, input.Title, input.Description, time.Now().UTC().Format(app.TimestampFormat)},
 	})
 	for _, tag := range input.Tags {
 		statements = append(statements, storage.Statement{
@@ -413,7 +389,7 @@ func handleGo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := store.Exec(r.Context(), `insert into clicks (id, link_id, clicked_at) values (?, ?, ?)`,
-		newID(), id, time.Now().UTC().Format(timeFormat)); err != nil {
+		app.NewID(), id, time.Now().UTC().Format(app.TimestampFormat)); err != nil {
 		http.Error(w, "record click: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -655,12 +631,4 @@ func pageURL(q, tag string, page int) string {
 		return "/"
 	}
 	return "/?" + values.Encode()
-}
-
-func newID() string {
-	var b [8]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return fmt.Sprintf("%d", time.Now().UnixNano())
-	}
-	return hex.EncodeToString(b[:])
 }
