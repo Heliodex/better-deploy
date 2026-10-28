@@ -18,6 +18,7 @@ import {
 	subscribeLogs,
 } from "../lib/api"
 import ResourceChart from "../lib/ResourceChart.svelte"
+import StackedResourceChart from "../lib/StackedResourceChart.svelte"
 
 const MIN_SIDEBAR = 200
 const MAX_SIDEBAR = 520
@@ -59,6 +60,8 @@ let logPane = $state<HTMLDivElement | null>(null)
 let followLogs = $state(true)
 let minLevel = $state<LogLevel>("trace")
 let resourceHistory = $state<ResourceSample[]>([])
+let overviewHistories = $state<{ [_: string]: ResourceSample[] }>({})
+let overviewPending = $state<{ [_: string]: boolean }>({})
 
 function uptime(startedAt: string): string {
 	const seconds = Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1000))
@@ -100,6 +103,11 @@ function appendHistory(sample: ResourceSample): void {
 	resourceHistory = mergeHistory(resourceHistory, [sample])
 }
 
+function appendOverviewHistory(name: string, sample: ResourceSample): void {
+	if (Number.isNaN(Date.parse(sample.at))) return
+	overviewHistories[name] = mergeHistory(overviewHistories[name] ?? [], [sample])
+}
+
 async function loadResourceHistory(key: string, name: string): Promise<void> {
 	try {
 		const samples = await fetchResourceHistory(key, name)
@@ -109,6 +117,29 @@ async function loadResourceHistory(key: string, name: string): Promise<void> {
 		if (selected !== name) return
 		error = err instanceof Error ? err.message : "Could not load resource history."
 	}
+}
+
+async function loadOverviewHistory(key: string, name: string): Promise<void> {
+	if (overviewPending[name]) return
+	overviewPending[name] = true
+	try {
+		const samples = await fetchResourceHistory(key, name)
+		overviewHistories[name] = mergeHistory(overviewHistories[name] ?? [], samples)
+	} catch (err) {
+		if (selected === null) error = err instanceof Error ? err.message : "Could not load resource history."
+	} finally {
+		delete overviewPending[name]
+	}
+}
+
+/** Fetch five-minute histories for every app missing one, so the overview stacks have depth on first paint. */
+function ensureOverviewHistories(key: string): void {
+	for (const app of apps)
+		if ((overviewHistories[app.name] ?? []).length === 0) void loadOverviewHistory(key, app.name)
+
+	// Drop histories for apps that no longer exist, so their colours free up.
+	for (const name of Object.keys(overviewHistories))
+		if (!apps.some(app => app.name === name)) delete overviewHistories[name]
 }
 
 const logTimeFormat = new Intl.DateTimeFormat(undefined, {
@@ -153,11 +184,12 @@ function select(name: string | null): void {
 	closeLogs()
 	const url = name ? `?app=${encodeURIComponent(name)}` : window.location.pathname
 	window.history.replaceState(null, "", url)
-	if (token && name) {
+	if (!token) return
+	if (name) {
 		void loadDetail(token, name)
 		void loadResourceHistory(token, name)
 		openLogs(name)
-	}
+	} else ensureOverviewHistories(token)
 }
 
 async function loadDetail(key: string, name: string): Promise<void> {
@@ -211,6 +243,7 @@ async function refresh(key: string): Promise<void> {
 	try {
 		apps = await fetchApps(key)
 		if (selected) detail = await fetchApp(key, selected)
+		else ensureOverviewHistories(key)
 	} catch (err) {
 		error = err instanceof Error ? err.message : "Could not reach the supervisor."
 	} finally {
@@ -228,6 +261,16 @@ function connect(key: string): void {
 	stopStream = subscribe(
 		updated => {
 			apps = updated
+			for (const app of updated)
+				appendOverviewHistory(app.name, {
+					at: app.sampledAt,
+					cpuPercent: app.cpuPercent,
+					memoryBytes: app.memoryBytes,
+				})
+
+			for (const name of Object.keys(overviewHistories))
+				if (!updated.some(app => app.name === name)) delete overviewHistories[name]
+
 			if (selected) {
 				const current = updated.find(app => app.name === selected)
 				if (current) {
@@ -238,7 +281,8 @@ function connect(key: string): void {
 						memoryBytes: current.memoryBytes,
 					})
 				}
-			}
+			} else ensureOverviewHistories(key)
+
 			loading = false
 			error = ""
 		},
@@ -404,6 +448,16 @@ async function upload(event: SubmitEvent): Promise<void> {
 
 /** Lines at or above the selected severity, in the same order as the stream. */
 const filteredLogs = $derived(logs.filter(entry => logLevels.indexOf(entry.level) >= logLevels.indexOf(minLevel)))
+
+/** One stacked series per known app, so the overview charts share colours and depth. */
+const overviewSeries = $derived(
+	apps
+		.toSorted((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+		.map(app => ({
+			name: app.name,
+			samples: overviewHistories[app.name] ?? [],
+		})),
+)
 
 const levelClasses: { [_: string]: string } = {
 	debug: "text-neutral-500",
@@ -691,9 +745,36 @@ onMount((): (() => void) => {
 							{error}
 						</p>
 					</div>
-				{:else}
+				{:else if apps.length === 0}
 					<div class="flex flex-1 items-center justify-center p-4">
-						<p class="text-sm text-neutral-500">Select an app to inspect it.</p>
+						<p class="text-sm text-neutral-500">
+							{loading ? "Loading apps…" : "No apps deployed."}
+						</p>
+					</div>
+				{:else}
+					<div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
+						<section aria-labelledby="overview-title" class="flex flex-col gap-2">
+							<h2
+								class="text-xs font-semibold tracking-wide text-neutral-400 uppercase"
+								id="overview-title"
+							>
+								All apps
+							</h2>
+							<div class="grid gap-4 sm:grid-cols-2">
+								<StackedResourceChart
+									format={formatCPU}
+									label="CPU"
+									series={overviewSeries}
+									value={(sample: ResourceSample) => sample.cpuPercent}
+								/>
+								<StackedResourceChart
+									format={formatMemory}
+									label="Memory"
+									series={overviewSeries}
+									value={(sample: ResourceSample) => sample.memoryBytes}
+								/>
+							</div>
+						</section>
 					</div>
 				{/if}
 			</main>
