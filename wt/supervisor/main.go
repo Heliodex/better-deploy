@@ -6,6 +6,7 @@ package main
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"crypto/subtle"
 	"encoding/json/v2"
 	"errors"
@@ -51,7 +52,21 @@ type appConfig struct {
 	Env      map[string]string `json:"env"`
 	Build    string            `json:"build,omitempty"`
 	MemoryMB int               `json:"memory_mb,omitempty"`
+	Schedule []scheduleConfig  `json:"schedule,omitempty"`
 }
+
+// scheduleConfig asks the supervisor to call an app endpoint on a timer. Components cannot run their own background loops under `wasmtime serve`, so time is driven from the host.
+type scheduleConfig struct {
+	Method string `json:"method,omitempty"`
+	Path   string `json:"path"`
+	Every  string `json:"every"`
+}
+
+const (
+	defaultScheduleMethod = http.MethodPost
+	minScheduleInterval   = time.Second
+	maxScheduleInterval   = 24 * time.Hour
+)
 
 type app struct {
 	name, dir string
@@ -64,6 +79,7 @@ type app struct {
 	logs      *appLog
 
 	mu              sync.Mutex
+	scheduleCancel  context.CancelFunc
 	cmd             *exec.Cmd
 	done            chan struct{}
 	exited, retired bool
@@ -183,7 +199,28 @@ func readAppConfig(dir, name, domain string) (appConfig, error) {
 	if cfg.Env == nil {
 		cfg.Env = map[string]string{}
 	}
+	for i := range cfg.Schedule {
+		entry := &cfg.Schedule[i]
+		if !strings.HasPrefix(entry.Path, "/") {
+			return cfg, fmt.Errorf("schedule[%d]: path must start with /", i)
+		}
+		if _, err := parseScheduleInterval(*entry); err != nil {
+			return cfg, fmt.Errorf("schedule[%d]: %w", i, err)
+		}
+	}
 	return cfg, nil
+}
+
+// parseScheduleInterval validates an entry's period and reports how often it fires.
+func parseScheduleInterval(entry scheduleConfig) (time.Duration, error) {
+	every, err := time.ParseDuration(entry.Every)
+	if err != nil {
+		return 0, fmt.Errorf("invalid every %q: use a duration such as 10s", entry.Every)
+	}
+	if every < minScheduleInterval || every > maxScheduleInterval {
+		return 0, fmt.Errorf("every %q must be between %s and %s", entry.Every, minScheduleInterval, maxScheduleInterval)
+	}
+	return every, nil
 }
 
 func freePort() (int, error) {
@@ -360,7 +397,12 @@ func (s *supervisor) stop(a *app) {
 		a.timer.Stop()
 		a.timer = nil
 	}
+	cancel := a.scheduleCancel
+	a.scheduleCancel = nil
 	a.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 	s.kill(a)
 }
 
@@ -516,6 +558,7 @@ func (s *supervisor) spawn(name, dir string, cfg appConfig, port int) (*app, err
 		s.stop(a)
 		return nil, err
 	}
+	s.startSchedule(a)
 	return a, nil
 }
 

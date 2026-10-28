@@ -31,7 +31,8 @@ laptop. Nothing is compiled on the serving node, and the app is a standard
     the supervisor's SQLite service.
   - `example/shelf` – link shelf with tags, search, pagination and click
     analytics.
-  - `example/ticker` – holds one SSE connection open and logs a `ticker beat N` line about every 10 seconds, paced by outbound HTTP round trips so the supervisor log tail has a steady stream to show.
+  - `example/ticker` – logs a `ticker beat` line every 10 seconds from an
+    `app.json` schedule, so the supervisor log tail has a steady stream to show.
   - `example/guestbook` – SvelteKit static frontend with a Go JSON API,
     embedded into one wasm component.
 - `supervisor/` – runs apps, proxies by `Host`, deploys bundles blue/green.
@@ -175,11 +176,31 @@ wasmtime serve -Scli -Sp3 -S inherit-network -W component-model-async=y \
   main.cwasm
 ```
 
-`app.json` carries `name`, `host`, `health`, `env`, `memory_mb` and the local
-`build` command. `memory_mb`, when set, becomes wasmtime's
+`app.json` carries `name`, `host`, `health`, `env`, `memory_mb`, `schedule`
+and the local `build` command. `memory_mb`, when set, becomes wasmtime's
 `-W max-memory-size`. The runtime-only image has no compiler, so `main.wasm`
 cannot run there: `main.cwasm` is required. If it is missing or incompatible,
 the deploy fails and the old version keeps serving.
+
+## Scheduled work
+
+A component under `wasmtime serve` only runs while it is handling a request:
+instances are reused briefly between requests, and the guest is never scheduled
+while idle, so a goroutine with a timer cannot keep working on its own. Periodic
+work is therefore driven from the host by `schedule` entries in `app.json`:
+
+```json
+"schedule": [
+  { "method": "POST", "path": "/tick", "every": "10s" }
+]
+```
+
+The supervisor starts one goroutine per entry once the app is serving and
+cancels it when the app stops or is replaced. Calls are sequential, so a slow
+endpoint delays the next tick rather than piling requests up; failures and
+non-2xx responses are written to the app's log. `method` defaults to `POST`,
+`path` must start with `/`, and `every` is a Go duration between `1s` and `24h`.
+Limits are checked by both `wt-deploy` and the supervisor.
 
 ## Container
 

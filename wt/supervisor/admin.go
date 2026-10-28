@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -125,8 +126,12 @@ func (l *appLog) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// guestStderr matches wasmtime's prefix for a guest's own stderr/stdout, e.g. "stderr [1] :: ".
+var guestStderr = regexp.MustCompile(`^(?:stderr|stdout) \[\d+\] :: `)
+
 // writeLine stamps one complete line and appends it, rotating past maxLogBytes.
 func (l *appLog) writeLine(line string) error {
+	line = guestStderr.ReplaceAllString(line, "")
 	stamp := time.Now().UTC().Format(logTimeFormat)
 	data := []byte(stamp + " " + line + "\n")
 	if l.size+int64(len(data)) > maxLogBytes {

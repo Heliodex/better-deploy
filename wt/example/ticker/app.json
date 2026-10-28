@@ -3,5 +3,12 @@
 	"health": "/",
 	"host": "ticker.localhost",
 	"memory_mb": 128,
-	"name": "ticker"
+	"name": "ticker",
+	"schedule": [
+		{
+			"every": "10s",
+			"method": "POST",
+			"path": "/tick"
+		}
+	]
 }

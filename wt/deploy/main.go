@@ -30,7 +30,20 @@ type manifest struct {
 	Env      map[string]string `json:"env"`
 	Build    string            `json:"build"`
 	MemoryMB int               `json:"memory_mb,omitempty"`
+	Schedule []schedule        `json:"schedule,omitempty"`
 }
+
+// schedule is carried through the bundle so the supervisor can call the app on a timer.
+type schedule struct {
+	Method string `json:"method,omitempty"`
+	Path   string `json:"path"`
+	Every  string `json:"every"`
+}
+
+const (
+	minScheduleInterval = time.Second
+	maxScheduleInterval = 24 * time.Hour
+)
 
 type deployConfig struct {
 	dir, app, host, token, wasmtime, target, appHost, out string
@@ -80,6 +93,15 @@ func readManifest(dir string) (manifest, error) {
 	}
 	if !validName(m.Name) {
 		return m, fmt.Errorf("invalid app name %q", m.Name)
+	}
+	for i, entry := range m.Schedule {
+		if !strings.HasPrefix(entry.Path, "/") {
+			return m, fmt.Errorf("schedule[%d]: path must start with /", i)
+		}
+		every, err := time.ParseDuration(entry.Every)
+		if err != nil || every < minScheduleInterval || every > maxScheduleInterval {
+			return m, fmt.Errorf("schedule[%d]: every %q must be a duration between %s and %s", i, entry.Every, minScheduleInterval, maxScheduleInterval)
+		}
 	}
 	return m, nil
 }

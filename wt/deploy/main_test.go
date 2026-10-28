@@ -192,3 +192,31 @@ func TestDevEnv(t *testing.T) {
 		t.Error("parent WT_TOKEN leaked into dev env")
 	}
 }
+
+func TestReadManifestValidatesSchedule(t *testing.T) {
+	dir := t.TempDir()
+	write := func(body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write(`{"name":"demo","schedule":[{"path":"/tick","every":"10s"}]}`)
+	if _, err := readManifest(dir); err != nil {
+		t.Errorf("valid schedule rejected: %v", err)
+	}
+
+	for name, body := range map[string]string{
+		"no path":       `{"name":"demo","schedule":[{"every":"10s"}]}`,
+		"relative path": `{"name":"demo","schedule":[{"path":"tick","every":"10s"}]}`,
+		"bad interval":  `{"name":"demo","schedule":[{"path":"/tick","every":"often"}]}`,
+		"too fast":      `{"name":"demo","schedule":[{"path":"/tick","every":"100ms"}]}`,
+		"too slow":      `{"name":"demo","schedule":[{"path":"/tick","every":"48h"}]}`,
+	} {
+		write(body)
+		if _, err := readManifest(dir); err == nil {
+			t.Errorf("%s: expected an error", name)
+		}
+	}
+}

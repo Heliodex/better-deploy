@@ -354,3 +354,20 @@ func TestHandleLogStreamRequiresAuth(t *testing.T) {
 		t.Errorf("status = %d, want 401", rec.Code)
 	}
 }
+
+func TestAppLogStripsGuestPrefix(t *testing.T) {
+	logs, err := newAppLog(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(logs, "stderr [2] :: hello\n"); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := logs.tail(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Message != "hello" {
+		t.Errorf("entries = %+v, want one with message hello", entries)
+	}
+}
