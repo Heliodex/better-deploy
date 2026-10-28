@@ -180,10 +180,6 @@ function moveGrip(event: PointerEvent): void {
 	gripY = event.clientY - bounds.top
 }
 
-function resetGrip(): void {
-	gripY = null
-}
-
 async function submitToken(event: SubmitEvent): Promise<void> {
 	event.preventDefault()
 	const value = tokenInput.trim()
@@ -335,7 +331,7 @@ onMount((): (() => void) => {
 		</main>
 	{:else}
 		<div class="workspace" style="--sidebar-width: {sidebarWidth}px">
-			<aside aria-label="Apps" class="flex min-h-0 shrink-0 flex-col border-r border-line bg-surface">
+			<aside aria-label="Apps" class="flex min-h-0 shrink-0 flex-col bg-surface">
 				<header class="flex shrink-0 items-center justify-between gap-2 border-b border-line-soft px-3 py-2">
 					<h2 class="text-xs font-semibold tracking-wide text-neutral-400 uppercase">Apps</h2>
 					<button class="btn" disabled={loading} onclick={refreshList} type="button">
@@ -389,7 +385,6 @@ onMount((): (() => void) => {
 				class="resize-handle hover:bg-primary-500/10"
 				onkeydown={onSeparatorKeydown}
 				onpointerdown={startSidebarResize}
-				onpointerleave={resetGrip}
 				onpointermove={moveGrip}
 				role="separator"
 				tabindex="0"
@@ -397,7 +392,7 @@ onMount((): (() => void) => {
 				<span aria-hidden="true" class="resize-grip" style:top={gripY === null ? "50%" : `${gripY}px`}></span>
 			</div>
 
-			<main class="flex min-w-0 flex-1 flex-col bg-surface">
+			<main class="flex min-w-0 flex-1 flex-col bg-black">
 				{#if selected}
 					<header class="flex shrink-0 items-center gap-2 border-b border-line bg-surface px-3 py-2">
 						<h2 class="text-sm font-semibold tracking-tight">{selected}</h2>
@@ -520,6 +515,7 @@ onMount((): (() => void) => {
 
 <style>
 .workspace {
+	position: relative;
 	display: flex;
 	flex: 1;
 	min-height: 0;
@@ -529,11 +525,27 @@ onMount((): (() => void) => {
 	width: var(--sidebar-width);
 }
 
-/* The separator is a thin hit area; only its grip is visible, so the panes sit flush. */
+/* The separator rides on the pane boundary, so its grip sits exactly on the divider. */
 .resize-handle {
-	position: relative;
-	flex: 0 0 5px;
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: var(--sidebar-width);
+	z-index: 30;
+	width: 9px;
 	touch-action: none;
+	translate: -50% 0;
+}
+
+.resize-handle::before {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: 50%;
+	width: 1px;
+	content: "";
+	background: var(--color-line);
+	translate: -50% 0;
 }
 
 .resize-grip {
@@ -570,6 +582,7 @@ onMount((): (() => void) => {
 
 	.workspace > aside {
 		width: auto;
+		border-bottom: 1px solid var(--color-line);
 	}
 
 	.resize-handle {
