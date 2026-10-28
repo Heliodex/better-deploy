@@ -1,6 +1,6 @@
 // Command wt-supervisor runs WASI HTTP components with wasmtime and routes requests by host.
 //
-// Each app lives in its own directory under WT_APPS_DIR with an app.json, a main.wasm and optionally a precompiled main.cwasm. The supervisor starts one `wasmtime serve` process per app on a loopback port, proxies by Host, and deploys new bundles blue/green.
+// Each app lives in its own directory under WT_APPS_DIR with an app.json and a precompiled main.cwasm. The supervisor starts one `wasmtime serve` process per app on a loopback port, proxies by Host, and deploys new bundles blue/green.
 package main
 
 import (
@@ -252,18 +252,16 @@ func withLaunchLog(source string, recent *logRing, err error) error {
 	return fmt.Errorf("%w\n--- %s output ---\n%s", err, filepath.Base(source), tail)
 }
 
-func (s *supervisor) appArgs(a *app, source string, allowPrecompiled bool) []string {
+func (s *supervisor) appArgs(a *app, source string) []string {
 	args := []string{
 		"serve",
 		"-Scli",
 		"-Sp3",
 		"-S", "inherit-network",
 		"-W", "component-model-async=y",
+		"--allow-precompiled",
 		"--target", s.cfg.wasmtimeTarget,
 		"--addr", fmt.Sprintf("127.0.0.1:%d", a.port),
-	}
-	if allowPrecompiled {
-		args = append(args, "--allow-precompiled")
 	}
 	stateDir := filepath.Join(s.cfg.stateDir, a.name)
 	args = append(args, "--dir", stateDir+"::/data")
@@ -407,22 +405,12 @@ func (s *supervisor) restart(a *app) {
 	a.mu.Unlock()
 
 	cwasm := filepath.Join(dir, "main.cwasm")
-	wasm := filepath.Join(dir, "main.wasm")
-	if _, err := os.Stat(cwasm); err == nil {
-		err := s.launch(a, cwasm, true)
-		if err == nil {
-			return
-		}
-		log.Printf("app %s: precompiled component did not restart, falling back to wasm: %v", a.name, err)
-		s.kill(a)
-		s.cancelRestart(a)
-	}
-	if _, err := os.Stat(wasm); err != nil {
+	if _, err := os.Stat(cwasm); err != nil {
 		log.Printf("app %s: restart: %v", a.name, err)
 		s.scheduleRetry(a)
 		return
 	}
-	if err := s.launch(a, wasm, false); err != nil {
+	if err := s.launch(a, cwasm); err != nil {
 		log.Printf("app %s: restart: %v", a.name, err)
 		s.kill(a)
 		s.cancelRestart(a)
@@ -430,11 +418,11 @@ func (s *supervisor) restart(a *app) {
 	}
 }
 
-func (s *supervisor) launch(a *app, source string, allowPrecompiled bool) error {
+func (s *supervisor) launch(a *app, source string) error {
 	logging := log.New(os.Stderr, "["+a.name+"] ", 0).Writer()
 	recent := newLogRing()
 	out := io.MultiWriter(logging, recent)
-	cmd := exec.Command(s.cfg.wasmtime, s.appArgs(a, source, allowPrecompiled)...)
+	cmd := exec.Command(s.cfg.wasmtime, s.appArgs(a, source)...)
 	cmd.Env = minimalEnv()
 	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGTERM}
 	cmd.Stdout = out
@@ -499,34 +487,20 @@ func (s *supervisor) spawn(name, dir string, cfg appConfig, port int) (*app, err
 		return nil, fmt.Errorf("state dir: %w", err)
 	}
 
-	newApp := func() *app {
-		return &app{
-			name:    name,
-			dir:     dir,
-			port:    port,
-			cfg:     cfg,
-			done:    make(chan struct{}),
-			started: time.Now().UTC(),
-			delay:   time.Second,
-		}
-	}
-
 	cwasm := filepath.Join(dir, "main.cwasm")
-	wasm := filepath.Join(dir, "main.wasm")
-	if _, statErr := os.Stat(cwasm); statErr == nil {
-		a := newApp()
-		err := s.launch(a, cwasm, true)
-		if err == nil {
-			return a, nil
-		}
-		log.Printf("app %s: precompiled component did not start, falling back to wasm: %v", name, err)
-		s.stop(a)
+	if _, err := os.Stat(cwasm); err != nil {
+		return nil, fmt.Errorf("read main.cwasm: %w", err)
 	}
-	if _, err := os.Stat(wasm); err != nil {
-		return nil, fmt.Errorf("read main.wasm: %w", err)
+	a := &app{
+		name:    name,
+		dir:     dir,
+		port:    port,
+		cfg:     cfg,
+		done:    make(chan struct{}),
+		started: time.Now().UTC(),
+		delay:   time.Second,
 	}
-	a := newApp()
-	if err := s.launch(a, wasm, false); err != nil {
+	if err := s.launch(a, cwasm); err != nil {
 		s.stop(a)
 		return nil, err
 	}
@@ -797,8 +771,8 @@ func (s *supervisor) deploy(w http.ResponseWriter, r *http.Request, name string)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if _, err := os.Stat(filepath.Join(tmpDir, "main.wasm")); err != nil {
-		writeError(w, http.StatusBadRequest, "archive must contain main.wasm")
+	if _, err := os.Stat(filepath.Join(tmpDir, "main.cwasm")); err != nil {
+		writeError(w, http.StatusBadRequest, "archive must contain main.cwasm")
 		return
 	}
 

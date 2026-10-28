@@ -170,19 +170,14 @@ func bundle(dir string, m manifest) ([]byte, error) {
 	}{
 		{"app.json", append(appJSON, '\n')},
 	}
-	for _, name := range []string{"main.wasm", "main.cwasm"} {
-		data, err := os.ReadFile(filepath.Join(dir, name))
-		if os.IsNotExist(err) && name == "main.cwasm" {
-			continue
-		}
-		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", name, err)
-		}
-		entries = append(entries, struct {
-			name string
-			data []byte
-		}{name, data})
+	data, err := os.ReadFile(filepath.Join(dir, "main.cwasm"))
+	if err != nil {
+		return nil, fmt.Errorf("read main.cwasm: %w (did the compile run?)", err)
 	}
+	entries = append(entries, struct {
+		name string
+		data []byte
+	}{"main.cwasm", data})
 	for _, entry := range entries {
 		if err := tw.WriteHeader(&tar.Header{Name: entry.name, Mode: 0o644, Size: int64(len(entry.data))}); err != nil {
 			return nil, fmt.Errorf("write %s: %w", entry.name, err)

@@ -99,7 +99,7 @@ curl -H 'Host: hello.localhost' http://127.0.0.1:8080/hello
 ```
 
 `wt-deploy` reads `app.json`, runs its `build` command, precompiles
-`main.wasm` with `wasmtime compile`, and uploads `app.json`, `main.wasm` and
+`main.wasm` with `wasmtime compile`, and uploads `app.json` and
 `main.cwasm` as a gzipped tarball. `--app-host` overrides the host written
 into the uploaded `app.json`, which is useful when the supervisor sits behind
 a real ingress domain. The supervisor starts the new version on a
