@@ -61,6 +61,7 @@ type app struct {
 	started   time.Time
 	delay     time.Duration
 	timer     *time.Timer
+	logs      *appLog
 
 	mu      sync.Mutex
 	cmd     *exec.Cmd
@@ -421,7 +422,11 @@ func (s *supervisor) restart(a *app) {
 func (s *supervisor) launch(a *app, source string) error {
 	logging := log.New(os.Stderr, "["+a.name+"] ", 0).Writer()
 	recent := newLogRing()
-	out := io.MultiWriter(logging, recent)
+	writers := []io.Writer{logging, recent}
+	if a.logs != nil {
+		writers = append(writers, a.logs)
+	}
+	out := io.MultiWriter(writers...)
 	cmd := exec.Command(s.cfg.wasmtime, s.appArgs(a, source)...)
 	cmd.Env = minimalEnv()
 	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGTERM}
@@ -491,11 +496,16 @@ func (s *supervisor) spawn(name, dir string, cfg appConfig, port int) (*app, err
 	if _, err := os.Stat(cwasm); err != nil {
 		return nil, fmt.Errorf("read main.cwasm: %w", err)
 	}
+	logs, err := newAppLog(filepath.Join(s.cfg.stateDir, ".logs", name))
+	if err != nil {
+		return nil, fmt.Errorf("app logs: %w", err)
+	}
 	a := &app{
 		name:    name,
 		dir:     dir,
 		port:    port,
 		cfg:     cfg,
+		logs:    logs,
 		done:    make(chan struct{}),
 		started: time.Now().UTC(),
 		delay:   time.Second,
@@ -826,6 +836,9 @@ func (s *supervisor) handleApps(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !s.requireAuth(w, r) {
+		return
+	}
 	s.mu.RLock()
 	apps := make([]*app, 0, len(s.apps))
 	for _, a := range s.apps {
@@ -842,33 +855,75 @@ func (s *supervisor) handleApps(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
-	name := strings.TrimPrefix(r.URL.Path, "/apps/")
-	if name == "" || strings.Contains(name, "/") || !validName(name) {
+	rest := strings.TrimPrefix(r.URL.Path, "/apps/")
+	name, action, _ := strings.Cut(rest, "/")
+	if name == "" || !validName(name) {
 		http.Error(w, "invalid app name", http.StatusBadRequest)
 		return
 	}
 
-	switch r.Method {
-	case http.MethodGet:
-		s.mu.RLock()
-		a := s.apps[name]
-		s.mu.RUnlock()
+	switch action {
+	case "":
+		switch r.Method {
+		case http.MethodGet:
+			if !s.requireAuth(w, r) {
+				return
+			}
+			a := s.lookup(name)
+			if a == nil {
+				http.Error(w, "app not found", http.StatusNotFound)
+				return
+			}
+			writeJSON(w, http.StatusOK, s.info(a))
+		case http.MethodPost:
+			if !s.requireAuth(w, r) {
+				return
+			}
+			s.deploy(w, r, name)
+		default:
+			w.Header().Set("Allow", "GET, POST")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	case "logs":
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !s.requireAuth(w, r) {
+			return
+		}
+		a := s.lookup(name)
 		if a == nil {
 			http.Error(w, "app not found", http.StatusNotFound)
 			return
 		}
-		writeJSON(w, http.StatusOK, s.info(a))
-	case http.MethodPost:
-		if !s.authorized(r) {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="wt-supervisor"`)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		s.handleLogs(w, r, a)
+	case "restart":
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		s.deploy(w, r, name)
+		if !s.requireAuth(w, r) {
+			return
+		}
+		a := s.lookup(name)
+		if a == nil {
+			http.Error(w, "app not found", http.StatusNotFound)
+			return
+		}
+		s.handleRestart(w, r, a)
 	default:
-		w.Header().Set("Allow", "GET, POST")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "unknown endpoint", http.StatusNotFound)
 	}
+}
+
+// lookup returns the app with the given name, or nil.
+func (s *supervisor) lookup(name string) *app {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.apps[name]
 }
 
 func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
@@ -894,6 +949,10 @@ func (s *supervisor) handler() http.Handler {
 	})
 	mux.HandleFunc("/apps", s.handleApps)
 	mux.HandleFunc("/apps/", s.handleApp)
+	mux.HandleFunc("/admin", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/admin/", http.StatusFound)
+	})
+	mux.Handle("/admin/", http.StripPrefix("/admin", adminStatic()))
 	mux.HandleFunc("/", s.handleProxy)
 	return mux
 }

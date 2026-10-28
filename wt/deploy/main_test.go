@@ -57,6 +57,47 @@ func TestBundle(t *testing.T) {
 	}
 }
 
+func TestRunBundle(t *testing.T) {
+	dir := t.TempDir()
+	for name, body := range map[string]string{
+		"app.json":   `{"name":"hello"}`,
+		"main.wasm":  "wasm",
+		"main.cwasm": "cwasm",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out := filepath.Join(t.TempDir(), "hello.tar.gz")
+	if err := runBundle([]string{"--dir", dir, "--out", out, "--skip-build", "--skip-compile"}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gz, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gz.Close()
+	names := map[string]bool{}
+	tr := tar.NewReader(gz)
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		names[header.Name] = true
+	}
+	if !names["app.json"] || !names["main.cwasm"] || len(names) != 2 {
+		t.Errorf("bundle entries = %v", names)
+	}
+}
+
 func TestBaseURL(t *testing.T) {
 	for input, want := range map[string]string{
 		"http://127.0.0.1:8080":  "http://127.0.0.1:8080",

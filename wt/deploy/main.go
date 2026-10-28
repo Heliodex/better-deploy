@@ -33,8 +33,8 @@ type manifest struct {
 }
 
 type deployConfig struct {
-	dir, app, host, token, wasmtime, target, appHost string
-	skipBuild, skipCompile                           bool
+	dir, app, host, token, wasmtime, target, appHost, out string
+	skipBuild, skipCompile                                bool
 }
 
 type devConfig struct {
@@ -248,13 +248,22 @@ func deploy(args []string) error {
 	if err != nil {
 		return err
 	}
-	m, err := readManifest(cfg.dir)
+	m, data, err := buildBundle(cfg)
 	if err != nil {
 		return err
 	}
+	return upload(cfg, m, data)
+}
+
+// buildBundle runs the app build, precompiles the component and packs the upload artifact.
+func buildBundle(cfg *deployConfig) (manifest, []byte, error) {
+	m, err := readManifest(cfg.dir)
+	if err != nil {
+		return m, nil, err
+	}
 	if cfg.app != "" {
 		if !validName(cfg.app) {
-			return fmt.Errorf("invalid app name %q", cfg.app)
+			return m, nil, fmt.Errorf("invalid app name %q", cfg.app)
 		}
 		m.Name = cfg.app
 	}
@@ -262,16 +271,61 @@ func deploy(args []string) error {
 		m.Host = cfg.appHost
 	}
 	if err := runBuild(cfg, m); err != nil {
-		return err
+		return m, nil, err
 	}
 	if err := runCompile(cfg); err != nil {
-		return err
+		return m, nil, err
 	}
-	bundle, err := bundle(cfg.dir, m)
+	data, err := bundle(cfg.dir, m)
+	if err != nil {
+		return m, nil, err
+	}
+	return m, data, nil
+}
+
+func resolveBundleConfig(args []string) (*deployConfig, error) {
+	flags := flag.NewFlagSet("bundle", flag.ContinueOnError)
+	dir := flags.String("dir", ".", "app directory containing app.json")
+	wasmtime := flags.String("wasmtime", env("WT_WASMTIME", "wasmtime"), "wasmtime binary")
+	target := flags.String("target", env("WT_WASMTIME_TARGET", "x86_64-unknown-linux-musl"), "wasmtime compile target")
+	out := flags.String("out", "", "output file (default <name>.tar.gz)")
+	skipBuild := flags.Bool("skip-build", false, "skip running app.json's build command")
+	skipCompile := flags.Bool("skip-compile", false, "reuse an existing main.cwasm")
+	if err := flags.Parse(args); err != nil {
+		return nil, err
+	}
+	if flags.NArg() > 0 {
+		return nil, fmt.Errorf("unexpected argument %q", flags.Arg(0))
+	}
+	return &deployConfig{
+		dir:         *dir,
+		wasmtime:    *wasmtime,
+		target:      *target,
+		skipBuild:   *skipBuild,
+		skipCompile: *skipCompile,
+		out:         *out,
+	}, nil
+}
+
+// runBundle builds the deploy artifact into a file instead of uploading it, for CI or manual upload.
+func runBundle(args []string) error {
+	cfg, err := resolveBundleConfig(args)
 	if err != nil {
 		return err
 	}
-	return upload(cfg, m, bundle)
+	m, data, err := buildBundle(cfg)
+	if err != nil {
+		return err
+	}
+	out := cfg.out
+	if out == "" {
+		out = m.Name + ".tar.gz"
+	}
+	if err := os.WriteFile(out, data, 0o644); err != nil {
+		return fmt.Errorf("write bundle: %w", err)
+	}
+	fmt.Println("wrote", out)
+	return nil
 }
 
 func resolveDevConfig(args []string) (*devConfig, error) {
@@ -545,12 +599,15 @@ func main() {
 	switch command {
 	case "deploy":
 		err = deploy(args)
+	case "bundle":
+		err = runBundle(args)
 	case "dev":
 		err = runDev(args)
 	case "new":
 		err = runNew(args)
 	case "help", "-h", "--help":
 		fmt.Println("usage: wt-deploy deploy [--dir DIR] [--host URL] [--token TOKEN] [--wasmtime PATH] [--skip-build] [--skip-compile]")
+		fmt.Println("       wt-deploy bundle --dir DIR --out app.tar.gz [--wasmtime PATH] [--skip-build] [--skip-compile]")
 		fmt.Println("       wt-deploy dev [--dir DIR] [--port 8080] [--wasmtime PATH]")
 		fmt.Println("       wt-deploy new --dir wt/example/NAME")
 	default:

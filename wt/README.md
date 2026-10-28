@@ -34,6 +34,8 @@ laptop. Nothing is compiled on the serving node, and the app is a standard
   - `example/guestbook` – SvelteKit static frontend with a Go JSON API,
     embedded into one wasm component.
 - `supervisor/` – runs apps, proxies by `Host`, deploys bundles blue/green.
+  - `supervisor/web` – SvelteKit admin panel, embedded into the supervisor
+    binary (not tracked: `web/build`, `web/node_modules`, `web/.svelte-kit`).
 - `deploy/` – builds, precompiles and uploads an app.
 
 ## Requirements
@@ -56,7 +58,7 @@ laptop. Nothing is compiled on the serving node, and the app is a standard
 ## Build the supervisor and CLI
 
 ```sh
-cd wt/supervisor && go build -o /tmp/wt-supervisor .
+cd wt/supervisor && go generate ./... && go build -o /tmp/wt-supervisor .
 cd wt/deploy && go build -o /tmp/wt-deploy .
 ```
 
@@ -81,6 +83,27 @@ The proxy preserves the original `Host` and sets `X-Forwarded-Host` and
 The supervisor scans `WT_APPS_DIR` at boot, starts every app found there, and
 serves `GET /apps`, `GET /apps/<name>` and `POST /apps/<name>` (deploy, bearer
 token). `/healthz` is the supervisor's own health check.
+
+## Admin panel
+
+The supervisor serves a small admin panel at `/admin/` on its own address
+(for example `http://127.0.0.1:8080/admin/` locally, or the deploy host in
+production). It lists apps with status and uptime, shows recent logs per app,
+restarts apps, and uploads new bundles. Every endpoint except `/healthz`
+requires the deploy bearer token, which the panel asks for once and keeps in
+the browser's local storage.
+
+To deploy from the panel without the CLI, build the bundle first and upload
+the file:
+
+```sh
+/tmp/wt-deploy bundle --dir wt/example/guestbook --out /tmp/guestbook.tar.gz \
+  --wasmtime /path/to/wasmtime
+```
+
+Then choose the file in the app's deploy form. The same bundle file works
+with `curl -F artifact=@/tmp/guestbook.tar.gz` against
+`POST /apps/<name>`, which is useful for CI.
 
 ## Deploy an example
 

@@ -1,0 +1,27 @@
+{
+	"name": "admin",
+	"version": "0.0.1",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"build": "vite build",
+		"dev": "vite dev",
+		"lint": "oxlint --fix; biome check --fix",
+		"prepare": "svelte-kit sync || echo ''",
+		"preview": "vite preview",
+		"svelte:check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"svelte:check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
+	},
+	"dependencies": {
+		"valibot": "^1.5.0"
+	},
+	"devDependencies": {
+		"@sveltejs/adapter-static": "^4.0.0",
+		"@sveltejs/kit": "^3.0.0",
+		"@sveltejs/vite-plugin-svelte": "^7.2.0",
+		"svelte": "^5.57.1",
+		"svelte-check": "^4.6.0",
+		"typescript": "^6.0.3",
+		"vite": "^8.3.0"
+	}
+}

@@ -11,3 +11,6 @@ example/*/web/build/
 example/*/web/.svelte-kit/
 example/*/contract/*.gen.go
 example/*/contract/schemas/
+supervisor/web/build/
+supervisor/web/node_modules/
+supervisor/web/.svelte-kit/
