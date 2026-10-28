@@ -110,7 +110,7 @@ func TestRunNew(t *testing.T) {
 		"app.json",
 		"main.go",
 		".gitignore",
-		"contract/generate.sh",
+		"contract/generate.go",
 		"web/package.json",
 		"web/src/lib/api.ts",
 		"web/src/lib/contract.ts",
@@ -149,12 +149,12 @@ func TestRunNew(t *testing.T) {
 		t.Errorf("main.go does not parse: %v", err)
 	}
 
-	info, err := os.Stat(filepath.Join(dir, "contract", "generate.sh"))
+	generate, err := os.ReadFile(filepath.Join(dir, "contract", "generate.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode()&0o111 == 0 {
-		t.Errorf("generate.sh is not executable: %v", info.Mode())
+	if !strings.Contains(string(generate), "//go:generate") {
+		t.Errorf("contract/generate.go has no go:generate directives:\n%s", generate)
 	}
 
 	if err := runNew([]string{"--dir", dir}); err == nil {

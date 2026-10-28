@@ -128,11 +128,7 @@ func runNew(args []string) error {
 		}
 		out := strings.ReplaceAll(string(data), newNameToken, name)
 		out = strings.ReplaceAll(out, newContractToken, contractImport)
-		mode := os.FileMode(0o644)
-		if rel == "contract/generate.sh" {
-			mode = 0o755
-		}
-		if err := os.WriteFile(dst, []byte(out), mode); err != nil {
+		if err := os.WriteFile(dst, []byte(out), 0o644); err != nil {
 			return err
 		}
 		count++

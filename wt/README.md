@@ -43,9 +43,8 @@ laptop. Nothing is compiled on the serving node, and the app is a standard
   downloads the patched Go it needs for async components.
 - The `example/guestbook` build also needs Bun. It runs `bun install` and
   `bun run build` in `example/guestbook/web`, then embeds the static output.
-  `example/guestbook/contract/generate.sh` turns the Valibot request schemas
-  into JSON Schema and generated Go request types with `go-jsonschema`. The
-  generated schema and Go files are not tracked.
+  `example/guestbook/contract/generate.go` turns the Valibot request schemas into JSON Schema and generated Go request types.
+  `go generate ./contract/` runs it as part of the build; the generated schema and Go files are not tracked.
 - wasmtime **50.0.0** on the machine running `wt-deploy` to compile the
   artifact. The precompiled artifact is tied to that version and target triple.
   The client and supervisor both default to `x86_64-unknown-linux-musl`, which

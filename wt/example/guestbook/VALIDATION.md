@@ -89,7 +89,7 @@ Connect also drops unknown JSON fields silently and omits zero-valued proto fiel
 3. **Share test vectors between the two sides.** A small JSON file of valid and invalid payloads, run against the Go handlers and against the Valibot schemas, catches drift without a framework. This is the cheapest way to keep the manual rules honest.
 
 4. **If you want one source of truth, choose one of these:**
-   - **Lean (implemented):** Valibot schemas to JSON Schema at build time, then `go-jsonschema` generated Go types and `UnmarshalJSON` validation. +0.6 MB wasm, no runtime schema library, client unchanged. `contract/generate.sh` runs as part of the app build; the generated JSON Schema and Go file are ignored.
+   - **Lean (implemented):** Valibot schemas to JSON Schema at build time, then `go-jsonschema` generated Go types and `UnmarshalJSON` validation. +0.6 MB wasm, no runtime schema library, client unchanged. `go generate ./contract/` runs as part of the app build; the generated JSON Schema and Go file are ignored.
    - **Full:** Huma on the server and Hey API with Valibot on the client. +2.2 MB wasm and +4.4 KB gzip, but validation, OpenAPI docs and the client SDK all come from the Go types. Best developer experience; most framework.
 
 The guestbook build pipeline is:
@@ -102,7 +102,7 @@ web/src/lib/contract.ts
   -> contract/contract.gen.go
 ```
 
-`contract/generate.sh` runs the two steps, and `app.json` calls it before componentizing. The generated Go code uses only the standard library, so no schema validator is linked into the Wasm component.
+`go generate ./contract/` runs the two steps above, and `app.json` calls it before componentizing. The generated Go code uses only the standard library, so no schema validator is linked into the Wasm component.
 
 One mismatch remains: Valibot counts string length in UTF-16 code units, while JSON Schema and the generated Go code count code points, so astral characters (emoji) reach the client limit sooner. If that matters, count grapheme clusters on both sides or exclude emoji from the limited fields.
 
