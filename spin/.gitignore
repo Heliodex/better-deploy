@@ -1,6 +1,0 @@
-main.wasm
-.spin/
-frontend/node_modules/
-frontend/dist/
-app.json
-.env

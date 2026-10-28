@@ -1,8 +1,0 @@
-{
-	"compilerOptions": {
-		"strict": true,
-		"types": ["$app/types", "@cloudflare/workers-types", "./worker-configuration.d.ts"]
-	},
-	"extends": "$app/tsconfig",
-	"include": ["src", "vite.config.ts"]
-}

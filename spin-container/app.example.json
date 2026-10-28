@@ -1,7 +1,0 @@
-{
-	"host": "gotime.apps.example.com",
-	"health": "/",
-	"env": {
-		"session_key": "replace-with-a-random-secret"
-	}
-}
