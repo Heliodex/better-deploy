@@ -1,0 +1,9 @@
+static/
+web/build/
+web/.svelte-kit/
+web/node_modules/
+web/bun.lock
+contract/*.gen.go
+contract/schemas/
+main.wasm
+main.cwasm

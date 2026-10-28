@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,6 +25,76 @@ func writeExampleLayout(t *testing.T, root string) {
 	}
 	if err := os.WriteFile(filepath.Join(root, "packages", "go.mod"), []byte("module wt.packages\n"), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestNewMatchesTemplate fails if a template file is missing from the embed
+// list in new.go, or if node_modules or bun.lock leak into the embedded set.
+func TestNewMatchesTemplate(t *testing.T) {
+	embedded := map[string]bool{}
+	err := fs.WalkDir(templateFS, "testdata/template", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		rel := strings.TrimPrefix(path, "testdata/template/")
+		embedded[rel] = true
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	onDisk := map[string]bool{}
+	err = filepath.WalkDir("testdata/template", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(filepath.Join("testdata", "template"), path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if rel == "." {
+			return nil
+		}
+		if rel == "web" || strings.HasPrefix(rel, "web/") {
+			name := strings.TrimPrefix(rel, "web/")
+			if name == "node_modules" || strings.HasPrefix(name, "node_modules/") || name == "bun.lock" {
+				if entry.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			// Generated output that bun install and svelte-kit sync leave behind.
+			if name == ".svelte-kit" || strings.HasPrefix(name, ".svelte-kit/") || name == "build" || strings.HasPrefix(name, "build/") {
+				if entry.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		onDisk[rel] = true
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for rel := range onDisk {
+		if !embedded[rel] {
+			t.Errorf("template file %s is not embedded; add it to the go:embed list in new.go", rel)
+		}
+	}
+	for rel := range embedded {
+		if !onDisk[rel] {
+			t.Errorf("embedded file %s is missing on disk", rel)
+		}
 	}
 }
 

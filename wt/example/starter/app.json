@@ -1,0 +1,7 @@
+{
+	"build": "cd web && bun install --frozen-lockfile && bun run build && cd .. && ./contract/generate.sh && rm -rf static && cp -r web/build static && ../../packages/generate.sh && go tool componentize-go -d ../../packages/wit -w wt:app/app build",
+	"health": "/",
+	"host": "starter.localhost",
+	"memory_mb": 128,
+	"name": "starter"
+}

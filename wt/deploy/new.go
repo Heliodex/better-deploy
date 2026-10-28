@@ -16,7 +16,23 @@ const (
 	newContractToken = "__CONTRACT_IMPORT__"
 )
 
-//go:embed all:testdata/template
+// Template files embedded into the binary. Listed explicitly so the
+// template's own web/node_modules and web/bun.lock are never embedded,
+// and therefore never copied into new apps. Run bun install there to
+// materialize them instead. Keep this list in sync with testdata/template
+// (TestNewMatchesTemplate fails if a template file is missing here).
+//
+//go:embed all:testdata/template/app.json
+//go:embed all:testdata/template/main.go
+//go:embed all:testdata/template/.gitignore
+//go:embed all:testdata/template/contract
+//go:embed all:testdata/template/web/package.json
+//go:embed all:testdata/template/web/tsconfig.json
+//go:embed all:testdata/template/web/vite.config.ts
+//go:embed all:testdata/template/web/.npmrc
+//go:embed all:testdata/template/web/src
+//go:embed all:testdata/template/web/scripts
+//go:embed all:testdata/template/web/static
 var templateFS embed.FS
 
 type newConfig struct {
