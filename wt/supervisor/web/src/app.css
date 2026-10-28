@@ -8,6 +8,8 @@
 	--ok: #4ade80;
 }
 
+@import "tailwindcss";
+
 * {
 	box-sizing: border-box;
 }
