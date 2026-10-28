@@ -16,8 +16,8 @@ const clockTicks = 100
 
 const (
 	// resourceSampleInterval is how often the supervisor reads CPU and memory and how often open panels receive them.
-	resourceSampleInterval = 2 * time.Second
-	// resourceHistoryWindow is how much history the panel charts; at the sample interval this is 150 points.
+	resourceSampleInterval = time.Second
+	// resourceHistoryWindow is how much history the panel charts; at the sample interval this is 300 points.
 	resourceHistoryWindow = 5 * time.Minute
 	resourceHistoryPoints = int(resourceHistoryWindow / resourceSampleInterval)
 )
@@ -43,7 +43,7 @@ type appStats struct {
 }
 
 // sampleResources refreshes the app's CPU and memory figures from procfs. Calling it
-// more than once a second reuses the previous sample so CPU deltas stay meaningful.
+// more than twice per sample interval reuses the previous sample so CPU deltas stay meaningful.
 func (a *app) sampleResources(now time.Time) {
 	a.mu.Lock()
 	pid := 0
@@ -65,7 +65,7 @@ func (a *app) sampleResources(now time.Time) {
 		stats.memoryBytes = 0
 		return
 	}
-	if stats.pid == pid && !stats.lastSample.IsZero() && now.Sub(stats.lastSample) < time.Second {
+	if stats.pid == pid && !stats.lastSample.IsZero() && now.Sub(stats.lastSample) < resourceSampleInterval/2 {
 		return
 	}
 

@@ -48,7 +48,8 @@ let timeline = $derived.by(() => {
 	for (const entry of ordered)
 		for (const sample of entry.samples) if (!Number.isNaN(Date.parse(sample.at))) times.add(sample.at)
 
-	return [...times].toSorted((a, b) => Date.parse(a) - Date.parse(b)).slice(-150)
+	// Five minutes at the supervisor's one-second sampling interval.
+	return [...times].toSorted((a, b) => Date.parse(a) - Date.parse(b)).slice(-300)
 })
 
 let byTime = $derived.by(() => {
