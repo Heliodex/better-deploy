@@ -31,6 +31,7 @@ laptop. Nothing is compiled on the serving node, and the app is a standard
     the supervisor's SQLite service.
   - `example/shelf` – link shelf with tags, search, pagination and click
     analytics.
+  - `example/ticker` – holds one SSE connection open and logs a `ticker beat N` line about every 10 seconds, paced by outbound HTTP round trips so the supervisor log tail has a steady stream to show.
   - `example/guestbook` – SvelteKit static frontend with a Go JSON API,
     embedded into one wasm component.
 - `supervisor/` – runs apps, proxies by `Host`, deploys bundles blue/green.
