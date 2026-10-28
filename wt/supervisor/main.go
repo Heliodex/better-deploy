@@ -63,11 +63,10 @@ type app struct {
 	timer     *time.Timer
 	logs      *appLog
 
-	mu      sync.Mutex
-	cmd     *exec.Cmd
-	done    chan struct{}
-	exited  bool
-	retired bool
+	mu              sync.Mutex
+	cmd             *exec.Cmd
+	done            chan struct{}
+	exited, retired bool
 }
 
 type supervisor struct {
