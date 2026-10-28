@@ -23,6 +23,8 @@ const (
 // (TestNewMatchesTemplate fails if a template file is missing here).
 //
 //go:embed all:testdata/template/app.json
+//go:embed all:testdata/template/biome.json
+//go:embed all:testdata/template/.oxlintrc.json
 //go:embed all:testdata/template/main.go
 //go:embed all:testdata/template/.gitignore
 //go:embed all:testdata/template/contract

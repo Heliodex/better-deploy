@@ -108,6 +108,8 @@ func TestRunNew(t *testing.T) {
 	}
 	for _, name := range []string{
 		"app.json",
+		"biome.json",
+		".oxlintrc.json",
 		"main.go",
 		".gitignore",
 		"contract/generate.go",
