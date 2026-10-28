@@ -30,10 +30,7 @@ const (
 	logTimeFormat  = time.RFC3339Nano
 )
 
-// appLog appends an app's output to a capped log file for the admin panel. The
-// file lives outside the app's /data preopen so components cannot read it. Each
-// line is stamped with the time the supervisor received it, so timestamps do not
-// depend on how an app logs.
+// appLog appends an app's output to a capped log file for the admin panel. The file lives outside the app's /data preopen so components cannot read it. Each line is stamped with the time the supervisor received it, so timestamps do not depend on how an app logs.
 type appLog struct {
 	mu      sync.Mutex
 	dir     string
@@ -68,8 +65,7 @@ func (l *appLog) unsubscribe(messages chan logEntry) {
 	delete(l.subs, messages)
 }
 
-// publish fans a line out to streaming clients. Callers hold l.mu, and delivery
-// is non-blocking so a stalled client can never hold up the app's output.
+// publish fans a line out to streaming clients. Callers hold l.mu, and delivery is non-blocking so a stalled client can never hold up the app's output.
 func (l *appLog) publish(entry logEntry) {
 	for messages := range l.subs {
 		select {
@@ -102,8 +98,7 @@ func (l *appLog) open() error {
 	return nil
 }
 
-// Write implements io.Writer. Output arrives in arbitrary chunks, so lines are
-// buffered until their newline and each one is written with a receive timestamp.
+// Write implements io.Writer. Output arrives in arbitrary chunks, so lines are buffered until their newline and each one is written with a receive timestamp.
 func (l *appLog) Write(p []byte) (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -163,16 +158,14 @@ func (l *appLog) rotate() error {
 // logLevels are the prefixes an app may put at the start of a line, most verbose first.
 var logLevels = []string{"TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"}
 
-// logEntry is one log line with the time the supervisor received it and its level.
-// Lines written before levels existed have no prefix and read as info.
+// logEntry is one log line with the time the supervisor received it and its level. Lines written before levels existed have no prefix and read as info.
 type logEntry struct {
 	Time    string `json:"time"`
 	Level   string `json:"level"`
 	Message string `json:"message"`
 }
 
-// splitLevelPrefix pulls an app's "<LEVEL> " prefix off a line. Anything
-// unrecognized is part of the message and the level is info.
+// splitLevelPrefix pulls an app's "<LEVEL> " prefix off a line. Anything unrecognized is part of the message and the level is info.
 func splitLevelPrefix(line string) (string, string) {
 	token, rest, ok := strings.Cut(line, " ")
 	if !ok {
@@ -232,8 +225,7 @@ type logsResponse struct {
 	Logs []logEntry `json:"logs"`
 }
 
-// hub fans out app snapshots to SSE subscribers. Snapshots carry full state,
-// so a slow subscriber that misses an update converges on the next one.
+// hub fans out app snapshots to SSE subscribers. Snapshots carry full state, so a slow subscriber that misses an update converges on the next one.
 type hub struct {
 	mu   sync.Mutex
 	subs map[chan []byte]struct{}
@@ -290,8 +282,7 @@ func (s *supervisor) snapshot() []appInfo {
 	return out
 }
 
-// broadcast sends the current snapshot to every SSE subscriber. Dropped
-// messages are harmless: the next broadcast carries the newest state.
+// broadcast sends the current snapshot to every SSE subscriber. Dropped messages are harmless: the next broadcast carries the newest state.
 func (s *supervisor) broadcast() {
 	if s.events == nil {
 		return
@@ -303,9 +294,7 @@ func (s *supervisor) broadcast() {
 	s.events.publish(data)
 }
 
-// handleEvents streams app snapshots over SSE, with comment pings to keep
-// the connection alive through proxies. EventSource cannot set headers, so
-// browsers authenticate with the wt_token cookie instead of a bearer token.
+// handleEvents streams app snapshots over SSE, with comment pings to keep the connection alive through proxies. EventSource cannot set headers, so browsers authenticate with the wt_token cookie instead of a bearer token.
 func (s *supervisor) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
@@ -408,8 +397,7 @@ type logStreamMessage struct {
 	Log  *logEntry  `json:"log,omitempty"`
 }
 
-// handleLogStream streams an app's log: the recent backlog on connect, then each
-// new line as the supervisor writes it, with comment pings to hold the connection.
+// handleLogStream streams an app's log: the recent backlog on connect, then each new line as the supervisor writes it, with comment pings to hold the connection.
 func (s *supervisor) handleLogStream(w http.ResponseWriter, r *http.Request, a *app) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
@@ -503,8 +491,7 @@ func (s *supervisor) handleRestart(w http.ResponseWriter, r *http.Request, a *ap
 	writeJSON(w, http.StatusOK, s.info(a))
 }
 
-// adminStatic serves the embedded admin panel. SvelteKit emits root-relative
-// URLs under the /admin base path, so the mux strips the prefix first.
+// adminStatic serves the embedded admin panel. SvelteKit emits root-relative URLs under the /admin base path, so the mux strips the prefix first.
 func adminStatic() http.Handler {
 	sub, err := fs.Sub(adminFiles, "web/build")
 	if err != nil {

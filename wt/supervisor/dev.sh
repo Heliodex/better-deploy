@@ -1,13 +1,10 @@
 #!/bin/sh
-# Rebuild the supervisor (including the embedded admin panel) and restart the
-# local instance. A running supervisor's directories and binary path are reused,
-# so deployed apps, their data and their logs survive the restart.
+# Rebuild the supervisor (including the embedded admin panel) and restart the local instance. A running supervisor's directories and binary path are reused, so deployed apps, their data and their logs survive the restart.
 #
 #   ./dev.sh                 # rebuild panel + binary, restart
 #   ./dev.sh --skip-generate # Go-only change: skip the panel build
 #
-# Overrides: WT_DEV_ROOT, WT_DEV_BIN, WT_DEV_LOG, or the usual WT_APPS_DIR,
-# WT_STATE_DIR, WT_LISTEN, WT_WASMTIME, WT_WASMTIME_TARGET and WT_TOKEN.
+# Overrides: WT_DEV_ROOT, WT_DEV_BIN, WT_DEV_LOG, or the usual WT_APPS_DIR, WT_STATE_DIR, WT_LISTEN, WT_WASMTIME, WT_WASMTIME_TARGET and WT_TOKEN.
 set -eu
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)

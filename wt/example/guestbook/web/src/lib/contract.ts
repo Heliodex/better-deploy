@@ -12,8 +12,7 @@ export const reactionSchema = picklist(reactions)
 
 const nonBlank = regex(/\S/, "This field cannot be blank.")
 
-// These schemas describe the JSON bodies.
-// The client trims before validating and the server trims before storing, so leading and trailing spaces are not part of the contract.
+// These schemas describe the JSON bodies. The client trims before validating and the server trims before storing, so leading and trailing spaces are not part of the contract.
 export const createMessageSchema = object({
 	body: pipe(
 		string(),

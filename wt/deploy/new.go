@@ -16,11 +16,7 @@ const (
 	newContractToken = "__CONTRACT_IMPORT__"
 )
 
-// Template files embedded into the binary. Listed explicitly so the
-// template's own web/node_modules and web/bun.lock are never embedded,
-// and therefore never copied into new apps. Run bun install there to
-// materialize them instead. Keep this list in sync with testdata/template
-// (TestNewMatchesTemplate fails if a template file is missing here).
+// Template files embedded into the binary. Listed explicitly so the template's own web/node_modules and web/bun.lock are never embedded, and therefore never copied into new apps. Run bun install there to materialize them instead. Keep this list in sync with testdata/template (TestNewMatchesTemplate fails if a template file is missing here).
 //
 //go:embed all:testdata/template/app.json
 //go:embed all:testdata/template/biome.json

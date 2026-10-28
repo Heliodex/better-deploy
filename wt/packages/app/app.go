@@ -37,9 +37,7 @@ func WriteError(w http.ResponseWriter, status int, message string) {
 	WriteJSON(w, status, map[string]string{"error": message})
 }
 
-// ServeStorage runs next behind the storage service. It answers 503 while the
-// storage client is unavailable, and 500 until the migration succeeds; a failed
-// migration is retried on the next request, a successful one runs only once.
+// ServeStorage runs next behind the storage service. It answers 503 while the storage client is unavailable, and 500 until the migration succeeds; a failed migration is retried on the next request, a successful one runs only once.
 func ServeStorage(storeErr error, migrate func(context.Context) error, next http.Handler) http.Handler {
 	var mu sync.Mutex
 	ready := false

@@ -28,8 +28,7 @@ func writeExampleLayout(t *testing.T, root string) {
 	}
 }
 
-// TestNewMatchesTemplate fails if a template file is missing from the embed
-// list in new.go, or if node_modules or bun.lock leak into the embedded set.
+// TestNewMatchesTemplate fails if a template file is missing from the embed list in new.go, or if node_modules or bun.lock leak into the embedded set.
 func TestNewMatchesTemplate(t *testing.T) {
 	embedded := map[string]bool{}
 	err := fs.WalkDir(templateFS, "testdata/template", func(path string, entry fs.DirEntry, err error) error {

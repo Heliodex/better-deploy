@@ -9,8 +9,7 @@ import (
 	"time"
 )
 
-// startSchedule launches one goroutine per scheduled endpoint. It runs once the
-// app is serving, and is cancelled when the app stops or is replaced.
+// startSchedule launches one goroutine per scheduled endpoint. It runs once the app is serving, and is cancelled when the app stops or is replaced.
 func (s *supervisor) startSchedule(a *app) {
 	if len(a.cfg.Schedule) == 0 {
 		return
@@ -24,8 +23,7 @@ func (s *supervisor) startSchedule(a *app) {
 	}
 }
 
-// runSchedule calls one endpoint on its interval. Calls are sequential, so a slow
-// endpoint delays the next tick instead of letting requests pile up.
+// runSchedule calls one endpoint on its interval. Calls are sequential, so a slow endpoint delays the next tick instead of letting requests pile up.
 func (s *supervisor) runSchedule(ctx context.Context, a *app, entry scheduleConfig) {
 	every, err := parseScheduleInterval(entry)
 	if err != nil {
@@ -36,8 +34,7 @@ func (s *supervisor) runSchedule(ctx context.Context, a *app, entry scheduleConf
 	if method == "" {
 		method = defaultScheduleMethod
 	}
-	// A hung endpoint must not stack ticks, but work that legitimately outlasts
-	// the interval should still be allowed to finish.
+	// A hung endpoint must not stack ticks, but work that legitimately outlasts the interval should still be allowed to finish.
 	client := &http.Client{Timeout: max(every, 5*time.Second)}
 	target := fmt.Sprintf("http://127.0.0.1:%d%s", a.port, entry.Path)
 

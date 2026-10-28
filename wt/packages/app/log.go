@@ -22,9 +22,7 @@ const (
 // output is swapped in tests; production writes to stderr, which wasmtime forwards.
 var output io.Writer = os.Stderr
 
-// Logf writes one line per message line as "<LEVEL> <message>". The supervisor
-// stamps it with the receive time and strips the level, so the app adds neither
-// a timestamp nor a prefix of its own.
+// Logf writes one line per message line as "<LEVEL> <message>". The supervisor stamps it with the receive time and strips the level, so the app adds neither a timestamp nor a prefix of its own.
 func Logf(level Level, format string, args ...any) {
 	message := fmt.Sprintf(format, args...)
 	var builder strings.Builder
@@ -43,15 +41,13 @@ func Infof(format string, args ...any)  { Logf(LevelInfo, format, args...) }
 func Warnf(format string, args ...any)  { Logf(LevelWarn, format, args...) }
 func Errorf(format string, args ...any) { Logf(LevelError, format, args...) }
 
-// Fatalf logs at FATAL and exits the component. A component instance should not
-// normally exit mid-request, so prefer Errorf unless the process really is done.
+// Fatalf logs at FATAL and exits the component. A component instance should not normally exit mid-request, so prefer Errorf unless the process really is done.
 func Fatalf(format string, args ...any) {
 	Logf(LevelFatal, format, args...)
 	os.Exit(1)
 }
 
-// Writer prefixes every complete line written to it, for handing to the stdlib
-// logger: log.SetFlags(0); log.SetOutput(app.Writer(app.LevelInfo)).
+// Writer prefixes every complete line written to it, for handing to the stdlib logger: log.SetFlags(0); log.SetOutput(app.Writer(app.LevelInfo)).
 func Writer(level Level) io.Writer {
 	return levelWriter{level: level}
 }

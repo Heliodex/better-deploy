@@ -9,9 +9,7 @@ import (
 	wasihttp "wt.packages/wasihttp"
 )
 
-// beatLevels rotates so the panel demonstrates every severity. It is derived
-// from the clock rather than a counter because each request may get a fresh
-// component instance.
+// beatLevels rotates so the panel demonstrates every severity. It is derived from the clock rather than a counter because each request may get a fresh component instance.
 var beatLevels = []app.Level{
 	app.LevelTrace,
 	app.LevelDebug,
@@ -21,9 +19,7 @@ var beatLevels = []app.Level{
 	app.LevelFatal,
 }
 
-// handleTick is driven by the schedule in app.json, not by a client. Components
-// under `wasmtime serve` only run while handling a request, so the supervisor
-// fires this endpoint every ten seconds and the panel stamps each log line.
+// handleTick is driven by the schedule in app.json, not by a client. Components under `wasmtime serve` only run while handling a request, so the supervisor fires this endpoint every ten seconds and the panel stamps each log line.
 func handleTick(w http.ResponseWriter, r *http.Request) {
 	slot := time.Now().UTC().Unix() / 10
 	app.Logf(beatLevels[int(slot%int64(len(beatLevels)))], "ticker beat")
