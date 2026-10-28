@@ -5,16 +5,19 @@ import {
 	deployBundle,
 	fetchApp,
 	fetchApps,
+	fetchResourceHistory,
 	forgetToken,
 	getToken,
 	type LogEntry,
 	type LogLevel,
 	logLevels,
+	type ResourceSample,
 	restartApp,
 	setToken,
 	subscribe,
 	subscribeLogs,
 } from "../lib/api"
+import ResourceChart from "../lib/ResourceChart.svelte"
 
 const MIN_SIDEBAR = 200
 const MAX_SIDEBAR = 520
@@ -28,6 +31,8 @@ const MAX_LOGS = 600
 const MAX_LOG_LINES = 5000
 /** Treat the log view as "following" until the user scrolls this far from the bottom. */
 const FOLLOW_THRESHOLD = 24
+/** Five minutes at the supervisor's two-second sampling interval. */
+const MAX_HISTORY_POINTS = 150
 
 let token = $state<string | null>(null)
 let tokenInput = $state("")
@@ -53,6 +58,7 @@ let stopLogs: (() => void) | null = null
 let logPane = $state<HTMLDivElement | null>(null)
 let followLogs = $state(true)
 let minLevel = $state<LogLevel>("trace")
+let resourceHistory = $state<ResourceSample[]>([])
 
 function uptime(startedAt: string): string {
 	const seconds = Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1000))
@@ -77,6 +83,32 @@ function formatMemory(bytes: number): string {
 	if (bytes <= 0) return "–"
 	const megabytes = bytes / (1024 * 1024)
 	return megabytes < 10 ? `${megabytes.toFixed(1)} MB` : `${Math.round(megabytes)} MB`
+}
+
+/** Merge history by timestamp so a late fetch cannot clobber samples that arrived over SSE. */
+function mergeHistory(existing: ResourceSample[], incoming: ResourceSample[]): ResourceSample[] {
+	const byTime = new Map<string, ResourceSample>()
+	for (const sample of [...existing, ...incoming]) {
+		const at = Date.parse(sample.at)
+		if (Number.isNaN(at) || at <= 0) continue
+		byTime.set(sample.at, sample)
+	}
+	return [...byTime.values()].toSorted((a, b) => Date.parse(a.at) - Date.parse(b.at)).slice(-MAX_HISTORY_POINTS)
+}
+
+function appendHistory(sample: ResourceSample): void {
+	resourceHistory = mergeHistory(resourceHistory, [sample])
+}
+
+async function loadResourceHistory(key: string, name: string): Promise<void> {
+	try {
+		const samples = await fetchResourceHistory(key, name)
+		if (selected !== name) return
+		resourceHistory = mergeHistory(resourceHistory, samples)
+	} catch (err) {
+		if (selected !== name) return
+		error = err instanceof Error ? err.message : "Could not load resource history."
+	}
 }
 
 const logTimeFormat = new Intl.DateTimeFormat(undefined, {
@@ -114,6 +146,7 @@ function select(name: string | null): void {
 	selected = name
 	detail = null
 	logs = []
+	resourceHistory = []
 	error = ""
 	actionMessage = ""
 	confirmRestart = false
@@ -122,6 +155,7 @@ function select(name: string | null): void {
 	window.history.replaceState(null, "", url)
 	if (token && name) {
 		void loadDetail(token, name)
+		void loadResourceHistory(token, name)
 		openLogs(name)
 	}
 }
@@ -196,7 +230,14 @@ function connect(key: string): void {
 			apps = updated
 			if (selected) {
 				const current = updated.find(app => app.name === selected)
-				if (current) detail = current
+				if (current) {
+					detail = current
+					appendHistory({
+						at: current.sampledAt,
+						cpuPercent: current.cpuPercent,
+						memoryBytes: current.memoryBytes,
+					})
+				}
 			}
 			loading = false
 			error = ""
@@ -404,7 +445,10 @@ onMount((): (() => void) => {
 		selected = name
 		connect(saved)
 		void refresh(saved)
-		if (name) openLogs(name)
+		if (name) {
+			void loadResourceHistory(saved, name)
+			openLogs(name)
+		}
 	} else {
 		loading = false
 		selected = name
@@ -561,7 +605,7 @@ onMount((): (() => void) => {
 
 					<div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
 						{#if detail}
-							<dl class="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-3">
+							<dl class="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-4">
 								<div class="flex flex-col">
 									<dt class="text-xs tracking-wide text-neutral-500 uppercase">Host</dt>
 									<dd class="text-sm wrap-break-word">{detail.host}</dd>
@@ -569,18 +613,6 @@ onMount((): (() => void) => {
 								<div class="flex flex-col">
 									<dt class="text-xs tracking-wide text-neutral-500 uppercase">Status</dt>
 									<dd class="text-sm">{detail.status}</dd>
-								</div>
-								<div class="flex flex-col">
-									<dt class="text-xs tracking-wide text-neutral-500 uppercase">CPU</dt>
-									<dd class="text-sm tabular-nums">
-										{detail.status === "running" ? formatCPU(detail.cpuPercent) : "–"}
-									</dd>
-								</div>
-								<div class="flex flex-col">
-									<dt class="text-xs tracking-wide text-neutral-500 uppercase">Memory</dt>
-									<dd class="text-sm tabular-nums">
-										{detail.status === "running" ? formatMemory(detail.memoryBytes) : "–"}
-									</dd>
 								</div>
 								<div class="flex flex-col">
 									<dt class="text-xs tracking-wide text-neutral-500 uppercase">Started</dt>
@@ -591,6 +623,31 @@ onMount((): (() => void) => {
 									<dd class="text-sm tabular-nums">{detail.pid ?? "–"}</dd>
 								</div>
 							</dl>
+
+							<section aria-labelledby="resources-title" class="flex flex-col gap-2">
+								<h3
+									class="text-xs font-semibold tracking-wide text-neutral-400 uppercase"
+									id="resources-title"
+								>
+									Resources
+								</h3>
+								<div class="grid gap-4 sm:grid-cols-2">
+									<ResourceChart
+										color="primary"
+										format={formatCPU}
+										label="CPU"
+										samples={resourceHistory}
+										value={(sample: ResourceSample) => sample.cpuPercent}
+									/>
+									<ResourceChart
+										color="sky"
+										format={formatMemory}
+										label="Memory"
+										samples={resourceHistory}
+										value={(sample: ResourceSample) => sample.memoryBytes}
+									/>
+								</div>
+							</section>
 						{/if}
 
 						{#if actionMessage}

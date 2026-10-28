@@ -1,6 +1,9 @@
 package main
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"testing"
@@ -87,7 +90,7 @@ func TestSampleResourcesReadsSelf(t *testing.T) {
 	app.cmd = &exec.Cmd{Process: &os.Process{Pid: os.Getpid()}}
 	app.sampleResources(time.Now())
 
-	cpu, memory := app.resourceStats()
+	cpu, memory, _ := app.resourceStats()
 	if memory <= 0 {
 		t.Errorf("memory = %d, want a positive RSS", memory)
 	}
@@ -101,8 +104,71 @@ func TestSampleResourcesClearsStoppedApp(t *testing.T) {
 	app.stats.cpuPercent = 42
 	app.stats.memoryBytes = 1 << 20
 	app.sampleResources(time.Now())
-	cpu, memory := app.resourceStats()
+	cpu, memory, _ := app.resourceStats()
 	if cpu != 0 || memory != 0 {
 		t.Errorf("stopped app stats = %v, %d; want 0, 0", cpu, memory)
+	}
+}
+
+func TestAppendHistoryTrims(t *testing.T) {
+	stats := &appStats{}
+	base := time.Now()
+	for i := range resourceHistoryPoints + 10 {
+		stats.appendHistory(base.Add(time.Duration(i)*resourceSampleInterval), float64(i), int64(i))
+	}
+	if len(stats.history) != resourceHistoryPoints {
+		t.Fatalf("history length = %d, want %d", len(stats.history), resourceHistoryPoints)
+	}
+	if got := stats.history[0].CPUPercent; got != 10 {
+		t.Errorf("oldest CPU = %v, want 10", got)
+	}
+	if got := stats.history[len(stats.history)-1].CPUPercent; got != float64(resourceHistoryPoints+9) {
+		t.Errorf("newest CPU = %v, want %d", got, resourceHistoryPoints+9)
+	}
+}
+
+func TestHandleResourcesReturnsHistory(t *testing.T) {
+	s := testSupervisor()
+	a := &app{name: "demo", cfg: appConfig{Host: "demo.example"}}
+	a.stats.history = []resourceSample{{At: time.Now().Add(-time.Second).UTC(), CPUPercent: 1.5, MemoryBytes: 1 << 20}}
+	a.stats.lastAppend = time.Now()
+	s.apps["demo"] = a
+
+	req := httptest.NewRequest(http.MethodGet, "/apps/demo/resources", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+	s.handleApp(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var out resourceHistoryResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Samples) != 1 || out.Samples[0].CPUPercent != 1.5 {
+		t.Errorf("samples = %+v, want the seeded sample", out.Samples)
+	}
+}
+
+func TestHandleResourcesEmptyHistory(t *testing.T) {
+	s := testSupervisor()
+	s.apps["demo"] = &app{name: "demo"}
+
+	req := httptest.NewRequest(http.MethodGet, "/apps/demo/resources", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+	s.handleApp(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var out resourceHistoryResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Samples == nil {
+		t.Error("samples is nil; want an empty array")
+	}
+	if len(out.Samples) != 0 {
+		t.Errorf("samples = %+v, want none", out.Samples)
 	}
 }

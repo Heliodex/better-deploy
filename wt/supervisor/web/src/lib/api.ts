@@ -23,6 +23,7 @@ const appInfoSchema = object({
 	name: pipe(string(), minLength(1)),
 	pid: optional(pipe(number(), integer())),
 	port: pipe(number(), integer(), minValue(0)),
+	sampledAt: pipe(string(), minLength(1)),
 	startedAt: pipe(string(), minLength(1)),
 	status: picklist(["running", "stopped"]),
 })
@@ -146,6 +147,23 @@ export function subscribe(onSnapshot: (apps: AppInfo[]) => void, onStatus: (live
 
 export function fetchApp(token: string, name: string): Promise<AppInfo> {
 	return request(`/apps/${encodeURIComponent(name)}`, { token }, appInfoSchema)
+}
+
+const resourceSampleSchema = object({
+	at: pipe(string(), minLength(1)),
+	cpuPercent: pipe(number(), minValue(0)),
+	memoryBytes: pipe(number(), minValue(0)),
+})
+
+export type ResourceSample = InferOutput<typeof resourceSampleSchema>
+
+const resourceHistorySchema = object({
+	samples: array(resourceSampleSchema),
+})
+
+export async function fetchResourceHistory(token: string, name: string): Promise<ResourceSample[]> {
+	const data = await request(`/apps/${encodeURIComponent(name)}/resources`, { token }, resourceHistorySchema)
+	return data.samples
 }
 
 const logStreamSchema = union([

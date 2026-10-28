@@ -43,7 +43,7 @@ func TestHandleAppsRequiresAuth(t *testing.T) {
 
 func TestHandleUnknownApp(t *testing.T) {
 	s := testSupervisor()
-	for _, target := range []string{"/apps/nope", "/apps/nope/logs", "/apps/nope/restart"} {
+	for _, target := range []string{"/apps/nope", "/apps/nope/logs", "/apps/nope/resources", "/apps/nope/restart"} {
 		method := http.MethodGet
 		if strings.HasSuffix(target, "restart") {
 			method = http.MethodPost
@@ -65,6 +65,7 @@ func TestHandleAppMethods(t *testing.T) {
 	}{
 		{http.MethodDelete, "/apps/nope", "GET, POST"},
 		{http.MethodPost, "/apps/nope/logs", http.MethodGet},
+		{http.MethodPost, "/apps/nope/resources", http.MethodGet},
 		{http.MethodGet, "/apps/nope/restart", http.MethodPost},
 		{http.MethodPut, "/apps/nope/unknown", ""},
 	}

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -13,17 +14,32 @@ import (
 // clockTicks is Linux USER_HZ, which is 100 on every architecture the supervisor supports.
 const clockTicks = 100
 
-// resourceSampleInterval is how often open admin panels receive fresh CPU and memory figures.
-const resourceSampleInterval = 2 * time.Second
+const (
+	// resourceSampleInterval is how often the supervisor reads CPU and memory and how often open panels receive them.
+	resourceSampleInterval = 2 * time.Second
+	// resourceHistoryWindow is how much history the panel charts; at the sample interval this is 150 points.
+	resourceHistoryWindow = 5 * time.Minute
+	resourceHistoryPoints = int(resourceHistoryWindow / resourceSampleInterval)
+)
 
-// appStats caches the last resource sample for one app process.
+// resourceSample is one point in an app's CPU and memory history.
+type resourceSample struct {
+	At          time.Time `json:"at"`
+	CPUPercent  float64   `json:"cpuPercent"`
+	MemoryBytes int64     `json:"memoryBytes"`
+}
+
+// appStats caches the last resource sample for one app process and keeps a short history for the charts.
 type appStats struct {
 	mu          sync.Mutex
 	pid         int
 	lastTicks   uint64
 	lastSample  time.Time
+	sampledAt   time.Time
 	cpuPercent  float64
 	memoryBytes int64
+	lastAppend  time.Time
+	history     []resourceSample
 }
 
 // sampleResources refreshes the app's CPU and memory figures from procfs. Calling it
@@ -44,6 +60,7 @@ func (a *app) sampleResources(now time.Time) {
 		stats.pid = 0
 		stats.lastTicks = 0
 		stats.lastSample = time.Time{}
+		stats.sampledAt = now.UTC()
 		stats.cpuPercent = 0
 		stats.memoryBytes = 0
 		return
@@ -65,14 +82,57 @@ func (a *app) sampleResources(now time.Time) {
 	stats.pid = pid
 	stats.lastTicks = ticks
 	stats.lastSample = now
+	stats.sampledAt = now.UTC()
 	stats.memoryBytes = memory
 }
 
-// resourceStats returns the last CPU percentage (of one core) and resident memory in bytes.
-func (a *app) resourceStats() (float64, int64) {
+// appendHistory records a point when the chart interval has passed. The caller holds stats.mu.
+func (s *appStats) appendHistory(now time.Time, cpu float64, memory int64) {
+	if !s.lastAppend.IsZero() && now.Sub(s.lastAppend) < resourceSampleInterval/2 {
+		return
+	}
+	s.lastAppend = now
+	s.history = append(s.history, resourceSample{At: now.UTC(), CPUPercent: cpu, MemoryBytes: memory})
+	if len(s.history) > resourceHistoryPoints {
+		s.history = s.history[len(s.history)-resourceHistoryPoints:]
+	}
+}
+
+// recordHistory appends the current figures with the sample timestamp, so the panel
+// can deduplicate history fetched from the API against snapshots arriving over SSE.
+func (a *app) recordHistory() {
 	a.stats.mu.Lock()
 	defer a.stats.mu.Unlock()
-	return a.stats.cpuPercent, a.stats.memoryBytes
+	if a.stats.sampledAt.IsZero() || time.Since(a.stats.sampledAt) > 2*resourceSampleInterval {
+		return
+	}
+	a.stats.appendHistory(a.stats.sampledAt, a.stats.cpuPercent, a.stats.memoryBytes)
+}
+
+// resourceStats returns the last CPU percentage (of one core), resident memory in bytes, and when it was sampled.
+func (a *app) resourceStats() (float64, int64, time.Time) {
+	a.stats.mu.Lock()
+	defer a.stats.mu.Unlock()
+	return a.stats.cpuPercent, a.stats.memoryBytes, a.stats.sampledAt
+}
+
+// resourceHistory returns a copy of the app's recent samples, oldest first.
+func (a *app) resourceHistory() []resourceSample {
+	a.stats.mu.Lock()
+	defer a.stats.mu.Unlock()
+	out := make([]resourceSample, len(a.stats.history))
+	copy(out, a.stats.history)
+	return out
+}
+
+type resourceHistoryResponse struct {
+	Samples []resourceSample `json:"samples"`
+}
+
+// handleResources returns the app's CPU and memory history for the charts.
+func (s *supervisor) handleResources(w http.ResponseWriter, _ *http.Request, a *app) {
+	a.sampleResources(time.Now())
+	writeJSON(w, http.StatusOK, resourceHistoryResponse{Samples: a.resourceHistory()})
 }
 
 // sampleAll refreshes resource usage for every app.
@@ -89,19 +149,35 @@ func (s *supervisor) sampleAll() {
 	}
 }
 
-// monitorResources pushes a fresh snapshot while an admin panel is subscribed, so
-// CPU and memory stay live without the panel polling.
+// recordAll appends one history point per app; the monitor calls it after sampling.
+func (s *supervisor) recordAll() {
+	s.mu.RLock()
+	apps := make([]*app, 0, len(s.apps))
+	for _, a := range s.apps {
+		apps = append(apps, a)
+	}
+	s.mu.RUnlock()
+	for _, a := range apps {
+		a.recordHistory()
+	}
+}
+
+// monitorResources samples every app in the background so the charts have history
+// before a panel opens, and pushes a fresh snapshot while one is subscribed.
 func (s *supervisor) monitorResources(every time.Duration) {
+	s.sampleAll()
+	s.recordAll()
 	ticker := time.NewTicker(every)
 	defer ticker.Stop()
 	for range ticker.C {
 		if s.stopping.Load() {
 			return
 		}
-		if s.events == nil || !s.events.hasSubscribers() {
-			continue
+		s.sampleAll()
+		s.recordAll()
+		if s.events != nil && s.events.hasSubscribers() {
+			s.broadcast()
 		}
-		s.broadcast()
 	}
 }
 

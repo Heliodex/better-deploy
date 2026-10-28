@@ -664,6 +664,7 @@ type appInfo struct {
 	StartedAt   time.Time `json:"startedAt"`
 	CPUPercent  float64   `json:"cpuPercent"`
 	MemoryBytes int64     `json:"memoryBytes"`
+	SampledAt   time.Time `json:"sampledAt"`
 }
 
 func (s *supervisor) info(a *app) appInfo {
@@ -677,7 +678,7 @@ func (s *supervisor) info(a *app) appInfo {
 		info.Status = "stopped"
 	}
 	a.mu.Unlock()
-	info.CPUPercent, info.MemoryBytes = a.resourceStats()
+	info.CPUPercent, info.MemoryBytes, info.SampledAt = a.resourceStats()
 	return info
 }
 
@@ -960,6 +961,21 @@ func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.handleLogs(w, r, a)
+	case "resources":
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !s.requireAuth(w, r) {
+			return
+		}
+		a := s.lookup(name)
+		if a == nil {
+			http.Error(w, "app not found", http.StatusNotFound)
+			return
+		}
+		s.handleResources(w, r, a)
 	case "restart":
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", http.MethodPost)
