@@ -1,232 +1,83 @@
-:root {
-	color-scheme: dark;
-	--ink: #f5f5f5;
-	--muted: #a3a3a3;
-	--line: #2e2e2e;
-	--accent: #7aa7ff;
-	--danger: #f87171;
-	--ok: #4ade80;
-}
-
 @import "tailwindcss";
+
+@theme {
+	/* Accent palette. Point these shades at any Tailwind colour family to re-theme the panel, e.g. swap the `emerald`s below for `violet`. */
+	--color-primary-200: var(--color-emerald-200);
+	--color-primary-300: var(--color-emerald-300);
+	--color-primary-400: var(--color-emerald-400);
+	--color-primary-500: var(--color-emerald-500);
+	--color-primary-600: var(--color-emerald-600);
+
+	/* Surfaces. Panes sit a hair above the pure-black canvas so each region reads as its own surface. */
+	--color-surface: var(--color-neutral-950);
+	--color-surface-raised: var(--color-neutral-900);
+	/* Borders: `line` divides panes, `line-soft` divides sections within one. */
+	--color-line: var(--color-neutral-600);
+	--color-line-soft: var(--color-neutral-800);
+}
 
 * {
 	box-sizing: border-box;
+	font-family: Lexend, ui-sans-serif, system-ui, sans-serif;
+	scrollbar-color: var(--color-neutral-700) transparent;
+	scrollbar-width: thin;
+	@apply accent-primary-500;
+}
+
+html {
+	color-scheme: dark;
 }
 
 body {
-	margin: 0;
-	background: #000000;
-	color: var(--ink);
-	font-family: ui-sans-serif, system-ui, sans-serif;
-	line-height: 1.5;
-}
-
-.page {
-	display: flex;
-	flex-direction: column;
-	gap: 16px;
-	max-width: 960px;
-	padding: 24px 16px 48px;
-	margin: 0 auto;
-}
-
-h1 {
-	margin: 0;
-	font-size: 1.4rem;
-}
-
-h2 {
-	margin: 0;
-	font-size: 1.05rem;
-}
-
-p {
-	margin: 0;
-}
-
-a {
-	color: var(--accent);
-}
-
-button,
-input,
-select {
-	color: var(--ink);
-	font: inherit;
+	color: white;
+	background: black;
 }
 
 button {
-	padding: 6px 12px;
-	background: #111111;
-	border: 1px solid var(--line);
-	border-radius: 6px;
+	cursor: pointer;
 }
 
-button:hover {
-	background: #1c1c1c;
+kbd {
+	padding: 0.0625rem 0.25rem;
+	font-family: ui-monospace, monospace;
+	font-size: 0.75rem;
+	line-height: 1.25;
+	color: var(--color-neutral-300);
+	background: black;
+	border: 1px solid var(--color-line);
 }
 
-button:disabled {
-	opacity: 0.6;
+::selection {
+	color: black;
+	background: var(--color-primary-500);
 }
 
-input,
-select {
-	padding: 6px 10px;
-	background: #111111;
-	border: 1px solid var(--line);
-	border-radius: 6px;
+/* A visible, consistent focus ring for keyboard users everywhere. Form fields get their own border cue instead. */
+:where(button, a, [role="tab"], [role="option"], [role="separator"], [tabindex]):focus-visible {
+	outline: 2px solid var(--color-primary-400);
+	outline-offset: 2px;
 }
 
-.layout {
-	display: flex;
-	gap: 16px;
-	align-items: flex-start;
-}
-
-.sidebar {
-	flex: 0 0 260px;
-}
-
-.main {
-	display: flex;
-	flex: 1;
-	flex-direction: column;
-	gap: 16px;
-	min-width: 0;
-}
-
-.app-list {
-	display: flex;
-	flex-direction: column;
-	gap: 4px;
-	margin: 0;
-	padding: 0;
-	list-style: none;
-}
-
-.app-list button {
-	display: flex;
-	width: 100%;
-	align-items: center;
-	gap: 8px;
-	text-align: left;
-}
-
-.app-list button[aria-current="true"] {
-	border-color: var(--accent);
-}
-
-.dot {
-	display: inline-block;
-	width: 8px;
-	height: 8px;
-	border-radius: 50%;
-	background: var(--muted);
-}
-
-.dot.running {
-	background: var(--ok);
-}
-
-.status {
-	display: inline-flex;
-	gap: 6px;
-	align-items: center;
-}
-
-.card {
-	display: flex;
-	flex-direction: column;
-	gap: 12px;
-	padding: 16px;
-	border: 1px solid var(--line);
-	border-radius: 8px;
-}
-
-.row {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 8px;
-	align-items: center;
-}
-
-.spacer {
-	flex: 1;
-}
-
-.error {
-	padding: 10px 12px;
-	color: var(--danger);
-	border: 1px solid var(--danger);
-	border-radius: 6px;
-}
-
-.muted {
-	color: var(--muted);
-}
-
-pre.logs {
-	max-height: 420px;
-	padding: 12px;
-	overflow: auto;
-	font-size: 0.78rem;
-	background: #0d0d0d;
-	border: 1px solid var(--line);
-	border-radius: 6px;
-	white-space: pre-wrap;
-	word-break: break-word;
-}
-
-label {
-	display: flex;
-	flex-direction: column;
-	gap: 6px;
-}
-
-label > span {
-	font-size: 0.72rem;
-	font-weight: 600;
-	color: var(--muted);
-	text-transform: uppercase;
-	letter-spacing: 0.08em;
-}
-
-.facts {
-	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-	gap: 8px 24px;
-}
-
-.facts div {
-	display: flex;
-	flex-direction: column;
-}
-
-.facts dt {
-	font-size: 0.72rem;
-	color: var(--muted);
-	text-transform: uppercase;
-	letter-spacing: 0.08em;
-}
-
-.facts dd {
-	margin: 0;
-	overflow-wrap: anywhere;
-}
-
-h3 {
-	margin: 0;
-	font-size: 0.95rem;
-}
-
-@media (max-width: 700px) {
-	.layout {
-		flex-direction: column;
+@layer components {
+	/* Bordered controls share one hover, press and disabled vocabulary so every action feels the same. */
+	.btn {
+		@apply inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 border border-neutral-600 px-2 py-1 text-sm whitespace-nowrap transition-colors duration-150 select-none;
+		@apply hover:border-neutral-500 hover:bg-neutral-800/70 hover:text-white;
+		@apply active:translate-y-px active:bg-neutral-800;
+		@apply disabled:pointer-events-none disabled:opacity-40;
 	}
 
-	.sidebar {
-		flex: auto;
+	.btn-primary {
+		@apply border-primary-500/70 text-primary-300 hover:border-primary-400 hover:bg-primary-500/15 hover:text-primary-200 active:bg-primary-500/25;
+	}
+
+	.btn-danger {
+		@apply text-neutral-400 hover:border-red-500/80 hover:bg-red-500/10 hover:text-red-400 active:bg-red-500/20;
+	}
+
+	/* Text fields and dropdowns. */
+	.field {
+		@apply min-w-0 border border-neutral-600 bg-neutral-900 px-2 py-1 text-sm transition-colors duration-150;
+		@apply placeholder:text-neutral-500 hover:border-neutral-500 focus:border-primary-400 focus:outline-none;
 	}
 }

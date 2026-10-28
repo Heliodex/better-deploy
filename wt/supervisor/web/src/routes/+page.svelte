@@ -13,6 +13,12 @@ import {
 	subscribe,
 } from "../lib/api"
 
+const MIN_SIDEBAR = 200
+const MAX_SIDEBAR = 520
+const MIN_VIEWPORT_FOR_SIDEBAR = 700
+/** Pixels a separator moves per arrow-key press (tripled while Shift is held). */
+const KEY_STEP = 16
+
 let token = $state<string | null>(null)
 let tokenInput = $state("")
 let apps = $state<AppInfo[]>([])
@@ -28,6 +34,8 @@ let actionMessage = $state("")
 let confirmRestart = $state(false)
 let live = $state(false)
 let now = $state(Date.now())
+let sidebarWidth = $state(280)
+let gripY = $state<number | null>(null)
 let stopStream: (() => void) | null = null
 
 function uptime(startedAt: string): string {
@@ -48,6 +56,13 @@ function formatTime(value: string): string {
 function readSelection(): string | null {
 	const name = new URLSearchParams(window.location.search).get("app")
 	return name && name.length > 0 ? name : null
+}
+
+function clampSidebar(width: number): number {
+	if (typeof window === "undefined") return width
+	// Always leave room for the detail pane, so the sidebar cannot swallow the workspace.
+	const upper = Math.min(MAX_SIDEBAR, Math.max(MIN_SIDEBAR, window.innerWidth - 360))
+	return Math.min(Math.max(width, MIN_SIDEBAR), upper)
 }
 
 function select(name: string | null): void {
@@ -125,6 +140,48 @@ function disconnect(): void {
 		stopStream = null
 	}
 	live = false
+}
+
+/** Drag the separator, tracking on the window so the drag survives a fast pointer. */
+function startSidebarResize(event: PointerEvent): void {
+	event.preventDefault()
+	const startX = event.clientX
+	const startWidth = sidebarWidth
+	const previousCursor = document.body.style.cursor
+	const previousSelect = document.body.style.userSelect
+	document.body.style.cursor = "col-resize"
+	document.body.style.userSelect = "none"
+
+	const onMove = (move: PointerEvent): void => {
+		sidebarWidth = clampSidebar(startWidth + move.clientX - startX)
+	}
+	const stop = (): void => {
+		window.removeEventListener("pointermove", onMove)
+		window.removeEventListener("pointerup", stop)
+		window.removeEventListener("pointercancel", stop)
+		document.body.style.cursor = previousCursor
+		document.body.style.userSelect = previousSelect
+	}
+	window.addEventListener("pointermove", onMove)
+	window.addEventListener("pointerup", stop)
+	window.addEventListener("pointercancel", stop)
+}
+
+function onSeparatorKeydown(event: KeyboardEvent): void {
+	if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return
+	event.preventDefault()
+	const step = event.shiftKey ? KEY_STEP * 3 : KEY_STEP
+	sidebarWidth = clampSidebar(sidebarWidth + (event.key === "ArrowLeft" ? -step : step))
+}
+
+/** The grip tracks the pointer along the separator, hinting where the drag will grab. */
+function moveGrip(event: PointerEvent): void {
+	const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect()
+	gripY = event.clientY - bounds.top
+}
+
+function resetGrip(): void {
+	gripY = null
 }
 
 async function submitToken(event: SubmitEvent): Promise<void> {
@@ -227,60 +284,91 @@ onMount((): (() => void) => {
 	<title>wt admin</title>
 </svelte:head>
 
-<div class="page">
-	<header class="row">
-		<h1>wt admin</h1>
-		<span class="spacer"></span>
+<div class="flex min-h-dvh flex-col">
+	<header class="flex shrink-0 items-center gap-2 border-b border-line bg-surface px-3 py-2">
+		<h1 class="text-sm font-semibold tracking-tight">wt admin</h1>
+		<span class="flex-1"></span>
 		{#if token}
-			<span class="status"
-				><span aria-hidden="true" class="dot {live ? "running" : ""}"></span>
-				{live ? "live" : "connecting…"}</span
-			>
-			<button onclick={forget} type="button">Forget token</button>
+			<span class="flex items-center gap-1.5 text-xs text-neutral-400">
+				<span
+					aria-hidden="true"
+					class={live ? "size-1.5 bg-primary-500" : "size-1.5 border border-neutral-500"}
+				></span>
+				{live ? "live" : "connecting…"}
+			</span>
+			<button class="btn" onclick={forget} type="button">Forget token</button>
 		{/if}
 	</header>
 
 	{#if !token}
-		<form class="card" onsubmit={submitToken}>
-			<h2>Sign in</h2>
-			<p class="muted">Enter the supervisor deploy token. It stays in this browser only.</p>
-			<label>
-				<span>Token</span>
-				<input autocomplete="off" placeholder="deploy token" type="password" bind:value={tokenInput}>
-			</label>
-			<div>
-				<button type="submit">Connect</button>
-			</div>
-			{#if error}
-				<div class="error" role="alert">{error}</div>
-			{/if}
-		</form>
-	{:else if loading && apps.length === 0}
-		<p class="muted">Loading apps…</p>
+		<main class="flex flex-1 items-center justify-center p-4">
+			<form
+				class="relative w-full max-w-sm border border-line bg-surface p-8 text-center shadow-2xl shadow-black"
+				onsubmit={submitToken}
+			>
+				<div
+					aria-hidden="true"
+					class="absolute inset-x-0 top-0 h-0.5 bg-linear-to-r from-emerald-500 via-primary-400 to-green-500"
+				></div>
+				<h2 class="text-xl font-semibold tracking-tight">Sign in</h2>
+				<small class="block pt-1 text-xs tracking-wide text-neutral-400 uppercase">
+					Enter the supervisor deploy token
+				</small>
+				<label class="flex flex-col gap-1.5 pt-6 text-left">
+					<span class="text-xs tracking-wide text-neutral-400 uppercase">Token</span>
+					<input
+						autocomplete="off"
+						class="field"
+						placeholder="deploy token"
+						type="password"
+						bind:value={tokenInput}
+					>
+				</label>
+				<button class="btn btn-primary mt-4 w-full" type="submit">Connect</button>
+				{#if error}
+					<p class="mt-4 border border-red-500/80 bg-red-500/10 px-2 py-1 text-sm text-red-400" role="alert">
+						{error}
+					</p>
+				{/if}
+				<p class="pt-6 text-xs text-neutral-500">The token stays in this browser only.</p>
+			</form>
+		</main>
 	{:else}
-		<div class="layout">
-			<aside aria-label="Apps" class="card sidebar">
-				<div class="row">
-					<h2>Apps</h2>
-					<span class="spacer"></span>
-					<button disabled={loading} onclick={refreshList} type="button">
+		<div class="workspace" style="--sidebar-width: {sidebarWidth}px">
+			<aside aria-label="Apps" class="flex min-h-0 shrink-0 flex-col border-r border-line bg-surface">
+				<header class="flex shrink-0 items-center justify-between gap-2 border-b border-line-soft px-3 py-2">
+					<h2 class="text-xs font-semibold tracking-wide text-neutral-400 uppercase">Apps</h2>
+					<button class="btn" disabled={loading} onclick={refreshList} type="button">
 						{loading ? "Refreshing…" : "Refresh"}
 					</button>
-				</div>
+				</header>
 				{#if apps.length === 0}
-					<p class="muted">No apps deployed.</p>
+					<p class="p-3 text-sm text-neutral-500">
+						{loading ? "Loading apps…" : "No apps deployed."}
+					</p>
 				{:else}
-					<ul class="app-list">
+					<ul class="flex min-h-0 flex-col overflow-y-auto py-1">
 						{#each apps as app (app.name)}
 							<li>
 								<button
 									aria-current={selected === app.name}
+									class={[
+										"flex w-full items-center gap-2 border-b border-l-2 border-line-soft px-3 py-1.5 text-left text-sm transition-colors hover:bg-neutral-800/40",
+										selected === app.name
+											? "border-l-primary-500 bg-neutral-800/40"
+											: "border-l-transparent",
+									]}
 									onclick={(): void => select(app.name)}
 									type="button"
 								>
-									<span aria-hidden="true" class="dot {app.status}"></span>
-									<span>{app.name}</span>
-									<span class="muted">{uptime(app.startedAt)}</span>
+									<span
+										aria-hidden="true"
+										class={app.status === "running"
+											? "size-1.5 shrink-0 bg-primary-500"
+											: "size-1.5 shrink-0 border border-neutral-500"}
+									></span>
+									<span class="flex-1 truncate">{app.name}</span>
+									<span class="text-xs text-neutral-500 tabular-nums">{uptime(app.startedAt)}</span>
 								</button>
 							</li>
 						{/each}
@@ -288,123 +376,204 @@ onMount((): (() => void) => {
 				{/if}
 			</aside>
 
-			<div class="main">
+			<!-- A focusable separator is a window splitter, adjustable by pointer and by arrow keys. -->
+			<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+			<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+			<!-- biome-ignore lint/a11y/useSemanticElements: A window splitter is not an <hr>. -->
+			<div
+				aria-label="Resize app list"
+				aria-orientation="vertical"
+				aria-valuemax={MAX_SIDEBAR}
+				aria-valuemin={MIN_SIDEBAR}
+				aria-valuenow={Math.round(sidebarWidth)}
+				class="resize-handle hover:bg-primary-500/10"
+				onkeydown={onSeparatorKeydown}
+				onpointerdown={startSidebarResize}
+				onpointerleave={resetGrip}
+				onpointermove={moveGrip}
+				role="separator"
+				tabindex="0"
+			>
+				<span aria-hidden="true" class="resize-grip" style:top={gripY === null ? "50%" : `${gripY}px`}></span>
+			</div>
+
+			<main class="flex min-w-0 flex-1 flex-col bg-surface">
 				{#if selected}
-					<section aria-busy={loading} aria-live="polite" class="card">
-						<div class="row">
-							<h2>{selected}</h2>
-							<span class="spacer"></span>
-							<button onclick={(): void => select(null)} type="button">Close</button>
-							<button disabled={restarting} onclick={restart} type="button">
-								{restarting ? "Restarting…" : confirmRestart ? "Click again to confirm" : "Restart"}
-							</button>
-						</div>
+					<header class="flex shrink-0 items-center gap-2 border-b border-line bg-surface px-3 py-2">
+						<h2 class="text-sm font-semibold tracking-tight">{selected}</h2>
+						<span class="flex-1"></span>
+						<button class="btn" onclick={(): void => select(null)} type="button">Close</button>
+						<button
+							class={confirmRestart ? "btn btn-danger" : "btn"}
+							disabled={restarting}
+							onclick={restart}
+							type="button"
+						>
+							{restarting ? "Restarting…" : confirmRestart ? "Click again to confirm" : "Restart"}
+						</button>
+					</header>
+
+					<div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
 						{#if detail}
-							<dl class="facts">
-								<div>
-									<dt>Host</dt>
-									<dd>{detail.host}</dd>
+							<dl class="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-4">
+								<div class="flex flex-col">
+									<dt class="text-xs tracking-wide text-neutral-500 uppercase">Host</dt>
+									<dd class="text-sm wrap-break-word">{detail.host}</dd>
 								</div>
-								<div>
-									<dt>Status</dt>
-									<dd>{detail.status}</dd>
+								<div class="flex flex-col">
+									<dt class="text-xs tracking-wide text-neutral-500 uppercase">Status</dt>
+									<dd class="text-sm">{detail.status}</dd>
 								</div>
-								<div>
-									<dt>Started</dt>
-									<dd>{formatTime(detail.startedAt)}</dd>
+								<div class="flex flex-col">
+									<dt class="text-xs tracking-wide text-neutral-500 uppercase">Started</dt>
+									<dd class="text-sm">{formatTime(detail.startedAt)}</dd>
 								</div>
-								<div>
-									<dt>PID</dt>
-									<dd>{detail.pid ?? "–"}</dd>
+								<div class="flex flex-col">
+									<dt class="text-xs tracking-wide text-neutral-500 uppercase">PID</dt>
+									<dd class="text-sm tabular-nums">{detail.pid ?? "–"}</dd>
 								</div>
 							</dl>
 						{/if}
-						{#if actionMessage}
-							<p>{actionMessage}</p>
-						{/if}
-						{#if error}
-							<div class="error" role="alert">{error}</div>
-						{/if}
-						<div class="row">
-							<h3>Logs</h3>
-							<span class="spacer"></span>
-							<select aria-label="Lines to show" onchange={reloadLogs} bind:value={tail}>
-								<option value={100}>100 lines</option>
-								<option value={500}>500 lines</option>
-								<option value={2000}>2000 lines</option>
-							</select>
-							<button disabled={loading} onclick={reloadLogs} type="button">Reload</button>
-						</div>
-						{#if logs.length === 0}
-							<p class="muted">No log lines yet.</p>
-						{:else}
-							<pre class="logs">{logs.join("\n")}</pre>
-						{/if}
-						<form class="row" onsubmit={upload}>
-							<label for="bundle">Deploy bundle</label>
-							<input accept=".tar.gz, application/gzip" id="bundle" type="file">
-							<button disabled={deploying} type="submit">{deploying ? "Deploying…" : "Deploy"}</button>
-						</form>
-					</section>
-				{/if}
 
-				{#if error && !selected}
-					<div class="error" role="alert">{error}</div>
-				{/if}
-				{#if !selected && !error}
-					<div class="card">
-						<p class="muted">Select an app to inspect it.</p>
+						{#if actionMessage}
+							<p
+								class="border border-primary-500/40 bg-primary-500/10 px-2 py-1 text-sm text-primary-300"
+							>
+								{actionMessage}
+							</p>
+						{/if}
+
+						<section aria-labelledby="logs-title" class="flex min-h-0 flex-col gap-2">
+							<div class="flex items-center gap-2">
+								<h3
+									class="text-xs font-semibold tracking-wide text-neutral-400 uppercase"
+									id="logs-title"
+								>
+									Logs
+								</h3>
+								<span class="flex-1"></span>
+								<select
+									aria-label="Lines to show"
+									class="field"
+									onchange={reloadLogs}
+									bind:value={tail}
+								>
+									<option value={100}>100 lines</option>
+									<option value={500}>500 lines</option>
+									<option value={2000}>2000 lines</option>
+								</select>
+								<button class="btn" disabled={loading} onclick={reloadLogs} type="button">
+									Reload
+								</button>
+							</div>
+							{#if logs.length === 0}
+								<p class="text-sm text-neutral-500">No log lines yet.</p>
+							{:else}
+								<pre
+									class="max-h-96 overflow-auto border border-line bg-black p-2 font-mono text-xs whitespace-pre-wrap wrap-break-word text-neutral-300"
+								>{logs.join("\n")}</pre>
+							{/if}
+						</section>
+
+						<form
+							class="flex flex-wrap items-center gap-2 border-t border-line-soft pt-4"
+							onsubmit={upload}
+						>
+							<label class="text-xs tracking-wide text-neutral-400 uppercase" for="bundle">
+								Deploy bundle
+							</label>
+							<input
+								accept=".tar.gz, application/gzip"
+								class="field file:mr-2 file:cursor-pointer file:border-0 file:bg-neutral-800 file:px-2 file:py-0.5 file:text-sm file:text-neutral-200 file:transition-colors hover:file:bg-neutral-700"
+								id="bundle"
+								type="file"
+							>
+							<button class="btn btn-primary" disabled={deploying} type="submit">
+								{deploying ? "Deploying…" : "Deploy"}
+							</button>
+						</form>
+
+						{#if error}
+							<p
+								class="border border-red-500/80 bg-red-500/10 px-2 py-1 text-sm text-red-400"
+								role="alert"
+							>
+								{error}
+							</p>
+						{/if}
+					</div>
+				{:else if error}
+					<div class="p-4">
+						<p class="border border-red-500/80 bg-red-500/10 px-2 py-1 text-sm text-red-400" role="alert">
+							{error}
+						</p>
+					</div>
+				{:else}
+					<div class="flex flex-1 items-center justify-center p-4">
+						<p class="text-sm text-neutral-500">Select an app to inspect it.</p>
 					</div>
 				{/if}
-			</div>
+			</main>
 		</div>
 	{/if}
 </div>
 
 <style>
-.spacer {
+.workspace {
+	display: flex;
 	flex: 1;
+	min-height: 0;
 }
 
-.facts {
-	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-	gap: 8px 24px;
+.workspace > aside {
+	width: var(--sidebar-width);
 }
 
-.facts div {
-	display: flex;
-	flex-direction: column;
+/* The separator is a thin hit area; only its grip is visible, so the panes sit flush. */
+.resize-handle {
+	position: relative;
+	flex: 0 0 5px;
+	touch-action: none;
 }
 
-.facts dt {
-	font-size: 0.72rem;
-	color: var(--muted);
-	text-transform: uppercase;
-	letter-spacing: 0.08em;
+.resize-grip {
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	width: 2px;
+	height: 2.5rem;
+	background: var(--color-neutral-600);
+	opacity: 0.35;
+	translate: -50% -50%;
+	transition:
+		opacity 120ms ease,
+		background-color 120ms ease;
 }
 
-.facts dd {
-	margin: 0;
-	overflow-wrap: anywhere;
+.resize-handle:hover .resize-grip,
+.resize-handle:focus-visible .resize-grip,
+.resize-handle:active .resize-grip {
+	background: var(--color-primary-500);
+	opacity: 1;
 }
 
-h3 {
-	margin: 0;
-	font-size: 0.95rem;
+.resize-handle:hover,
+.resize-handle:active {
+	cursor: col-resize;
 }
 
-label {
-	display: flex;
-	flex-direction: column;
-	gap: 6px;
-}
+/* Below the split point the panes stack, so the separator has nothing to adjust. */
+@media (max-width: 700px) {
+	.workspace {
+		flex-direction: column;
+	}
 
-label > span {
-	font-size: 0.72rem;
-	font-weight: 600;
-	color: var(--muted);
-	text-transform: uppercase;
-	letter-spacing: 0.08em;
+	.workspace > aside {
+		width: auto;
+	}
+
+	.resize-handle {
+		display: none;
+	}
 }
 </style>
