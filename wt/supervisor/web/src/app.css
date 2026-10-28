@@ -33,7 +33,7 @@ body {
 	background: black;
 }
 
-button {
+button:not(:disabled) {
 	cursor: pointer;
 }
 

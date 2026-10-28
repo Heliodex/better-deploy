@@ -80,6 +80,8 @@ function clampSidebar(width: number): number {
 }
 
 function select(name: string | null): void {
+	// Re-selecting the open app would reset its detail and reload it for nothing.
+	if (name === selected) return
 	selected = name
 	detail = null
 	logs = []
@@ -360,11 +362,12 @@ onMount((): (() => void) => {
 									<button
 										aria-current={selected === app.name}
 										class={[
-											"flex w-full items-center gap-2 border-b border-l-2 border-line-soft px-3 py-1.5 text-left text-sm transition-colors hover:bg-neutral-800/40",
+											"flex w-full items-center gap-2 border-b border-l-2 border-line-soft px-3 py-1.5 text-left text-sm transition-colors",
 											selected === app.name
-												? "border-l-primary-500 bg-neutral-800/40"
-												: "border-l-transparent",
+												? "cursor-default border-l-primary-500 bg-neutral-800/40"
+												: "border-l-transparent hover:bg-neutral-800/40",
 										]}
+										disabled={selected === app.name}
 										onclick={(): void => select(app.name)}
 										type="button"
 									>
