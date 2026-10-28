@@ -159,6 +159,14 @@ func TestRunNew(t *testing.T) {
 		t.Errorf("contract/generate.go has no go:generate directives:\n%s", generate)
 	}
 
+	script, err := os.ReadFile(filepath.Join(dir, "web", "scripts", "contract.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(script), "createNote") {
+		t.Errorf("contract script references a specific schema; keep it generic:\n%s", script)
+	}
+
 	if err := runNew([]string{"--dir", dir}); err == nil {
 		t.Error("expected error scaffolding into a non-empty directory")
 	}
