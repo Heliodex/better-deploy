@@ -117,7 +117,11 @@ func runNew(args []string) error {
 		if err != nil {
 			return err
 		}
-		rel := strings.TrimPrefix(path, "testdata/template/")
+		rel, ok := strings.CutPrefix(path, "testdata/template")
+		if !ok {
+			return fmt.Errorf("unexpected template path %q", path)
+		}
+		rel = strings.TrimPrefix(rel, "/")
 		dst := filepath.Join(abs, filepath.FromSlash(rel))
 		if entry.IsDir() {
 			return os.MkdirAll(dst, 0o755)
