@@ -8,6 +8,7 @@ import {
 	fetchLogs,
 	forgetToken,
 	getToken,
+	type LogEntry,
 	restartApp,
 	setToken,
 	subscribe,
@@ -24,7 +25,7 @@ let tokenInput = $state("")
 let apps = $state<AppInfo[]>([])
 let selected = $state<string | null>(null)
 let detail = $state<AppInfo | null>(null)
-let logs = $state<string[]>([])
+let logs = $state<LogEntry[]>([])
 let tail = $state(200)
 let error = $state("")
 let loading = $state(true)
@@ -51,6 +52,19 @@ function uptime(startedAt: string): string {
 function formatTime(value: string): string {
 	const date = new Date(value)
 	return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+}
+
+const logTimeFormat = new Intl.DateTimeFormat(undefined, {
+	hour: "2-digit",
+	hour12: false,
+	minute: "2-digit",
+	second: "2-digit",
+})
+
+function formatLogTime(value: string): string {
+	if (value === "") return ""
+	const date = new Date(value)
+	return Number.isNaN(date.getTime()) ? value : logTimeFormat.format(date)
 }
 
 function readSelection(): string | null {
@@ -467,9 +481,16 @@ onMount((): (() => void) => {
 							{#if logs.length === 0}
 								<p class="text-sm text-neutral-500">No log lines yet.</p>
 							{:else}
-								<pre
-									class="max-h-96 overflow-auto border border-line bg-black p-2 font-mono text-xs whitespace-pre-wrap wrap-break-word text-neutral-300"
-								>{logs.join("\n")}</pre>
+								<div class="max-h-96 overflow-auto border border-line bg-black p-2 font-mono text-xs">
+									{#each logs as entry, index (index)}
+										<div class="flex gap-3 whitespace-pre-wrap wrap-break-word">
+											<time class="shrink-0 text-neutral-500 tabular-nums" datetime={entry.time}
+												>{entry.time === "" ? "—" : formatLogTime(entry.time)}</time
+											>
+											<span class="text-neutral-300">{entry.message}</span>
+										</div>
+									{/each}
+								</div>
 							{/if}
 						</section>
 

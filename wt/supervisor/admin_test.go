@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -126,9 +127,12 @@ func TestAppLogRotation(t *testing.T) {
 	if len(got) != 5 {
 		t.Fatalf("tail(5) returned %d lines", len(got))
 	}
-	for _, line := range got {
-		if !strings.HasPrefix(line, "line ") {
-			t.Errorf("unexpected tail line %q", line)
+	for _, entry := range got {
+		if !strings.HasPrefix(entry.Message, "line ") {
+			t.Errorf("unexpected tail message %q", entry.Message)
+		}
+		if entry.Time == "" {
+			t.Errorf("entry %q has no timestamp", entry.Message)
 		}
 	}
 
@@ -138,6 +142,55 @@ func TestAppLogRotation(t *testing.T) {
 	}
 	if len(got) == 0 {
 		t.Error("tail returned no lines")
+	}
+}
+
+func TestAppLogStampsCompleteLines(t *testing.T) {
+	logs, err := newAppLog(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Output arrives in arbitrary chunks: "hel" + "lo\nwor" + "ld\n".
+	for _, chunk := range []string{"hel", "lo\nwor", "ld\n"} {
+		if _, err := io.WriteString(logs, chunk); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	entries, err := logs.tail(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("tail returned %d entries, want 2: %+v", len(entries), entries)
+	}
+	for i, want := range []string{"hello", "world"} {
+		if entries[i].Message != want {
+			t.Errorf("entry %d message = %q, want %q", i, entries[i].Message, want)
+		}
+		parsed, err := time.Parse(logTimeFormat, entries[i].Time)
+		if err != nil {
+			t.Errorf("entry %d time %q does not parse: %v", i, entries[i].Time, err)
+			continue
+		}
+		if delta := time.Since(parsed); delta < 0 || delta > time.Minute {
+			t.Errorf("entry %d time is not recent: %v", i, delta)
+		}
+	}
+}
+
+func TestParseLogLineToleratesLegacyLines(t *testing.T) {
+	legacy := parseLogLine("Serving HTTP on http://127.0.0.1:8080/")
+	if legacy.Time != "" || legacy.Message != "Serving HTTP on http://127.0.0.1:8080/" {
+		t.Errorf("legacy line parsed as %+v", legacy)
+	}
+	appStamp := parseLogLine("2026/10/28 14:20:11 app says hi")
+	if appStamp.Time != "" || appStamp.Message != "2026/10/28 14:20:11 app says hi" {
+		t.Errorf("app-stamped line parsed as %+v", appStamp)
+	}
+	stamped := parseLogLine("2026-10-28T18:20:11.5Z hello world")
+	if stamped.Time != "2026-10-28T18:20:11.5Z" || stamped.Message != "hello world" {
+		t.Errorf("stamped line parsed as %+v", stamped)
 	}
 }
 

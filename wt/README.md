@@ -95,7 +95,8 @@ refreshing. Every endpoint except `/healthz` requires the deploy bearer
 token, which the panel asks for once and keeps in the browser (a `wt_token`
 cookie carries it on the event stream, where headers cannot go). App logs
 persist under `/var/lib/wt/.logs` (or `WT_STATE_DIR`), outside each app's
-`/data` preopen.
+`/data` preopen, and every line is stamped with the time the supervisor
+received it so timestamps do not depend on how an app logs.
 
 To deploy from the panel without the CLI, build the bundle first and upload
 the file:

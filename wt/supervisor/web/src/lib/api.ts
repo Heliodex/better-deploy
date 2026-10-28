@@ -35,12 +35,18 @@ const snapshotSchema = object({
 
 export type Snapshot = InferOutput<typeof snapshotSchema>
 
+const logEntrySchema = object({
+	message: string(),
+	time: string(),
+})
+
+export type LogEntry = InferOutput<typeof logEntrySchema>
+
 const logsResponseSchema = object({
-	logs: array(string()),
+	logs: array(logEntrySchema),
 })
 
 export type LogsResult = InferOutput<typeof logsResponseSchema>
-
 const errorResponseSchema = object({
 	error: string(),
 })
@@ -134,7 +140,7 @@ export function fetchApp(token: string, name: string): Promise<AppInfo> {
 	return request(`/apps/${encodeURIComponent(name)}`, { token }, appInfoSchema)
 }
 
-export async function fetchLogs(token: string, name: string, tail: number): Promise<string[]> {
+export async function fetchLogs(token: string, name: string, tail: number): Promise<LogEntry[]> {
 	const data = await request(`/apps/${encodeURIComponent(name)}/logs?tail=${tail}`, { token }, logsResponseSchema)
 	return data.logs
 }

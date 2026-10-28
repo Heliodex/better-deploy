@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"embed"
 	"encoding/json/v2"
 	"fmt"
@@ -25,15 +26,19 @@ const (
 	defaultLogTail = 200
 	maxLogTail     = 5000
 	maxLogBytes    = 1 << 20
+	logTimeFormat  = time.RFC3339Nano
 )
 
 // appLog appends an app's output to a capped log file for the admin panel. The
-// file lives outside the app's /data preopen so components cannot read it.
+// file lives outside the app's /data preopen so components cannot read it. Each
+// line is stamped with the time the supervisor received it, so timestamps do not
+// depend on how an app logs.
 type appLog struct {
-	mu   sync.Mutex
-	dir  string
-	file *os.File
-	size int64
+	mu      sync.Mutex
+	dir     string
+	file    *os.File
+	size    int64
+	pending []byte
 }
 
 func newAppLog(dir string) (*appLog, error) {
@@ -70,18 +75,41 @@ func (l *appLog) open() error {
 	return nil
 }
 
-// Write implements io.Writer, rotating to output.log.1 past maxLogBytes.
+// Write implements io.Writer. Output arrives in arbitrary chunks, so lines are
+// buffered until their newline and each one is written with a receive timestamp.
 func (l *appLog) Write(p []byte) (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.size+int64(len(p)) > maxLogBytes {
-		if err := l.rotate(); err != nil {
+	l.pending = append(l.pending, p...)
+	for {
+		index := bytes.IndexByte(l.pending, '\n')
+		if index < 0 {
+			break
+		}
+		line := string(l.pending[:index])
+		l.pending = l.pending[index+1:]
+		if err := l.writeLine(line); err != nil {
 			return 0, err
 		}
 	}
-	written, err := l.file.Write(p)
+	// A writer that never emits a newline must not grow the buffer without bound.
+	if len(l.pending) > maxLogBytes {
+		l.pending = append([]byte{}, l.pending[len(l.pending)-maxLogBytes:]...)
+	}
+	return len(p), nil
+}
+
+// writeLine stamps one complete line and appends it, rotating past maxLogBytes.
+func (l *appLog) writeLine(line string) error {
+	data := []byte(time.Now().UTC().Format(logTimeFormat) + " " + line + "\n")
+	if l.size+int64(len(data)) > maxLogBytes {
+		if err := l.rotate(); err != nil {
+			return err
+		}
+	}
+	written, err := l.file.Write(data)
 	l.size += int64(written)
-	return written, err
+	return err
 }
 
 func (l *appLog) rotate() error {
@@ -95,11 +123,30 @@ func (l *appLog) rotate() error {
 	return l.open()
 }
 
+// logEntry is one log line with the time the supervisor received it. Lines
+// written before timestamps existed have no time and keep their whole text.
+type logEntry struct {
+	Time    string `json:"time"`
+	Message string `json:"message"`
+}
+
+// parseLogLine splits a stamped line into its time and message.
+func parseLogLine(line string) logEntry {
+	stamp, message, ok := strings.Cut(line, " ")
+	if !ok {
+		return logEntry{Message: line}
+	}
+	if _, err := time.Parse(logTimeFormat, stamp); err != nil {
+		return logEntry{Message: line}
+	}
+	return logEntry{Time: stamp, Message: message}
+}
+
 // tail returns the last n log lines, oldest first.
-func (l *appLog) tail(n int) ([]string, error) {
+func (l *appLog) tail(n int) ([]logEntry, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	out := []string{}
+	lines := []string{}
 	for _, path := range []string{l.backupPath(), l.path()} {
 		data, err := os.ReadFile(path)
 		if os.IsNotExist(err) {
@@ -108,19 +155,23 @@ func (l *appLog) tail(n int) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, strings.Split(string(data), "\n")...)
+		lines = append(lines, strings.Split(string(data), "\n")...)
 	}
-	for len(out) > 0 && out[len(out)-1] == "" {
-		out = out[:len(out)-1]
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
 	}
-	if len(out) > n {
-		out = out[len(out)-n:]
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	out := make([]logEntry, 0, len(lines))
+	for _, line := range lines {
+		out = append(out, parseLogLine(line))
 	}
 	return out, nil
 }
 
 type logsResponse struct {
-	Logs []string `json:"logs"`
+	Logs []logEntry `json:"logs"`
 }
 
 // hub fans out app snapshots to SSE subscribers. Snapshots carry full state,
@@ -271,7 +322,7 @@ func (s *supervisor) handleLogs(w http.ResponseWriter, r *http.Request, a *app) 
 		}
 		tail = parsed
 	}
-	logs := []string{}
+	logs := []logEntry{}
 	if a.logs != nil {
 		var err error
 		logs, err = a.logs.tail(tail)
