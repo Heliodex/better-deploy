@@ -350,7 +350,7 @@ const levelClasses: { [_: string]: string } = {
 	debug: "text-neutral-500",
 	error: "text-red-400",
 	fatal: "font-semibold text-red-500",
-	info: "text-neutral-400",
+	info: "text-sky-400",
 	trace: "text-neutral-600",
 	warn: "text-amber-400",
 }
@@ -359,7 +359,7 @@ const levelMessageClasses: { [_: string]: string } = {
 	debug: "text-neutral-300",
 	error: "text-red-200",
 	fatal: "text-red-200",
-	info: "text-neutral-300",
+	info: "text-sky-300",
 	trace: "text-neutral-400",
 	warn: "text-amber-200",
 }

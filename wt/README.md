@@ -64,6 +64,11 @@ cd wt/supervisor && go generate ./... && go build -o /tmp/wt-supervisor .
 cd wt/deploy && go build -o /tmp/wt-deploy .
 ```
 
+For the local loop, `wt/supervisor/dev.sh` rebuilds the admin panel and binary
+and restarts the supervisor, reusing the running instance's app and state
+directories so deployed apps, data and logs survive. `./dev.sh --skip-generate`
+skips the panel build for a Go-only change.
+
 ## Run the supervisor
 
 ```sh
