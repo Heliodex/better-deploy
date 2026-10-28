@@ -46,6 +46,7 @@ const errorResponseSchema = object({
 })
 
 const tokenKey = "wt-admin-token"
+const cookieName = "wt_token"
 
 export function getToken(): string | null {
 	return localStorage.getItem(tokenKey)
@@ -53,12 +54,12 @@ export function getToken(): string | null {
 
 export function setToken(token: string): void {
 	localStorage.setItem(tokenKey, token)
-	setCookie(tokenKey, token, 31536000)
+	setCookie(cookieName, token, 31536000)
 }
 
 export function forgetToken(): void {
 	localStorage.removeItem(tokenKey)
-	setCookie(tokenKey, "", 0)
+	setCookie(cookieName, "", 0)
 }
 
 function setCookie(name: string, value: string, maxAge: number): void {
