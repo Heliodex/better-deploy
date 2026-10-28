@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -170,5 +171,86 @@ func TestHandleResourcesEmptyHistory(t *testing.T) {
 	}
 	if len(out.Samples) != 0 {
 		t.Errorf("samples = %+v, want none", out.Samples)
+	}
+}
+
+func TestPersistResourcesRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	s := testSupervisor()
+	s.cfg.stateDir = dir
+	base := time.Now().UTC().Truncate(time.Second)
+	a := &app{name: "demo"}
+	a.stats.history = []resourceSample{
+		{At: base.Add(-2 * time.Second), CPUPercent: 1.5, MemoryBytes: 1 << 20},
+		{At: base.Add(-time.Second), CPUPercent: 2.5, MemoryBytes: 2 << 20},
+	}
+	s.apps["demo"] = a
+	s.persistResources()
+
+	loaded := testSupervisor()
+	loaded.cfg.stateDir = dir
+	b := &app{name: "demo"}
+	loaded.loadResourceHistory(b)
+	got := b.resourceHistory()
+	if len(got) != 2 {
+		t.Fatalf("samples = %+v, want 2", got)
+	}
+	if got[0].CPUPercent != 1.5 || got[1].CPUPercent != 2.5 || got[1].MemoryBytes != 2<<20 {
+		t.Errorf("samples = %+v, want the persisted values in order", got)
+	}
+}
+
+func TestLoadResourceHistoryMissingAndCorrupt(t *testing.T) {
+	dir := t.TempDir()
+	s := testSupervisor()
+	s.cfg.stateDir = dir
+	a := &app{name: "demo"}
+	s.loadResourceHistory(a)
+	if len(a.resourceHistory()) != 0 {
+		t.Fatalf("missing file loaded %+v, want none", a.resourceHistory())
+	}
+
+	if err := os.MkdirAll(s.resourcesDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(s.resourcesDir(), "demo.json"), []byte("not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.loadResourceHistory(a)
+	if len(a.resourceHistory()) != 0 {
+		t.Errorf("corrupt file loaded %+v, want none", a.resourceHistory())
+	}
+}
+
+func TestLoadResourceHistoryTrimsStale(t *testing.T) {
+	dir := t.TempDir()
+	s := testSupervisor()
+	s.cfg.stateDir = dir
+	now := time.Now().UTC()
+	history := []resourceSample{{At: now.Add(-resourceHistoryWindow - time.Minute), CPUPercent: 9999, MemoryBytes: 9999}}
+	for i := range resourceHistoryPoints + 5 {
+		// Tightly spaced so every fresh sample is inside the window; only the stale one is cut.
+		history = append(history, resourceSample{At: now.Add(-time.Duration(resourceHistoryPoints+4-i) * 100 * time.Millisecond), CPUPercent: float64(i), MemoryBytes: int64(i)})
+	}
+	a := &app{name: "demo"}
+	a.stats.history = history
+	s.apps["demo"] = a
+	s.persistResources()
+
+	loaded := testSupervisor()
+	loaded.cfg.stateDir = dir
+	b := &app{name: "demo"}
+	loaded.loadResourceHistory(b)
+	got := b.resourceHistory()
+	if len(got) != resourceHistoryPoints {
+		t.Fatalf("samples = %d, want %d", len(got), resourceHistoryPoints)
+	}
+	for _, sample := range got {
+		if sample.CPUPercent == 9999 {
+			t.Fatalf("stale sample survived the load: %+v", got)
+		}
+	}
+	if last := got[len(got)-1]; last.CPUPercent != float64(resourceHistoryPoints+4) {
+		t.Errorf("newest CPU = %v, want %d", last.CPUPercent, resourceHistoryPoints+4)
 	}
 }

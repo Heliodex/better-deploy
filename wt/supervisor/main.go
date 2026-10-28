@@ -555,6 +555,7 @@ func (s *supervisor) spawn(name, dir string, cfg appConfig, port int) (*app, err
 		started: time.Now().UTC(),
 		delay:   time.Second,
 	}
+	s.loadResourceHistory(a)
 	if err := s.launch(a, cwasm); err != nil {
 		s.stop(a)
 		return nil, err
@@ -1128,6 +1129,7 @@ func main() {
 		err = server.ListenAndServe()
 	}
 	s.stopAll()
+	s.persistResources()
 	storage.close()
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("listen: %v", err)

@@ -69,7 +69,7 @@ The supervisor serves a small admin panel at `/admin/` on its own address (for e
 
 ## Resource usage
 
-The app detail charts CPU and resident memory for the `wasmtime serve` process, read from `/proc/<pid>/stat` and `/proc/<pid>/statm`. CPU is a percentage of one core and can exceed 100% for a multi-threaded component; memory is the process's resident set size. The supervisor samples every second and keeps five minutes of history, which the panel fetches from `GET /apps/<name>/resources` and draws as two charts; live figures arrive in the same SSE snapshots, so the charts keep moving without polling. History is in memory only, so it resets when the supervisor restarts. A stopped app records zeros, and a container without a mounted `/proc` shows memory as `–`.
+The app detail charts CPU and resident memory for the `wasmtime serve` process, read from `/proc/<pid>/stat` and `/proc/<pid>/statm`. CPU is a percentage of one core and can exceed 100% for a multi-threaded component; memory is the process's resident set size. The supervisor samples every second and keeps five minutes of history, which the panel fetches from `GET /apps/<name>/resources` and draws as two charts; live figures arrive in the same SSE snapshots, so the charts keep moving without polling. History is persisted under `WT_STATE_DIR/.resources` every ten seconds and on shutdown, so it survives restarts with at most a few seconds lost. A stopped app records zeros, and a container without a mounted `/proc` shows memory as `–`.
 
 ## Log levels
 

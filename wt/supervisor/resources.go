@@ -2,13 +2,22 @@ package main
 
 import (
 	"bytes"
+	"encoding/json/v2"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+)
+
+const (
+	// resourcePersistInterval is how often chart histories are written to disk. A crash loses at most this much history.
+	resourcePersistInterval = 10 * time.Second
 )
 
 // clockTicks is Linux USER_HZ, which is 100 on every architecture the supervisor supports.
@@ -167,6 +176,8 @@ func (s *supervisor) recordAll() {
 func (s *supervisor) monitorResources(every time.Duration) {
 	s.sampleAll()
 	s.recordAll()
+	s.persistResources()
+	lastPersist := time.Now()
 	ticker := time.NewTicker(every)
 	defer ticker.Stop()
 	for range ticker.C {
@@ -175,10 +186,93 @@ func (s *supervisor) monitorResources(every time.Duration) {
 		}
 		s.sampleAll()
 		s.recordAll()
+		if time.Since(lastPersist) >= resourcePersistInterval {
+			s.persistResources()
+			lastPersist = time.Now()
+		}
 		if s.events != nil && s.events.hasSubscribers() {
 			s.broadcast()
 		}
 	}
+}
+
+// resourcesDir holds one JSON history file per app, outside any app's /data preopen.
+func (s *supervisor) resourcesDir() string {
+	return filepath.Join(s.cfg.stateDir, ".resources")
+}
+
+func (s *supervisor) resourceHistoryPath(name string) string {
+	return filepath.Join(s.resourcesDir(), name+".json")
+}
+
+// persistResources writes each app's chart history to disk so it survives restarts.
+// Failures are logged and ignored: history is best-effort.
+func (s *supervisor) persistResources() {
+	if s.cfg.stateDir == "" {
+		return
+	}
+	if err := os.MkdirAll(s.resourcesDir(), 0o755); err != nil {
+		log.Printf("resources: persist: %v", err)
+		return
+	}
+	s.mu.RLock()
+	apps := make([]*app, 0, len(s.apps))
+	for _, a := range s.apps {
+		apps = append(apps, a)
+	}
+	s.mu.RUnlock()
+	for _, a := range apps {
+		data, err := json.Marshal(resourceHistoryResponse{Samples: a.resourceHistory()})
+		if err != nil {
+			continue
+		}
+		tmp, err := os.CreateTemp(s.resourcesDir(), "."+a.name+".*.json")
+		if err != nil {
+			continue
+		}
+		tmpName := tmp.Name()
+		_, writeErr := tmp.Write(append(data, '\n'))
+		closeErr := tmp.Close()
+		if writeErr != nil || closeErr != nil {
+			_ = os.Remove(tmpName)
+			continue
+		}
+		if err := os.Rename(tmpName, s.resourceHistoryPath(a.name)); err != nil {
+			_ = os.Remove(tmpName)
+		}
+	}
+}
+
+// loadResourceHistory reads a persisted history back into a fresh app, trimming to
+// the chart window. A missing or corrupt file means empty history.
+func (s *supervisor) loadResourceHistory(a *app) {
+	data, err := os.ReadFile(s.resourceHistoryPath(a.name))
+	if err != nil {
+		return
+	}
+	var out resourceHistoryResponse
+	if err := json.Unmarshal(data, &out); err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-resourceHistoryWindow)
+	kept := make([]resourceSample, 0, len(out.Samples))
+	for _, sample := range out.Samples {
+		if sample.At.IsZero() || sample.At.Before(cutoff) {
+			continue
+		}
+		kept = append(kept, sample)
+	}
+	sort.Slice(kept, func(i, j int) bool { return kept[i].At.Before(kept[j].At) })
+	if len(kept) > resourceHistoryPoints {
+		kept = kept[len(kept)-resourceHistoryPoints:]
+	}
+	if len(kept) == 0 {
+		return
+	}
+	a.stats.mu.Lock()
+	a.stats.history = kept
+	a.stats.lastAppend = kept[len(kept)-1].At
+	a.stats.mu.Unlock()
 }
 
 // cpuPercent converts a CPU-tick delta into percent of one core over elapsed.
