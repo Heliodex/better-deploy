@@ -7,10 +7,11 @@ FROM docker.io/library/golang:1.27-alpine AS supervisor
 WORKDIR /src
 RUN mkdir -p /out
 COPY --from=docker.io/oven/bun:alpine /usr/local/bin/bun /usr/local/bin/bun
+RUN apk add --no-cache libstdc++ libgcc
 COPY wt/supervisor/go.mod wt/supervisor/go.sum ./
 RUN go mod download
 COPY wt/supervisor/ ./
-RUN cd /src/supervisor && go generate ./... && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+RUN go generate ./... && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -trimpath -ldflags="-s -w" -o /out/wt-supervisor .
 
 # Build wasmtime without Cranelift/Winch: the serving side only deserializes
