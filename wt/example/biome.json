@@ -38,11 +38,8 @@
 			"!**/build",
 			"!**/dist",
 			"!**/.wrangler",
-			"!packages/binding",
-			"!example/guestbook/static",
-			"!example/guestbook/contract/schemas",
-			"!apps",
-			"!state"
+			"!*/static",
+			"!*/contract/schemas"
 		]
 	},
 	"formatter": {
@@ -299,7 +296,7 @@
 			}
 		},
 		{
-			"includes": ["example/*/web/scripts/**", "deploy/testdata/template/web/scripts/**"],
+			"includes": ["*/web/scripts/**"],
 			"linter": {
 				"rules": {
 					"correctness": {
