@@ -348,8 +348,8 @@ func requestError(err error) string {
 	if index := strings.Index(message, ": invalid value"); index >= 0 {
 		return "field reaction: " + message[index+2:]
 	}
-	if index := strings.LastIndex(message, ": "); index >= 0 {
-		return message[index+2:]
+	if _, after, ok := strings.CutLast(message, ": "); ok {
+		return after
 	}
 	return message
 }
