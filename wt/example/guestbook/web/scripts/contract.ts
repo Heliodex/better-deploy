@@ -1,18 +1,16 @@
-import { mkdir, rm, writeFile } from "node:fs/promises"
-import { join } from "node:path"
-import { fileURLToPath } from "node:url"
+/// <reference types="bun" />
+import { rm } from "node:fs/promises"
 import { toJsonSchema } from "@valibot/to-json-schema"
 import { createMessageSchema, reactMessageSchema } from "../src/lib/contract"
-
-const outDir = fileURLToPath(new URL("../../contract/schemas", import.meta.url))
 
 const schemas = Object.freeze([
 	{ file: "create-message", schema: createMessageSchema, title: "CreateMessageRequest" },
 	{ file: "react-message", schema: reactMessageSchema, title: "ReactMessageRequest" },
 ] as const)
 
-await rm(outDir, { force: true, recursive: true })
-await mkdir(outDir, { recursive: true })
+const schemasDir = `${import.meta.dir}/../../contract/schemas`
+
+await rm(schemasDir, { force: true, recursive: true })
 
 for (const { file, title, schema } of schemas) {
 	const json = {
@@ -20,6 +18,6 @@ for (const { file, title, schema } of schemas) {
 		$id: `https://wt.example/guestbook/${file}.json`,
 		title,
 	}
-	await writeFile(join(outDir, `${file}.json`), `${JSON.stringify(json, null, "\t")}\n`)
+	await Bun.write(`${schemasDir}/${file}.json`, `${JSON.stringify(json, null, "\t")}\n`)
 	console.log(`wrote contract/schemas/${file}.json`)
 }
