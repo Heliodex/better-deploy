@@ -281,21 +281,6 @@ onMount((): (() => void) => {
 </svelte:head>
 
 <div class="flex min-h-dvh flex-col">
-	<header class="flex shrink-0 items-center gap-2 border-b border-line bg-surface px-3 py-2">
-		<h1 class="text-sm font-semibold tracking-tight">wt admin</h1>
-		<span class="flex-1"></span>
-		{#if token}
-			<span class="flex items-center gap-1.5 text-xs text-neutral-400">
-				<span
-					aria-hidden="true"
-					class={live ? "size-1.5 bg-primary-500" : "size-1.5 border border-neutral-500"}
-				></span>
-				{live ? "live" : "connecting…"}
-			</span>
-			<button class="btn" onclick={forget} type="button">Forget token</button>
-		{/if}
-	</header>
-
 	{#if !token}
 		<main class="flex flex-1 items-center justify-center p-4">
 			<form
@@ -306,9 +291,9 @@ onMount((): (() => void) => {
 					aria-hidden="true"
 					class="absolute inset-x-0 top-0 h-0.5 bg-linear-to-r from-emerald-500 via-primary-400 to-green-500"
 				></div>
-				<h2 class="text-xl font-semibold tracking-tight">Sign in</h2>
+				<h2 class="text-xl font-semibold tracking-tight">wt admin</h2>
 				<small class="block pt-1 text-xs tracking-wide text-neutral-400 uppercase">
-					Enter the supervisor deploy token
+					Sign in with your deploy token
 				</small>
 				<label class="flex flex-col gap-1.5 pt-6 text-left">
 					<span class="text-xs tracking-wide text-neutral-400 uppercase">Token</span>
@@ -332,44 +317,62 @@ onMount((): (() => void) => {
 	{:else}
 		<div class="workspace" style="--sidebar-width: {sidebarWidth}px">
 			<aside aria-label="Apps" class="flex min-h-0 shrink-0 flex-col bg-surface">
+				<div class="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
+					<span class="text-sm font-semibold tracking-tight">wt admin</span>
+					<span class="flex-1"></span>
+					<span class="flex items-center gap-1.5 text-xs text-neutral-400">
+						<span
+							aria-hidden="true"
+							class={live ? "size-1.5 bg-primary-500" : "size-1.5 border border-neutral-500"}
+						></span>
+						{live ? "live" : "connecting…"}
+					</span>
+				</div>
 				<header class="flex shrink-0 items-center justify-between gap-2 border-b border-line-soft px-3 py-2">
 					<h2 class="text-xs font-semibold tracking-wide text-neutral-400 uppercase">Apps</h2>
 					<button class="btn" disabled={loading} onclick={refreshList} type="button">
 						{loading ? "Refreshing…" : "Refresh"}
 					</button>
 				</header>
-				{#if apps.length === 0}
-					<p class="p-3 text-sm text-neutral-500">
-						{loading ? "Loading apps…" : "No apps deployed."}
-					</p>
-				{:else}
-					<ul class="flex min-h-0 flex-col overflow-y-auto py-1">
-						{#each apps as app (app.name)}
-							<li>
-								<button
-									aria-current={selected === app.name}
-									class={[
-										"flex w-full items-center gap-2 border-b border-l-2 border-line-soft px-3 py-1.5 text-left text-sm transition-colors hover:bg-neutral-800/40",
-										selected === app.name
-											? "border-l-primary-500 bg-neutral-800/40"
-											: "border-l-transparent",
-									]}
-									onclick={(): void => select(app.name)}
-									type="button"
-								>
-									<span
-										aria-hidden="true"
-										class={app.status === "running"
-											? "size-1.5 shrink-0 bg-primary-500"
-											: "size-1.5 shrink-0 border border-neutral-500"}
-									></span>
-									<span class="flex-1 truncate">{app.name}</span>
-									<span class="text-xs text-neutral-500 tabular-nums">{uptime(app.startedAt)}</span>
-								</button>
-							</li>
-						{/each}
-					</ul>
-				{/if}
+				<div class="flex min-h-0 flex-1 flex-col overflow-y-auto">
+					{#if apps.length === 0}
+						<p class="p-3 text-sm text-neutral-500">
+							{loading ? "Loading apps…" : "No apps deployed."}
+						</p>
+					{:else}
+						<ul class="flex flex-col py-1">
+							{#each apps as app (app.name)}
+								<li>
+									<button
+										aria-current={selected === app.name}
+										class={[
+											"flex w-full items-center gap-2 border-b border-l-2 border-line-soft px-3 py-1.5 text-left text-sm transition-colors hover:bg-neutral-800/40",
+											selected === app.name
+												? "border-l-primary-500 bg-neutral-800/40"
+												: "border-l-transparent",
+										]}
+										onclick={(): void => select(app.name)}
+										type="button"
+									>
+										<span
+											aria-hidden="true"
+											class={app.status === "running"
+												? "size-1.5 shrink-0 bg-primary-500"
+												: "size-1.5 shrink-0 border border-neutral-500"}
+										></span>
+										<span class="flex-1 truncate">{app.name}</span>
+										<span class="text-xs text-neutral-500 tabular-nums"
+											>{uptime(app.startedAt)}</span
+										>
+									</button>
+								</li>
+							{/each}
+						</ul>
+					{/if}
+				</div>
+				<footer class="shrink-0 border-t border-line px-3 py-2">
+					<button class="btn w-full" onclick={forget} type="button">Forget token</button>
+				</footer>
 			</aside>
 
 			<!-- A focusable separator is a window splitter, adjustable by pointer and by arrow keys. -->
