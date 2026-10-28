@@ -77,21 +77,43 @@ select {
 	border-radius: 6px;
 }
 
-table {
+.layout {
+	display: flex;
+	gap: 16px;
+	align-items: flex-start;
+}
+
+.sidebar {
+	flex: 0 0 260px;
+}
+
+.main {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	gap: 16px;
+	min-width: 0;
+}
+
+.app-list {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.app-list button {
+	display: flex;
 	width: 100%;
-	border-collapse: collapse;
-}
-
-th,
-td {
-	padding: 8px;
+	align-items: center;
+	gap: 8px;
 	text-align: left;
-	border-bottom: 1px solid var(--line);
 }
 
-th {
-	color: var(--muted);
-	font-weight: 600;
+.app-list button[aria-current="true"] {
+	border-color: var(--accent);
 }
 
 .dot {
@@ -195,4 +217,14 @@ label > span {
 h3 {
 	margin: 0;
 	font-size: 0.95rem;
+}
+
+@media (max-width: 700px) {
+	.layout {
+		flex-direction: column;
+	}
+
+	.sidebar {
+		flex: auto;
+	}
 }

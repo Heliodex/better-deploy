@@ -258,117 +258,106 @@ onMount((): (() => void) => {
 	{:else if loading && apps.length === 0}
 		<p class="muted">Loading apps…</p>
 	{:else}
-		<section class="card">
-			<div class="row">
-				<h2>Apps</h2>
-				<span class="spacer"></span>
-				<button disabled={loading} onclick={refreshList} type="button">
-					{loading ? "Refreshing…" : "Refresh"}
-				</button>
-			</div>
-			{#if apps.length === 0}
-				<p class="muted">No apps deployed.</p>
-			{:else}
-				<table>
-					<thead>
-						<tr>
-							<th>Name</th>
-							<th>Host</th>
-							<th>Status</th>
-							<th>Uptime</th>
-							<th>PID</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each apps as app (app.name)}
-							<tr>
-								<td>
-									<a
-										href="?app={encodeURIComponent(app.name)}"
-										onclick={(event): void => {
-											event.preventDefault()
-											select(app.name)
-										}}
-										>{app.name}</a
-									>
-								</td>
-								<td><a href="https://{app.host}" rel="noreferrer" target="_blank">{app.host}</a></td>
-								<td>
-									<span class="status"
-										><span aria-hidden="true" class="dot {app.status}"></span>{app.status}</span
-									>
-								</td>
-								<td>{uptime(app.startedAt)}</td>
-								<td>{app.pid ?? "–"}</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			{/if}
-		</section>
-
-		{#if selected}
-			<section aria-busy={loading} aria-live="polite" class="card">
+		<div class="layout">
+			<aside aria-label="Apps" class="card sidebar">
 				<div class="row">
-					<h2>{selected}</h2>
+					<h2>Apps</h2>
 					<span class="spacer"></span>
-					<button onclick={(): void => select(null)} type="button">Close</button>
-					<button disabled={restarting} onclick={restart} type="button">
-						{restarting ? "Restarting…" : confirmRestart ? "Click again to confirm" : "Restart"}
+					<button disabled={loading} onclick={refreshList} type="button">
+						{loading ? "Refreshing…" : "Refresh"}
 					</button>
 				</div>
-				{#if detail}
-					<dl class="facts">
-						<div>
-							<dt>Host</dt>
-							<dd>{detail.host}</dd>
-						</div>
-						<div>
-							<dt>Status</dt>
-							<dd>{detail.status}</dd>
-						</div>
-						<div>
-							<dt>Started</dt>
-							<dd>{formatTime(detail.startedAt)}</dd>
-						</div>
-						<div>
-							<dt>PID</dt>
-							<dd>{detail.pid ?? "–"}</dd>
-						</div>
-					</dl>
+				{#if apps.length === 0}
+					<p class="muted">No apps deployed.</p>
+				{:else}
+					<ul class="app-list">
+						{#each apps as app (app.name)}
+							<li>
+								<button
+									aria-current={selected === app.name}
+									onclick={(): void => select(app.name)}
+									type="button"
+								>
+									<span aria-hidden="true" class="dot {app.status}"></span>
+									<span>{app.name}</span>
+									<span class="muted">{uptime(app.startedAt)}</span>
+								</button>
+							</li>
+						{/each}
+					</ul>
 				{/if}
-				{#if actionMessage}
-					<p>{actionMessage}</p>
+			</aside>
+
+			<div class="main">
+				{#if selected}
+					<section aria-busy={loading} aria-live="polite" class="card">
+						<div class="row">
+							<h2>{selected}</h2>
+							<span class="spacer"></span>
+							<button onclick={(): void => select(null)} type="button">Close</button>
+							<button disabled={restarting} onclick={restart} type="button">
+								{restarting ? "Restarting…" : confirmRestart ? "Click again to confirm" : "Restart"}
+							</button>
+						</div>
+						{#if detail}
+							<dl class="facts">
+								<div>
+									<dt>Host</dt>
+									<dd>{detail.host}</dd>
+								</div>
+								<div>
+									<dt>Status</dt>
+									<dd>{detail.status}</dd>
+								</div>
+								<div>
+									<dt>Started</dt>
+									<dd>{formatTime(detail.startedAt)}</dd>
+								</div>
+								<div>
+									<dt>PID</dt>
+									<dd>{detail.pid ?? "–"}</dd>
+								</div>
+							</dl>
+						{/if}
+						{#if actionMessage}
+							<p>{actionMessage}</p>
+						{/if}
+						{#if error}
+							<div class="error" role="alert">{error}</div>
+						{/if}
+						<div class="row">
+							<h3>Logs</h3>
+							<span class="spacer"></span>
+							<select aria-label="Lines to show" onchange={reloadLogs} bind:value={tail}>
+								<option value={100}>100 lines</option>
+								<option value={500}>500 lines</option>
+								<option value={2000}>2000 lines</option>
+							</select>
+							<button disabled={loading} onclick={reloadLogs} type="button">Reload</button>
+						</div>
+						{#if logs.length === 0}
+							<p class="muted">No log lines yet.</p>
+						{:else}
+							<pre class="logs">{logs.join("\n")}</pre>
+						{/if}
+						<form class="row" onsubmit={upload}>
+							<label for="bundle">Deploy bundle</label>
+							<input accept=".tar.gz, application/gzip" id="bundle" type="file">
+							<button disabled={deploying} type="submit">{deploying ? "Deploying…" : "Deploy"}</button>
+						</form>
+					</section>
 				{/if}
-				{#if error}
+
+				{#if error && !selected}
 					<div class="error" role="alert">{error}</div>
 				{/if}
-				<div class="row">
-					<h3>Logs</h3>
-					<span class="spacer"></span>
-					<select aria-label="Lines to show" onchange={reloadLogs} bind:value={tail}>
-						<option value={100}>100 lines</option>
-						<option value={500}>500 lines</option>
-						<option value={2000}>2000 lines</option>
-					</select>
-					<button disabled={loading} onclick={reloadLogs} type="button">Reload</button>
-				</div>
-				{#if logs.length === 0}
-					<p class="muted">No log lines yet.</p>
-				{:else}
-					<pre class="logs">{logs.join("\n")}</pre>
+				{#if !selected && !error}
+					<div class="card">
+						<p class="muted">Select an app to inspect it.</p>
+					</div>
 				{/if}
-				<form class="row" onsubmit={upload}>
-					<label for="bundle">Deploy bundle</label>
-					<input accept=".tar.gz, application/gzip" id="bundle" type="file">
-					<button disabled={deploying} type="submit">{deploying ? "Deploying…" : "Deploy"}</button>
-				</form>
-			</section>
-		{/if}
-
-		{#if error && !selected}
-			<div class="error" role="alert">{error}</div>
-		{/if}
+			</div>
+		</div>
 	{/if}
 </div>
 
