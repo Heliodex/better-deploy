@@ -214,6 +214,44 @@ func sortedKeys(values map[string]string) []string {
 	return keys
 }
 
+// maxLaunchLogBytes caps how much of a wasmtime process's output is kept for failed-launch errors.
+const maxLaunchLogBytes = 8 << 10
+
+// logRing keeps the tail of a process's output for failed-launch errors, so deploys report why wasmtime exited.
+type logRing struct {
+	mu  sync.Mutex
+	buf []byte
+}
+
+func newLogRing() *logRing {
+	return &logRing{}
+}
+
+func (r *logRing) Write(p []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.buf = append(r.buf, p...)
+	if len(r.buf) > maxLaunchLogBytes {
+		r.buf = append([]byte{}, r.buf[len(r.buf)-maxLaunchLogBytes:]...)
+	}
+	return len(p), nil
+}
+
+func (r *logRing) String() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return strings.TrimSpace(string(r.buf))
+}
+
+// withLaunchLog appends the tail of the failed process output to a launch error.
+func withLaunchLog(source string, recent *logRing, err error) error {
+	tail := recent.String()
+	if tail == "" {
+		return err
+	}
+	return fmt.Errorf("%w\n--- %s output ---\n%s", err, filepath.Base(source), tail)
+}
+
 func (s *supervisor) appArgs(a *app, source string, allowPrecompiled bool) []string {
 	args := []string{
 		"serve",
@@ -393,11 +431,14 @@ func (s *supervisor) restart(a *app) {
 }
 
 func (s *supervisor) launch(a *app, source string, allowPrecompiled bool) error {
+	logging := log.New(os.Stderr, "["+a.name+"] ", 0).Writer()
+	recent := newLogRing()
+	out := io.MultiWriter(logging, recent)
 	cmd := exec.Command(s.cfg.wasmtime, s.appArgs(a, source, allowPrecompiled)...)
 	cmd.Env = minimalEnv()
 	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGTERM}
-	cmd.Stdout = log.New(os.Stderr, "["+a.name+"] ", 0).Writer()
-	cmd.Stderr = log.New(os.Stderr, "["+a.name+"] ", 0).Writer()
+	cmd.Stdout = out
+	cmd.Stderr = out
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start wasmtime: %w", err)
 	}
@@ -446,7 +487,7 @@ func (s *supervisor) launch(a *app, source string, allowPrecompiled bool) error 
 	}()
 
 	if err := s.waitReady(a, done); err != nil {
-		return err
+		return withLaunchLog(source, recent, err)
 	}
 	a.proxy = s.newProxy(a)
 	log.Printf("app %s started on 127.0.0.1:%d (%s)", a.name, a.port, a.cfg.Host)

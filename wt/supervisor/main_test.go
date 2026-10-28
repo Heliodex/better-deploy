@@ -3,12 +3,14 @@ package main
 import (
 	"archive/tar"
 	"compress/gzip"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -72,6 +74,46 @@ func TestExtractTarGzRejectsTraversal(t *testing.T) {
 	archive := writeTarGz(t, map[string]string{"../evil": "nope"})
 	if err := extractTarGz(archive, t.TempDir()); err == nil {
 		t.Fatal("expected traversal error")
+	}
+}
+
+func TestLogRingKeepsTail(t *testing.T) {
+	r := newLogRing()
+	if _, err := r.Write([]byte("first\n")); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.String(); got != "first" {
+		t.Errorf("String() = %q, want %q", got, "first")
+	}
+	big := make([]byte, maxLaunchLogBytes+100)
+	for i := range big {
+		big[i] = 'x'
+	}
+	if _, err := r.Write(big); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(r.String()); got != maxLaunchLogBytes {
+		t.Errorf("len(String()) = %d, want %d", got, maxLaunchLogBytes)
+	}
+}
+
+func TestWithLaunchLog(t *testing.T) {
+	base := errors.New("wasmtime exited")
+	if err := withLaunchLog("main.cwasm", newLogRing(), base); err != base {
+		t.Errorf("empty ring should return the error unchanged, got %v", err)
+	}
+	recent := newLogRing()
+	if _, err := recent.Write([]byte("boom\n")); err != nil {
+		t.Fatal(err)
+	}
+	err := withLaunchLog("/tmp/x/main.cwasm", recent, base)
+	if !errors.Is(err, base) {
+		t.Errorf("should wrap the base error, got %v", err)
+	}
+	for _, want := range []string{"main.cwasm output", "boom"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q should contain %q", err, want)
+		}
 	}
 }
 
