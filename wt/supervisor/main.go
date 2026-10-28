@@ -882,6 +882,21 @@ func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Allow", "GET, POST")
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
+	case "logs/stream":
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !s.requireAuth(w, r) {
+			return
+		}
+		a := s.lookup(name)
+		if a == nil {
+			http.Error(w, "app not found", http.StatusNotFound)
+			return
+		}
+		s.handleLogStream(w, r, a)
 	case "logs":
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", http.MethodGet)

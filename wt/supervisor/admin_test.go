@@ -287,3 +287,70 @@ func TestHandleEventsRequiresAuth(t *testing.T) {
 		t.Errorf("status = %d, want 401", rec.Code)
 	}
 }
+
+func TestHandleLogStreamBacklogAndLines(t *testing.T) {
+	logs, err := newAppLog(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(logs, "existing line\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	s := testSupervisor()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := httptest.NewRequest(http.MethodGet, "/apps/demo/logs/stream?tail=10", nil).WithContext(ctx)
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		s.handleLogStream(rec, req, &app{name: "demo", logs: logs})
+	}()
+
+	body := func() string {
+		rec.Flush()
+		return rec.Body.String()
+	}
+	waitFor := func(want string) {
+		t.Helper()
+		deadline := time.After(5 * time.Second)
+		for !strings.Contains(body(), want) {
+			select {
+			case <-deadline:
+				cancel()
+				<-finished
+				t.Fatalf("timed out waiting for %q in %s", want, body())
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+	}
+
+	waitFor(`"type":"backlog"`)
+	if !strings.Contains(body(), `"message":"existing line"`) {
+		t.Errorf("backlog missing existing line: %s", body())
+	}
+
+	if _, err := io.WriteString(logs, "fresh line\n"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(`"type":"line"`)
+	waitFor(`"message":"fresh line"`)
+
+	cancel()
+	<-finished
+	if got := rec.Header().Get("Content-Type"); got != "text/event-stream" {
+		t.Errorf("Content-Type = %q, want text/event-stream", got)
+	}
+}
+
+func TestHandleLogStreamRequiresAuth(t *testing.T) {
+	s := testSupervisor()
+	req := httptest.NewRequest(http.MethodGet, "/apps/demo/logs/stream", nil)
+	rec := httptest.NewRecorder()
+	s.handleLogStream(rec, req, &app{name: "demo"})
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rec.Code)
+	}
+}

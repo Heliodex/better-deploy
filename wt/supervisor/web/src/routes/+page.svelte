@@ -5,13 +5,13 @@ import {
 	deployBundle,
 	fetchApp,
 	fetchApps,
-	fetchLogs,
 	forgetToken,
 	getToken,
 	type LogEntry,
 	restartApp,
 	setToken,
 	subscribe,
+	subscribeLogs,
 } from "../lib/api"
 
 const MIN_SIDEBAR = 200
@@ -19,6 +19,13 @@ const MAX_SIDEBAR = 520
 const MIN_VIEWPORT_FOR_SIDEBAR = 700
 /** Pixels a separator moves per arrow-key press (tripled while Shift is held). */
 const KEY_STEP = 16
+/** Log pane height bounds; the upper bound also leaves room for the detail pane. */
+const MIN_LOGS = 100
+const MAX_LOGS = 600
+/** Keep the live log stream bounded when a chatty app runs for a long time. */
+const MAX_LOG_LINES = 5000
+/** Treat the log view as "following" until the user scrolls this far from the bottom. */
+const FOLLOW_THRESHOLD = 24
 
 let token = $state<string | null>(null)
 let tokenInput = $state("")
@@ -36,8 +43,13 @@ let confirmRestart = $state(false)
 let live = $state(false)
 let now = $state(Date.now())
 let sidebarWidth = $state(280)
+let logsHeight = $state(240)
 let gripY = $state<number | null>(null)
+let logsGripX = $state<number | null>(null)
 let stopStream: (() => void) | null = null
+let stopLogs: (() => void) | null = null
+let logPane = $state<HTMLDivElement | null>(null)
+let followLogs = $state(true)
 
 function uptime(startedAt: string): string {
 	const seconds = Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1000))
@@ -88,11 +100,12 @@ function select(name: string | null): void {
 	error = ""
 	actionMessage = ""
 	confirmRestart = false
+	closeLogs()
 	const url = name ? `?app=${encodeURIComponent(name)}` : window.location.pathname
 	window.history.replaceState(null, "", url)
 	if (token && name) {
 		void loadDetail(token, name)
-		void loadLogs(token, name)
+		openLogs(name)
 	}
 }
 
@@ -104,13 +117,41 @@ async function loadDetail(key: string, name: string): Promise<void> {
 	}
 }
 
-async function loadLogs(key: string, name: string): Promise<void> {
-	try {
-		logs = await fetchLogs(key, name, tail)
-		error = ""
-	} catch (err) {
-		error = err instanceof Error ? err.message : "Could not load logs."
+/** Stream one app's log: the recent backlog, then every new line as it is written. */
+function openLogs(name: string): void {
+	closeLogs()
+	logs = []
+	followLogs = true
+	stopLogs = subscribeLogs(
+		name,
+		tail,
+		backlog => {
+			logs = backlog
+		},
+		entry => {
+			const next = [...logs, entry]
+			logs = next.length > MAX_LOG_LINES ? next.slice(-MAX_LOG_LINES) : next
+		},
+	)
+}
+
+function closeLogs(): void {
+	if (stopLogs) {
+		stopLogs()
+		stopLogs = null
 	}
+}
+
+/** Reopening the stream picks up a new backlog for the selected line count. */
+function reloadLogs(): void {
+	if (!token || !selected) return
+	openLogs(selected)
+}
+
+/** Follow new lines only while the view is scrolled to the bottom. */
+function onLogsScroll(): void {
+	if (!logPane) return
+	followLogs = logPane.scrollHeight - logPane.scrollTop - logPane.clientHeight < FOLLOW_THRESHOLD
 }
 
 async function refresh(key: string): Promise<void> {
@@ -129,11 +170,6 @@ async function refresh(key: string): Promise<void> {
 function refreshList(): void {
 	if (!token) return
 	void refresh(token)
-}
-
-function reloadLogs(): void {
-	if (!token || !selected) return
-	void loadLogs(token, selected)
 }
 
 function connect(key: string): void {
@@ -155,32 +191,56 @@ function disconnect(): void {
 		stopStream()
 		stopStream = null
 	}
+	closeLogs()
 	live = false
 }
 
 /** Drag the separator, tracking on the window so the drag survives a fast pointer. */
-function startSidebarResize(event: PointerEvent): void {
+function clampLogsHeight(height: number): number {
+	if (typeof window === "undefined") return height
+	// Leave room for the detail pane above the log, however tall the window is.
+	const upper = Math.min(MAX_LOGS, Math.max(MIN_LOGS, window.innerHeight - 260))
+	return Math.min(Math.max(height, MIN_LOGS), upper)
+}
+
+/** Run a window-level pointer drag, reporting the total movement from the start. */
+function trackPointerDrag(event: PointerEvent, cursor: string, onMove: (dx: number, dy: number) => void): void {
 	event.preventDefault()
 	const startX = event.clientX
-	const startWidth = sidebarWidth
+	const startY = event.clientY
 	const previousCursor = document.body.style.cursor
 	const previousSelect = document.body.style.userSelect
-	document.body.style.cursor = "col-resize"
+	document.body.style.cursor = cursor
 	document.body.style.userSelect = "none"
 
-	const onMove = (move: PointerEvent): void => {
-		sidebarWidth = clampSidebar(startWidth + move.clientX - startX)
+	const handleMove = (move: PointerEvent): void => {
+		onMove(move.clientX - startX, move.clientY - startY)
 	}
 	const stop = (): void => {
-		window.removeEventListener("pointermove", onMove)
+		window.removeEventListener("pointermove", handleMove)
 		window.removeEventListener("pointerup", stop)
 		window.removeEventListener("pointercancel", stop)
 		document.body.style.cursor = previousCursor
 		document.body.style.userSelect = previousSelect
 	}
-	window.addEventListener("pointermove", onMove)
+	window.addEventListener("pointermove", handleMove)
 	window.addEventListener("pointerup", stop)
 	window.addEventListener("pointercancel", stop)
+}
+
+function startSidebarResize(event: PointerEvent): void {
+	const start = sidebarWidth
+	trackPointerDrag(event, "col-resize", dx => {
+		sidebarWidth = clampSidebar(start + dx)
+	})
+}
+
+/** Drag the log pane's top border: dragging up grows the pane. */
+function startLogsResize(event: PointerEvent): void {
+	const start = logsHeight
+	trackPointerDrag(event, "row-resize", (_dx, dy) => {
+		logsHeight = clampLogsHeight(start - dy)
+	})
 }
 
 function onSeparatorKeydown(event: KeyboardEvent): void {
@@ -190,10 +250,22 @@ function onSeparatorKeydown(event: KeyboardEvent): void {
 	sidebarWidth = clampSidebar(sidebarWidth + (event.key === "ArrowLeft" ? -step : step))
 }
 
+function onLogsSeparatorKeydown(event: KeyboardEvent): void {
+	if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return
+	event.preventDefault()
+	const step = event.shiftKey ? KEY_STEP * 3 : KEY_STEP
+	logsHeight = clampLogsHeight(logsHeight + (event.key === "ArrowUp" ? step : -step))
+}
+
 /** The grip tracks the pointer along the separator, hinting where the drag will grab. */
 function moveGrip(event: PointerEvent): void {
 	const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect()
 	gripY = event.clientY - bounds.top
+}
+
+function moveLogsGrip(event: PointerEvent): void {
+	const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect()
+	logsGripX = event.clientX - bounds.left
 }
 
 async function submitToken(event: SubmitEvent): Promise<void> {
@@ -234,7 +306,6 @@ async function restart(event: MouseEvent): Promise<void> {
 	actionMessage = ""
 	try {
 		detail = await restartApp(token, selected)
-		await loadLogs(token, selected)
 		actionMessage = `${selected} restarted.`
 	} catch (err) {
 		error = err instanceof Error ? err.message : "Could not restart the app."
@@ -269,6 +340,14 @@ async function upload(event: SubmitEvent): Promise<void> {
 	}
 }
 
+/** Keep the newest lines in view, unless the reader scrolled away from the bottom. */
+$effect(() => {
+	// Reading the length subscribes the effect to new lines and to a fresh backlog.
+	const count = logs.length
+	if (count === 0 || !logPane || !followLogs) return
+	logPane.scrollTop = logPane.scrollHeight
+})
+
 onMount((): (() => void) => {
 	const saved = getToken()
 	const name = readSelection()
@@ -277,7 +356,7 @@ onMount((): (() => void) => {
 		selected = name
 		connect(saved)
 		void refresh(saved)
-		if (name) void loadLogs(saved, name)
+		if (name) openLogs(name)
 	} else {
 		loading = false
 		selected = name
@@ -331,7 +410,7 @@ onMount((): (() => void) => {
 			</form>
 		</main>
 	{:else}
-		<div class="workspace" style="--sidebar-width: {sidebarWidth}px">
+		<div class="workspace" style="--sidebar-width: {sidebarWidth}px; --logs-height: {selected ? logsHeight : 0}px">
 			<aside aria-label="Apps" class="flex min-h-0 shrink-0 flex-col bg-surface">
 				<div class="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
 					<span class="text-sm font-semibold tracking-tight">wt admin</span>
@@ -402,14 +481,18 @@ onMount((): (() => void) => {
 				aria-valuemax={MAX_SIDEBAR}
 				aria-valuemin={MIN_SIDEBAR}
 				aria-valuenow={Math.round(sidebarWidth)}
-				class="resize-handle hover:bg-primary-500/10"
+				class="resize-handle resize-handle-sidebar hover:bg-primary-500/10"
 				onkeydown={onSeparatorKeydown}
 				onpointerdown={startSidebarResize}
 				onpointermove={moveGrip}
 				role="separator"
 				tabindex="0"
 			>
-				<span aria-hidden="true" class="resize-grip" style:top={gripY === null ? "50%" : `${gripY}px`}></span>
+				<span
+					aria-hidden="true"
+					class="resize-grip resize-grip-vertical"
+					style:top={gripY === null ? "50%" : `${gripY}px`}
+				></span>
 			</div>
 
 			<main class="flex min-w-0 flex-1 flex-col bg-black">
@@ -458,45 +541,6 @@ onMount((): (() => void) => {
 							</p>
 						{/if}
 
-						<section aria-labelledby="logs-title" class="flex min-h-0 flex-col gap-2">
-							<div class="flex items-center gap-2">
-								<h3
-									class="text-xs font-semibold tracking-wide text-neutral-400 uppercase"
-									id="logs-title"
-								>
-									Logs
-								</h3>
-								<span class="flex-1"></span>
-								<select
-									aria-label="Lines to show"
-									class="field"
-									onchange={reloadLogs}
-									bind:value={tail}
-								>
-									<option value={100}>100 lines</option>
-									<option value={500}>500 lines</option>
-									<option value={2000}>2000 lines</option>
-								</select>
-								<button class="btn" disabled={loading} onclick={reloadLogs} type="button">
-									Reload
-								</button>
-							</div>
-							{#if logs.length === 0}
-								<p class="text-sm text-neutral-500">No log lines yet.</p>
-							{:else}
-								<div class="max-h-96 overflow-auto border border-line bg-black p-2 font-mono text-xs">
-									{#each logs as entry, index (index)}
-										<div class="flex gap-3 whitespace-pre-wrap wrap-break-word">
-											<time class="shrink-0 text-neutral-500 tabular-nums" datetime={entry.time}
-												>{entry.time === "" ? "—" : formatLogTime(entry.time)}</time
-											>
-											<span class="text-neutral-300">{entry.message}</span>
-										</div>
-									{/each}
-								</div>
-							{/if}
-						</section>
-
 						<form
 							class="flex flex-wrap items-center gap-2 border-t border-line-soft pt-4"
 							onsubmit={upload}
@@ -536,6 +580,77 @@ onMount((): (() => void) => {
 					</div>
 				{/if}
 			</main>
+
+			{#if selected}
+				<!-- A focusable separator is a window splitter, adjustable by pointer and by arrow keys. -->
+				<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+				<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+				<!-- biome-ignore lint/a11y/useSemanticElements: A window splitter is not an <hr>. -->
+				<div
+					aria-label="Resize logs"
+					aria-orientation="horizontal"
+					aria-valuemax={MAX_LOGS}
+					aria-valuemin={MIN_LOGS}
+					aria-valuenow={Math.round(logsHeight)}
+					class="resize-handle resize-handle-logs hover:bg-primary-500/10"
+					onkeydown={onLogsSeparatorKeydown}
+					onpointerdown={startLogsResize}
+					onpointermove={moveLogsGrip}
+					role="separator"
+					tabindex="0"
+				>
+					<span
+						aria-hidden="true"
+						class="resize-grip resize-grip-horizontal"
+						style:left={logsGripX === null ? "50%" : `${logsGripX}px`}
+					></span>
+				</div>
+
+				<section
+					aria-labelledby="logs-title"
+					class="logs-pane flex min-h-0 flex-col border-t border-line bg-surface"
+				>
+					<header class="flex shrink-0 items-center gap-2 border-b border-line-soft px-3 py-2">
+						<h2 class="text-xs font-semibold tracking-wide text-neutral-400 uppercase" id="logs-title">
+							Logs
+						</h2>
+						<span class="flex-1"></span>
+						<select aria-label="Lines to show" class="field" onchange={reloadLogs} bind:value={tail}>
+							<option value={100}>100 lines</option>
+							<option value={500}>500 lines</option>
+							<option value={2000}>2000 lines</option>
+						</select>
+					</header>
+					{#if logs.length === 0}
+						<p class="p-3 text-sm text-neutral-500">No log lines yet.</p>
+					{:else}
+						<div
+							class="min-h-0 flex-1 overflow-auto bg-black p-2 font-mono text-xs"
+							onscroll={onLogsScroll}
+							bind:this={logPane}
+						>
+							<table class="w-full border-collapse">
+								<tbody>
+									{#each logs as entry, index (index)}
+										<tr>
+											<td
+												class="w-0 pr-3 align-top whitespace-nowrap text-neutral-500 tabular-nums"
+											>
+												<time datetime={entry.time}
+													>{entry.time === "" ? "—" : formatLogTime(entry.time)}</time
+												>
+											</td>
+											<td class="align-top text-neutral-300 whitespace-pre-wrap wrap-break-word">
+												{entry.message}
+											</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
+					{/if}
+				</section>
+			{/if}
 		</div>
 	{/if}
 </div>
@@ -543,50 +658,96 @@ onMount((): (() => void) => {
 <style>
 .workspace {
 	position: relative;
-	display: flex;
+	display: grid;
 	flex: 1;
+	grid-template-areas:
+		"sidebar main"
+		"sidebar logs";
+	grid-template-rows: minmax(0, 1fr) var(--logs-height);
+	grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
 	min-height: 0;
+	overflow: hidden;
 }
 
 .workspace > aside {
+	grid-area: sidebar;
 	width: var(--sidebar-width);
 }
 
-/* The separator rides on the pane boundary, so its grip sits exactly on the divider. */
+.workspace > main {
+	grid-area: main;
+	min-width: 0;
+}
+
+.workspace > .logs-pane {
+	grid-area: logs;
+}
+
+/* The separators ride on the pane boundaries, so their grips sit exactly on the dividers. */
 .resize-handle {
 	position: absolute;
-	top: 0;
-	bottom: 0;
-	left: var(--sidebar-width);
 	z-index: 30;
-	width: 9px;
 	touch-action: none;
-	translate: -50% 0;
 }
 
 .resize-handle::before {
 	position: absolute;
+	content: "";
+	background: var(--color-line);
+}
+
+.resize-handle-sidebar {
+	top: 0;
+	bottom: 0;
+	left: var(--sidebar-width);
+	width: 9px;
+	translate: -50% 0;
+}
+
+.resize-handle-sidebar::before {
 	top: 0;
 	bottom: 0;
 	left: 50%;
 	width: 1px;
-	content: "";
-	background: var(--color-line);
 	translate: -50% 0;
+}
+
+.resize-handle-logs {
+	right: 0;
+	bottom: var(--logs-height);
+	left: var(--sidebar-width);
+	height: 9px;
+	translate: 0 50%;
+}
+
+.resize-handle-logs::before {
+	top: 50%;
+	right: 0;
+	left: 0;
+	height: 1px;
+	translate: 0 -50%;
 }
 
 .resize-grip {
 	position: absolute;
 	top: 50%;
 	left: 50%;
-	width: 2px;
-	height: 2.5rem;
 	background: var(--color-neutral-600);
 	opacity: 0.35;
 	translate: -50% -50%;
 	transition:
 		opacity 120ms ease,
 		background-color 120ms ease;
+}
+
+.resize-grip-vertical {
+	width: 2px;
+	height: 2.5rem;
+}
+
+.resize-grip-horizontal {
+	width: 2.5rem;
+	height: 2px;
 }
 
 .resize-handle:hover .resize-grip,
@@ -596,14 +757,20 @@ onMount((): (() => void) => {
 	opacity: 1;
 }
 
-.resize-handle:hover,
-.resize-handle:active {
+.resize-handle-sidebar:hover,
+.resize-handle-sidebar:active {
 	cursor: col-resize;
 }
 
-/* Below the split point the panes stack, so the separator has nothing to adjust. */
+.resize-handle-logs:hover,
+.resize-handle-logs:active {
+	cursor: row-resize;
+}
+
+/* Below the split point the panes stack, so the side separator has nothing to adjust. */
 @media (max-width: 700px) {
 	.workspace {
+		display: flex;
 		flex-direction: column;
 	}
 
@@ -612,7 +779,11 @@ onMount((): (() => void) => {
 		border-bottom: 1px solid var(--color-line);
 	}
 
-	.resize-handle {
+	.workspace > .logs-pane {
+		height: var(--logs-height);
+	}
+
+	.resize-handle-sidebar {
 		display: none;
 	}
 }

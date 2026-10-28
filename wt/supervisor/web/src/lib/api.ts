@@ -13,6 +13,7 @@ import {
 	pipe,
 	safeParse,
 	string,
+	union,
 } from "valibot"
 
 const appInfoSchema = object({
@@ -140,9 +141,47 @@ export function fetchApp(token: string, name: string): Promise<AppInfo> {
 	return request(`/apps/${encodeURIComponent(name)}`, { token }, appInfoSchema)
 }
 
+const logStreamSchema = union([
+	object({
+		logs: array(logEntrySchema),
+		type: literal("backlog"),
+	}),
+	object({
+		log: logEntrySchema,
+		type: literal("line"),
+	}),
+])
+
 export async function fetchLogs(token: string, name: string, tail: number): Promise<LogEntry[]> {
 	const data = await request(`/apps/${encodeURIComponent(name)}/logs?tail=${tail}`, { token }, logsResponseSchema)
 	return data.logs
+}
+
+export function subscribeLogs(
+	name: string,
+	tail: number,
+	onBacklog: (logs: LogEntry[]) => void,
+	onLine: (entry: LogEntry) => void,
+): () => void {
+	const source = new EventSource(`/apps/${encodeURIComponent(name)}/logs/stream?tail=${tail}`)
+	source.addEventListener("message", event => {
+		if (typeof event.data !== "string") return
+		let data: unknown
+		try {
+			data = JSON.parse(event.data)
+		} catch {
+			console.warn("ignoring malformed log frame")
+			return
+		}
+		const parsed = safeParse(logStreamSchema, data)
+		if (!parsed.success) {
+			console.warn("ignoring unexpected log frame shape")
+			return
+		}
+		if (parsed.output.type === "backlog") onBacklog(parsed.output.logs)
+		else onLine(parsed.output.log)
+	})
+	return (): void => source.close()
 }
 
 export function restartApp(token: string, name: string): Promise<AppInfo> {

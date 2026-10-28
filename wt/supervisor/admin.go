@@ -39,17 +39,43 @@ type appLog struct {
 	file    *os.File
 	size    int64
 	pending []byte
+	subs    map[chan logEntry]struct{}
 }
 
 func newAppLog(dir string) (*appLog, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
-	out := &appLog{dir: dir}
+	out := &appLog{dir: dir, subs: map[chan logEntry]struct{}{}}
 	if err := out.open(); err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+func (l *appLog) subscribe() chan logEntry {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	messages := make(chan logEntry, 128)
+	l.subs[messages] = struct{}{}
+	return messages
+}
+
+func (l *appLog) unsubscribe(messages chan logEntry) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.subs, messages)
+}
+
+// publish fans a line out to streaming clients. Callers hold l.mu, and delivery
+// is non-blocking so a stalled client can never hold up the app's output.
+func (l *appLog) publish(entry logEntry) {
+	for messages := range l.subs {
+		select {
+		case messages <- entry:
+		default:
+		}
+	}
 }
 
 func (l *appLog) path() string {
@@ -101,7 +127,8 @@ func (l *appLog) Write(p []byte) (int, error) {
 
 // writeLine stamps one complete line and appends it, rotating past maxLogBytes.
 func (l *appLog) writeLine(line string) error {
-	data := []byte(time.Now().UTC().Format(logTimeFormat) + " " + line + "\n")
+	stamp := time.Now().UTC().Format(logTimeFormat)
+	data := []byte(stamp + " " + line + "\n")
 	if l.size+int64(len(data)) > maxLogBytes {
 		if err := l.rotate(); err != nil {
 			return err
@@ -109,7 +136,11 @@ func (l *appLog) writeLine(line string) error {
 	}
 	written, err := l.file.Write(data)
 	l.size += int64(written)
-	return err
+	if err != nil {
+		return err
+	}
+	l.publish(logEntry{Time: stamp, Message: line})
+	return nil
 }
 
 func (l *appLog) rotate() error {
@@ -312,15 +343,24 @@ func (s *supervisor) requireAuth(w http.ResponseWriter, r *http.Request) bool {
 	return false
 }
 
+// logTailParam reads the ?tail= query, writing 400 when it is out of range.
+func logTailParam(w http.ResponseWriter, r *http.Request) (int, bool) {
+	value := r.URL.Query().Get("tail")
+	if value == "" {
+		return defaultLogTail, true
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed < 1 || parsed > maxLogTail {
+		writeError(w, http.StatusBadRequest, "tail must be between 1 and 5000")
+		return 0, false
+	}
+	return parsed, true
+}
+
 func (s *supervisor) handleLogs(w http.ResponseWriter, r *http.Request, a *app) {
-	tail := defaultLogTail
-	if value := r.URL.Query().Get("tail"); value != "" {
-		parsed, err := strconv.Atoi(value)
-		if err != nil || parsed < 1 || parsed > maxLogTail {
-			writeError(w, http.StatusBadRequest, "tail must be between 1 and 5000")
-			return
-		}
-		tail = parsed
+	tail, ok := logTailParam(w, r)
+	if !ok {
+		return
 	}
 	logs := []logEntry{}
 	if a.logs != nil {
@@ -332,6 +372,84 @@ func (s *supervisor) handleLogs(w http.ResponseWriter, r *http.Request, a *app) 
 		}
 	}
 	writeJSON(w, http.StatusOK, logsResponse{Logs: logs})
+}
+
+// logStreamMessage is one SSE frame: the backlog on connect, then single lines.
+type logStreamMessage struct {
+	Type string     `json:"type"`
+	Logs []logEntry `json:"logs,omitempty"`
+	Log  *logEntry  `json:"log,omitempty"`
+}
+
+// handleLogStream streams an app's log: the recent backlog on connect, then each
+// new line as the supervisor writes it, with comment pings to hold the connection.
+func (s *supervisor) handleLogStream(w http.ResponseWriter, r *http.Request, a *app) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.requireAuth(w, r) {
+		return
+	}
+	tail, ok := logTailParam(w, r)
+	if !ok {
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	send := func(message logStreamMessage) bool {
+		data, err := json.Marshal(message)
+		if err != nil {
+			return false
+		}
+		if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
+			return false
+		}
+		flusher.Flush()
+		return true
+	}
+
+	backlog := []logEntry{}
+	var messages chan logEntry
+	if a.logs != nil {
+		var err error
+		backlog, err = a.logs.tail(tail)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		messages = a.logs.subscribe()
+		defer a.logs.unsubscribe(messages)
+	}
+	if !send(logStreamMessage{Type: "backlog", Logs: backlog}) {
+		return
+	}
+
+	ticker := time.NewTicker(20 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case entry := <-messages:
+			if !send(logStreamMessage{Type: "line", Log: &entry}) {
+				return
+			}
+		case <-ticker.C:
+			if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+		case <-r.Context().Done():
+			return
+		}
+	}
 }
 
 func (s *supervisor) handleRestart(w http.ResponseWriter, r *http.Request, a *app) {
