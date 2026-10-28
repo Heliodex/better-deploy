@@ -76,10 +76,14 @@ const logTimeFormat = new Intl.DateTimeFormat(undefined, {
 	second: "2-digit",
 })
 
-function formatLogTime(value: string): string {
-	if (value === "") return ""
+// Part-by-part so the panel can give each segment the same width even though Lexend's digits are proportional.
+function logTimeParts(value: string): string[] {
+	if (value === "") return ["—"]
 	const date = new Date(value)
-	return Number.isNaN(date.getTime()) ? value : logTimeFormat.format(date)
+	if (Number.isNaN(date.getTime())) return [value]
+	const parts = logTimeFormat.formatToParts(date)
+	const pick = (type: string): string => parts.find(part => part.type === type)?.value ?? ""
+	return [pick("hour"), pick("minute"), pick("second")]
 }
 
 function readSelection(): string | null {
@@ -665,20 +669,29 @@ onMount((): (() => void) => {
 						</p>
 					{:else}
 						<div
-							class="min-h-0 flex-1 overflow-auto bg-black p-2 font-mono text-xs"
+							class="min-h-0 flex-1 overflow-auto bg-black p-2 text-xs"
 							onscroll={onLogsScroll}
 							bind:this={logPane}
 						>
 							<table class="w-full border-collapse">
 								<tbody>
 									{#each filteredLogs as entry, index (index)}
+										{const timeParts = logTimeParts(entry.time)}
 										<tr>
 											<td
 												class="w-0 pr-3 align-top whitespace-nowrap text-neutral-500 tabular-nums"
 											>
-												<time datetime={entry.time}
-													>{entry.time === "" ? "—" : formatLogTime(entry.time)}</time
-												>
+												<time class="log-time" datetime={entry.time}>
+													<span class="log-time-segment">{timeParts[0] ?? ""}</span>
+													{#if timeParts.length > 1}
+														<span class="log-time-colon">:</span>
+														<span class="log-time-segment">{timeParts[1]}</span>
+													{/if}
+													{#if timeParts.length > 2}
+														<span class="log-time-colon">:</span>
+														<span class="log-time-segment">{timeParts[2]}</span>
+													{/if}
+												</time>
 											</td>
 											<td
 												class="w-0 pr-3 align-top whitespace-nowrap {levelClasses[entry.level]}"
@@ -814,6 +827,21 @@ onMount((): (() => void) => {
 .resize-handle-logs:hover,
 .resize-handle-logs:active {
 	cursor: row-resize;
+}
+
+/* Lexend's digits are proportional; a fixed box per timestamp segment lines the colons up without forcing a monospace log font. */
+.log-time {
+	display: inline-flex;
+	align-items: baseline;
+}
+
+.log-time-segment {
+	flex: 0 0 1.35em;
+	text-align: center;
+}
+
+.log-time-colon {
+	flex: none;
 }
 
 /* Below the split point the panes stack, so the side separator has nothing to adjust. */
