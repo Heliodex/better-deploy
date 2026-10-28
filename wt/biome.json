@@ -299,7 +299,7 @@
 			}
 		},
 		{
-			"includes": ["example/guestbook/web/scripts/**"],
+			"includes": ["example/guestbook/web/scripts/**", "deploy/testdata/template/web/scripts/**"],
 			"linter": {
 				"rules": {
 					"correctness": {
