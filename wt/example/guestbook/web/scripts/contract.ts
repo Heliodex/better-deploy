@@ -6,10 +6,10 @@ import { createMessageSchema, reactMessageSchema } from "../src/lib/contract"
 
 const outDir = fileURLToPath(new URL("../../contract/schemas", import.meta.url))
 
-const schemas = [
+const schemas = Object.freeze([
 	{ file: "create-message", schema: createMessageSchema, title: "CreateMessageRequest" },
 	{ file: "react-message", schema: reactMessageSchema, title: "ReactMessageRequest" },
-] as const
+] as const)
 
 await rm(outDir, { force: true, recursive: true })
 await mkdir(outDir, { recursive: true })

@@ -102,13 +102,8 @@ web/src/lib/contract.ts
   -> contract/contract.gen.go
 ```
 
-`contract/generate.sh` runs the two steps, and `app.json` calls it before
-componentizing. The generated Go code uses only the standard library, so no
-schema validator is linked into the Wasm component.
+`contract/generate.sh` runs the two steps, and `app.json` calls it before componentizing. The generated Go code uses only the standard library, so no schema validator is linked into the Wasm component.
 
-One mismatch remains: Valibot counts string length in UTF-16 code units, while
-JSON Schema and the generated Go code count code points, so astral characters
-(emoji) reach the client limit sooner. If that matters, count grapheme clusters
-on both sides or exclude emoji from the limited fields.
+One mismatch remains: Valibot counts string length in UTF-16 code units, while JSON Schema and the generated Go code count code points, so astral characters (emoji) reach the client limit sooner. If that matters, count grapheme clusters on both sides or exclude emoji from the limited fields.
 
 The prototypes live in `/tmp/opencode/contract-bench` (server variants, client entries, benchmark and validation scripts).

@@ -24,6 +24,9 @@ html {
 }
 
 body {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
 	margin: 0;
 	background:
 		radial-gradient(circle at 15% 0%, rgba(182, 67, 29, 0.08), transparent 28rem),

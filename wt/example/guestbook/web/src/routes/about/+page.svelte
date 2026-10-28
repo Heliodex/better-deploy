@@ -56,7 +56,7 @@
 }
 
 .eyebrow {
-	margin-bottom: 10px;
+	padding-bottom: 10px;
 	font-size: 0.72rem;
 	font-weight: 750;
 	color: var(--accent);
@@ -71,7 +71,7 @@ h1 {
 
 .lede {
 	max-width: 720px;
-	margin-top: 16px;
+	padding-top: 16px;
 	font-size: 1.02rem;
 	color: var(--muted);
 }
@@ -88,7 +88,7 @@ code {
 	display: grid;
 	grid-template-columns: repeat(3, minmax(0, 1fr));
 	gap: 12px;
-	margin-top: 34px;
+	padding-top: 34px;
 }
 
 .facts article {
@@ -106,12 +106,12 @@ code {
 }
 
 .facts h2 {
-	margin-top: 8px;
+	padding-top: 8px;
 	font-size: 1.05rem;
 }
 
 .facts p {
-	margin-top: 8px;
+	padding-top: 8px;
 	font-size: 0.88rem;
 	color: var(--muted);
 }
@@ -120,7 +120,7 @@ code {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 7px;
-	margin-top: 24px;
+	padding-top: 24px;
 }
 
 .about .stack span {
@@ -135,7 +135,7 @@ code {
 
 .back {
 	display: inline-block;
-	margin-top: 30px;
+	padding-top: 30px;
 	font-weight: 700;
 }
 

@@ -4,7 +4,7 @@ import { maxLength, minLength, object, picklist, pipe, regex, string } from "val
 export const maxName = 40
 export const maxMessage = 280
 
-export const reactions = ["rocket", "heart", "eyes", "brain"] as const
+export const reactions = Object.freeze(["rocket", "heart", "eyes", "brain"] as const)
 
 export type Reaction = (typeof reactions)[number]
 

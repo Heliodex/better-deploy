@@ -3,7 +3,7 @@ import { onMount } from "svelte"
 import { createMessage, fetchMessages, type Message, reactToMessage, ValidationError } from "../lib/api"
 import { maxMessage, maxName, type Reaction } from "../lib/contract"
 
-const reactionOptions = [
+const reactionOptions = Object.freeze([
 	{ emoji: "🚀", key: "rocket", label: "rocket" },
 	{ emoji: "🧡", key: "heart", label: "heart" },
 	{ emoji: "👀", key: "eyes", label: "eyes" },
@@ -12,7 +12,7 @@ const reactionOptions = [
 	key: Reaction
 	emoji: string
 	label: string
-}[]
+}[])
 
 let messages = $state<Message[]>([])
 let name = $state("")
@@ -20,7 +20,7 @@ let body = $state("")
 let loading = $state(true)
 let sending = $state(false)
 let error = $state("")
-let fieldErrors = $state<Record<string, string>>({})
+let fieldErrors = $state<{ [_: string]: string }>({})
 
 let totalReactions = $derived(
 	messages.reduce(
@@ -50,10 +50,10 @@ async function loadMessages(): Promise<void> {
 	}
 }
 
-onMount(() => {
+onMount((): (() => void) => {
 	void loadMessages()
-	const timer = setInterval(() => void loadMessages(), 20000)
-	return () => clearInterval(timer)
+	const timer = setInterval((): void => void loadMessages(), 20000)
+	return (): void => clearInterval(timer)
 })
 
 function clearFieldError(field: string): void {
@@ -116,121 +116,128 @@ async function react(message: Message, reaction: Reaction): Promise<void> {
 	</div>
 </section>
 
-<section aria-labelledby="composer-title" class="composer">
-	<div class="section-head">
-		<h2 id="composer-title">Sign the wall</h2>
-		<span>Keep it kind. Keep it short.</span>
-	</div>
-	<form novalidate onsubmit={submit}>
-		<div class="fields">
-			<label class="name-field">
-				<span>Name</span>
-				<input
-					aria-describedby={fieldErrors.name ? "name-error" : undefined}
-					aria-invalid={fieldErrors.name ? "true" : undefined}
-					autocomplete="name"
-					maxlength={maxName}
-					oninput={() => clearFieldError("name")}
-					placeholder="Your name"
-					required
-					bind:value={name}
-				>
-				{#if fieldErrors.name}
-					<small class="field-error" id="name-error">{fieldErrors.name}</small>
-				{/if}
-			</label>
-			<label class="message-field">
-				<span>Message</span>
-				<textarea
-					aria-describedby={fieldErrors.body ? "body-error" : undefined}
-					aria-invalid={fieldErrors.body ? "true" : undefined}
-					maxlength={maxMessage}
-					oninput={() => clearFieldError("body")}
-					placeholder="What are you building?"
-					required
-					rows="3"
-					bind:value={body}
-				></textarea>
-				{#if fieldErrors.body}
-					<small class="field-error" id="body-error">{fieldErrors.body}</small>
-				{/if}
-			</label>
+<div class="feed">
+	<section aria-labelledby="composer-title" class="composer">
+		<div class="section-head">
+			<h2 id="composer-title">Sign the wall</h2>
+			<span>Keep it kind. Keep it short.</span>
 		</div>
-		<div class="composer-foot">
-			<span>{body.length} / {maxMessage}</span>
-			<button disabled={sending} type="submit">
-				{sending ? "Posting…" : "Post to the wall"}
-			</button>
-		</div>
-	</form>
-</section>
+		<form novalidate onsubmit={submit}>
+			<div class="fields">
+				<label class="name-field">
+					<span>Name</span>
+					<input
+						aria-describedby={fieldErrors.name ? "name-error" : undefined}
+						aria-invalid={fieldErrors.name ? "true" : undefined}
+						autocomplete="name"
+						maxlength={maxName}
+						oninput={(): void => clearFieldError("name")}
+						placeholder="Your name"
+						required
+						bind:value={name}
+					>
+					{#if fieldErrors.name}
+						<small class="field-error" id="name-error">{fieldErrors.name}</small>
+					{/if}
+				</label>
+				<label class="message-field">
+					<span>Message</span>
+					<textarea
+						aria-describedby={fieldErrors.body ? "body-error" : undefined}
+						aria-invalid={fieldErrors.body ? "true" : undefined}
+						maxlength={maxMessage}
+						oninput={(): void => clearFieldError("body")}
+						placeholder="What are you building?"
+						required
+						rows="3"
+						bind:value={body}
+					></textarea>
+					{#if fieldErrors.body}
+						<small class="field-error" id="body-error">{fieldErrors.body}</small>
+					{/if}
+				</label>
+			</div>
+			<div class="composer-foot">
+				<span>{body.length} / {maxMessage}</span>
+				<button disabled={sending} type="submit">
+					{sending ? "Posting…" : "Post to the wall"}
+				</button>
+			</div>
+		</form>
+	</section>
 
-{#if error}
-	<div class="error" role="alert">{error}</div>
-{/if}
-
-<section aria-busy={loading} aria-labelledby="wall-title" aria-live="polite" class="wall">
-	<div class="wall-head">
-		<h2 id="wall-title">The wall</h2>
-		<span>{messages.length} {messages.length === 1 ? "note" : "notes"}</span>
-	</div>
-
-	{#if loading}
-		<div aria-label="Loading the wall" class="skeleton" role="status">
-			<div></div>
-			<div></div>
-			<div></div>
-		</div>
-	{:else if messages.length === 0}
-		<div class="empty">
-			<p>The wall is quiet.</p>
-			<span>Be the first to leave a note.</span>
-		</div>
-	{:else}
-		<div class="messages">
-			{#each messages as message (message.id)}
-				<article class="message">
-					<header>
-						<div aria-hidden="true" class="avatar">
-							{message.name.charAt(0).toUpperCase()}
-						</div>
-						<div>
-							<h3>{message.name}</h3>
-							<time datetime={message.createdAt}>{formatTime(message.createdAt)}</time>
-						</div>
-					</header>
-					<p>{message.body}</p>
-					<div class="reactions">
-						{#each reactionOptions as option (option.key)}
-							<button
-								aria-label={`React with ${option.label}`}
-								onclick={() => react(message, option.key)}
-								title={`React with ${option.label}`}
-								type="button"
-							>
-								<span aria-hidden="true">{option.emoji}</span>
-								<span>{message.reactions[option.key]}</span>
-							</button>
-						{/each}
-					</div>
-				</article>
-			{/each}
-		</div>
+	{#if error}
+		<div class="error" role="alert">{error}</div>
 	{/if}
-</section>
+
+	<section aria-busy={loading} aria-labelledby="wall-title" aria-live="polite" class="wall">
+		<div class="wall-head">
+			<h2 id="wall-title">The wall</h2>
+			<span>{messages.length} {messages.length === 1 ? "note" : "notes"}</span>
+		</div>
+
+		{#if loading}
+			<div aria-label="Loading the wall" class="skeleton" role="status">
+				<div></div>
+				<div></div>
+				<div></div>
+			</div>
+		{:else if messages.length === 0}
+			<div class="empty">
+				<p>The wall is quiet.</p>
+				<span>Be the first to leave a note.</span>
+			</div>
+		{:else}
+			<div class="messages">
+				{#each messages as message (message.id)}
+					<article class="message">
+						<header>
+							<div aria-hidden="true" class="avatar">
+								{message.name.charAt(0).toUpperCase()}
+							</div>
+							<div>
+								<h3>{message.name}</h3>
+								<time datetime={message.createdAt}>{formatTime(message.createdAt)}</time>
+							</div>
+						</header>
+						<p>{message.body}</p>
+						<div class="reactions">
+							{#each reactionOptions as option (option.key)}
+								<button
+									aria-label={`React with ${option.label}`}
+									onclick={(): void => void react(message, option.key)}
+									title={`React with ${option.label}`}
+									type="button"
+								>
+									<span aria-hidden="true">{option.emoji}</span>
+									<span>{message.reactions[option.key]}</span>
+								</button>
+							{/each}
+						</div>
+					</article>
+				{/each}
+			</div>
+		{/if}
+	</section>
+</div>
 
 <style>
+.feed {
+	display: flex;
+	flex-direction: column;
+	gap: 22px;
+}
 .hero {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 28px;
 	align-items: flex-end;
 	justify-content: space-between;
-	margin-bottom: 30px;
+	padding-bottom: 30px;
 }
 
 .eyebrow {
-	margin-bottom: 10px;
+	padding-bottom: 10px;
 	font-size: 0.72rem;
 	font-weight: 750;
 	color: var(--accent);
@@ -250,7 +257,7 @@ h1 em {
 
 .lede {
 	max-width: 620px;
-	margin-top: 14px;
+	padding-top: 14px;
 	font-size: 1.02rem;
 	color: var(--muted);
 }
@@ -286,7 +293,6 @@ h1 em {
 
 .composer {
 	padding: 22px;
-	margin-bottom: 22px;
 	background: var(--card);
 	border: 1px solid var(--line);
 	border-radius: var(--radius);
@@ -299,7 +305,7 @@ h1 em {
 	gap: 16px;
 	align-items: baseline;
 	justify-content: space-between;
-	margin-bottom: 14px;
+	padding-bottom: 14px;
 }
 
 .section-head h2 {
@@ -358,7 +364,7 @@ textarea[aria-invalid="true"] {
 	gap: 16px;
 	align-items: center;
 	justify-content: space-between;
-	margin-top: 12px;
+	padding-top: 12px;
 }
 
 .composer-foot > span {
@@ -388,7 +394,6 @@ textarea[aria-invalid="true"] {
 
 .error {
 	padding: 11px 14px;
-	margin-bottom: 22px;
 	font-size: 0.88rem;
 	color: #7d2a12;
 	background: #fbe5df;
@@ -401,7 +406,7 @@ textarea[aria-invalid="true"] {
 	gap: 16px;
 	align-items: baseline;
 	justify-content: space-between;
-	margin-bottom: 12px;
+	padding-bottom: 12px;
 }
 
 .wall-head h2 {
@@ -430,7 +435,7 @@ textarea[aria-invalid="true"] {
 	display: flex;
 	gap: 11px;
 	align-items: center;
-	margin-bottom: 10px;
+	padding-bottom: 10px;
 }
 
 .avatar {
@@ -451,7 +456,7 @@ textarea[aria-invalid="true"] {
 
 .message time {
 	display: block;
-	margin-top: 1px;
+	padding-top: 1px;
 	font-size: 0.72rem;
 	color: var(--muted);
 }
@@ -467,8 +472,7 @@ textarea[aria-invalid="true"] {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 7px;
-	padding-top: 12px;
-	margin-top: 14px;
+	padding-top: 26px;
 	border-top: 1px dashed var(--line);
 }
 

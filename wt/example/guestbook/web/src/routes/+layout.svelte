@@ -36,7 +36,6 @@ let { children }: LayoutProps = $props()
 	flex-direction: column;
 	width: min(1080px, calc(100% - 36px));
 	min-height: 100vh;
-	margin: 0 auto;
 }
 
 .site-header {
@@ -97,7 +96,7 @@ footer {
 }
 
 footer span + span::before {
-	margin-right: 20px;
+	padding-right: 20px;
 	color: var(--line);
 	content: "·";
 }

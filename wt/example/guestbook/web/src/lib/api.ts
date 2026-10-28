@@ -46,9 +46,9 @@ const errorResponseSchema = object({
 
 // ValidationError carries per-field messages so the form can show them next to the input that failed.
 export class ValidationError extends Error {
-	readonly fields: Record<string, string>
+	readonly fields: { [_: string]: string }
 
-	constructor(fields: Record<string, string>) {
+	constructor(fields: { [_: string]: string }) {
 		super(Object.values(fields)[0] ?? "Please check the form.")
 		this.name = "ValidationError"
 		this.fields = fields
@@ -56,10 +56,11 @@ export class ValidationError extends Error {
 }
 
 function toValidationError(issues: readonly BaseIssue<unknown>[]): ValidationError {
-	const fields: Record<string, string> = {}
+	const fields: { [_: string]: string } = {}
 	for (const issue of issues) {
 		const key = issue.path?.[0]?.key
-		if (typeof key === "string" && !(key in fields)) fields[key] = issue.message
+		if (typeof key !== "string" || key in fields) continue
+		fields[key] = issue.message
 	}
 	return new ValidationError(fields)
 }
@@ -96,7 +97,12 @@ export async function createMessage(name: string, body: string): Promise<Message
 	return parseJSON(response, messageSchema)
 }
 
-export async function reactToMessage(id: string, reaction: Reaction): Promise<{ reaction: Reaction; count: number }> {
+interface ReactResult {
+	count: number
+	reaction: Reaction
+}
+
+export async function reactToMessage(id: string, reaction: Reaction): Promise<ReactResult> {
 	const input = safeParse(reactMessageInput, { id, reaction })
 	if (!input.success) throw toValidationError(input.issues)
 
