@@ -3,7 +3,7 @@
 # The wt runtime image: a runtime-only wasmtime and the supervisor. Apps are
 # uploaded later; the image contains no applications.
 
-FROM docker.io/library/golang:1.27-alpine AS supervisor
+FROM golang:1-alpine AS supervisor
 WORKDIR /src
 RUN mkdir -p /out
 COPY --from=docker.io/oven/bun:alpine /usr/local/bin/bun /usr/local/bin/bun
@@ -17,7 +17,7 @@ RUN go generate ./... && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
 # Build wasmtime without Cranelift/Winch: the serving side only deserializes
 # the .cwasm files produced by wt-deploy. The musl build is fully static, so
 # the final image can be scratch.
-FROM docker.io/library/rust:1.97-slim AS wasmtime
+FROM rust:1-slim AS wasmtime
 
 ARG WASMTIME_VERSION=v50.0.0
 
