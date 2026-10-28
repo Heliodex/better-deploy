@@ -69,6 +69,16 @@ function formatTime(value: string): string {
 	return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
 }
 
+function formatCPU(percent: number): string {
+	return percent < 10 ? `${percent.toFixed(1)}%` : `${Math.round(percent)}%`
+}
+
+function formatMemory(bytes: number): string {
+	if (bytes <= 0) return "–"
+	const megabytes = bytes / (1024 * 1024)
+	return megabytes < 10 ? `${megabytes.toFixed(1)} MB` : `${Math.round(megabytes)} MB`
+}
+
 const logTimeFormat = new Intl.DateTimeFormat(undefined, {
 	hour: "2-digit",
 	hour12: false,
@@ -184,6 +194,10 @@ function connect(key: string): void {
 	stopStream = subscribe(
 		updated => {
 			apps = updated
+			if (selected) {
+				const current = updated.find(app => app.name === selected)
+				if (current) detail = current
+			}
 			loading = false
 			error = ""
 		},
@@ -547,7 +561,7 @@ onMount((): (() => void) => {
 
 					<div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
 						{#if detail}
-							<dl class="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-4">
+							<dl class="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-3">
 								<div class="flex flex-col">
 									<dt class="text-xs tracking-wide text-neutral-500 uppercase">Host</dt>
 									<dd class="text-sm wrap-break-word">{detail.host}</dd>
@@ -555,6 +569,18 @@ onMount((): (() => void) => {
 								<div class="flex flex-col">
 									<dt class="text-xs tracking-wide text-neutral-500 uppercase">Status</dt>
 									<dd class="text-sm">{detail.status}</dd>
+								</div>
+								<div class="flex flex-col">
+									<dt class="text-xs tracking-wide text-neutral-500 uppercase">CPU</dt>
+									<dd class="text-sm tabular-nums">
+										{detail.status === "running" ? formatCPU(detail.cpuPercent) : "–"}
+									</dd>
+								</div>
+								<div class="flex flex-col">
+									<dt class="text-xs tracking-wide text-neutral-500 uppercase">Memory</dt>
+									<dd class="text-sm tabular-nums">
+										{detail.status === "running" ? formatMemory(detail.memoryBytes) : "–"}
+									</dd>
 								</div>
 								<div class="flex flex-col">
 									<dt class="text-xs tracking-wide text-neutral-500 uppercase">Started</dt>

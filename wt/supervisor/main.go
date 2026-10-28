@@ -77,6 +77,7 @@ type app struct {
 	delay     time.Duration
 	timer     *time.Timer
 	logs      *appLog
+	stats     appStats
 
 	mu              sync.Mutex
 	scheduleCancel  context.CancelFunc
@@ -655,24 +656,28 @@ func writeError(w http.ResponseWriter, status int, message string) {
 }
 
 type appInfo struct {
-	Name      string    `json:"name"`
-	Host      string    `json:"host"`
-	Port      int       `json:"port"`
-	Status    string    `json:"status"`
-	PID       int       `json:"pid,omitempty"`
-	StartedAt time.Time `json:"startedAt"`
+	Name        string    `json:"name"`
+	Host        string    `json:"host"`
+	Port        int       `json:"port"`
+	Status      string    `json:"status"`
+	PID         int       `json:"pid,omitempty"`
+	StartedAt   time.Time `json:"startedAt"`
+	CPUPercent  float64   `json:"cpuPercent"`
+	MemoryBytes int64     `json:"memoryBytes"`
 }
 
 func (s *supervisor) info(a *app) appInfo {
-	info := appInfo{Name: a.name, Host: a.cfg.Host, Port: a.port, StartedAt: a.started}
+	info := appInfo{Name: a.name, Host: a.cfg.Host, Port: a.port}
 	a.mu.Lock()
-	defer a.mu.Unlock()
+	info.StartedAt = a.started
 	if a.cmd != nil && a.cmd.Process != nil && !a.exited {
 		info.Status = "running"
 		info.PID = a.cmd.Process.Pid
 	} else {
 		info.Status = "stopped"
 	}
+	a.mu.Unlock()
+	info.CPUPercent, info.MemoryBytes = a.resourceStats()
 	return info
 }
 
@@ -914,6 +919,7 @@ func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "app not found", http.StatusNotFound)
 				return
 			}
+			a.sampleResources(time.Now())
 			writeJSON(w, http.StatusOK, s.info(a))
 		case http.MethodPost:
 			if !s.requireAuth(w, r) {
@@ -1077,6 +1083,7 @@ func main() {
 	if err := s.loadApps(); err != nil {
 		log.Fatalf("load apps: %v", err)
 	}
+	go s.monitorResources(resourceSampleInterval)
 
 	server := &http.Server{
 		Addr:              cfg.listen,

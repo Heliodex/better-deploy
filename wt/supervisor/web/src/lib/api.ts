@@ -17,7 +17,9 @@ import {
 } from "valibot"
 
 const appInfoSchema = object({
+	cpuPercent: pipe(number(), minValue(0)),
 	host: pipe(string(), minLength(1)),
+	memoryBytes: pipe(number(), minValue(0)),
 	name: pipe(string(), minLength(1)),
 	pid: optional(pipe(number(), integer())),
 	port: pipe(number(), integer(), minValue(0)),

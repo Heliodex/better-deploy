@@ -249,6 +249,12 @@ func (h *hub) unsubscribe(messages chan []byte) {
 	delete(h.subs, messages)
 }
 
+func (h *hub) hasSubscribers() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.subs) > 0
+}
+
 func (h *hub) publish(message []byte) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -267,6 +273,8 @@ type snapshotMessage struct {
 
 // snapshot returns the current app list, newest details included.
 func (s *supervisor) snapshot() []appInfo {
+	// Sampling here keeps REST and SSE snapshots current; the method throttles itself.
+	s.sampleAll()
 	s.mu.RLock()
 	apps := make([]*app, 0, len(s.apps))
 	for _, a := range s.apps {
@@ -488,6 +496,7 @@ func (s *supervisor) handleRestart(w http.ResponseWriter, r *http.Request, a *ap
 		writeError(w, http.StatusBadGateway, "app did not restart: "+err.Error())
 		return
 	}
+	a.sampleResources(time.Now())
 	writeJSON(w, http.StatusOK, s.info(a))
 }
 

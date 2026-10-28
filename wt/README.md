@@ -67,6 +67,10 @@ The supervisor scans `WT_APPS_DIR` at boot, starts every app found there, and se
 
 The supervisor serves a small admin panel at `/admin/` on its own address (for example `http://127.0.0.1:8080/admin/` locally, or the deploy host in production). It lists apps with status and ticking uptime, streams each app's log live over server-sent events, restarts apps, and uploads new bundles. Updates stream over server-sent events, so the dashboard reflects deploys and restarts without refreshing. Every endpoint except `/healthz` requires the deploy bearer token, which the panel asks for once and keeps in the browser (a `wt_token` cookie carries it on the event streams, where headers cannot go). App logs persist under `/var/lib/wt/.logs` (or `WT_STATE_DIR`), outside each app's `/data` preopen, and every line is stamped with the time the supervisor received it so timestamps do not depend on how an app logs.
 
+## Resource usage
+
+The app detail shows CPU and resident memory for the `wasmtime serve` process, read from `/proc/<pid>/stat` and `/proc/<pid>/statm`. CPU is a percentage of one core and can exceed 100% for a multi-threaded component; memory is the process's resident set size. The supervisor samples every two seconds while an admin panel is subscribed and pushes the figures in the same SSE snapshots, so the values stay live without polling. Metrics are not persisted or charted; a stopped app shows no values, and a container without a mounted `/proc` shows memory as `–`.
+
 ## Log levels
 
 An app prefixes a line with a level and the supervisor separates it from the message:

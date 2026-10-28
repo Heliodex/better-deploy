@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -240,6 +241,51 @@ func TestHubBroadcast(t *testing.T) {
 	}
 }
 
+// safeRecorder is a ResponseWriter that can be read while a streaming handler writes.
+type safeRecorder struct {
+	mu     sync.Mutex
+	header http.Header
+	body   strings.Builder
+	status int
+	wrote  chan struct{}
+	once   sync.Once
+}
+
+func newSafeRecorder() *safeRecorder {
+	return &safeRecorder{header: http.Header{}, wrote: make(chan struct{})}
+}
+
+func (r *safeRecorder) Header() http.Header {
+	return r.header
+}
+
+func (r *safeRecorder) WriteHeader(status int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.status == 0 {
+		r.status = status
+	}
+}
+
+func (r *safeRecorder) Write(p []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.status == 0 {
+		r.status = http.StatusOK
+	}
+	n, err := r.body.Write(p)
+	r.once.Do(func() { close(r.wrote) })
+	return n, err
+}
+
+func (r *safeRecorder) Flush() {}
+
+func (r *safeRecorder) Body() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.body.String()
+}
+
 func TestHandleEventsStreamsSnapshot(t *testing.T) {
 	s := testSupervisor()
 	s.apps["demo"] = &app{name: "demo", cfg: appConfig{Host: "demo.example"}}
@@ -248,33 +294,26 @@ func TestHandleEventsStreamsSnapshot(t *testing.T) {
 	defer cancel()
 	req := httptest.NewRequest(http.MethodGet, "/events", nil).WithContext(ctx)
 	req.Header.Set("Authorization", "Bearer secret")
-	rec := httptest.NewRecorder()
+	rec := newSafeRecorder()
 	finished := make(chan struct{})
 	go func() {
 		defer close(finished)
 		s.handleEvents(rec, req)
 	}()
-	deadline := time.After(5 * time.Second)
-	for {
-		rec.Flush()
-		if strings.Contains(rec.Body.String(), `"type":"snapshot"`) {
-			break
-		}
-		select {
-		case <-deadline:
-			cancel()
-			<-finished
-			t.Fatal("timed out waiting for snapshot")
-		case <-time.After(10 * time.Millisecond):
-		}
+	select {
+	case <-rec.wrote:
+	case <-time.After(5 * time.Second):
+		cancel()
+		<-finished
+		t.Fatal("timed out waiting for snapshot")
 	}
 	cancel()
 	<-finished
 	if got := rec.Header().Get("Content-Type"); got != "text/event-stream" {
 		t.Errorf("Content-Type = %q, want text/event-stream", got)
 	}
-	if !strings.Contains(rec.Body.String(), `"name":"demo"`) {
-		t.Errorf("snapshot missing app: %s", rec.Body.String())
+	if body := rec.Body(); !strings.Contains(body, `"name":"demo"`) {
+		t.Errorf("snapshot missing app: %s", body)
 	}
 }
 
@@ -302,34 +341,30 @@ func TestHandleLogStreamBacklogAndLines(t *testing.T) {
 	defer cancel()
 	req := httptest.NewRequest(http.MethodGet, "/apps/demo/logs/stream?tail=10", nil).WithContext(ctx)
 	req.Header.Set("Authorization", "Bearer secret")
-	rec := httptest.NewRecorder()
+	rec := newSafeRecorder()
 	finished := make(chan struct{})
 	go func() {
 		defer close(finished)
 		s.handleLogStream(rec, req, &app{name: "demo", logs: logs})
 	}()
 
-	body := func() string {
-		rec.Flush()
-		return rec.Body.String()
-	}
 	waitFor := func(want string) {
 		t.Helper()
 		deadline := time.After(5 * time.Second)
-		for !strings.Contains(body(), want) {
+		for !strings.Contains(rec.Body(), want) {
 			select {
 			case <-deadline:
 				cancel()
 				<-finished
-				t.Fatalf("timed out waiting for %q in %s", want, body())
+				t.Fatalf("timed out waiting for %q in %s", want, rec.Body())
 			case <-time.After(10 * time.Millisecond):
 			}
 		}
 	}
 
 	waitFor(`"type":"backlog"`)
-	if !strings.Contains(body(), `"message":"existing line"`) {
-		t.Errorf("backlog missing existing line: %s", body())
+	if body := rec.Body(); !strings.Contains(body, `"message":"existing line"`) {
+		t.Errorf("backlog missing existing line: %s", body)
 	}
 
 	if _, err := io.WriteString(logs, "fresh line\n"); err != nil {
