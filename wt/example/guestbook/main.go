@@ -69,78 +69,59 @@ var (
 	schemaReady bool
 )
 
-func init() {
-	store, storeErr = storage.New(wasihttp.NewClient())
-	if storeErr != nil {
-		return
+func newID() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
 	}
-
-	sub, err := fs.Sub(staticFiles, "static")
-	if err != nil {
-		panic(err)
-	}
-	files := http.FileServer(http.FS(sub))
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/messages", handleListMessages)
-	mux.HandleFunc("POST /api/messages", handleCreateMessage)
-	mux.HandleFunc("POST /api/messages/{id}/react", handleReact)
-	mux.HandleFunc("GET /api/stats", handleStats)
-	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/_app/") {
-			w.Header().Set("cache-control", "public, max-age=31536000, immutable")
-		}
-		files.ServeHTTP(w, r)
-	}))
-
-	wasihttp.Handle(func(w http.ResponseWriter, r *http.Request) {
-		if storeErr != nil {
-			http.Error(w, "storage unavailable: "+storeErr.Error(), http.StatusServiceUnavailable)
-			return
-		}
-		if err := ensureSchema(r.Context()); err != nil {
-			http.Error(w, "storage schema: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		mux.ServeHTTP(w, r)
-	})
+	return hex.EncodeToString(b[:])
 }
 
-func main() {}
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("content-type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	data, _ := json.Marshal(value)
+	_, _ = w.Write(append(data, '\n'))
+}
 
-func ensureSchema(ctx context.Context) error {
-	schemaMu.Lock()
-	defer schemaMu.Unlock()
-	if schemaReady {
-		return nil
+func writeError(w http.ResponseWriter, status int, message string) {
+	writeJSON(w, status, map[string]string{"error": message})
+}
+
+func lowerFieldName(message string) string {
+	const prefix = "field "
+	if !strings.HasPrefix(message, prefix) {
+		return message
 	}
-	_, err := store.Batch(ctx,
-		storage.Statement{SQL: `create table if not exists messages (
-			id text primary key,
-			name text not null,
-			body text not null,
-			created_at text not null
-		)`},
-		storage.Statement{SQL: `create table if not exists reactions (
-			message_id text not null,
-			reaction text not null,
-			count integer not null default 0,
-			primary key (message_id, reaction)
-		)`},
-		storage.Statement{SQL: `create table if not exists meta (
-			key text primary key,
-			value text not null
-		)`},
-		storage.Statement{SQL: `create index if not exists messages_created_idx on messages(created_at)`},
-	)
-	if err != nil {
-		return err
+	rest := message[len(prefix):]
+	if rest == "" {
+		return message
 	}
-	if err := seed(ctx); err != nil {
-		return err
+	return prefix + strings.ToLower(rest[:1]) + rest[1:]
+}
+
+// requestError trims the encoding/json/v2 wrapper from a generated validation error, leaving the field and the rule that failed.
+func requestError(err error) string {
+	message := err.Error()
+	if index := strings.Index(message, ": field "); index >= 0 {
+		return lowerFieldName(message[index+2:])
 	}
-	schemaReady = true
-	return nil
+	if index := strings.Index(message, ": invalid value"); index >= 0 {
+		return "field reaction: " + message[index+2:]
+	}
+	if _, after, ok := strings.CutLast(message, ": "); ok {
+		return after
+	}
+	return message
+}
+
+func readJSON(w http.ResponseWriter, r *http.Request, out any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
+	if err := json.UnmarshalRead(r.Body, out); err != nil {
+		writeError(w, http.StatusBadRequest, requestError(err))
+		return false
+	}
+	return true
 }
 
 func seed(ctx context.Context) error {
@@ -210,6 +191,41 @@ func seed(ctx context.Context) error {
 	})
 	_, err := store.Batch(ctx, statements...)
 	return err
+}
+
+func ensureSchema(ctx context.Context) error {
+	schemaMu.Lock()
+	defer schemaMu.Unlock()
+	if schemaReady {
+		return nil
+	}
+	_, err := store.Batch(ctx,
+		storage.Statement{SQL: `create table if not exists messages (
+			id text primary key,
+			name text not null,
+			body text not null,
+			created_at text not null
+		)`},
+		storage.Statement{SQL: `create table if not exists reactions (
+			message_id text not null,
+			reaction text not null,
+			count integer not null default 0,
+			primary key (message_id, reaction)
+		)`},
+		storage.Statement{SQL: `create table if not exists meta (
+			key text primary key,
+			value text not null
+		)`},
+		storage.Statement{SQL: `create index if not exists messages_created_idx on messages(created_at)`},
+	)
+	if err != nil {
+		return err
+	}
+	if err := seed(ctx); err != nil {
+		return err
+	}
+	schemaReady = true
+	return nil
 }
 
 func handleListMessages(w http.ResponseWriter, r *http.Request) {
@@ -329,58 +345,41 @@ func handleStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, stats)
 }
 
-func readJSON(w http.ResponseWriter, r *http.Request, out any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
-	if err := json.UnmarshalRead(r.Body, out); err != nil {
-		writeError(w, http.StatusBadRequest, requestError(err))
-		return false
+func init() {
+	store, storeErr = storage.New(wasihttp.NewClient())
+	if storeErr != nil {
+		return
 	}
-	return true
+
+	sub, err := fs.Sub(staticFiles, "static")
+	if err != nil {
+		panic(err)
+	}
+	files := http.FileServer(http.FS(sub))
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/messages", handleListMessages)
+	mux.HandleFunc("POST /api/messages", handleCreateMessage)
+	mux.HandleFunc("POST /api/messages/{id}/react", handleReact)
+	mux.HandleFunc("GET /api/stats", handleStats)
+	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/_app/") {
+			w.Header().Set("cache-control", "public, max-age=31536000, immutable")
+		}
+		files.ServeHTTP(w, r)
+	}))
+
+	wasihttp.Handle(func(w http.ResponseWriter, r *http.Request) {
+		if storeErr != nil {
+			http.Error(w, "storage unavailable: "+storeErr.Error(), http.StatusServiceUnavailable)
+			return
+		}
+		if err := ensureSchema(r.Context()); err != nil {
+			http.Error(w, "storage schema: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
 }
 
-// requestError trims the encoding/json/v2 wrapper from a generated validation
-// error, leaving the field and the rule that failed.
-func requestError(err error) string {
-	message := err.Error()
-	if index := strings.Index(message, ": field "); index >= 0 {
-		return lowerFieldName(message[index+2:])
-	}
-	if index := strings.Index(message, ": invalid value"); index >= 0 {
-		return "field reaction: " + message[index+2:]
-	}
-	if _, after, ok := strings.CutLast(message, ": "); ok {
-		return after
-	}
-	return message
-}
-
-func lowerFieldName(message string) string {
-	const prefix = "field "
-	if !strings.HasPrefix(message, prefix) {
-		return message
-	}
-	rest := message[len(prefix):]
-	if rest == "" {
-		return message
-	}
-	return prefix + strings.ToLower(rest[:1]) + rest[1:]
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("content-type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	data, _ := json.Marshal(value)
-	_, _ = w.Write(append(data, '\n'))
-}
-
-func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, map[string]string{"error": message})
-}
-
-func newID() string {
-	var b [8]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return fmt.Sprintf("%d", time.Now().UnixNano())
-	}
-	return hex.EncodeToString(b[:])
-}
+func main() {}

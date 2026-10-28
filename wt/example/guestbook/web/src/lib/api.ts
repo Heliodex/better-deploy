@@ -44,8 +44,7 @@ const errorResponseSchema = object({
 	error: string(),
 })
 
-// ValidationError carries per-field messages so the form can show them next to
-// the input that failed.
+// ValidationError carries per-field messages so the form can show them next to the input that failed.
 export class ValidationError extends Error {
 	readonly fields: Record<string, string>
 
