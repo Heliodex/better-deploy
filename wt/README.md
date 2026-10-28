@@ -88,10 +88,14 @@ token). `/healthz` is the supervisor's own health check.
 
 The supervisor serves a small admin panel at `/admin/` on its own address
 (for example `http://127.0.0.1:8080/admin/` locally, or the deploy host in
-production). It lists apps with status and uptime, shows recent logs per app,
-restarts apps, and uploads new bundles. Every endpoint except `/healthz`
-requires the deploy bearer token, which the panel asks for once and keeps in
-the browser's local storage.
+production). It lists apps with status and ticking uptime, shows recent logs
+per app, restarts apps, and uploads new bundles. Updates stream over
+server-sent events, so the dashboard reflects deploys and restarts without
+refreshing. Every endpoint except `/healthz` requires the deploy bearer
+token, which the panel asks for once and keeps in the browser (a `wt_token`
+cookie carries it on the event stream, where headers cannot go). App logs
+persist under `/var/lib/wt/.logs` (or `WT_STATE_DIR`), outside each app's
+`/data` preopen.
 
 To deploy from the panel without the CLI, build the bundle first and upload
 the file:

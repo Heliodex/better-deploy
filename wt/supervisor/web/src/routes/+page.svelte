@@ -10,6 +10,7 @@ import {
 	getToken,
 	restartApp,
 	setToken,
+	subscribe,
 } from "../lib/api"
 
 let token = $state<string | null>(null)
@@ -25,9 +26,12 @@ let restarting = $state(false)
 let deploying = $state(false)
 let actionMessage = $state("")
 let confirmRestart = $state(false)
+let live = $state(false)
+let now = $state(Date.now())
+let stopStream: (() => void) | null = null
 
 function uptime(startedAt: string): string {
-	const seconds = Math.max(0, Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000))
+	const seconds = Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1000))
 	if (seconds < 60) return `${seconds}s`
 	const minutes = Math.floor(seconds / 60)
 	if (minutes < 60) return `${minutes}m`
@@ -101,6 +105,28 @@ function reloadLogs(): void {
 	void loadLogs(token, selected)
 }
 
+function connect(key: string): void {
+	disconnect()
+	stopStream = subscribe(
+		updated => {
+			apps = updated
+			loading = false
+			error = ""
+		},
+		value => {
+			live = value
+		},
+	)
+}
+
+function disconnect(): void {
+	if (stopStream) {
+		stopStream()
+		stopStream = null
+	}
+	live = false
+}
+
 async function submitToken(event: SubmitEvent): Promise<void> {
 	event.preventDefault()
 	const value = tokenInput.trim()
@@ -111,6 +137,7 @@ async function submitToken(event: SubmitEvent): Promise<void> {
 		token = value
 		tokenInput = ""
 		error = ""
+		connect(value)
 		await refresh(value)
 	} catch (err) {
 		error = err instanceof Error ? err.message : "Could not reach the supervisor."
@@ -120,6 +147,7 @@ async function submitToken(event: SubmitEvent): Promise<void> {
 function forget(event: MouseEvent): void {
 	event.preventDefault()
 	forgetToken()
+	disconnect()
 	token = null
 	apps = []
 	select(null)
@@ -178,16 +206,20 @@ onMount((): (() => void) => {
 	if (saved) {
 		token = saved
 		selected = name
+		connect(saved)
 		void refresh(saved)
 		if (name) void loadLogs(saved, name)
 	} else {
 		loading = false
 		selected = name
 	}
-	const timer = setInterval(() => {
-		if (token && document.visibilityState === "visible") void refresh(token)
-	}, 10000)
-	return (): void => clearInterval(timer)
+	const clock = setInterval((): void => {
+		now = Date.now()
+	}, 1000)
+	return (): void => {
+		clearInterval(clock)
+		disconnect()
+	}
 })
 </script>
 
@@ -200,6 +232,10 @@ onMount((): (() => void) => {
 		<h1>wt admin</h1>
 		<span class="spacer"></span>
 		{#if token}
+			<span class="status"
+				><span aria-hidden="true" class="dot {live ? "running" : ""}"></span>
+				{live ? "live" : "connecting…"}</span
+			>
 			<button onclick={forget} type="button">Forget token</button>
 		{/if}
 	</header>

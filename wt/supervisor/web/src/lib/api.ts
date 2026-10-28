@@ -3,6 +3,7 @@ import {
 	type GenericSchema,
 	type InferOutput,
 	integer,
+	literal,
 	minLength,
 	minValue,
 	number,
@@ -27,6 +28,13 @@ export type AppInfo = InferOutput<typeof appInfoSchema>
 
 const appsResponseSchema = array(appInfoSchema)
 
+const snapshotSchema = object({
+	apps: array(appInfoSchema),
+	type: literal("snapshot"),
+})
+
+export type Snapshot = InferOutput<typeof snapshotSchema>
+
 const logsResponseSchema = object({
 	logs: array(string()),
 })
@@ -45,10 +53,17 @@ export function getToken(): string | null {
 
 export function setToken(token: string): void {
 	localStorage.setItem(tokenKey, token)
+	setCookie(tokenKey, token, 31536000)
 }
 
 export function forgetToken(): void {
 	localStorage.removeItem(tokenKey)
+	setCookie(tokenKey, "", 0)
+}
+
+function setCookie(name: string, value: string, maxAge: number): void {
+	// biome-ignore lint/suspicious/noDocumentCookie: document.cookie is the only cross-browser way to manage cookies; the Cookie Store API is Chromium-only.
+	document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; path=/; max-age=${maxAge}; SameSite=Lax`
 }
 
 interface RequestOptions {
@@ -85,6 +100,33 @@ async function request<T>(path: string, options: RequestOptions, schema: Generic
 
 export function fetchApps(token: string): Promise<AppInfo[]> {
 	return request("/apps", { token }, appsResponseSchema)
+}
+
+export function subscribe(onSnapshot: (apps: AppInfo[]) => void, onStatus: (live: boolean) => void): () => void {
+	const source = new EventSource("/events")
+	source.addEventListener("open", () => onStatus(true))
+	source.addEventListener("error", () => onStatus(false))
+	source.addEventListener("message", event => {
+		if (typeof event.data !== "string") {
+			console.warn("ignoring snapshot without text data")
+			return
+		}
+		let data: unknown
+		try {
+			data = JSON.parse(event.data)
+		} catch {
+			console.warn("ignoring malformed snapshot")
+			return
+		}
+		const parsed = safeParse(snapshotSchema, data)
+		if (!parsed.success) {
+			console.warn("ignoring unexpected snapshot shape")
+			return
+		}
+		onStatus(true)
+		onSnapshot(parsed.output.apps)
+	})
+	return (): void => source.close()
 }
 
 export function fetchApp(token: string, name: string): Promise<AppInfo> {

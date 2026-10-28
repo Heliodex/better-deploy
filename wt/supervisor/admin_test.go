@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -8,13 +9,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func testSupervisor() *supervisor {
 	return &supervisor{
-		cfg:   config{token: "secret"},
-		apps:  map[string]*app{},
-		hosts: map[string]*app{},
+		cfg:    config{token: "secret"},
+		events: newHub(),
+		apps:   map[string]*app{},
+		hosts:  map[string]*app{},
 	}
 }
 
@@ -135,5 +138,99 @@ func TestAppLogRotation(t *testing.T) {
 	}
 	if len(got) == 0 {
 		t.Error("tail returned no lines")
+	}
+}
+
+func TestAuthorizedAcceptsCookie(t *testing.T) {
+	s := testSupervisor()
+	req := httptest.NewRequest(http.MethodGet, "/apps", nil)
+	req.AddCookie(&http.Cookie{Name: "wt_token", Value: "secret"})
+	if !s.authorized(req) {
+		t.Error("cookie token should authorize")
+	}
+	req = httptest.NewRequest(http.MethodGet, "/apps", nil)
+	req.AddCookie(&http.Cookie{Name: "wt_token", Value: "wrong"})
+	if s.authorized(req) {
+		t.Error("wrong cookie token should not authorize")
+	}
+}
+
+func TestHubBroadcast(t *testing.T) {
+	h := newHub()
+	first := h.subscribe()
+	second := h.subscribe()
+	h.publish([]byte("hello"))
+	for _, ch := range []chan []byte{first, second} {
+		select {
+		case got := <-ch:
+			if string(got) != "hello" {
+				t.Errorf("got %q, want hello", got)
+			}
+		default:
+			t.Error("subscriber did not receive broadcast")
+		}
+	}
+	h.unsubscribe(first)
+	h.publish([]byte("again"))
+	select {
+	case <-first:
+		t.Error("unsubscribed channel received a broadcast")
+	default:
+	}
+	select {
+	case got := <-second:
+		if string(got) != "again" {
+			t.Errorf("got %q, want again", got)
+		}
+	default:
+		t.Error("remaining subscriber did not receive broadcast")
+	}
+}
+
+func TestHandleEventsStreamsSnapshot(t *testing.T) {
+	s := testSupervisor()
+	s.apps["demo"] = &app{name: "demo", cfg: appConfig{Host: "demo.example"}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := httptest.NewRequest(http.MethodGet, "/events", nil).WithContext(ctx)
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		s.handleEvents(rec, req)
+	}()
+	deadline := time.After(5 * time.Second)
+	for {
+		rec.Flush()
+		if strings.Contains(rec.Body.String(), `"type":"snapshot"`) {
+			break
+		}
+		select {
+		case <-deadline:
+			cancel()
+			<-finished
+			t.Fatal("timed out waiting for snapshot")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	cancel()
+	<-finished
+	if got := rec.Header().Get("Content-Type"); got != "text/event-stream" {
+		t.Errorf("Content-Type = %q, want text/event-stream", got)
+	}
+	if !strings.Contains(rec.Body.String(), `"name":"demo"`) {
+		t.Errorf("snapshot missing app: %s", rec.Body.String())
+	}
+}
+
+func TestHandleEventsRequiresAuth(t *testing.T) {
+	s := testSupervisor()
+	req := httptest.NewRequest(http.MethodGet, "/events", nil)
+	rec := httptest.NewRecorder()
+	s.handleEvents(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rec.Code)
 	}
 }

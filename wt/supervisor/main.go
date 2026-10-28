@@ -73,6 +73,7 @@ type app struct {
 type supervisor struct {
 	cfg     config
 	storage *storageServer
+	events  *hub
 
 	mu          sync.RWMutex
 	apps, hosts map[string]*app
@@ -468,6 +469,7 @@ func (s *supervisor) launch(a *app, source string) error {
 		delay := a.delay
 		a.mu.Unlock()
 		close(done)
+		s.broadcast()
 
 		if err != nil {
 			log.Printf("app %s: wasmtime exited: %v", a.name, err)
@@ -484,6 +486,7 @@ func (s *supervisor) launch(a *app, source string) error {
 	}
 	a.proxy = s.newProxy(a)
 	log.Printf("app %s started on 127.0.0.1:%d (%s)", a.name, a.port, a.cfg.Host)
+	s.broadcast()
 	return nil
 }
 
@@ -519,13 +522,13 @@ func (s *supervisor) spawn(name, dir string, cfg appConfig, port int) (*app, err
 
 func (s *supervisor) register(a *app) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if old := s.apps[a.name]; old != nil {
 		delete(s.hosts, old.cfg.Host)
 	}
 	s.apps[a.name] = a
 	s.hosts[a.cfg.Host] = a
+	s.mu.Unlock()
+	s.broadcast()
 }
 
 func (s *supervisor) hostTaken(host, except string) bool {
@@ -584,10 +587,17 @@ func (s *supervisor) authorized(r *http.Request) bool {
 	}
 	const prefix = "Bearer "
 	header := r.Header.Get("Authorization")
-	if !strings.HasPrefix(header, prefix) {
+	if strings.HasPrefix(header, prefix) {
+		got := strings.TrimSpace(strings.TrimPrefix(header, prefix))
+		if subtle.ConstantTimeCompare([]byte(got), []byte(s.cfg.token)) == 1 {
+			return true
+		}
+	}
+	cookie, err := r.Cookie("wt_token")
+	if err != nil {
 		return false
 	}
-	got := strings.TrimSpace(strings.TrimPrefix(header, prefix))
+	got := strings.TrimSpace(cookie.Value)
 	return subtle.ConstantTimeCompare([]byte(got), []byte(s.cfg.token)) == 1
 }
 
@@ -839,19 +849,7 @@ func (s *supervisor) handleApps(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAuth(w, r) {
 		return
 	}
-	s.mu.RLock()
-	apps := make([]*app, 0, len(s.apps))
-	for _, a := range s.apps {
-		apps = append(apps, a)
-	}
-	s.mu.RUnlock()
-	sort.Slice(apps, func(i, j int) bool { return apps[i].name < apps[j].name })
-
-	out := make([]appInfo, 0, len(apps))
-	for _, a := range apps {
-		out = append(out, s.info(a))
-	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, s.snapshot())
 }
 
 func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
@@ -949,6 +947,7 @@ func (s *supervisor) handler() http.Handler {
 	})
 	mux.HandleFunc("/apps", s.handleApps)
 	mux.HandleFunc("/apps/", s.handleApp)
+	mux.HandleFunc("GET /events", s.handleEvents)
 	mux.HandleFunc("/admin", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin/", http.StatusFound)
 	})
@@ -1014,6 +1013,7 @@ func main() {
 	s := &supervisor{
 		cfg:     cfg,
 		storage: storage,
+		events:  newHub(),
 		apps:    map[string]*app{},
 		hosts:   map[string]*app{},
 	}

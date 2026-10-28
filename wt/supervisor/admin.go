@@ -2,11 +2,14 @@ package main
 
 import (
 	"embed"
+	"encoding/json/v2"
+	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -118,6 +121,134 @@ func (l *appLog) tail(n int) ([]string, error) {
 
 type logsResponse struct {
 	Logs []string `json:"logs"`
+}
+
+// hub fans out app snapshots to SSE subscribers. Snapshots carry full state,
+// so a slow subscriber that misses an update converges on the next one.
+type hub struct {
+	mu   sync.Mutex
+	subs map[chan []byte]struct{}
+}
+
+func newHub() *hub {
+	return &hub{subs: map[chan []byte]struct{}{}}
+}
+
+func (h *hub) subscribe() chan []byte {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	messages := make(chan []byte, 4)
+	h.subs[messages] = struct{}{}
+	return messages
+}
+
+func (h *hub) unsubscribe(messages chan []byte) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.subs, messages)
+}
+
+func (h *hub) publish(message []byte) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for messages := range h.subs {
+		select {
+		case messages <- message:
+		default:
+		}
+	}
+}
+
+type snapshotMessage struct {
+	Type string    `json:"type"`
+	Apps []appInfo `json:"apps"`
+}
+
+// snapshot returns the current app list, newest details included.
+func (s *supervisor) snapshot() []appInfo {
+	s.mu.RLock()
+	apps := make([]*app, 0, len(s.apps))
+	for _, a := range s.apps {
+		apps = append(apps, a)
+	}
+	s.mu.RUnlock()
+	sort.Slice(apps, func(i, j int) bool { return apps[i].name < apps[j].name })
+
+	out := make([]appInfo, 0, len(apps))
+	for _, a := range apps {
+		out = append(out, s.info(a))
+	}
+	return out
+}
+
+// broadcast sends the current snapshot to every SSE subscriber. Dropped
+// messages are harmless: the next broadcast carries the newest state.
+func (s *supervisor) broadcast() {
+	if s.events == nil {
+		return
+	}
+	data, err := json.Marshal(snapshotMessage{Type: "snapshot", Apps: s.snapshot()})
+	if err != nil {
+		return
+	}
+	s.events.publish(data)
+}
+
+// handleEvents streams app snapshots over SSE, with comment pings to keep
+// the connection alive through proxies. EventSource cannot set headers, so
+// browsers authenticate with the wt_token cookie instead of a bearer token.
+func (s *supervisor) handleEvents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.authorized(r) {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="wt-supervisor"`)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+	data, err := json.Marshal(snapshotMessage{Type: "snapshot", Apps: s.snapshot()})
+	if err != nil {
+		http.Error(w, "snapshot failed", http.StatusInternalServerError)
+		return
+	}
+	if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
+		return
+	}
+	flusher.Flush()
+
+	messages := s.events.subscribe()
+	defer s.events.unsubscribe(messages)
+	ticker := time.NewTicker(20 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case message, ok := <-messages:
+			if !ok {
+				return
+			}
+			if _, err := fmt.Fprintf(w, "data: %s\n\n", message); err != nil {
+				return
+			}
+			flusher.Flush()
+		case <-ticker.C:
+			if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+		case <-r.Context().Done():
+			return
+		}
+	}
 }
 
 // requireAuth writes 401 unless the request carries the deploy token.
