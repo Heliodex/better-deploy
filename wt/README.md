@@ -100,6 +100,34 @@ App logs persist under `/var/lib/wt/.logs` (or `WT_STATE_DIR`), outside each
 app's `/data` preopen, and every line is stamped with the time the supervisor
 received it so timestamps do not depend on how an app logs.
 
+## Log levels
+
+An app prefixes a line with a level and the supervisor separates it from the
+message:
+
+```text
+TRACE cache miss for /api/messages
+WARN  storage slow: 1.2s
+ERROR could not save the note
+```
+
+`wt.packages/app` writes that shape for Go apps:
+
+```go
+app.Debugf("cache miss for %s", path)
+app.Warnf("storage slow: %s", elapsed)
+app.Errorf("could not save the note: %v", err)
+```
+
+`Logf` takes a level explicitly and the level set is `TRACE`, `DEBUG`, `INFO`,
+`WARN`, `ERROR` and `FATAL`; `Fatalf` also exits the component. Lines without a
+recognized prefix, including a library's own output, are `INFO`. Multi-line
+messages get one line per level. A stdlib logger can adopt levels via
+`log.SetFlags(0); log.SetOutput(app.Writer(app.LevelInfo))`.
+
+The supervisor stores the level with the line, sends it in the log stream, and
+the panel colours each level and filters by minimum severity.
+
 To deploy from the panel without the CLI, build the bundle first and upload
 the file:
 

@@ -36,7 +36,12 @@ const snapshotSchema = object({
 
 export type Snapshot = InferOutput<typeof snapshotSchema>
 
+export const logLevels = ["trace", "debug", "info", "warn", "error", "fatal"] as const
+
+export type LogLevel = (typeof logLevels)[number]
+
 const logEntrySchema = object({
+	level: picklist(logLevels),
 	message: string(),
 	time: string(),
 })

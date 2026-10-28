@@ -371,3 +371,58 @@ func TestAppLogStripsGuestPrefix(t *testing.T) {
 		t.Errorf("entries = %+v, want one with message hello", entries)
 	}
 }
+
+func TestSplitLevelPrefix(t *testing.T) {
+	cases := []struct{ line, level, message string }{
+		{"WARN storage slow", "WARN", "storage slow"},
+		{"error boom", "ERROR", "boom"},
+		{"TRACE deep", "TRACE", "deep"},
+		{"FATAL done", "FATAL", "done"},
+		{"plain message", "INFO", "plain message"},
+		{"WARNING not a level", "INFO", "WARNING not a level"},
+		{"INFO", "INFO", "INFO"},
+	}
+	for _, tc := range cases {
+		level, message := splitLevelPrefix(tc.line)
+		if level != tc.level || message != tc.message {
+			t.Errorf("splitLevelPrefix(%q) = %q, %q; want %q, %q", tc.line, level, message, tc.level, tc.message)
+		}
+	}
+}
+
+func TestAppLogRecordsLevels(t *testing.T) {
+	logs, err := newAppLog(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(logs, "WARN careful\nplain line\n"); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := logs.tail(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []logEntry{
+		{Time: entries[0].Time, Level: "warn", Message: "careful"},
+		{Time: entries[1].Time, Level: "info", Message: "plain line"},
+	}
+	if len(entries) != len(want) {
+		t.Fatalf("got %d entries: %+v", len(entries), entries)
+	}
+	for i := range want {
+		if entries[i].Level != want[i].Level || entries[i].Message != want[i].Message {
+			t.Errorf("entry %d = %+v, want %+v", i, entries[i], want[i])
+		}
+	}
+}
+
+func TestParseLogLineReadsLegacyLinesAsInfo(t *testing.T) {
+	legacy := parseLogLine("2026-10-28T21:00:00Z Serving HTTP on http://127.0.0.1:8080/")
+	if legacy.Level != "info" || legacy.Message != "Serving HTTP on http://127.0.0.1:8080/" {
+		t.Errorf("legacy line parsed as %+v", legacy)
+	}
+	stamped := parseLogLine("2026-10-28T21:00:00Z ERROR broke")
+	if stamped.Level != "error" || stamped.Message != "broke" {
+		t.Errorf("leveled line parsed as %+v", stamped)
+	}
+}

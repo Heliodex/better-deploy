@@ -132,8 +132,9 @@ var guestStderr = regexp.MustCompile(`^(?:stderr|stdout) \[\d+\] :: `)
 // writeLine stamps one complete line and appends it, rotating past maxLogBytes.
 func (l *appLog) writeLine(line string) error {
 	line = guestStderr.ReplaceAllString(line, "")
+	level, message := splitLevelPrefix(line)
 	stamp := time.Now().UTC().Format(logTimeFormat)
-	data := []byte(stamp + " " + line + "\n")
+	data := []byte(stamp + " " + level + " " + message + "\n")
 	if l.size+int64(len(data)) > maxLogBytes {
 		if err := l.rotate(); err != nil {
 			return err
@@ -144,7 +145,7 @@ func (l *appLog) writeLine(line string) error {
 	if err != nil {
 		return err
 	}
-	l.publish(logEntry{Time: stamp, Message: line})
+	l.publish(logEntry{Time: stamp, Level: strings.ToLower(level), Message: message})
 	return nil
 }
 
@@ -159,23 +160,44 @@ func (l *appLog) rotate() error {
 	return l.open()
 }
 
-// logEntry is one log line with the time the supervisor received it. Lines
-// written before timestamps existed have no time and keep their whole text.
+// logLevels are the prefixes an app may put at the start of a line, most verbose first.
+var logLevels = []string{"TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"}
+
+// logEntry is one log line with the time the supervisor received it and its level.
+// Lines written before levels existed have no prefix and read as info.
 type logEntry struct {
 	Time    string `json:"time"`
+	Level   string `json:"level"`
 	Message string `json:"message"`
+}
+
+// splitLevelPrefix pulls an app's "<LEVEL> " prefix off a line. Anything
+// unrecognized is part of the message and the level is info.
+func splitLevelPrefix(line string) (string, string) {
+	token, rest, ok := strings.Cut(line, " ")
+	if !ok {
+		return "INFO", line
+	}
+	upper := strings.ToUpper(token)
+	for _, level := range logLevels {
+		if upper == level {
+			return level, rest
+		}
+	}
+	return "INFO", line
 }
 
 // parseLogLine splits a stamped line into its time and message.
 func parseLogLine(line string) logEntry {
-	stamp, message, ok := strings.Cut(line, " ")
+	stamp, rest, ok := strings.Cut(line, " ")
 	if !ok {
-		return logEntry{Message: line}
+		return logEntry{Level: "info", Message: line}
 	}
 	if _, err := time.Parse(logTimeFormat, stamp); err != nil {
-		return logEntry{Message: line}
+		return logEntry{Level: "info", Message: line}
 	}
-	return logEntry{Time: stamp, Message: message}
+	level, message := splitLevelPrefix(rest)
+	return logEntry{Time: stamp, Level: strings.ToLower(level), Message: message}
 }
 
 // tail returns the last n log lines, oldest first.

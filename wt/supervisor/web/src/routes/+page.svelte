@@ -8,6 +8,8 @@ import {
 	forgetToken,
 	getToken,
 	type LogEntry,
+	type LogLevel,
+	logLevels,
 	restartApp,
 	setToken,
 	subscribe,
@@ -50,6 +52,7 @@ let stopStream: (() => void) | null = null
 let stopLogs: (() => void) | null = null
 let logPane = $state<HTMLDivElement | null>(null)
 let followLogs = $state(true)
+let minLevel = $state<LogLevel>("trace")
 
 function uptime(startedAt: string): string {
 	const seconds = Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1000))
@@ -340,10 +343,37 @@ async function upload(event: SubmitEvent): Promise<void> {
 	}
 }
 
+/** Lines at or above the selected severity, in the same order as the stream. */
+const filteredLogs = $derived(logs.filter(entry => logLevels.indexOf(entry.level) >= logLevels.indexOf(minLevel)))
+
+const levelClasses: { [_: string]: string } = {
+	debug: "text-neutral-500",
+	error: "text-red-400",
+	fatal: "font-semibold text-red-500",
+	info: "text-neutral-400",
+	trace: "text-neutral-600",
+	warn: "text-amber-400",
+}
+
+const levelMessageClasses: { [_: string]: string } = {
+	debug: "text-neutral-300",
+	error: "text-red-200",
+	fatal: "text-red-200",
+	info: "text-neutral-300",
+	trace: "text-neutral-400",
+	warn: "text-amber-200",
+}
+
+function setMinLevel(event: Event): void {
+	const { value } = event.currentTarget as HTMLSelectElement
+	const level = logLevels.find(candidate => candidate === value)
+	if (level) minLevel = level
+}
+
 /** Keep the newest lines in view, unless the reader scrolled away from the bottom. */
 $effect(() => {
-	// Reading the length subscribes the effect to new lines and to a fresh backlog.
-	const count = logs.length
+	// Reading the length subscribes the effect to new lines, a fresh backlog and the filter.
+	const count = filteredLogs.length
 	if (count === 0 || !logPane || !followLogs) return
 	logPane.scrollTop = logPane.scrollHeight
 })
@@ -615,14 +645,24 @@ onMount((): (() => void) => {
 							Logs
 						</h2>
 						<span class="flex-1"></span>
+						<select aria-label="Minimum level" class="field" onchange={setMinLevel} value={minLevel}>
+							<option value="trace">All levels</option>
+							<option value="debug">Debug and above</option>
+							<option value="info">Info and above</option>
+							<option value="warn">Warn and above</option>
+							<option value="error">Error and above</option>
+							<option value="fatal">Fatal only</option>
+						</select>
 						<select aria-label="Lines to show" class="field" onchange={reloadLogs} bind:value={tail}>
 							<option value={100}>100 lines</option>
 							<option value={500}>500 lines</option>
 							<option value={2000}>2000 lines</option>
 						</select>
 					</header>
-					{#if logs.length === 0}
-						<p class="p-3 text-sm text-neutral-500">No log lines yet.</p>
+					{#if filteredLogs.length === 0}
+						<p class="p-3 text-sm text-neutral-500">
+							{logs.length === 0 ? "No log lines yet." : "No lines at this level."}
+						</p>
 					{:else}
 						<div
 							class="min-h-0 flex-1 overflow-auto bg-black p-2 font-mono text-xs"
@@ -631,7 +671,7 @@ onMount((): (() => void) => {
 						>
 							<table class="w-full border-collapse">
 								<tbody>
-									{#each logs as entry, index (index)}
+									{#each filteredLogs as entry, index (index)}
 										<tr>
 											<td
 												class="w-0 pr-3 align-top whitespace-nowrap text-neutral-500 tabular-nums"
@@ -640,7 +680,16 @@ onMount((): (() => void) => {
 													>{entry.time === "" ? "—" : formatLogTime(entry.time)}</time
 												>
 											</td>
-											<td class="align-top text-neutral-300 whitespace-pre-wrap wrap-break-word">
+											<td
+												class="w-0 pr-3 align-top whitespace-nowrap {levelClasses[entry.level]}"
+											>
+												{entry.level.toUpperCase()}
+											</td>
+											<td
+												class="align-top whitespace-pre-wrap wrap-break-word {levelMessageClasses[
+													entry.level
+												]}"
+											>
 												{entry.message}
 											</td>
 										</tr>
