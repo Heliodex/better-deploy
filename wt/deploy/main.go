@@ -547,9 +547,12 @@ func main() {
 		err = deploy(args)
 	case "dev":
 		err = runDev(args)
+	case "new":
+		err = runNew(args)
 	case "help", "-h", "--help":
 		fmt.Println("usage: wt-deploy deploy [--dir DIR] [--host URL] [--token TOKEN] [--wasmtime PATH] [--skip-build] [--skip-compile]")
 		fmt.Println("       wt-deploy dev [--dir DIR] [--port 8080] [--wasmtime PATH]")
+		fmt.Println("       wt-deploy new --dir wt/example/NAME")
 	default:
 		err = fmt.Errorf("unknown command %q", command)
 	}
