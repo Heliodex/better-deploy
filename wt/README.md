@@ -118,6 +118,22 @@ curl -H 'Host: notes.localhost' http://127.0.0.1:8080/notes
 # data lives in /tmp/wt/state/.storage/notes/storage.db
 ```
 
+## Scaffold a new app
+
+```sh
+/tmp/wt-deploy new --dir wt/example/myapp
+/tmp/wt-deploy dev --dir wt/example/myapp --wasmtime /path/to/wasmtime
+# myapp at http://127.0.0.1:8080/
+```
+
+`wt new` scaffolds a notes app with the guestbook stack: a static SvelteKit
+frontend with Valibot request and response validation, a Go JSON API, the
+Valibot to JSON Schema to `go-jsonschema` contract pipeline, and per-app
+SQLite storage. New apps live under `wt/example/` so the shared module and
+the relative `../../packages` paths keep working. `wt dev` builds the app
+and serves it locally on loopback, with the SQLite database persisting in
+`/tmp/wt-dev/<name>` between runs.
+
 ## What each app runs
 
 ```sh
