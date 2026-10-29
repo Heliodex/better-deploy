@@ -595,13 +595,14 @@ func (s *supervisor) handleBackupRoute(w http.ResponseWriter, r *http.Request, n
 func (s *supervisor) handleBackups(w http.ResponseWriter, r *http.Request, name string) {
 	switch r.Method {
 	case http.MethodGet:
-		s.writeBackups(w, name)
+		s.writeBackups(w, name, "")
 	case http.MethodPost:
-		if _, err := s.backups.create(r.Context(), name); err != nil {
+		info, err := s.backups.create(r.Context(), name)
+		if err != nil && !errors.Is(err, errBackupUnchanged) {
 			writeBackupError(w, err)
 			return
 		}
-		s.writeBackups(w, name)
+		s.writeBackups(w, name, info.Name)
 	default:
 		w.Header().Set("Allow", "GET, POST")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -628,7 +629,7 @@ func (s *supervisor) handleBackupSettings(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.writeBackups(w, name)
+	s.writeBackups(w, name, "")
 }
 
 func (s *supervisor) handleBackupRestore(w http.ResponseWriter, r *http.Request, name, file string) {
@@ -641,15 +642,16 @@ func (s *supervisor) handleBackupRestore(w http.ResponseWriter, r *http.Request,
 		writeBackupError(w, err)
 		return
 	}
-	s.writeBackups(w, name)
+	s.writeBackups(w, name, "")
 }
 
-func (s *supervisor) writeBackups(w http.ResponseWriter, name string) {
+func (s *supervisor) writeBackups(w http.ResponseWriter, name, created string) {
 	overview, err := s.backups.overview(name)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	overview.Created = created
 	writeJSON(w, http.StatusOK, overview)
 }
 

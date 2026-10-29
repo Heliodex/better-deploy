@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -45,6 +48,7 @@ var (
 	errNoStorageDatabase = errors.New("app has no storage database yet")
 	errBackupNotFound    = errors.New("backup not found")
 	errInvalidBackupName = errors.New("invalid backup name")
+	errBackupUnchanged   = errors.New("database has not changed since the current snapshot")
 )
 
 // backupSettings is one app's snapshot policy. Snapshots are on by default so a fresh deployment is protected without configuration.
@@ -92,11 +96,15 @@ type backupInfo struct {
 type backupNode struct {
 	Parent string `json:"parent,omitempty"`
 	Kind   string `json:"kind,omitempty"`
+	// Hash is the SHA-256 of the snapshot file, used to reject a snapshot that would duplicate the current node.
+	Hash string `json:"hash,omitempty"`
 }
 
 // backupTree records each snapshot's parent and the snapshot the live database currently follows.
 type backupTree struct {
-	Current string                `json:"current,omitempty"`
+	Current string `json:"current,omitempty"`
+	// Checked is the last time a snapshot was made or found unchanged. It keeps the scheduler from retrying an unchanged database every minute.
+	Checked time.Time             `json:"checked,omitempty"`
 	Nodes   map[string]backupNode `json:"nodes"`
 }
 
@@ -112,6 +120,8 @@ type backupsResponse struct {
 	Backups  []backupInfo   `json:"backups"`
 	Database bool           `json:"database"`
 	Current  string         `json:"current"`
+	// Created is set only by a POST that made a snapshot; it stays empty when the database was unchanged.
+	Created string `json:"created,omitempty"`
 }
 
 // backupManager owns per-app snapshot policies and files. Snapshots live outside the storage directory so an app can never read or delete them through its SQL service.
@@ -432,6 +442,20 @@ func (m *backupManager) overview(app string) (backupsResponse, error) {
 	}, nil
 }
 
+// backupHash fingerprints a snapshot file so an unchanged database is not recorded twice.
+func backupHash(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
 // create takes a snapshot now even when automatic backups are disabled.
 func (m *backupManager) create(ctx context.Context, app string) (backupInfo, error) {
 	m.mu.Lock()
@@ -473,6 +497,37 @@ func (m *backupManager) createLocked(ctx context.Context, app, kind string) (bac
 		_ = os.Remove(temp)
 		return backupInfo{}, err
 	}
+	candidateHash, err := backupHash(temp)
+	if err != nil {
+		log.Printf("backup %s: hash candidate: %v", app, err)
+	}
+
+	tree := state.Tree
+	parentHash := ""
+	if parent != "" {
+		node := tree.Nodes[parent]
+		parentHash = node.Hash
+		if parentHash == "" {
+			// Snapshots from before hashes were recorded get one now, so the next attempt can compare cheaply.
+			hash, err := backupHash(filepath.Join(m.appDir(app), parent))
+			if err != nil {
+				log.Printf("backup %s: hash current: %v", app, err)
+			} else {
+				parentHash = hash
+				node.Hash = hash
+				tree.Nodes[parent] = node
+			}
+		}
+	}
+	if candidateHash != "" && candidateHash == parentHash {
+		_ = os.Remove(temp)
+		tree.Checked = now
+		if err := m.saveTreeLocked(app, tree); err != nil {
+			log.Printf("backup %s: save tree: %v", app, err)
+		}
+		return backupInfo{}, errBackupUnchanged
+	}
+
 	if err := os.Rename(temp, path); err != nil {
 		_ = os.Remove(temp)
 		return backupInfo{}, fmt.Errorf("install backup: %w", err)
@@ -482,9 +537,9 @@ func (m *backupManager) createLocked(ctx context.Context, app, kind string) (bac
 		return backupInfo{}, err
 	}
 
-	tree := state.Tree
-	tree.Nodes[name] = backupNode{Parent: parent, Kind: kind}
+	tree.Nodes[name] = backupNode{Parent: parent, Kind: kind, Hash: candidateHash}
 	tree.Current = name
+	tree.Checked = now
 	if err := m.saveTreeLocked(app, tree); err != nil {
 		// The file is already a valid snapshot; the next load will add it as a child of the previous current node.
 		log.Printf("backup %s: save tree: %v", app, err)
@@ -695,13 +750,20 @@ func (m *backupManager) backupIfDue(ctx context.Context, app string, now time.Ti
 	if err != nil {
 		return err
 	}
-	infos, err := m.listLocked(app)
+	state, err := m.stateLocked(app)
 	if err != nil {
 		return err
 	}
-	if len(infos) > 0 && now.Sub(infos[0].CreatedAt) < every {
+	last := state.Tree.Checked
+	if len(state.Files) > 0 && state.Files[0].CreatedAt.After(last) {
+		last = state.Files[0].CreatedAt
+	}
+	if !last.IsZero() && now.Sub(last) < every {
 		return nil
 	}
 	_, err = m.createLocked(ctx, app, backupKindAutomatic)
+	if errors.Is(err, errBackupUnchanged) {
+		return nil
+	}
 	return err
 }

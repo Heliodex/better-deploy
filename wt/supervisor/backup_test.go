@@ -37,18 +37,28 @@ func storageCount(t *testing.T, storage *storageServer, token string) int {
 	return int(result.Rows[0][0].(float64))
 }
 
+func insertItem(t *testing.T, storage *storageServer, token, value string) {
+	t.Helper()
+	resp := storageSQL(t, storage, token, "/v1/exec", map[string]any{
+		"sql":    `insert into items (value) values (?)`,
+		"params": []any{value},
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("insert %q: %d %s", value, resp.StatusCode, readBody(t, resp))
+	}
+	resp.Body.Close()
+}
+
 func createItems(t *testing.T, storage *storageServer, token string) {
 	t.Helper()
-	for _, statement := range []string{
-		`create table items (value text not null)`,
-		`insert into items (value) values ('one')`,
-	} {
-		resp := storageSQL(t, storage, token, "/v1/exec", map[string]any{"sql": statement})
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("exec %q: %d %s", statement, resp.StatusCode, readBody(t, resp))
-		}
-		resp.Body.Close()
+	resp := storageSQL(t, storage, token, "/v1/exec", map[string]any{
+		"sql": `create table items (value text not null)`,
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("create: %d %s", resp.StatusCode, readBody(t, resp))
 	}
+	resp.Body.Close()
+	insertItem(t, storage, token, "one")
 }
 
 func TestBackupCreateAndRestore(t *testing.T) {
@@ -91,6 +101,37 @@ func TestBackupCreateAndRestore(t *testing.T) {
 	}
 }
 
+func TestBackupRejectsUnchanged(t *testing.T) {
+	storage, backups := testBackupManager(t)
+	token := storage.tokenFor("notes")
+	createItems(t, storage, token)
+	ctx := context.Background()
+
+	first, err := backups.create(ctx, "notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := backups.create(ctx, "notes"); !errors.Is(err, errBackupUnchanged) {
+		t.Fatalf("unchanged create = %v, want unchanged", err)
+	}
+	view, err := backups.overview("notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Backups) != 1 || view.Current != first.Name {
+		t.Errorf("unchanged overview = %+v", view)
+	}
+
+	insertItem(t, storage, token, "two")
+	second, err := backups.create(ctx, "notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Parent != first.Name {
+		t.Errorf("second parent = %q, want %q", second.Parent, first.Name)
+	}
+}
+
 func TestBackupTreeBranches(t *testing.T) {
 	storage, backups := testBackupManager(t)
 	token := storage.tokenFor("notes")
@@ -101,6 +142,7 @@ func TestBackupTreeBranches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	insertItem(t, storage, token, "two")
 	second, err := backups.create(ctx, "notes")
 	if err != nil {
 		t.Fatal(err)
@@ -127,7 +169,11 @@ func TestBackupTreeBranches(t *testing.T) {
 	if view.Current != first.Name {
 		t.Errorf("current after restore = %q, want %q", view.Current, first.Name)
 	}
+	if _, err := backups.create(ctx, "notes"); !errors.Is(err, errBackupUnchanged) {
+		t.Fatalf("unchanged create after restore = %v, want unchanged", err)
+	}
 
+	insertItem(t, storage, token, "three")
 	third, err := backups.create(ctx, "notes")
 	if err != nil {
 		t.Fatal(err)
@@ -159,12 +205,14 @@ func TestBackupTreePruneKeepsCurrentBranch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	insertItem(t, storage, token, "two")
 	if _, err := backups.create(ctx, "notes"); err != nil {
 		t.Fatal(err)
 	}
 	if err := backups.restore(ctx, "notes", first.Name); err != nil {
 		t.Fatal(err)
 	}
+	insertItem(t, storage, token, "three")
 	branch, err := backups.create(ctx, "notes")
 	if err != nil {
 		t.Fatal(err)
@@ -198,6 +246,7 @@ func TestBackupTreeRebuildsLegacyChain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	insertItem(t, storage, token, "two")
 	second, err := backups.create(ctx, "notes")
 	if err != nil {
 		t.Fatal(err)
@@ -271,7 +320,8 @@ func TestBackupPrune(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for range 3 {
+	for _, value := range []string{"two", "three", "four"} {
+		insertItem(t, storage, token, value)
 		if _, err := backups.create(context.Background(), "notes"); err != nil {
 			t.Fatal(err)
 		}
@@ -305,6 +355,7 @@ func TestBackupDue(t *testing.T) {
 		t.Errorf("automatic snapshot kind = %q, want %q", infos[0].Kind, backupKindAutomatic)
 	}
 
+	insertItem(t, storage, token, "two")
 	if err := backups.backupIfDue(context.Background(), "notes", now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
@@ -319,6 +370,14 @@ func TestBackupDue(t *testing.T) {
 	infos, _ = backups.list("notes")
 	if len(infos) != 2 {
 		t.Errorf("later run left %d backups, want 2", len(infos))
+	}
+
+	if err := backups.backupIfDue(context.Background(), "notes", now.Add(49*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	infos, _ = backups.list("notes")
+	if len(infos) != 2 {
+		t.Errorf("unchanged due run created a backup: %d backups", len(infos))
 	}
 
 	if err := backups.saveSettings("notes", backupSettings{Enabled: false, Every: "24h", Keep: 7}); err != nil {
@@ -395,8 +454,19 @@ func TestHandleBackupRoutes(t *testing.T) {
 	}
 	first := result.Backups[0]
 	backup := first.Name
+	if result.Created != backup {
+		t.Errorf("created = %q, want %q", result.Created, backup)
+	}
 	if first.Parent != "" || first.Kind != backupKindManual {
 		t.Errorf("first backup = %+v, want a manual root", first)
+	}
+
+	rec, result = do(http.MethodPost, "/apps/notes/backups", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unchanged create = %d %s", rec.Code, rec.Body.String())
+	}
+	if result.Created != "" || len(result.Backups) != 1 || result.Current != backup {
+		t.Errorf("unchanged create = %+v, want no new snapshot", result)
 	}
 
 	rec, result = do(http.MethodPut, "/apps/notes/backups/config", `{"enabled":false,"every":"6h","keep":3}`)
