@@ -487,7 +487,15 @@ const overviewSeries = $derived(
 
 /** One legend for both overview charts: colours are assigned by sorted app name. */
 const legendApps = $derived(
-	overviewSeries.map((entry, index) => ({ color: palette[index % palette.length], name: entry.name })),
+	overviewSeries.map((entry, index) => {
+		const last = entry.samples.at(-1)
+		return {
+			color: palette[index % palette.length],
+			cpu: last?.cpuPercent ?? 0,
+			memory: last?.memoryBytes ?? 0,
+			name: entry.name,
+		}
+	}),
 )
 
 let detailSpan = $state(300)
@@ -844,11 +852,19 @@ onMount((): (() => void) => {
 									value={(sample: ResourceSample) => sample.memoryBytes}
 								/>
 							</div>
-							<ul class="flex flex-wrap gap-x-4 gap-y-1">
+							<ul class="flex flex-col gap-1">
+								<li aria-hidden="true" class="flex items-center gap-2 text-[10px] tracking-wide text-neutral-600 uppercase">
+									<span class="size-2 shrink-0"></span>
+									<span class="flex-1"></span>
+									<span class="w-16 shrink-0 text-right">memory</span>
+									<span class="w-14 shrink-0 text-right">cpu</span>
+								</li>
 								{#each legendApps as item (item.name)}
 									<li class="flex items-center gap-2 text-xs">
 										<span aria-hidden="true" class="size-2 shrink-0 {item.color.dot}"></span>
-										<span class="text-neutral-300">{item.name}</span>
+										<span class="flex-1 truncate text-neutral-300">{item.name}</span>
+										<span class="w-16 shrink-0 text-right text-neutral-400 tabular-nums">{formatMemory(item.memory)}</span>
+										<span class="w-14 shrink-0 text-right text-neutral-400 tabular-nums">{formatCPU(item.cpu)}</span>
 									</li>
 								{/each}
 							</ul>
