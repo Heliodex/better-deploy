@@ -6,10 +6,13 @@ import {
 	type BackupSettings,
 	type BackupsResult,
 	createBackup,
+	type DatabaseRows,
 	deployBundle,
 	fetchApp,
 	fetchApps,
 	fetchBackups,
+	fetchDatabase,
+	fetchDatabaseRows,
 	fetchResourceHistory,
 	forgetToken,
 	getToken,
@@ -45,7 +48,7 @@ const FOLLOW_THRESHOLD = 24
 /** Thirty minutes at the supervisor's one-second sampling interval. */
 const MAX_HISTORY_POINTS = 1800
 
-const tabs = ["overview", "backups"] as const
+const tabs = ["overview", "backups", "database"] as const
 type Tab = (typeof tabs)[number]
 
 let token = $state<string | null>(null)
@@ -88,6 +91,16 @@ let backingUp = $state(false)
 let savingBackups = $state(false)
 let restoringBackup = $state<string | null>(null)
 let confirmRestore = $state<string | null>(null)
+let databaseExists = $state(false)
+let databaseTables = $state<string[]>([])
+let databaseTable = $state<string | null>(null)
+let databaseRows = $state<DatabaseRows | null>(null)
+let databaseLoadedFor = $state<string | null>(null)
+let databaseLoading = $state(false)
+let databaseRowsLoading = $state(false)
+let databaseError = $state("")
+let databaseLimit = $state(50)
+let databaseOffset = $state(0)
 
 function uptime(startedAt: string): string {
 	const seconds = Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1000))
@@ -121,6 +134,21 @@ function formatSize(bytes: number): string {
 	const kilobytes = bytes / 1024
 	if (kilobytes < 1024) return `${Math.round(kilobytes)} KB`
 	return `${(kilobytes / 1024).toFixed(1)} MB`
+}
+
+function isBlobValue(value: unknown): value is { $b64: string } {
+	return typeof value === "object" && value !== null && "$b64" in value && typeof value.$b64 === "string"
+}
+
+function formatDatabaseValue(value: unknown): string {
+	if (value === null) return "–"
+	if (typeof value === "string") return value
+	if (typeof value === "number" || typeof value === "boolean") return String(value)
+	if (isBlobValue(value)) {
+		const bytes = Math.floor((value.$b64.length * 3) / 4)
+		return `blob (${formatSize(bytes)})`
+	}
+	return JSON.stringify(value) ?? String(value)
 }
 
 /** One supervisor access line, parsed from its `METHOD status duration path` shape. */
@@ -252,6 +280,7 @@ function select(name: string | null): void {
 	savingBackups = false
 	restoringBackup = null
 	confirmRestore = null
+	resetDatabase()
 	closeLogs()
 	const url = name ? `?app=${encodeURIComponent(name)}` : window.location.pathname
 	window.history.replaceState(null, "", url)
@@ -260,6 +289,7 @@ function select(name: string | null): void {
 		void loadDetail(token, name)
 		void loadResourceHistory(token, name)
 		void loadBackups(token, name)
+		if (tab === "database") void loadDatabase(token, name)
 		openLogs(name)
 	} else ensureOverviewHistories(token)
 }
@@ -356,6 +386,8 @@ async function revertBackup(name: string): Promise<void> {
 	try {
 		const result = await restoreBackup(token, selected, name)
 		applyBackups(result, name)
+		// The restored database has different contents, so the viewer must reload next time it opens.
+		databaseLoadedFor = null
 		actionMessage = restored
 			? `${selected} reverted to the snapshot from ${formatTime(restored.createdAt)}.`
 			: `${selected} reverted.`
@@ -364,6 +396,98 @@ async function revertBackup(name: string): Promise<void> {
 	} finally {
 		restoringBackup = null
 	}
+}
+
+function resetDatabase(): void {
+	databaseExists = false
+	databaseTables = []
+	databaseTable = null
+	databaseRows = null
+	databaseLoadedFor = null
+	databaseLoading = false
+	databaseRowsLoading = false
+	databaseError = ""
+	databaseOffset = 0
+}
+
+function openTab(next: Tab): void {
+	tab = next
+	if (next === "database" && token && selected && databaseLoadedFor !== selected) void loadDatabase(token, selected)
+}
+
+async function loadDatabase(key: string, name: string): Promise<void> {
+	databaseLoading = true
+	databaseError = ""
+	try {
+		const overview = await fetchDatabase(key, name)
+		if (selected !== name) return
+		databaseExists = overview.database
+		databaseTables = overview.tables
+		databaseLoadedFor = name
+		databaseOffset = 0
+		if (!overview.database || overview.tables.length === 0) {
+			databaseTable = null
+			databaseRows = null
+			return
+		}
+		const nextTable = databaseTable && overview.tables.includes(databaseTable) ? databaseTable : overview.tables[0]
+		databaseTable = nextTable ?? null
+		if (nextTable) await loadDatabaseRows(key, name, nextTable, 0)
+	} catch (err) {
+		if (selected === name) databaseError = err instanceof Error ? err.message : "Could not load the database."
+	} finally {
+		if (selected === name) databaseLoading = false
+	}
+}
+
+async function loadDatabaseRows(key: string, name: string, table: string, offset: number): Promise<void> {
+	databaseRowsLoading = true
+	databaseError = ""
+	try {
+		const result = await fetchDatabaseRows(key, name, table, databaseLimit, offset)
+		if (selected !== name || databaseTable !== table) return
+		databaseRows = result
+		databaseOffset = result.offset
+	} catch (err) {
+		if (selected === name && databaseTable === table)
+			databaseError = err instanceof Error ? err.message : "Could not load the table."
+	} finally {
+		if (selected === name && databaseTable === table) databaseRowsLoading = false
+	}
+}
+
+function selectDatabaseTable(event: Event): void {
+	const { value } = event.currentTarget as HTMLSelectElement
+	if (!token || !selected || !value || value === databaseTable) return
+	databaseTable = value
+	databaseOffset = 0
+	databaseRows = null
+	void loadDatabaseRows(token, selected, value, 0)
+}
+
+function changeDatabaseLimit(event: Event): void {
+	const limit = Number((event.currentTarget as HTMLSelectElement).value)
+	if (!Number.isFinite(limit) || limit === databaseLimit) return
+	databaseLimit = limit
+	databaseOffset = 0
+	if (token && selected && databaseTable) {
+		databaseRows = null
+		void loadDatabaseRows(token, selected, databaseTable, 0)
+	}
+}
+
+function databasePage(direction: -1 | 1): void {
+	if (!token || !selected || !databaseTable || !databaseRows || databaseRowsLoading) return
+	const offset =
+		direction < 0 ? Math.max(0, databaseOffset - databaseLimit) : databaseRows.offset + databaseRows.rows.length
+	if (offset === databaseOffset) return
+	void loadDatabaseRows(token, selected, databaseTable, offset)
+}
+
+function reloadDatabase(): void {
+	if (!token || !selected) return
+	databaseLoadedFor = null
+	void loadDatabase(token, selected)
 }
 
 /** Stream one app's log: the recent backlog, then every new line as it is written. */
@@ -411,6 +535,7 @@ async function refresh(key: string): Promise<void> {
 		if (selected) {
 			detail = await fetchApp(key, selected)
 			void loadBackups(key, selected)
+			if (tab === "database") void loadDatabase(key, selected)
 		} else ensureOverviewHistories(key)
 	} catch (err) {
 		error = err instanceof Error ? err.message : "Could not reach the supervisor."
@@ -542,7 +667,7 @@ function onTabKeydown(event: KeyboardEvent): void {
 	if (next === null) return
 	event.preventDefault()
 	const nextTab = tabs[next]
-	if (nextTab) tab = nextTab
+	if (nextTab) openTab(nextTab)
 	tablistEl?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus()
 }
 
@@ -881,7 +1006,7 @@ onMount((): (() => void) => {
 									: "border-transparent text-neutral-400 hover:bg-neutral-800/40 hover:text-neutral-200",
 							]}
 							id="app-tab-overview"
-							onclick={() => (tab = "overview")}
+							onclick={() => openTab("overview")}
 							onkeydown={onTabKeydown}
 							role="tab"
 							tabindex={tab === "overview" ? 0 : -1}
@@ -899,13 +1024,31 @@ onMount((): (() => void) => {
 									: "border-transparent text-neutral-400 hover:bg-neutral-800/40 hover:text-neutral-200",
 							]}
 							id="app-tab-backups"
-							onclick={() => (tab = "backups")}
+							onclick={() => openTab("backups")}
 							onkeydown={onTabKeydown}
 							role="tab"
 							tabindex={tab === "backups" ? 0 : -1}
 							type="button"
 						>
 							Backups
+						</button>
+						<button
+							aria-controls="app-panel-database"
+							aria-selected={tab === "database"}
+							class={[
+								"-mb-px flex-1 cursor-pointer border-b-2 px-3 py-2 text-sm transition-colors",
+								tab === "database"
+									? "border-primary-500 bg-primary-500/5 font-medium text-primary-300"
+									: "border-transparent text-neutral-400 hover:bg-neutral-800/40 hover:text-neutral-200",
+							]}
+							id="app-tab-database"
+							onclick={() => openTab("database")}
+							onkeydown={onTabKeydown}
+							role="tab"
+							tabindex={tab === "database" ? 0 : -1}
+							type="button"
+						>
+							Database
 						</button>
 					</div>
 
@@ -1015,7 +1158,7 @@ onMount((): (() => void) => {
 								</p>
 							{/if}
 						</div>
-					{:else}
+					{:else if tab === "backups"}
 						<div
 							aria-labelledby="app-tab-backups"
 							class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4"
@@ -1204,6 +1347,169 @@ onMount((): (() => void) => {
 									{actionMessage}
 								</p>
 							{/if}
+						</div>
+					{:else}
+						<div
+							aria-labelledby="app-tab-database"
+							class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4"
+							id="app-panel-database"
+							role="tabpanel"
+						>
+							<section
+								aria-labelledby="database-title"
+								class="flex flex-col gap-3 border border-line-soft bg-surface p-2"
+							>
+								<div class="flex flex-wrap items-center justify-between gap-2">
+									<div class="flex items-center gap-2">
+										<h3
+											class="text-xs font-semibold tracking-wide text-neutral-400 uppercase"
+											id="database-title"
+										>
+											Database
+										</h3>
+										<span class="text-xs text-neutral-500">
+											{databaseTables.length}
+											{databaseTables.length === 1 ? "table" : "tables"}
+										</span>
+									</div>
+									<button
+										class="btn"
+										disabled={databaseLoading}
+										onclick={reloadDatabase}
+										type="button"
+									>
+										{databaseLoading ? "Refreshing…" : "Refresh"}
+									</button>
+								</div>
+
+								{#if databaseError}
+									<p
+										class="border border-red-500/80 bg-red-500/10 px-2 py-1 text-sm text-red-400"
+										role="alert"
+									>
+										{databaseError}
+									</p>
+								{/if}
+
+								{#if databaseLoading}
+									<p class="text-sm text-neutral-500">Loading database…</p>
+								{:else if !databaseExists}
+									<p class="text-sm text-neutral-500">
+										No database yet. One is created the first time the app uses storage.
+									</p>
+								{:else if databaseTables.length === 0}
+									<p class="text-sm text-neutral-500">The database has no tables yet.</p>
+								{:else}
+									<div class="flex flex-wrap items-end gap-3">
+										<label class="flex flex-col gap-1">
+											<span class="text-[10px] tracking-wide text-neutral-500 uppercase">
+												Table
+											</span>
+											<select
+												aria-label="Table"
+												class="field"
+												onchange={selectDatabaseTable}
+												value={databaseTable ?? ""}
+											>
+												{#each databaseTables as table (table)}
+													<option value={table}>{table}</option>
+												{/each}
+											</select>
+										</label>
+										<label class="flex flex-col gap-1">
+											<span class="text-[10px] tracking-wide text-neutral-500 uppercase">
+												Rows
+											</span>
+											<select
+												aria-label="Rows per page"
+												class="field"
+												onchange={changeDatabaseLimit}
+												value={databaseLimit}
+											>
+												{#each [25, 50, 100] as limit (limit)}
+													<option value={limit}>{limit}</option>
+												{/each}
+											</select>
+										</label>
+										<span class="pb-1.5 text-xs text-neutral-500 tabular-nums">
+											{#if databaseRows && databaseRows.rows.length > 0}
+												{databaseRows.offset + 1}–{databaseRows.offset
+													+ databaseRows.rows.length}
+												of {databaseRows.total}
+											{:else if databaseRows}
+												0 of {databaseRows.total}
+											{:else}
+												…
+											{/if}
+										</span>
+										<span class="flex-1"></span>
+										<button
+											class="btn"
+											disabled={databaseRowsLoading || databaseOffset === 0}
+											onclick={(): void => databasePage(-1)}
+											type="button"
+										>
+											Previous
+										</button>
+										<button
+											class="btn"
+											disabled={databaseRowsLoading
+												|| !databaseRows?.truncated
+												|| (databaseRows?.rows.length ?? 0) === 0}
+											onclick={(): void => databasePage(1)}
+											type="button"
+										>
+											Next
+										</button>
+									</div>
+
+									{#if databaseRowsLoading}
+										<p class="text-sm text-neutral-500">Loading rows…</p>
+									{:else if databaseRows}
+										<div class="overflow-x-auto border border-line-soft">
+											<table class="w-full border-collapse text-left text-xs">
+												<thead
+													class="bg-surface-raised text-[10px] tracking-wide text-neutral-500 uppercase"
+												>
+													<tr>
+														{#each databaseRows.columns as column (column)}
+															<th class="px-2 py-1 font-normal whitespace-nowrap">
+																{column}
+															</th>
+														{/each}
+													</tr>
+												</thead>
+												<tbody>
+													{#if databaseRows.rows.length === 0}
+														<tr>
+															<td
+																class="px-2 py-2 text-neutral-500"
+																colspan={Math.max(databaseRows.columns.length, 1)}
+															>
+																No rows.
+															</td>
+														</tr>
+													{:else}
+														{#each databaseRows.rows as row, rowIndex (rowIndex)}
+															<tr class="border-t border-line-soft">
+																{#each row as cell, cellIndex (cellIndex)}
+																	{const text = formatDatabaseValue(cell)}
+																	<td
+																		class="max-w-80 truncate px-2 py-1 font-mono text-neutral-300"
+																		title={text}
+																	>
+																		{text}
+																	</td>
+																{/each}
+															</tr>
+														{/each}
+													{/if}
+												</tbody>
+											</table>
+										</div>
+									{/if}
+								{/if}
+							</section>
 						</div>
 					{/if}
 				{:else if error}

@@ -15,6 +15,7 @@ import {
 	safeParse,
 	string,
 	union,
+	unknown as unknownSchema,
 } from "valibot"
 
 const appInfoSchema = object({
@@ -206,6 +207,25 @@ const backupsResponseSchema = object({
 
 export type BackupsResult = InferOutput<typeof backupsResponseSchema>
 
+const databaseOverviewSchema = object({
+	database: boolean(),
+	tables: array(string()),
+})
+
+export type DatabaseOverview = InferOutput<typeof databaseOverviewSchema>
+
+const databaseRowsSchema = object({
+	columns: array(string()),
+	limit: pipe(number(), integer(), minValue(1)),
+	offset: pipe(number(), integer(), minValue(0)),
+	rows: array(array(unknownSchema())),
+	table: pipe(string(), minLength(1)),
+	total: pipe(number(), integer(), minValue(0)),
+	truncated: boolean(),
+})
+
+export type DatabaseRows = InferOutput<typeof databaseRowsSchema>
+
 const logStreamSchema = union([
 	object({
 		logs: array(logEntrySchema),
@@ -281,4 +301,19 @@ export function restoreBackup(token: string, name: string, backup: string): Prom
 		{ method: "POST", token },
 		backupsResponseSchema,
 	)
+}
+
+export function fetchDatabase(token: string, name: string): Promise<DatabaseOverview> {
+	return request(`/apps/${encodeURIComponent(name)}/database`, { token }, databaseOverviewSchema)
+}
+
+export function fetchDatabaseRows(
+	token: string,
+	name: string,
+	table: string,
+	limit: number,
+	offset: number,
+): Promise<DatabaseRows> {
+	const query = new URLSearchParams({ limit: `${limit}`, offset: `${offset}`, table })
+	return request(`/apps/${encodeURIComponent(name)}/database/rows?${query}`, { token }, databaseRowsSchema)
 }
