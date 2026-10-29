@@ -304,8 +304,10 @@ async function backupNow(): Promise<void> {
 	actionMessage = ""
 	try {
 		const result = await createBackup(token, selected)
-		applyBackups(result, result.current)
-		actionMessage = `${selected} backed up.`
+		applyBackups(result, result.created ?? null)
+		actionMessage = result.created
+			? `${selected} backed up.`
+			: "No changes since the current snapshot; no backup was made."
 	} catch (err) {
 		backupsError = err instanceof Error ? err.message : "Could not back up the database."
 	} finally {

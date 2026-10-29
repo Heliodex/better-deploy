@@ -198,6 +198,7 @@ export type BackupInfo = InferOutput<typeof backupInfoSchema>
 
 const backupsResponseSchema = object({
 	backups: array(backupInfoSchema),
+	created: optional(string()),
 	current: string(),
 	database: boolean(),
 	settings: backupSettingsSchema,
