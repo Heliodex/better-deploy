@@ -61,6 +61,7 @@ let tab = $state<Tab>("overview")
 let tablistEl = $state<HTMLDivElement | null>(null)
 let detail = $state<AppInfo | null>(null)
 let logs = $state<LogEntry[]>([])
+let logsOpen = $state(true)
 let tail = $state(200)
 let error = $state("")
 let loading = $state(true)
@@ -536,6 +537,7 @@ function reloadDatabase(): void {
 
 /** Stream one app's log: the recent backlog, then every new line as it is written. */
 function openLogs(name: string): void {
+	if (!logsOpen) return
 	closeLogs()
 	logs = []
 	followLogs = true
@@ -557,6 +559,13 @@ function closeLogs(): void {
 		stopLogs()
 		stopLogs = null
 	}
+}
+
+function toggleLogs(): void {
+	logsOpen = !logsOpen
+	if (logsOpen) {
+		if (token && selected) openLogs(selected)
+	} else closeLogs()
 }
 
 /** Reopening the stream picks up a new backlog for the selected line count. */
@@ -933,7 +942,10 @@ onMount((): (() => void) => {
 			</form>
 		</main>
 	{:else}
-		<div class="workspace" style="--sidebar-width: {sidebarWidth}px; --logs-height: {selected ? logsHeight : 0}px">
+		<div
+			class="workspace"
+			style="--sidebar-width: {sidebarWidth}px; --logs-height: {selected && logsOpen ? logsHeight : 0}px"
+		>
 			<aside aria-label="Apps" class="flex min-h-0 shrink-0 flex-col bg-surface">
 				<div class="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
 					<span class="text-sm font-semibold tracking-tight">wt admin</span>
@@ -1088,8 +1100,17 @@ onMount((): (() => void) => {
 			<main class="flex min-w-0 flex-1 flex-col bg-black">
 				{#if selected}
 					<header class="flex shrink-0 items-center gap-2 border-b border-line bg-surface px-3 py-2">
-						<h2 class="text-sm font-semibold tracking-tight">{selected}</h2>
+						<h2 class="min-w-0 truncate text-sm font-semibold tracking-tight">{selected}</h2>
 						<span class="flex-1"></span>
+						<button
+							aria-controls="logs-panel"
+							aria-expanded={logsOpen}
+							class="btn"
+							onclick={toggleLogs}
+							type="button"
+						>
+							{logsOpen ? "Hide logs" : "Show logs"}
+						</button>
 						<button class="btn" onclick={(): void => select(null)} type="button">Close</button>
 						<button
 							class={confirmRestart ? "btn btn-danger" : "btn"}
@@ -1754,7 +1775,7 @@ onMount((): (() => void) => {
 				{/if}
 			</main>
 
-			{#if selected}
+			{#if selected && logsOpen}
 				<!-- A focusable separator is a window splitter, adjustable by pointer and by arrow keys. -->
 				<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 				<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -1782,6 +1803,7 @@ onMount((): (() => void) => {
 				<section
 					aria-labelledby="logs-title"
 					class="logs-pane flex min-h-0 flex-col border-t border-line bg-surface"
+					id="logs-panel"
 				>
 					<header class="flex shrink-0 items-center gap-2 border-b border-line-soft px-3 py-2">
 						<h2 class="text-xs font-semibold tracking-wide text-neutral-400 uppercase" id="logs-title">
