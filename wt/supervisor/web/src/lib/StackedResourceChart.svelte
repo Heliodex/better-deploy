@@ -80,7 +80,7 @@ let totals = $derived(stacked.map(point => point.values.reduce((sum, current) =>
 let currentTotal = $derived(totals.at(-1) ?? 0)
 let peakTotal = $derived(totals.length > 0 ? Math.max(...totals) : 0)
 /** Ticks picked in display units, so memory lands on round megabytes rather than round bytes. The domain ceiling is the top tick, so gridlines are evenly spaced to the top of the chart. */
-let scale = $derived(tickScale(peakTotal / unit, 2))
+let scale = $derived(tickScale(peakTotal / unit, 1))
 let ticks = $derived(scale.ticks.map(tick => tick * unit))
 let maxValue = $derived(Math.max(scale.max * unit, 1))
 
