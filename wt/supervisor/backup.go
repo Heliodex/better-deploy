@@ -20,7 +20,7 @@ const (
 	backupFileSuffix = ".db"
 	backupTempSuffix = ".tmp"
 
-	defaultBackupEvery = 24 * time.Hour
+	defaultBackupEvery = "24h"
 	defaultBackupKeep  = 7
 	minBackupEvery     = time.Minute
 	maxBackupEvery     = 30 * 24 * time.Hour
@@ -49,7 +49,7 @@ type backupSettings struct {
 }
 
 func defaultBackupSettings() backupSettings {
-	return backupSettings{Enabled: true, Every: defaultBackupEvery.String(), Keep: defaultBackupKeep}
+	return backupSettings{Enabled: true, Every: defaultBackupEvery, Keep: defaultBackupKeep}
 }
 
 func (b backupSettings) interval() (time.Duration, error) {
