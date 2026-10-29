@@ -265,6 +265,12 @@ async function loadDetail(key: string, name: string): Promise<void> {
 	}
 }
 
+/** Selecting another node disarms a revert confirmation from the previous one. */
+function selectBackup(name: string): void {
+	selectedBackup = name
+	confirmRestore = null
+}
+
 function applyBackups(result: BackupsResult, selectName: string | null = null): void {
 	backupSettings = result.settings
 	backupList = result.backups
@@ -990,7 +996,7 @@ onMount((): (() => void) => {
 								<BackupTree
 									backups={backupList}
 									current={backupCurrent}
-									onselect={name => (selectedBackup = name)}
+									onselect={selectBackup}
 									selected={selectedBackup}
 								/>
 
@@ -1053,20 +1059,22 @@ onMount((): (() => void) => {
 											>
 												{backingUp ? "Backing up…" : "Back up current state"}
 											</button>
-											<button
-												class={confirmRestore === selectedBackupInfo.name
-													? "btn btn-danger"
-													: "btn"}
-												disabled={restoringBackup !== null}
-												onclick={(): Promise<void> => revertBackup(selectedBackupInfo.name)}
-												type="button"
-											>
-												{restoringBackup === selectedBackupInfo.name
-													? "Reverting…"
-													: confirmRestore === selectedBackupInfo.name
-														? "Click again to confirm"
-														: "Revert to this snapshot"}
-											</button>
+											{#if selectedBackupInfo.name !== backupCurrent}
+												<button
+													class={confirmRestore === selectedBackupInfo.name
+														? "btn btn-danger"
+														: "btn"}
+													disabled={restoringBackup !== null}
+													onclick={(): Promise<void> => revertBackup(selectedBackupInfo.name)}
+													type="button"
+												>
+													{restoringBackup === selectedBackupInfo.name
+														? "Reverting…"
+														: confirmRestore === selectedBackupInfo.name
+															? "Click again to confirm"
+															: "Revert to this snapshot"}
+												</button>
+											{/if}
 										</div>
 									</div>
 								{/if}
