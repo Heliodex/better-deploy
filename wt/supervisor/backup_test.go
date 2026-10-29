@@ -301,6 +301,9 @@ func TestBackupDue(t *testing.T) {
 	if len(infos) != 1 {
 		t.Fatalf("first due run created %d backups, want 1", len(infos))
 	}
+	if infos[0].Kind != backupKindAutomatic {
+		t.Errorf("automatic snapshot kind = %q, want %q", infos[0].Kind, backupKindAutomatic)
+	}
 
 	if err := backups.backupIfDue(context.Background(), "notes", now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
