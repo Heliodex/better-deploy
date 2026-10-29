@@ -134,13 +134,14 @@ let spanLabel = $derived.by(() => {
 			<div aria-hidden="true" class="relative h-24 w-12 shrink-0 text-xs text-neutral-500">
 				{#each ticks as tick (tick)}
 					{const percent = maxValue > 0 ? (tick / maxValue) * 100 : 0}
+					{const placement = percent <= 8 ? "bottom" : percent >= 92 ? "top" : "middle"}
 					<span
-						class="absolute right-0 tabular-nums {tick === 0
+						class="absolute right-0 tabular-nums {placement === "bottom"
 							? "bottom-0"
-							: tick >= maxValue
+							: placement === "top"
 								? "top-0"
 								: "-translate-y-1/2"}"
-						style={tick === 0 || tick >= maxValue ? "" : `bottom: ${percent}%`}
+						style={placement === "middle" ? `bottom: ${percent}%` : ""}
 					>
 						{format(tick)}
 					</span>
