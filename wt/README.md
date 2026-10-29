@@ -230,6 +230,8 @@ The supervisor snapshots each app's SQLite database with SQLite's online backup 
 
 Automatic backups are on by default: every app with a database is snapshotted every 24 hours, and 7 snapshots are kept. The supervisor checks once a minute for policies that are due; an app that has not used storage yet has no database and is skipped until its first write. Changing the policy takes effect on the next check, and reducing `keep` prunes older snapshots immediately. Pruning removes abandoned leaves first and keeps the branch the live database follows for as long as possible. Snapshots and their tree survive deploys, restarts and pod rolls with the rest of the state volume.
 
+A new snapshot is rejected when its file is byte-identical to the current snapshot, so an unchanged database does not add a node. Snapshot hashes are kept in the tree, and older snapshots get one when first compared. For automatic backups the check time still advances, so an unchanged database is retried after the next interval rather than every minute. Any committed SQLite write, including one that stores the same value again, can change the file and is therefore accepted as a new snapshot.
+
 The admin panel's app detail shows snapshots as a tree. Each snapshot descends from the snapshot the live database followed when it was taken, so a chain of daily backups reads down the tree. Reverting moves the current node, and the next snapshot then forms a new branch from the restored snapshot instead of continuing the old one. Selecting a node shows its time, size, kind, parent and child count, and offers **Back up current state** and **Revert to this snapshot**. Reverting is a two-click action because it replaces all data written since that snapshot. Snapshots made before the tree existed are chained in creation order when the index is first built. The same operations are available over the authenticated API:
 
 ```text
@@ -239,7 +241,7 @@ PUT  /apps/<name>/backups/config                   {"enabled": true, "every": "2
 POST /apps/<name>/backups/<file>/restore           replace the live database
 ```
 
-`every` is a Go duration between `1m` and `720h`, and `keep` is between 1 and 100. A manual snapshot works even when automatic backups are disabled. A restore validates the snapshot with SQLite's `quick_check` first, then copies it through the online backup API; connections stay open, but any writes made after the snapshot are lost. Responses include each snapshot's `parent`, its `kind` (`auto`, `manual`, or empty for one from before the tree index) and the `current` snapshot the live database follows.
+`every` is a Go duration between `1m` and `720h`, and `keep` is between 1 and 100. A manual snapshot works even when automatic backups are disabled. A restore validates the snapshot with SQLite's `quick_check` first, then copies it through the online backup API; connections stay open, but any writes made after the snapshot are lost. Responses include each snapshot's `parent`, its `kind` (`auto`, `manual`, or empty for one from before the tree index) and the `current` snapshot the live database follows. A `POST` that finds the database unchanged returns `created` empty.
 
 ## Bindings
 
