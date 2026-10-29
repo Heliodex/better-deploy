@@ -65,7 +65,7 @@ The supervisor scans `WT_APPS_DIR` at boot, starts every app found there, and se
 
 ## Admin panel
 
-The supervisor serves a small admin panel at `/admin/` on its own address (for example `http://127.0.0.1:8080/admin/` locally, or the deploy host in production). It lists apps with status and ticking uptime, streams each app's log live over server-sent events, restarts apps, uploads new bundles, and configures and restores database backups. Updates stream over server-sent events, so the dashboard reflects deploys and restarts without refreshing. Every endpoint except `/healthz` requires the deploy bearer token, which the panel asks for once and keeps in the browser (a `wt_token` cookie carries it on the event streams, where headers cannot go). App logs persist under `/var/lib/wt/.logs` (or `WT_STATE_DIR`), outside each app's `/data` preopen, and every line is stamped with the time the supervisor received it so timestamps do not depend on how an app logs. The supervisor also logs each proxied request at info level into a separate per-app supervisor log, as `METHOD status duration path`; the panel recognises the shape and lays it out as structured columns with each line badged by origin.
+The supervisor serves a small admin panel at `/admin/` on its own address (for example `http://127.0.0.1:8080/admin/` locally, or the deploy host in production). It lists apps with status and ticking uptime, streams each app's log live over server-sent events, restarts apps, uploads new bundles, configures and restores database backups, and browses each app's database tables. Updates stream over server-sent events, so the dashboard reflects deploys and restarts without refreshing. Every endpoint except `/healthz` requires the deploy bearer token, which the panel asks for once and keeps in the browser (a `wt_token` cookie carries it on the event streams, where headers cannot go). App logs persist under `/var/lib/wt/.logs` (or `WT_STATE_DIR`), outside each app's `/data` preopen, and every line is stamped with the time the supervisor received it so timestamps do not depend on how an app logs. The supervisor also logs each proxied request at info level into a separate per-app supervisor log, as `METHOD status duration path`; the panel recognises the shape and lays it out as structured columns with each line badged by origin.
 
 ## Resource usage
 
@@ -242,6 +242,17 @@ POST /apps/<name>/backups/<file>/restore           replace the live database
 ```
 
 `every` is a Go duration between `1m` and `720h`, and `keep` is between 1 and 100. A manual snapshot works even when automatic backups are disabled. A restore validates the snapshot with SQLite's `quick_check` first, then copies it through the online backup API; connections stay open, but any writes made after the snapshot are lost. Responses include each snapshot's `parent`, its `kind` (`auto`, `manual`, or empty for one from before the tree index) and the `current` snapshot the live database follows. A `POST` that finds the database unchanged returns `created` empty.
+
+## Database viewer
+
+The admin panel's Database tab lists an app's user tables and pages through their rows. It is read-only: the table name is checked against `sqlite_master` and quoted before use, so the viewer cannot run arbitrary SQL or reach another app's database. SQLite's internal `sqlite_*` tables are hidden. Values are encoded like the app-facing storage API, and blobs are shown as their size rather than their base64 contents.
+
+```text
+GET /apps/<name>/database
+GET /apps/<name>/database/rows?table=<table>&limit=50&offset=0
+```
+
+Rows default to 50 per page and accept `limit` up to 500. The rows response includes the columns, the page of rows, the table's total row count, and whether more rows remain.
 
 ## Bindings
 
