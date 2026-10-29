@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"context"
+	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -12,23 +14,240 @@ import (
 	"sort"
 	"strconv"
 	"time"
+
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 const (
-	changeLogName      = "changes.log"
-	changeLogBackup    = "changes.log.1"
-	maxChangeLogBytes  = 1 << 20
-	maxChangeEntrySize = 256 << 10
-	defaultChangeLimit = 200
-	maxChangeLimit     = 1000
+	changeLogName        = "changes.log"
+	changeLogBackup      = "changes.log.1"
+	maxChangeLogBytes    = 1 << 20
+	maxChangeEntrySize   = 256 << 10
+	maxCollectedChanges  = 500
+	maxCollectedRowBytes = 256 << 10
+	defaultChangeLimit   = 200
+	maxChangeLimit       = 1000
 )
 
 // storageChange is one successful write through the app-facing storage service.
 type storageChange struct {
-	Time         time.Time        `json:"time"`
-	SQL          string           `json:"sql"`
-	Params       []jsontext.Value `json:"params"`
-	RowsAffected int64            `json:"rowsAffected"`
+	Time          time.Time        `json:"time"`
+	SQL           string           `json:"sql"`
+	Params        []jsontext.Value `json:"params"`
+	RowsAffected  int64            `json:"rowsAffected"`
+	Rows          []rowChange      `json:"rows,omitempty"`
+	RowsTruncated bool             `json:"rowsTruncated,omitempty"`
+}
+
+// rowChange is one row touched by a statement. Old is set for updates and deletes, New for inserts and updates.
+type rowChange struct {
+	Table   string   `json:"table"`
+	Op      string   `json:"op"`
+	RowID   int64    `json:"rowId,omitempty"`
+	Columns []string `json:"columns"`
+	Old     []any    `json:"old,omitempty"`
+	New     []any    `json:"new,omitempty"`
+}
+
+// rowChangeCollector receives pre-update rows for one write operation.
+type rowChangeCollector struct {
+	rows    []rowChange
+	omitted int
+	bytes   int
+}
+
+func (c *rowChangeCollector) add(data sqlite.SQLitePreUpdateData) {
+	if len(c.rows) >= maxCollectedChanges || c.bytes >= maxCollectedRowBytes {
+		c.omitted++
+		return
+	}
+	change, err := collectRowChange(data)
+	if err != nil {
+		log.Printf("storage: pre-update hook: %v", err)
+		c.omitted++
+		return
+	}
+	size := rowChangeSize(change)
+	if c.bytes+size > maxCollectedRowBytes {
+		c.omitted++
+		c.bytes = maxCollectedRowBytes
+		return
+	}
+	c.rows = append(c.rows, change)
+	c.bytes += size
+}
+
+func collectRowChange(data sqlite.SQLitePreUpdateData) (rowChange, error) {
+	change := rowChange{Table: data.TableName, Columns: []string{}}
+	switch data.Op {
+	case sqlite3.SQLITE_INSERT:
+		change.Op = "insert"
+		change.RowID = data.NewRowID
+		newValues, err := preUpdateValues(data, true)
+		if err != nil {
+			return rowChange{}, err
+		}
+		change.New = newValues
+	case sqlite3.SQLITE_DELETE:
+		change.Op = "delete"
+		change.RowID = data.OldRowID
+		oldValues, err := preUpdateValues(data, false)
+		if err != nil {
+			return rowChange{}, err
+		}
+		change.Old = oldValues
+	case sqlite3.SQLITE_UPDATE:
+		change.Op = "update"
+		change.RowID = data.OldRowID
+		if change.RowID == 0 {
+			change.RowID = data.NewRowID
+		}
+		oldValues, err := preUpdateValues(data, false)
+		if err != nil {
+			return rowChange{}, err
+		}
+		newValues, err := preUpdateValues(data, true)
+		if err != nil {
+			return rowChange{}, err
+		}
+		change.Old = oldValues
+		change.New = newValues
+	default:
+		return rowChange{}, fmt.Errorf("unknown pre-update operation %d", data.Op)
+	}
+	return change, nil
+}
+
+func preUpdateValues(data sqlite.SQLitePreUpdateData, new bool) ([]any, error) {
+	count := data.Count()
+	values := make([]any, count)
+	var err error
+	if new {
+		err = data.New(values...)
+	} else {
+		err = data.Old(values...)
+	}
+	if err != nil {
+		return nil, err
+	}
+	encoded := make([]any, count)
+	for i, value := range values {
+		encoded[i] = encodeStorageValue(value)
+	}
+	return encoded, nil
+}
+
+func rowChangeSize(change rowChange) int {
+	size := len(change.Table) + len(change.Op) + 16
+	for _, value := range change.Old {
+		size += changeValueSize(value)
+	}
+	for _, value := range change.New {
+		size += changeValueSize(value)
+	}
+	return size
+}
+
+// changeValueSize measures encoded values; blobs arrive as a base64 wrapper, which storageValueSize does not know about.
+func changeValueSize(value any) int {
+	if blob, ok := value.(map[string]string); ok {
+		return len(blob["$b64"])
+	}
+	return storageValueSize(value)
+}
+
+// resolveColumns adds column names to collected rows. It runs after the statement or transaction has finished, when the connection can run schema queries again.
+func (c *rowChangeCollector) resolveColumns(ctx context.Context, conn *sql.Conn) {
+	cache := map[string][]string{}
+	for i := range c.rows {
+		row := &c.rows[i]
+		columns, ok := cache[row.Table]
+		if !ok {
+			resolved, err := tableColumns(ctx, conn, row.Table)
+			if err != nil {
+				log.Printf("storage: pre-update columns for %s: %v", row.Table, err)
+			}
+			columns = resolved
+			cache[row.Table] = columns
+		}
+		row.Columns = columns
+		needed := max(len(row.Old), len(row.New))
+		for len(row.Columns) < needed {
+			row.Columns = append(row.Columns, fmt.Sprintf("column_%d", len(row.Columns)+1))
+		}
+	}
+}
+
+func tableColumns(ctx context.Context, conn *sql.Conn, table string) ([]string, error) {
+	rows, err := conn.QueryContext(ctx, "pragma table_xinfo("+quoteSQLiteIdentifier(table)+")")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	columns := []string{}
+	for rows.Next() {
+		var cid, notnull, pk, hidden int
+		var name, columnType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notnull, &defaultValue, &pk, &hidden); err != nil {
+			return nil, err
+		}
+		columns = append(columns, name)
+	}
+	return columns, rows.Err()
+}
+
+// registerRowHook installs the driver's pre-update hook for one write. The hook is replaced on the next write, so it never accumulates callbacks.
+func registerRowHook(conn *sql.Conn, collector *rowChangeCollector) error {
+	return conn.Raw(func(driverConn any) error {
+		hooker, ok := driverConn.(interface {
+			RegisterPreUpdateHook(sqlite.PreUpdateHookFn)
+		})
+		if !ok {
+			return nil
+		}
+		hooker.RegisterPreUpdateHook(func(data sqlite.SQLitePreUpdateData) {
+			collector.add(data)
+		})
+		return nil
+	})
+}
+
+func unregisterRowHook(conn *sql.Conn) error {
+	return conn.Raw(func(driverConn any) error {
+		if hooker, ok := driverConn.(interface {
+			RegisterPreUpdateHook(sqlite.PreUpdateHookFn)
+		}); ok {
+			hooker.RegisterPreUpdateHook(nil)
+		}
+		return nil
+	})
+}
+
+// withWriteConn runs a write with a pre-update collector attached to the connection. Columns are resolved after the statement or transaction finishes, before the connection is released.
+func (s *storageServer) withWriteConn(ctx context.Context, app string, fn func(*sql.Conn, *rowChangeCollector) error) error {
+	return s.withConn(ctx, app, func(conn *sql.Conn) error {
+		collector := &rowChangeCollector{}
+		registered := false
+		if err := registerRowHook(conn, collector); err != nil {
+			log.Printf("storage %s: pre-update hook: %v", app, err)
+		} else {
+			registered = true
+		}
+		if registered {
+			defer func() {
+				if err := unregisterRowHook(conn); err != nil {
+					log.Printf("storage %s: clear pre-update hook: %v", app, err)
+				}
+			}()
+		}
+		if err := fn(conn, collector); err != nil {
+			return err
+		}
+		collector.resolveColumns(ctx, conn)
+		return nil
+	})
 }
 
 type storageChangesResponse struct {
@@ -90,7 +309,17 @@ func trimChange(change storageChange) storageChange {
 	if err != nil || len(line) <= maxChangeEntrySize {
 		return change
 	}
-	change.Params = []jsontext.Value{jsontext.Value([]byte(`"<params omitted: too large>"`))}
+	if len(change.Params) > 0 {
+		change.Params = []jsontext.Value{jsontext.Value([]byte(`"<params omitted: too large>"`))}
+	}
+	line, err = json.Marshal(change)
+	if err != nil || len(line) <= maxChangeEntrySize {
+		return change
+	}
+	if len(change.Rows) > 0 {
+		change.Rows = nil
+		change.RowsTruncated = true
+	}
 	return change
 }
 

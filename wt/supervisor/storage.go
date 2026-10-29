@@ -408,7 +408,9 @@ func (s *storageServer) exec(w http.ResponseWriter, r *http.Request, app string)
 	defer cancel()
 
 	var result storageResult
-	err = s.withConn(ctx, app, func(conn *sql.Conn) error {
+	var collector *rowChangeCollector
+	err = s.withWriteConn(ctx, app, func(conn *sql.Conn, changes *rowChangeCollector) error {
+		collector = changes
 		res, err := conn.ExecContext(ctx, req.SQL, params...)
 		if err != nil {
 			return err
@@ -421,11 +423,19 @@ func (s *storageServer) exec(w http.ResponseWriter, r *http.Request, app string)
 		writeStorageError(w, err)
 		return
 	}
+	var rows []rowChange
+	truncated := false
+	if collector != nil {
+		rows = collector.rows
+		truncated = collector.omitted > 0
+	}
 	s.logChanges(app, []storageChange{{
-		Time:         time.Now().UTC(),
-		SQL:          req.SQL,
-		Params:       req.Params,
-		RowsAffected: result.RowsAffected,
+		Time:          time.Now().UTC(),
+		SQL:           req.SQL,
+		Params:        req.Params,
+		RowsAffected:  result.RowsAffected,
+		Rows:          rows,
+		RowsTruncated: truncated,
 	}})
 	writeJSON(w, http.StatusOK, result)
 }
@@ -461,7 +471,11 @@ func (s *storageServer) batch(w http.ResponseWriter, r *http.Request, app string
 	defer cancel()
 
 	results := make([]storageResult, 0, len(req.Statements))
-	err := s.withConn(ctx, app, func(conn *sql.Conn) error {
+	starts := make([]int, len(req.Statements))
+	ends := make([]int, len(req.Statements))
+	var collector *rowChangeCollector
+	err := s.withWriteConn(ctx, app, func(conn *sql.Conn, rows *rowChangeCollector) error {
+		collector = rows
 		tx, err := conn.BeginTx(ctx, nil)
 		if err != nil {
 			return err
@@ -469,10 +483,12 @@ func (s *storageServer) batch(w http.ResponseWriter, r *http.Request, app string
 		defer tx.Rollback()
 
 		for i, statement := range req.Statements {
+			starts[i] = len(rows.rows)
 			res, err := tx.ExecContext(ctx, statement.SQL, params[i]...)
 			if err != nil {
 				return fmt.Errorf("statement %d: %w", i+1, err)
 			}
+			ends[i] = len(rows.rows)
 			affected, _ := res.RowsAffected()
 			lastID, _ := res.LastInsertId()
 			results = append(results, storageResult{RowsAffected: affected, LastInsertID: lastID})
@@ -485,11 +501,19 @@ func (s *storageServer) batch(w http.ResponseWriter, r *http.Request, app string
 	}
 	changes := make([]storageChange, len(req.Statements))
 	for i, statement := range req.Statements {
+		var rows []rowChange
+		truncated := false
+		if collector != nil {
+			rows = collector.rows[starts[i]:ends[i]]
+			truncated = collector.omitted > 0
+		}
 		changes[i] = storageChange{
-			Time:         time.Now().UTC(),
-			SQL:          statement.SQL,
-			Params:       statement.Params,
-			RowsAffected: results[i].RowsAffected,
+			Time:          time.Now().UTC(),
+			SQL:           statement.SQL,
+			Params:        statement.Params,
+			RowsAffected:  results[i].RowsAffected,
+			Rows:          rows,
+			RowsTruncated: truncated,
 		}
 	}
 	s.logChanges(app, changes)
