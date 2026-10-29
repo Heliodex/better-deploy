@@ -1,5 +1,6 @@
 import {
 	array,
+	boolean,
 	type GenericSchema,
 	type InferOutput,
 	integer,
@@ -85,6 +86,7 @@ function setCookie(name: string, value: string, maxAge: number): void {
 
 interface RequestOptions {
 	body?: BodyInit
+	json?: unknown
 	method?: string
 	token?: string
 }
@@ -106,9 +108,14 @@ async function parseJSON<T>(response: Response, schema: GenericSchema<T>): Promi
 async function request<T>(path: string, options: RequestOptions, schema: GenericSchema<T>): Promise<T> {
 	const headers: { [_: string]: string } = {}
 	if (options.token) headers.authorization = `Bearer ${options.token}`
+	let { body } = options
+	if (options.json !== undefined) {
+		headers["content-type"] = "application/json"
+		body = JSON.stringify(options.json)
+	}
 
 	const response = await fetch(path, {
-		body: options.body,
+		body,
 		headers,
 		method: options.method,
 	})
@@ -167,6 +174,30 @@ export async function fetchResourceHistory(token: string, name: string): Promise
 	return data.samples
 }
 
+const backupSettingsSchema = object({
+	enabled: boolean(),
+	every: pipe(string(), minLength(1)),
+	keep: pipe(number(), integer(), minValue(1)),
+})
+
+export type BackupSettings = InferOutput<typeof backupSettingsSchema>
+
+const backupInfoSchema = object({
+	createdAt: pipe(string(), minLength(1)),
+	name: pipe(string(), minLength(1)),
+	size: pipe(number(), minValue(0)),
+})
+
+export type BackupInfo = InferOutput<typeof backupInfoSchema>
+
+const backupsResponseSchema = object({
+	backups: array(backupInfoSchema),
+	database: boolean(),
+	settings: backupSettingsSchema,
+})
+
+export type BackupsResult = InferOutput<typeof backupsResponseSchema>
+
 const logStreamSchema = union([
 	object({
 		logs: array(logEntrySchema),
@@ -218,4 +249,28 @@ export function deployBundle(token: string, name: string, file: File): Promise<A
 	const body = new FormData()
 	body.append("artifact", file)
 	return request(`/apps/${encodeURIComponent(name)}`, { body, method: "POST", token }, appInfoSchema)
+}
+
+export function fetchBackups(token: string, name: string): Promise<BackupsResult> {
+	return request(`/apps/${encodeURIComponent(name)}/backups`, { token }, backupsResponseSchema)
+}
+
+export function createBackup(token: string, name: string): Promise<BackupsResult> {
+	return request(`/apps/${encodeURIComponent(name)}/backups`, { method: "POST", token }, backupsResponseSchema)
+}
+
+export function saveBackupSettings(token: string, name: string, settings: BackupSettings): Promise<BackupsResult> {
+	return request(
+		`/apps/${encodeURIComponent(name)}/backups/config`,
+		{ json: settings, method: "PUT", token },
+		backupsResponseSchema,
+	)
+}
+
+export function restoreBackup(token: string, name: string, backup: string): Promise<BackupsResult> {
+	return request(
+		`/apps/${encodeURIComponent(name)}/backups/${encodeURIComponent(backup)}/restore`,
+		{ method: "POST", token },
+		backupsResponseSchema,
+	)
 }

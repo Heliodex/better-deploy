@@ -2,9 +2,14 @@
 import { onMount } from "svelte"
 import {
 	type AppInfo,
+	type BackupInfo,
+	type BackupSettings,
+	type BackupsResult,
+	createBackup,
 	deployBundle,
 	fetchApp,
 	fetchApps,
+	fetchBackups,
 	fetchResourceHistory,
 	forgetToken,
 	getToken,
@@ -13,6 +18,8 @@ import {
 	logLevels,
 	type ResourceSample,
 	restartApp,
+	restoreBackup,
+	saveBackupSettings,
 	setToken,
 	subscribe,
 	subscribeLogs,
@@ -63,6 +70,15 @@ let minLevel = $state<LogLevel>("trace")
 let resourceHistory = $state<ResourceSample[]>([])
 let overviewHistories = $state<{ [_: string]: ResourceSample[] }>({})
 let overviewPending = $state<{ [_: string]: boolean }>({})
+let backupSettings = $state<BackupSettings>({ enabled: true, every: "24h", keep: 7 })
+let backupList = $state<BackupInfo[]>([])
+let backupDatabase = $state(false)
+let backupsLoading = $state(false)
+let backupsError = $state("")
+let backingUp = $state(false)
+let savingBackups = $state(false)
+let restoringBackup = $state<string | null>(null)
+let confirmRestore = $state<string | null>(null)
 
 function uptime(startedAt: string): string {
 	const seconds = Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1000))
@@ -87,6 +103,13 @@ function formatMemory(bytes: number): string {
 	if (bytes <= 0) return "–"
 	const megabytes = bytes / (1024 * 1024)
 	return megabytes < 10 ? `${megabytes.toFixed(1)} MB` : `${Math.round(megabytes)} MB`
+}
+
+function formatSize(bytes: number): string {
+	if (bytes < 1024) return `${bytes} B`
+	const kilobytes = bytes / 1024
+	if (kilobytes < 1024) return `${Math.round(kilobytes)} KB`
+	return `${(kilobytes / 1024).toFixed(1)} MB`
 }
 
 /** One supervisor access line, parsed from its `METHOD status duration path` shape. */
@@ -207,6 +230,15 @@ function select(name: string | null): void {
 	error = ""
 	actionMessage = ""
 	confirmRestart = false
+	backupSettings = { enabled: true, every: "24h", keep: 7 }
+	backupList = []
+	backupDatabase = false
+	backupsLoading = false
+	backupsError = ""
+	backingUp = false
+	savingBackups = false
+	restoringBackup = null
+	confirmRestore = null
 	closeLogs()
 	const url = name ? `?app=${encodeURIComponent(name)}` : window.location.pathname
 	window.history.replaceState(null, "", url)
@@ -214,6 +246,7 @@ function select(name: string | null): void {
 	if (name) {
 		void loadDetail(token, name)
 		void loadResourceHistory(token, name)
+		void loadBackups(token, name)
 		openLogs(name)
 	} else ensureOverviewHistories(token)
 }
@@ -223,6 +256,86 @@ async function loadDetail(key: string, name: string): Promise<void> {
 		detail = await fetchApp(key, name)
 	} catch (err) {
 		error = err instanceof Error ? err.message : "Could not load the app."
+	}
+}
+
+function applyBackups(result: BackupsResult): void {
+	backupSettings = result.settings
+	backupList = result.backups
+	backupDatabase = result.database
+	confirmRestore = null
+}
+
+async function loadBackups(key: string, name: string): Promise<void> {
+	backupsLoading = true
+	backupsError = ""
+	try {
+		const result = await fetchBackups(key, name)
+		if (selected !== name) return
+		applyBackups(result)
+	} catch (err) {
+		if (selected !== name) return
+		backupsError = err instanceof Error ? err.message : "Could not load backups."
+	} finally {
+		if (selected === name) backupsLoading = false
+	}
+}
+
+async function backupNow(): Promise<void> {
+	if (!token || !selected) return
+	backingUp = true
+	backupsError = ""
+	actionMessage = ""
+	try {
+		applyBackups(await createBackup(token, selected))
+		actionMessage = `${selected} backed up.`
+	} catch (err) {
+		backupsError = err instanceof Error ? err.message : "Could not back up the database."
+	} finally {
+		backingUp = false
+	}
+}
+
+async function saveBackupConfig(event: SubmitEvent): Promise<void> {
+	event.preventDefault()
+	if (!token || !selected) return
+	savingBackups = true
+	backupsError = ""
+	try {
+		const result = await saveBackupSettings(token, selected, {
+			enabled: backupSettings.enabled,
+			every: backupSettings.every.trim(),
+			keep: backupSettings.keep,
+		})
+		applyBackups(result)
+		actionMessage = "Backup settings saved."
+	} catch (err) {
+		backupsError = err instanceof Error ? err.message : "Could not save backup settings."
+	} finally {
+		savingBackups = false
+	}
+}
+
+/** Reverting is destructive, so the first click only arms the row. */
+async function revertBackup(name: string): Promise<void> {
+	if (!token || !selected) return
+	if (confirmRestore !== name) {
+		confirmRestore = name
+		return
+	}
+	const restored = backupList.find(backup => backup.name === name)
+	confirmRestore = null
+	restoringBackup = name
+	backupsError = ""
+	try {
+		applyBackups(await restoreBackup(token, selected, name))
+		actionMessage = restored
+			? `${selected} reverted to the snapshot from ${formatTime(restored.createdAt)}.`
+			: `${selected} reverted.`
+	} catch (err) {
+		backupsError = err instanceof Error ? err.message : "Could not restore the backup."
+	} finally {
+		restoringBackup = null
 	}
 }
 
@@ -268,8 +381,10 @@ async function refresh(key: string): Promise<void> {
 	error = ""
 	try {
 		apps = await fetchApps(key)
-		if (selected) detail = await fetchApp(key, selected)
-		else ensureOverviewHistories(key)
+		if (selected) {
+			detail = await fetchApp(key, selected)
+			void loadBackups(key, selected)
+		} else ensureOverviewHistories(key)
 	} catch (err) {
 		error = err instanceof Error ? err.message : "Could not reach the supervisor."
 	} finally {
@@ -543,6 +658,7 @@ onMount((): (() => void) => {
 		void refresh(saved)
 		if (name) {
 			void loadResourceHistory(saved, name)
+			void loadBackups(saved, name)
 			openLogs(name)
 		}
 	} else {
@@ -764,6 +880,125 @@ onMount((): (() => void) => {
 							</section>
 						{/if}
 
+						<section
+							aria-labelledby="backups-title"
+							class="flex flex-col gap-3 border border-line-soft bg-surface p-2"
+						>
+							<div class="flex flex-wrap items-center justify-between gap-2">
+								<h3
+									class="text-xs font-semibold tracking-wide text-neutral-400 uppercase"
+									id="backups-title"
+								>
+									Backups
+								</h3>
+								<button
+									class="btn btn-primary"
+									disabled={backingUp || backupsLoading}
+									onclick={backupNow}
+									type="button"
+								>
+									{backingUp ? "Backing up…" : "Back up now"}
+								</button>
+							</div>
+
+							<form class="flex flex-wrap items-end gap-3" onsubmit={saveBackupConfig}>
+								<label class="flex items-center gap-2 pb-1.5 text-sm">
+									<input
+										class="accent-primary-500"
+										type="checkbox"
+										bind:checked={backupSettings.enabled}
+									>
+									Automatic backups
+								</label>
+								<label class="flex flex-col gap-1">
+									<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Every</span>
+									<input
+										aria-label="Backup interval"
+										class="field w-24"
+										placeholder="24h"
+										bind:value={backupSettings.every}
+									>
+								</label>
+								<label class="flex flex-col gap-1">
+									<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Keep</span>
+									<input
+										aria-label="Backups to keep"
+										class="field w-20"
+										max={100}
+										min={1}
+										type="number"
+										bind:value={backupSettings.keep}
+									>
+								</label>
+								<button class="btn" disabled={savingBackups} type="submit">
+									{savingBackups ? "Saving…" : "Save"}
+								</button>
+							</form>
+
+							<p class="text-xs text-neutral-500">
+								Snapshots use SQLite's online backup, so the app keeps serving while one is taken.
+							</p>
+
+							{#if backupsError}
+								<p
+									class="border border-red-500/80 bg-red-500/10 px-2 py-1 text-sm text-red-400"
+									role="alert"
+								>
+									{backupsError}
+								</p>
+							{/if}
+
+							{#if backupList.length === 0}
+								<p class="text-sm text-neutral-500">
+									{backupsLoading
+										? "Loading backups…"
+										: backupDatabase
+											? "No backups yet."
+											: "No database yet. One is created the first time the app uses storage."}
+								</p>
+							{:else}
+								<div class="overflow-x-auto">
+									<table class="w-full border-collapse text-left text-xs">
+										<thead class="text-[10px] tracking-wide text-neutral-500 uppercase">
+											<tr>
+												<th class="py-1 pr-3 font-normal">Created</th>
+												<th class="py-1 pr-3 font-normal">Size</th>
+												<th class="py-1 text-right font-normal">Revert</th>
+											</tr>
+										</thead>
+										<tbody>
+											{#each backupList as backup (backup.name)}
+												<tr class="border-t border-line-soft">
+													<td class="py-1 pr-3 whitespace-nowrap">
+														{formatTime(backup.createdAt)}
+													</td>
+													<td class="py-1 pr-3 text-neutral-400 tabular-nums">
+														{formatSize(backup.size)}
+													</td>
+													<td class="py-1 text-right">
+														<button
+															class={confirmRestore === backup.name
+																? "btn btn-danger"
+																: "btn"}
+															disabled={restoringBackup !== null}
+															onclick={(): Promise<void> => revertBackup(backup.name)}
+															type="button"
+														>
+															{restoringBackup === backup.name
+																? "Reverting…"
+																: confirmRestore === backup.name
+																	? "Click again to confirm"
+																	: "Revert"}
+														</button>
+													</td>
+												</tr>
+											{/each}
+										</tbody>
+									</table>
+								</div>
+							{/if}
+						</section>
+
 						{#if actionMessage}
 							<p
 								class="border border-primary-500/40 bg-primary-500/10 px-2 py-1 text-sm text-primary-300"
@@ -853,7 +1088,10 @@ onMount((): (() => void) => {
 								/>
 							</div>
 							<ul class="flex flex-col gap-1">
-								<li aria-hidden="true" class="flex items-center gap-2 text-[10px] tracking-wide text-neutral-600 uppercase">
+								<li
+									aria-hidden="true"
+									class="flex items-center gap-2 text-[10px] tracking-wide text-neutral-600 uppercase"
+								>
 									<span class="size-2 shrink-0"></span>
 									<span class="flex-1"></span>
 									<span class="w-14 shrink-0 text-right">cpu</span>
@@ -863,8 +1101,12 @@ onMount((): (() => void) => {
 									<li class="flex items-center gap-2 text-xs">
 										<span aria-hidden="true" class="size-2 shrink-0 {item.color.dot}"></span>
 										<span class="flex-1 truncate text-neutral-300">{item.name}</span>
-										<span class="w-14 shrink-0 text-right text-neutral-400 tabular-nums">{formatCPU(item.cpu)}</span>
-										<span class="w-16 shrink-0 text-right text-neutral-400 tabular-nums">{formatMemory(item.memory)}</span>
+										<span class="w-14 shrink-0 text-right text-neutral-400 tabular-nums"
+											>{formatCPU(item.cpu)}</span
+										>
+										<span class="w-16 shrink-0 text-right text-neutral-400 tabular-nums"
+											>{formatMemory(item.memory)}</span
+										>
 									</li>
 								{/each}
 							</ul>
