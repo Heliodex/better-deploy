@@ -100,7 +100,9 @@ function formatTime(value: string): string {
 }
 
 function formatCPU(percent: number): string {
-	return percent < 10 ? `${percent.toFixed(1)}%` : `${Math.round(percent)}%`
+	// One decimal below 10%, none at or above it; whole values keep no trailing ".0".
+	const value = percent < 10 ? Number(percent.toFixed(1)) : Math.round(percent)
+	return `${value}%`
 }
 
 function formatMemory(bytes: number): string {
