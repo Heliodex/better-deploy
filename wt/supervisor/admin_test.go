@@ -215,9 +215,13 @@ func TestAdminStaticCacheHeaders(t *testing.T) {
 	if _, err := fs.Stat(adminFiles, "web/build/index.html"); err != nil {
 		t.Skip("admin panel not built")
 	}
+	nodes, err := fs.Glob(adminFiles, "web/build/_app/immutable/nodes/*.js")
+	if err != nil || len(nodes) == 0 {
+		t.Skip("admin panel has no built node bundles")
+	}
 	for _, tc := range []struct{ path, want string }{
 		{"/", "no-cache"},
-		{"/_app/immutable/nodes/2.C_8-dSv8.js", "public, max-age=31536000, immutable"},
+		{"/_app/immutable/nodes/" + filepath.Base(nodes[0]), "public, max-age=31536000, immutable"},
 	} {
 		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
 		rec := httptest.NewRecorder()
