@@ -740,6 +740,7 @@ onMount((): (() => void) => {
 										label="CPU"
 										samples={resourceHistory}
 										span={detailSpan}
+										unit={1}
 										value={(sample: ResourceSample) => sample.cpuPercent}
 									/>
 									<ResourceChart
@@ -748,6 +749,7 @@ onMount((): (() => void) => {
 										label="Memory"
 										samples={resourceHistory}
 										span={detailSpan}
+										unit={1024 * 1024}
 										value={(sample: ResourceSample) => sample.memoryBytes}
 									/>
 								</div>
@@ -830,6 +832,7 @@ onMount((): (() => void) => {
 									label="CPU"
 									series={overviewSeries}
 									span={overviewSpan}
+									unit={1}
 									value={(sample: ResourceSample) => sample.cpuPercent}
 								/>
 								<StackedResourceChart
@@ -837,6 +840,7 @@ onMount((): (() => void) => {
 									label="Memory"
 									series={overviewSeries}
 									span={overviewSpan}
+									unit={1024 * 1024}
 									value={(sample: ResourceSample) => sample.memoryBytes}
 								/>
 							</div>

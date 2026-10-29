@@ -8,10 +8,12 @@ interface Props {
 	label: string
 	samples: ResourceSample[]
 	span: number
+	/** Display units per raw value step, so ticks land on round labels (1 for %, 1 MiB for bytes). */
+	unit: number
 	value(sample: ResourceSample): number
 }
 
-let { color, format, label, samples, span, value }: Props = $props()
+let { color, format, label, samples, span, unit, value }: Props = $props()
 
 const width = 100
 const height = 40
@@ -31,7 +33,8 @@ let values = $derived(visible.map(sample => value(sample)))
 let current = $derived(values.at(-1) ?? 0)
 let peak = $derived(values.length > 0 ? Math.max(...values) : 0)
 let maxValue = $derived(Math.max(peak, 1))
-let ticks = $derived(niceTicks(maxValue, 2))
+/** Ticks picked in display units, so memory lands on round megabytes rather than round bytes. */
+let ticks = $derived(niceTicks(peak / unit, 2).map(tick => tick * unit))
 let points = $derived.by(() => {
 	const first = visible.at(0)
 	const last = visible.at(-1)

@@ -13,10 +13,12 @@ interface Props {
 	label: string
 	series: Series[]
 	span: number
+	/** Display units per raw value step, so ticks land on round labels (1 for %, 1 MiB for bytes). */
+	unit: number
 	value(sample: ResourceSample): number
 }
 
-let { format, label, series, span, value }: Props = $props()
+let { format, label, series, span, unit, value }: Props = $props()
 
 const width = 100
 const height = 40
@@ -78,7 +80,8 @@ let totals = $derived(stacked.map(point => point.values.reduce((sum, current) =>
 let currentTotal = $derived(totals.at(-1) ?? 0)
 let peakTotal = $derived(totals.length > 0 ? Math.max(...totals) : 0)
 let maxValue = $derived(Math.max(peakTotal, 1))
-let ticks = $derived(niceTicks(maxValue, 2))
+/** Ticks picked in display units, so memory lands on round megabytes rather than round bytes. */
+let ticks = $derived(niceTicks(peakTotal / unit, 2).map(tick => tick * unit))
 
 function yFor(stackedValue: number): number {
 	return height - padding - (stackedValue / maxValue) * (height - padding * 2)
