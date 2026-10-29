@@ -856,15 +856,15 @@ onMount((): (() => void) => {
 								<li aria-hidden="true" class="flex items-center gap-2 text-[10px] tracking-wide text-neutral-600 uppercase">
 									<span class="size-2 shrink-0"></span>
 									<span class="flex-1"></span>
-									<span class="w-16 shrink-0 text-right">memory</span>
 									<span class="w-14 shrink-0 text-right">cpu</span>
+									<span class="w-16 shrink-0 text-right">memory</span>
 								</li>
 								{#each legendApps as item (item.name)}
 									<li class="flex items-center gap-2 text-xs">
 										<span aria-hidden="true" class="size-2 shrink-0 {item.color.dot}"></span>
 										<span class="flex-1 truncate text-neutral-300">{item.name}</span>
-										<span class="w-16 shrink-0 text-right text-neutral-400 tabular-nums">{formatMemory(item.memory)}</span>
 										<span class="w-14 shrink-0 text-right text-neutral-400 tabular-nums">{formatCPU(item.cpu)}</span>
+										<span class="w-16 shrink-0 text-right text-neutral-400 tabular-nums">{formatMemory(item.memory)}</span>
 									</li>
 								{/each}
 							</ul>
