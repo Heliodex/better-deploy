@@ -452,13 +452,47 @@ func TestAppLogRecordsLevels(t *testing.T) {
 	}
 }
 
+func TestAppLogSeparatesSupervisorLines(t *testing.T) {
+	logs, err := newAppLog(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(logs, "WARN careful\n"); err != nil {
+		t.Fatal(err)
+	}
+	logs.logSupervisor("GET /hello 200 1.5ms")
+	if _, err := io.WriteString(logs, "plain line\n"); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := logs.tail(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []logEntry{
+		{Level: "warn", Source: "app", Message: "careful"},
+		{Level: "info", Source: "supervisor", Message: "GET /hello 200 1.5ms"},
+		{Level: "info", Source: "app", Message: "plain line"},
+	}
+	if len(entries) != len(want) {
+		t.Fatalf("got %d entries: %+v", len(entries), entries)
+	}
+	for i := range want {
+		if entries[i].Level != want[i].Level || entries[i].Source != want[i].Source || entries[i].Message != want[i].Message {
+			t.Errorf("entry %d = %+v, want %+v", i, entries[i], want[i])
+		}
+		if entries[i].Time == "" {
+			t.Errorf("entry %d has no timestamp", i)
+		}
+	}
+}
+
 func TestParseLogLineReadsLegacyLinesAsInfo(t *testing.T) {
 	legacy := parseLogLine("2026-10-28T21:00:00Z Serving HTTP on http://127.0.0.1:8080/")
-	if legacy.Level != "info" || legacy.Message != "Serving HTTP on http://127.0.0.1:8080/" {
+	if legacy.Level != "info" || legacy.Source != "app" || legacy.Message != "Serving HTTP on http://127.0.0.1:8080/" {
 		t.Errorf("legacy line parsed as %+v", legacy)
 	}
 	stamped := parseLogLine("2026-10-28T21:00:00Z ERROR broke")
-	if stamped.Level != "error" || stamped.Message != "broke" {
+	if stamped.Level != "error" || stamped.Source != "app" || stamped.Message != "broke" {
 		t.Errorf("leveled line parsed as %+v", stamped)
 	}
 }

@@ -30,14 +30,16 @@ const (
 	logTimeFormat  = time.RFC3339Nano
 )
 
-// appLog appends an app's output to a capped log file for the admin panel. The file lives outside the app's /data preopen so components cannot read it. Each line is stamped with the time the supervisor received it, so timestamps do not depend on how an app logs.
+// appLog appends an app's output to capped log files for the admin panel. Files live outside the app's /data preopen so components cannot read them. Each line is stamped with the time the supervisor received it, so timestamps do not depend on how an app logs. The app's own output goes to output.log; supervisor-side lines for the app, such as proxied requests, go to supervisor.log so the two read apart.
 type appLog struct {
-	mu      sync.Mutex
-	dir     string
-	file    *os.File
-	size    int64
-	pending []byte
-	subs    map[chan logEntry]struct{}
+	mu             sync.Mutex
+	dir            string
+	file           *os.File
+	size           int64
+	supervisorFile *os.File
+	supervisorSize int64
+	pending        []byte
+	subs           map[chan logEntry]struct{}
 }
 
 func newAppLog(dir string) (*appLog, error) {
@@ -83,18 +85,50 @@ func (l *appLog) backupPath() string {
 	return filepath.Join(l.dir, "output.log.1")
 }
 
-func (l *appLog) open() error {
-	file, err := os.OpenFile(l.path(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+func (l *appLog) supervisorPath() string {
+	return filepath.Join(l.dir, "supervisor.log")
+}
+
+func (l *appLog) supervisorBackupPath() string {
+	return filepath.Join(l.dir, "supervisor.log.1")
+}
+
+func openLogFile(path string) (*os.File, int64, error) {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
-		return err
+		return nil, 0, err
 	}
 	info, err := file.Stat()
 	if err != nil {
 		_ = file.Close()
+		return nil, 0, err
+	}
+	return file, info.Size(), nil
+}
+
+func rotateLogFile(file *os.File, path, backup string) (*os.File, int64, error) {
+	if err := file.Close(); err != nil {
+		return nil, 0, err
+	}
+	_ = os.Remove(backup)
+	if err := os.Rename(path, backup); err != nil && !os.IsNotExist(err) {
+		return nil, 0, err
+	}
+	return openLogFile(path)
+}
+
+func (l *appLog) open() error {
+	file, size, err := openLogFile(l.path())
+	if err != nil {
 		return err
 	}
-	l.file = file
-	l.size = info.Size()
+	l.file, l.size = file, size
+	supervisorFile, supervisorSize, err := openLogFile(l.supervisorPath())
+	if err != nil {
+		_ = file.Close()
+		return err
+	}
+	l.supervisorFile, l.supervisorSize = supervisorFile, supervisorSize
 	return nil
 }
 
@@ -124,44 +158,60 @@ func (l *appLog) Write(p []byte) (int, error) {
 // guestStderr matches wasmtime's prefix for a guest's own stderr/stdout, e.g. "stderr [1] :: ".
 var guestStderr = regexp.MustCompile(`^(?:stderr|stdout) \[\d+\] :: `)
 
-// writeLine stamps one complete line and appends it, rotating past maxLogBytes.
+// writeLine stamps one complete line of the app's own output and appends it, rotating past maxLogBytes.
 func (l *appLog) writeLine(line string) error {
 	line = guestStderr.ReplaceAllString(line, "")
 	level, message := splitLevelPrefix(line)
 	stamp := time.Now().UTC().Format(logTimeFormat)
 	data := []byte(stamp + " " + level + " " + message + "\n")
 	if l.size+int64(len(data)) > maxLogBytes {
-		if err := l.rotate(); err != nil {
+		file, size, err := rotateLogFile(l.file, l.path(), l.backupPath())
+		if err != nil {
 			return err
 		}
+		l.file, l.size = file, size
 	}
 	written, err := l.file.Write(data)
 	l.size += int64(written)
 	if err != nil {
 		return err
 	}
-	l.publish(logEntry{Time: stamp, Level: strings.ToLower(level), Message: message})
+	l.publish(logEntry{Time: stamp, Level: strings.ToLower(level), Source: "app", Message: message})
 	return nil
 }
 
-func (l *appLog) rotate() error {
-	if err := l.file.Close(); err != nil {
-		return err
+// logSupervisor records a supervisor-side line for the app, such as a proxied request.
+// It streams and persists alongside the app's own output, marked so the two read apart.
+func (l *appLog) logSupervisor(message string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	stamp := time.Now().UTC().Format(logTimeFormat)
+	data := []byte(stamp + " INFO " + message + "\n")
+	if l.supervisorSize+int64(len(data)) > maxLogBytes {
+		file, size, err := rotateLogFile(l.supervisorFile, l.supervisorPath(), l.supervisorBackupPath())
+		if err != nil {
+			return
+		}
+		l.supervisorFile, l.supervisorSize = file, size
 	}
-	_ = os.Remove(l.backupPath())
-	if err := os.Rename(l.path(), l.backupPath()); err != nil && !os.IsNotExist(err) {
-		return err
+	written, err := l.supervisorFile.Write(data)
+	l.supervisorSize += int64(written)
+	if err != nil {
+		return
 	}
-	return l.open()
+	l.publish(logEntry{Time: stamp, Level: "info", Source: "supervisor", Message: message})
 }
 
 // logLevels are the prefixes an app may put at the start of a line, most verbose first.
 var logLevels = []string{"TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"}
 
-// logEntry is one log line with the time the supervisor received it and its level. Lines written before levels existed have no prefix and read as info.
+// logEntry is one log line with the time the supervisor received it, its level, and
+// which side wrote it: the app process or the supervisor. Lines written before
+// sources existed have no marker and read as app output.
 type logEntry struct {
 	Time    string `json:"time"`
 	Level   string `json:"level"`
+	Source  string `json:"source"`
 	Message string `json:"message"`
 }
 
@@ -182,41 +232,53 @@ func splitLevelPrefix(line string) (string, string) {
 
 // parseLogLine splits a stamped line into its time and message.
 func parseLogLine(line string) logEntry {
-	stamp, rest, ok := strings.Cut(line, " ")
-	if !ok {
-		return logEntry{Level: "info", Message: line}
-	}
-	if _, err := time.Parse(logTimeFormat, stamp); err != nil {
-		return logEntry{Level: "info", Message: line}
-	}
-	level, message := splitLevelPrefix(rest)
-	return logEntry{Time: stamp, Level: strings.ToLower(level), Message: message}
+	return parseSourcedLogLine(line, "app")
 }
 
-// tail returns the last n log lines, oldest first.
+// parseSourcedLogLine parses a line from one of the app's log files, marking which side wrote it.
+func parseSourcedLogLine(line, source string) logEntry {
+	stamp, rest, ok := strings.Cut(line, " ")
+	if !ok {
+		return logEntry{Level: "info", Source: source, Message: line}
+	}
+	if _, err := time.Parse(logTimeFormat, stamp); err != nil {
+		return logEntry{Level: "info", Source: source, Message: line}
+	}
+	level, message := splitLevelPrefix(rest)
+	return logEntry{Time: stamp, Level: strings.ToLower(level), Source: source, Message: message}
+}
+
+// tail returns the last n log lines from both the app and the supervisor, oldest first.
 func (l *appLog) tail(n int) ([]logEntry, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	lines := []string{}
-	for _, path := range []string{l.backupPath(), l.path()} {
-		data, err := os.ReadFile(path)
-		if os.IsNotExist(err) {
-			continue
+	files := []struct {
+		backup, path, source string
+	}{
+		{l.backupPath(), l.path(), "app"},
+		{l.supervisorBackupPath(), l.supervisorPath(), "supervisor"},
+	}
+	out := []logEntry{}
+	for _, file := range files {
+		for _, path := range []string{file.backup, file.path} {
+			data, err := os.ReadFile(path)
+			if os.IsNotExist(err) {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			for _, line := range strings.Split(string(data), "\n") {
+				if line == "" {
+					continue
+				}
+				out = append(out, parseSourcedLogLine(line, file.source))
+			}
 		}
-		if err != nil {
-			return nil, err
-		}
-		lines = append(lines, strings.Split(string(data), "\n")...)
 	}
-	for len(lines) > 0 && lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
-	}
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
-	}
-	out := make([]logEntry, 0, len(lines))
-	for _, line := range lines {
-		out = append(out, parseLogLine(line))
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Time < out[j].Time })
+	if len(out) > n {
+		out = out[len(out)-n:]
 	}
 	return out, nil
 }

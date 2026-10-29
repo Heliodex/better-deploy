@@ -219,11 +219,11 @@ func TestHandleProxyLogsRequest(t *testing.T) {
 	if len(entries) != 2 {
 		t.Fatalf("logged %d requests, want 2: %+v", len(entries), entries)
 	}
-	if entries[0].Level != "info" || !strings.HasPrefix(entries[0].Message, "GET /hello?x=1 200 ") {
-		t.Errorf("first entry = %+v, want an info access line for GET /hello?x=1 200", entries[0])
+	if entries[0].Level != "info" || entries[0].Source != "supervisor" || !strings.HasPrefix(entries[0].Message, "GET /hello?x=1 200 ") {
+		t.Errorf("first entry = %+v, want a supervisor access line for GET /hello?x=1 200", entries[0])
 	}
-	if entries[1].Level != "info" || !strings.HasPrefix(entries[1].Message, "GET /missing 404 ") {
-		t.Errorf("second entry = %+v, want an info access line for GET /missing 404", entries[1])
+	if entries[1].Level != "info" || entries[1].Source != "supervisor" || !strings.HasPrefix(entries[1].Message, "GET /missing 404 ") {
+		t.Errorf("second entry = %+v, want a supervisor access line for GET /missing 404", entries[1])
 	}
 }
 

@@ -46,6 +46,7 @@ export type LogLevel = (typeof logLevels)[number]
 const logEntrySchema = object({
 	level: picklist(logLevels),
 	message: string(),
+	source: picklist(["app", "supervisor"]),
 	time: string(),
 })
 

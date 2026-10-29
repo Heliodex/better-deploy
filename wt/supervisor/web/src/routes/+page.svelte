@@ -841,7 +841,7 @@ onMount((): (() => void) => {
 								<tbody>
 									{#each filteredLogs as entry, index (index)}
 										{const timeParts = logTimeParts(entry.time)}
-										<tr>
+										<tr class={entry.source === "supervisor" ? "bg-violet-500/5" : ""}>
 											<td
 												class="w-0 pr-3 align-top whitespace-nowrap text-neutral-500 tabular-nums"
 											>
@@ -856,6 +856,23 @@ onMount((): (() => void) => {
 														<span class="log-time-segment">{timeParts[2]}</span>
 													{/if}
 												</time>
+											</td>
+											<td class="w-0 pr-3 align-top whitespace-nowrap">
+												{#if entry.source === "supervisor"}
+													<span
+														class="inline-block border border-violet-500/60 px-1 text-[10px] tracking-wide text-violet-300 uppercase"
+														title="Logged by the supervisor"
+													>
+														proxy
+													</span>
+												{:else}
+													<span
+														class="inline-block border border-neutral-700 px-1 text-[10px] tracking-wide text-neutral-500 uppercase"
+														title="Logged by the app"
+													>
+														app
+													</span>
+												{/if}
 											</td>
 											<td
 												class="w-0 pr-3 align-top whitespace-nowrap {levelClasses[entry.level]}"

@@ -1047,7 +1047,7 @@ func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
 	wrapped := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 	a.proxy.ServeHTTP(wrapped, r)
 	if a.logs != nil {
-		_, _ = fmt.Fprintf(a.logs, "INFO %s %s %d %s\n", r.Method, r.URL.RequestURI(), wrapped.status, formatProxyDuration(time.Since(started)))
+		a.logs.logSupervisor(fmt.Sprintf("%s %s %d %s", r.Method, r.URL.RequestURI(), wrapped.status, formatProxyDuration(time.Since(started))))
 	}
 }
 
