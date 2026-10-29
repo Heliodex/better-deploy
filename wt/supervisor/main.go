@@ -1004,6 +1004,33 @@ func (s *supervisor) lookup(name string) *app {
 	return s.apps[name]
 }
 
+// statusWriter captures the status code a proxied response is written with. Unwrap
+// hands the underlying writer's optional interfaces (Flusher, Hijacker) through.
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusWriter) WriteHeader(status int) {
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *statusWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
+// formatProxyDuration renders a request duration compactly for the access log.
+func formatProxyDuration(d time.Duration) string {
+	if d < time.Millisecond {
+		return fmt.Sprintf("%dµs", d.Microseconds())
+	}
+	if d < time.Second {
+		return fmt.Sprintf("%.1fms", float64(d.Microseconds())/1000)
+	}
+	return fmt.Sprintf("%.2fs", d.Seconds())
+}
+
 func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
 	host := strings.ToLower(r.Host)
 	if h, _, err := net.SplitHostPort(host); err == nil {
@@ -1016,7 +1043,12 @@ func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no app for this host", http.StatusNotFound)
 		return
 	}
-	a.proxy.ServeHTTP(w, r)
+	started := time.Now()
+	wrapped := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+	a.proxy.ServeHTTP(wrapped, r)
+	if a.logs != nil {
+		_, _ = fmt.Fprintf(a.logs, "INFO %s %s %d %s\n", r.Method, r.URL.RequestURI(), wrapped.status, formatProxyDuration(time.Since(started)))
+	}
 }
 
 func (s *supervisor) handler() http.Handler {

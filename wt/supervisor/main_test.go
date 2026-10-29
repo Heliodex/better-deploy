@@ -175,3 +175,70 @@ func TestProxyRewrite(t *testing.T) {
 		t.Fatal("backend did not receive the request")
 	}
 }
+
+func TestHandleProxyLogsRequest(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/missing" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer backend.Close()
+
+	target, err := url.Parse(backend.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(target.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := testSupervisor()
+	logs, err := newAppLog(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &app{name: "test", cfg: appConfig{Host: "app.example"}, logs: logs}
+	a.proxy = s.newProxy(&app{name: "test", port: port})
+	s.apps["test"] = a
+	s.hosts["app.example"] = a
+
+	for _, path := range []string{"/hello?x=1", "/missing"} {
+		req := httptest.NewRequest(http.MethodGet, "http://app.example"+path, nil)
+		req.Host = "app.example"
+		rec := httptest.NewRecorder()
+		s.handleProxy(rec, req)
+	}
+
+	entries, err := logs.tail(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("logged %d requests, want 2: %+v", len(entries), entries)
+	}
+	if entries[0].Level != "info" || !strings.HasPrefix(entries[0].Message, "GET /hello?x=1 200 ") {
+		t.Errorf("first entry = %+v, want an info access line for GET /hello?x=1 200", entries[0])
+	}
+	if entries[1].Level != "info" || !strings.HasPrefix(entries[1].Message, "GET /missing 404 ") {
+		t.Errorf("second entry = %+v, want an info access line for GET /missing 404", entries[1])
+	}
+}
+
+func TestFormatProxyDuration(t *testing.T) {
+	cases := []struct {
+		elapsed time.Duration
+		want    string
+	}{
+		{500 * time.Microsecond, "500µs"},
+		{1500 * time.Microsecond, "1.5ms"},
+		{2500 * time.Millisecond, "2.50s"},
+	}
+	for _, tc := range cases {
+		if got := formatProxyDuration(tc.elapsed); got != tc.want {
+			t.Errorf("formatProxyDuration(%s) = %q, want %q", tc.elapsed, got, tc.want)
+		}
+	}
+}
