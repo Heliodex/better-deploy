@@ -1165,181 +1165,175 @@ onMount((): (() => void) => {
 							id="app-panel-backups"
 							role="tabpanel"
 						>
-							<section
-								aria-labelledby="backups-title"
-								class="flex flex-col gap-3 border border-line-soft bg-surface p-2"
-							>
-								<div class="flex items-center justify-between gap-2">
-									<h3
-										class="text-xs font-semibold tracking-wide text-neutral-400 uppercase"
-										id="backups-title"
+							<div class="flex items-center justify-between gap-2">
+								<h3
+									class="text-xs font-semibold tracking-wide text-neutral-400 uppercase"
+									id="backups-title"
+								>
+									Backups
+								</h3>
+								<span class="text-xs text-neutral-500">
+									{backupList.length}
+									{backupList.length === 1 ? "snapshot" : "snapshots"}
+								</span>
+							</div>
+
+							<form class="flex flex-wrap items-end gap-3" onsubmit={saveBackupConfig}>
+								<label class="flex items-center gap-2 pb-1.5 text-sm">
+									<input
+										aria-label="Automatic backups"
+										class="accent-primary-500"
+										type="checkbox"
+										bind:checked={backupSettings.enabled}
 									>
-										Backups
-									</h3>
-									<span class="text-xs text-neutral-500">
-										{backupList.length}
-										{backupList.length === 1 ? "snapshot" : "snapshots"}
-									</span>
-								</div>
+									Automatic backups
+								</label>
+								<label class="flex flex-col gap-1">
+									<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Every</span>
+									<input
+										aria-label="Backup interval"
+										class="field w-24"
+										placeholder="24h"
+										bind:value={backupSettings.every}
+									>
+								</label>
+								<label class="flex flex-col gap-1">
+									<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Keep</span>
+									<input
+										aria-label="Backups to keep"
+										class="field w-20"
+										max={100}
+										min={1}
+										type="number"
+										bind:value={backupSettings.keep}
+									>
+								</label>
+								<button class="btn" disabled={savingBackups} type="submit">
+									{savingBackups ? "Saving…" : "Save"}
+								</button>
+							</form>
 
-								<form class="flex flex-wrap items-end gap-3" onsubmit={saveBackupConfig}>
-									<label class="flex items-center gap-2 pb-1.5 text-sm">
-										<input
-											aria-label="Automatic backups"
-											class="accent-primary-500"
-											type="checkbox"
-											bind:checked={backupSettings.enabled}
-										>
-										Automatic backups
-									</label>
-									<label class="flex flex-col gap-1">
-										<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Every</span>
-										<input
-											aria-label="Backup interval"
-											class="field w-24"
-											placeholder="24h"
-											bind:value={backupSettings.every}
-										>
-									</label>
-									<label class="flex flex-col gap-1">
-										<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Keep</span>
-										<input
-											aria-label="Backups to keep"
-											class="field w-20"
-											max={100}
-											min={1}
-											type="number"
-											bind:value={backupSettings.keep}
-										>
-									</label>
-									<button class="btn" disabled={savingBackups} type="submit">
-										{savingBackups ? "Saving…" : "Save"}
-									</button>
-								</form>
+							<p class="text-xs text-neutral-500">
+								Snapshots use SQLite's online backup, so the app keeps serving while one is taken.
+							</p>
 
-								<p class="text-xs text-neutral-500">
-									Snapshots use SQLite's online backup, so the app keeps serving while one is taken.
+							{#if backupsError}
+								<p
+									class="border border-red-500/80 bg-red-500/10 px-2 py-1 text-sm text-red-400"
+									role="alert"
+								>
+									{backupsError}
 								</p>
+							{/if}
 
-								{#if backupsError}
-									<p
-										class="border border-red-500/80 bg-red-500/10 px-2 py-1 text-sm text-red-400"
-										role="alert"
-									>
-										{backupsError}
+							{#if backupList.length === 0}
+								<div class="flex flex-col items-start gap-2">
+									<p class="text-sm text-neutral-500">
+										{backupsLoading
+											? "Loading backups…"
+											: backupDatabase
+												? "No backups yet."
+												: "No database yet. One is created the first time the app uses storage."}
 									</p>
-								{/if}
+									{#if backupDatabase}
+										<button
+											class="btn btn-primary"
+											disabled={backingUp}
+											onclick={backupNow}
+											title="Snapshot the live database"
+											type="button"
+										>
+											{backingUp ? "Backing up…" : "Back up current state"}
+										</button>
+									{/if}
+								</div>
+							{:else}
+								<BackupTree
+									backups={backupList}
+									current={backupCurrent}
+									onselect={selectBackup}
+									selected={selectedBackup}
+								/>
 
-								{#if backupList.length === 0}
-									<div class="flex flex-col items-start gap-2">
-										<p class="text-sm text-neutral-500">
-											{backupsLoading
-												? "Loading backups…"
-												: backupDatabase
-													? "No backups yet."
-													: "No database yet. One is created the first time the app uses storage."}
+								{#if selectedBackupInfo}
+									<div class="flex flex-col gap-2 border-t border-line-soft pt-2">
+										<div class="flex flex-wrap items-center gap-2">
+											<h4 class="text-sm font-semibold">
+												{formatTime(selectedBackupInfo.createdAt)}
+											</h4>
+											<span
+												class="border border-line px-1 text-[10px] tracking-wide text-neutral-400 uppercase"
+											>
+												{backupKindLabel(selectedBackupInfo.kind)}
+											</span>
+											{#if selectedBackup === backupCurrent}
+												<span
+													class="border border-primary-500/40 bg-primary-500/10 px-1 text-[10px] tracking-wide text-primary-300 uppercase"
+												>
+													Current
+												</span>
+											{/if}
+										</div>
+
+										<dl class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-3">
+											<div>
+												<dt class="text-neutral-500">Size</dt>
+												<dd class="tabular-nums">{formatSize(selectedBackupInfo.size)}</dd>
+											</div>
+											<div>
+												<dt class="text-neutral-500">After</dt>
+												<dd>
+													{selectedBackupParent
+														? formatTime(selectedBackupParent.createdAt)
+														: "Start of tree"}
+												</dd>
+											</div>
+											<div>
+												<dt class="text-neutral-500">Children</dt>
+												<dd class="tabular-nums">{selectedBackupChildren}</dd>
+											</div>
+										</dl>
+
+										<p class="text-xs text-neutral-500">
+											{#if selectedBackup === backupCurrent}
+												The live database follows this snapshot, so a new backup continues this
+												branch.
+											{:else}
+												Reverting replaces the live database, and the next backup becomes a new
+												branch from this snapshot.
+											{/if}
 										</p>
-										{#if backupDatabase}
+
+										<div class="flex flex-wrap items-center gap-2">
 											<button
 												class="btn btn-primary"
 												disabled={backingUp}
 												onclick={backupNow}
-												title="Snapshot the live database"
+												title="Snapshot the live database; the snapshot continues from the current node"
 												type="button"
 											>
 												{backingUp ? "Backing up…" : "Back up current state"}
 											</button>
-										{/if}
-									</div>
-								{:else}
-									<BackupTree
-										backups={backupList}
-										current={backupCurrent}
-										onselect={selectBackup}
-										selected={selectedBackup}
-									/>
-
-									{#if selectedBackupInfo}
-										<div class="flex flex-col gap-2 border-t border-line-soft pt-2">
-											<div class="flex flex-wrap items-center gap-2">
-												<h4 class="text-sm font-semibold">
-													{formatTime(selectedBackupInfo.createdAt)}
-												</h4>
-												<span
-													class="border border-line px-1 text-[10px] tracking-wide text-neutral-400 uppercase"
-												>
-													{backupKindLabel(selectedBackupInfo.kind)}
-												</span>
-												{#if selectedBackup === backupCurrent}
-													<span
-														class="border border-primary-500/40 bg-primary-500/10 px-1 text-[10px] tracking-wide text-primary-300 uppercase"
-													>
-														Current
-													</span>
-												{/if}
-											</div>
-
-											<dl class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-3">
-												<div>
-													<dt class="text-neutral-500">Size</dt>
-													<dd class="tabular-nums">{formatSize(selectedBackupInfo.size)}</dd>
-												</div>
-												<div>
-													<dt class="text-neutral-500">After</dt>
-													<dd>
-														{selectedBackupParent
-															? formatTime(selectedBackupParent.createdAt)
-															: "Start of tree"}
-													</dd>
-												</div>
-												<div>
-													<dt class="text-neutral-500">Children</dt>
-													<dd class="tabular-nums">{selectedBackupChildren}</dd>
-												</div>
-											</dl>
-
-											<p class="text-xs text-neutral-500">
-												{#if selectedBackup === backupCurrent}
-													The live database follows this snapshot, so a new backup continues
-													this branch.
-												{:else}
-													Reverting replaces the live database, and the next backup becomes a
-													new branch from this snapshot.
-												{/if}
-											</p>
-
-											<div class="flex flex-wrap items-center gap-2">
+											{#if selectedBackupInfo.name !== backupCurrent}
 												<button
-													class="btn btn-primary"
-													disabled={backingUp}
-													onclick={backupNow}
-													title="Snapshot the live database; the snapshot continues from the current node"
+													class={confirmRestore === selectedBackupInfo.name
+														? "btn btn-danger"
+														: "btn"}
+													disabled={restoringBackup !== null}
+													onclick={(): Promise<void> => revertBackup(selectedBackupInfo.name)}
 													type="button"
 												>
-													{backingUp ? "Backing up…" : "Back up current state"}
+													{restoringBackup === selectedBackupInfo.name
+														? "Reverting…"
+														: confirmRestore === selectedBackupInfo.name
+															? "Click again to confirm"
+															: "Revert to this snapshot"}
 												</button>
-												{#if selectedBackupInfo.name !== backupCurrent}
-													<button
-														class={confirmRestore === selectedBackupInfo.name
-															? "btn btn-danger"
-															: "btn"}
-														disabled={restoringBackup !== null}
-														onclick={(): Promise<void> =>
-															revertBackup(selectedBackupInfo.name)}
-														type="button"
-													>
-														{restoringBackup === selectedBackupInfo.name
-															? "Reverting…"
-															: confirmRestore === selectedBackupInfo.name
-																? "Click again to confirm"
-																: "Revert to this snapshot"}
-													</button>
-												{/if}
-											</div>
+											{/if}
 										</div>
-									{/if}
+									</div>
 								{/if}
-							</section>
+							{/if}
 							{#if actionMessage}
 								<p
 									class="border border-primary-500/40 bg-primary-500/10 px-2 py-1 text-sm text-primary-300"
@@ -1355,161 +1349,148 @@ onMount((): (() => void) => {
 							id="app-panel-database"
 							role="tabpanel"
 						>
-							<section
-								aria-labelledby="database-title"
-								class="flex flex-col gap-3 border border-line-soft bg-surface p-2"
-							>
-								<div class="flex flex-wrap items-center justify-between gap-2">
-									<div class="flex items-center gap-2">
-										<h3
-											class="text-xs font-semibold tracking-wide text-neutral-400 uppercase"
-											id="database-title"
-										>
-											Database
-										</h3>
-										<span class="text-xs text-neutral-500">
-											{databaseTables.length}
-											{databaseTables.length === 1 ? "table" : "tables"}
+							<div class="flex flex-wrap items-center justify-between gap-2">
+								<div class="flex items-center gap-2">
+									<h3
+										class="text-xs font-semibold tracking-wide text-neutral-400 uppercase"
+										id="database-title"
+									>
+										Database
+									</h3>
+									<span class="text-xs text-neutral-500">
+										{databaseTables.length}
+										{databaseTables.length === 1 ? "table" : "tables"}
+									</span>
+								</div>
+								<button class="btn" disabled={databaseLoading} onclick={reloadDatabase} type="button">
+									{databaseLoading ? "Refreshing…" : "Refresh"}
+								</button>
+							</div>
+
+							{#if databaseError}
+								<p
+									class="border border-red-500/80 bg-red-500/10 px-2 py-1 text-sm text-red-400"
+									role="alert"
+								>
+									{databaseError}
+								</p>
+							{/if}
+
+							{#if databaseLoading}
+								<p class="text-sm text-neutral-500">Loading database…</p>
+							{:else if !databaseExists}
+								<p class="text-sm text-neutral-500">
+									No database yet. One is created the first time the app uses storage.
+								</p>
+							{:else if databaseTables.length === 0}
+								<p class="text-sm text-neutral-500">The database has no tables yet.</p>
+							{:else}
+								<div class="flex flex-wrap items-end gap-3">
+									<label class="flex flex-col gap-1">
+										<span class="text-[10px] tracking-wide text-neutral-500 uppercase">
+											Table
 										</span>
-									</div>
+										<select
+											aria-label="Table"
+											class="field"
+											onchange={selectDatabaseTable}
+											value={databaseTable ?? ""}
+										>
+											{#each databaseTables as table (table)}
+												<option value={table}>{table}</option>
+											{/each}
+										</select>
+									</label>
+									<label class="flex flex-col gap-1">
+										<span class="text-[10px] tracking-wide text-neutral-500 uppercase"> Rows </span>
+										<select
+											aria-label="Rows per page"
+											class="field"
+											onchange={changeDatabaseLimit}
+											value={databaseLimit}
+										>
+											{#each [25, 50, 100] as limit (limit)}
+												<option value={limit}>{limit}</option>
+											{/each}
+										</select>
+									</label>
+									<span class="pb-1.5 text-xs text-neutral-500 tabular-nums">
+										{#if databaseRows && databaseRows.rows.length > 0}
+											{databaseRows.offset + 1}–{databaseRows.offset + databaseRows.rows.length}
+											of {databaseRows.total}
+										{:else if databaseRows}
+											0 of {databaseRows.total}
+										{:else}
+											…
+										{/if}
+									</span>
+									<span class="flex-1"></span>
 									<button
 										class="btn"
-										disabled={databaseLoading}
-										onclick={reloadDatabase}
+										disabled={databaseRowsLoading || databaseOffset === 0}
+										onclick={(): void => databasePage(-1)}
 										type="button"
 									>
-										{databaseLoading ? "Refreshing…" : "Refresh"}
+										Previous
+									</button>
+									<button
+										class="btn"
+										disabled={databaseRowsLoading
+											|| !databaseRows?.truncated
+											|| (databaseRows?.rows.length ?? 0) === 0}
+										onclick={(): void => databasePage(1)}
+										type="button"
+									>
+										Next
 									</button>
 								</div>
 
-								{#if databaseError}
-									<p
-										class="border border-red-500/80 bg-red-500/10 px-2 py-1 text-sm text-red-400"
-										role="alert"
-									>
-										{databaseError}
-									</p>
-								{/if}
-
-								{#if databaseLoading}
-									<p class="text-sm text-neutral-500">Loading database…</p>
-								{:else if !databaseExists}
-									<p class="text-sm text-neutral-500">
-										No database yet. One is created the first time the app uses storage.
-									</p>
-								{:else if databaseTables.length === 0}
-									<p class="text-sm text-neutral-500">The database has no tables yet.</p>
-								{:else}
-									<div class="flex flex-wrap items-end gap-3">
-										<label class="flex flex-col gap-1">
-											<span class="text-[10px] tracking-wide text-neutral-500 uppercase">
-												Table
-											</span>
-											<select
-												aria-label="Table"
-												class="field"
-												onchange={selectDatabaseTable}
-												value={databaseTable ?? ""}
+								{#if databaseRowsLoading}
+									<p class="text-sm text-neutral-500">Loading rows…</p>
+								{:else if databaseRows}
+									<div class="overflow-x-auto border border-line-soft">
+										<table class="w-full border-collapse text-left text-xs">
+											<thead
+												class="bg-surface-raised text-[10px] tracking-wide text-neutral-500 uppercase"
 											>
-												{#each databaseTables as table (table)}
-													<option value={table}>{table}</option>
-												{/each}
-											</select>
-										</label>
-										<label class="flex flex-col gap-1">
-											<span class="text-[10px] tracking-wide text-neutral-500 uppercase">
-												Rows
-											</span>
-											<select
-												aria-label="Rows per page"
-												class="field"
-												onchange={changeDatabaseLimit}
-												value={databaseLimit}
-											>
-												{#each [25, 50, 100] as limit (limit)}
-													<option value={limit}>{limit}</option>
-												{/each}
-											</select>
-										</label>
-										<span class="pb-1.5 text-xs text-neutral-500 tabular-nums">
-											{#if databaseRows && databaseRows.rows.length > 0}
-												{databaseRows.offset + 1}–{databaseRows.offset
-													+ databaseRows.rows.length}
-												of {databaseRows.total}
-											{:else if databaseRows}
-												0 of {databaseRows.total}
-											{:else}
-												…
-											{/if}
-										</span>
-										<span class="flex-1"></span>
-										<button
-											class="btn"
-											disabled={databaseRowsLoading || databaseOffset === 0}
-											onclick={(): void => databasePage(-1)}
-											type="button"
-										>
-											Previous
-										</button>
-										<button
-											class="btn"
-											disabled={databaseRowsLoading
-												|| !databaseRows?.truncated
-												|| (databaseRows?.rows.length ?? 0) === 0}
-											onclick={(): void => databasePage(1)}
-											type="button"
-										>
-											Next
-										</button>
-									</div>
-
-									{#if databaseRowsLoading}
-										<p class="text-sm text-neutral-500">Loading rows…</p>
-									{:else if databaseRows}
-										<div class="overflow-x-auto border border-line-soft">
-											<table class="w-full border-collapse text-left text-xs">
-												<thead
-													class="bg-surface-raised text-[10px] tracking-wide text-neutral-500 uppercase"
-												>
+												<tr>
+													{#each databaseRows.columns as column (column)}
+														<th class="px-2 py-1 font-normal whitespace-nowrap">
+															{column}
+														</th>
+													{/each}
+												</tr>
+											</thead>
+											<tbody>
+												{#if databaseRows.rows.length === 0}
 													<tr>
-														{#each databaseRows.columns as column (column)}
-															<th class="px-2 py-1 font-normal whitespace-nowrap">
-																{column}
-															</th>
-														{/each}
+														<td
+															class="px-2 py-2 text-neutral-500"
+															colspan={Math.max(databaseRows.columns.length, 1)}
+														>
+															No rows.
+														</td>
 													</tr>
-												</thead>
-												<tbody>
-													{#if databaseRows.rows.length === 0}
-														<tr>
-															<td
-																class="px-2 py-2 text-neutral-500"
-																colspan={Math.max(databaseRows.columns.length, 1)}
-															>
-																No rows.
-															</td>
+												{:else}
+													{#each databaseRows.rows as row, rowIndex (rowIndex)}
+														<tr class="border-t border-line-soft">
+															{#each row as cell, cellIndex (cellIndex)}
+																{const text = formatDatabaseValue(cell)}
+																<td
+																	class="max-w-80 truncate px-2 py-1 font-mono text-neutral-300"
+																	title={text}
+																>
+																	{text}
+																</td>
+															{/each}
 														</tr>
-													{:else}
-														{#each databaseRows.rows as row, rowIndex (rowIndex)}
-															<tr class="border-t border-line-soft">
-																{#each row as cell, cellIndex (cellIndex)}
-																	{const text = formatDatabaseValue(cell)}
-																	<td
-																		class="max-w-80 truncate px-2 py-1 font-mono text-neutral-300"
-																		title={text}
-																	>
-																		{text}
-																	</td>
-																{/each}
-															</tr>
-														{/each}
-													{/if}
-												</tbody>
-											</table>
-										</div>
-									{/if}
+													{/each}
+												{/if}
+											</tbody>
+										</table>
+									</div>
 								{/if}
-							</section>
+							{/if}
 						</div>
 					{/if}
 				{:else if error}
