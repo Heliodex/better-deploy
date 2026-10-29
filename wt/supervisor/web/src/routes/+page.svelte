@@ -700,12 +700,12 @@ function onLogsSeparatorKeydown(event: KeyboardEvent): void {
 	logsHeight = clampLogsHeight(logsHeight + (event.key === "ArrowUp" ? step : -step))
 }
 
-/** Move between tabs with the arrow keys (and Home/End), as expected of an ARIA tablist. */
+/** Move between tabs with the arrow keys (and Home/End), as expected of an ARIA tablist. Both axes work because the tablist is vertical on desktop and can wrap on narrow screens. */
 function onTabKeydown(event: KeyboardEvent): void {
 	let next: number | null = null
 	const index = tabs.indexOf(tab)
-	if (event.key === "ArrowRight") next = (index + 1) % tabs.length
-	else if (event.key === "ArrowLeft") next = (index - 1 + tabs.length) % tabs.length
+	if (event.key === "ArrowDown" || event.key === "ArrowRight") next = (index + 1) % tabs.length
+	else if (event.key === "ArrowUp" || event.key === "ArrowLeft") next = (index - 1 + tabs.length) % tabs.length
 	else if (event.key === "Home") next = 0
 	else if (event.key === "End") next = tabs.length - 1
 	if (next === null) return
@@ -989,6 +989,73 @@ onMount((): (() => void) => {
 						</ul>
 					{/if}
 				</div>
+				{#if selected}
+					<div
+						aria-label="{selected} sections"
+						aria-orientation="vertical"
+						class="flex shrink-0 flex-col border-t border-line"
+						role="tablist"
+						bind:this={tablistEl}
+					>
+						<h2 class="px-3 py-2 text-xs font-semibold tracking-wide text-neutral-400 uppercase">
+							Sections
+						</h2>
+						<button
+							aria-controls="app-panel-overview"
+							aria-selected={tab === "overview"}
+							class={[
+								"flex w-full items-center border-b border-l-2 border-line-soft px-3 py-1.5 text-left text-sm transition-colors last:border-b-0",
+								tab === "overview"
+									? "cursor-default border-l-primary-500 bg-neutral-800/40 text-primary-300"
+									: "border-l-transparent text-neutral-400 hover:bg-neutral-800/40 hover:text-neutral-200",
+							]}
+							id="app-tab-overview"
+							onclick={() => openTab("overview")}
+							onkeydown={onTabKeydown}
+							role="tab"
+							tabindex={tab === "overview" ? 0 : -1}
+							type="button"
+						>
+							Overview
+						</button>
+						<button
+							aria-controls="app-panel-backups"
+							aria-selected={tab === "backups"}
+							class={[
+								"flex w-full items-center border-b border-l-2 border-line-soft px-3 py-1.5 text-left text-sm transition-colors last:border-b-0",
+								tab === "backups"
+									? "cursor-default border-l-primary-500 bg-neutral-800/40 text-primary-300"
+									: "border-l-transparent text-neutral-400 hover:bg-neutral-800/40 hover:text-neutral-200",
+							]}
+							id="app-tab-backups"
+							onclick={() => openTab("backups")}
+							onkeydown={onTabKeydown}
+							role="tab"
+							tabindex={tab === "backups" ? 0 : -1}
+							type="button"
+						>
+							Backups
+						</button>
+						<button
+							aria-controls="app-panel-database"
+							aria-selected={tab === "database"}
+							class={[
+								"flex w-full items-center border-b border-l-2 border-line-soft px-3 py-1.5 text-left text-sm transition-colors last:border-b-0",
+								tab === "database"
+									? "cursor-default border-l-primary-500 bg-neutral-800/40 text-primary-300"
+									: "border-l-transparent text-neutral-400 hover:bg-neutral-800/40 hover:text-neutral-200",
+							]}
+							id="app-tab-database"
+							onclick={() => openTab("database")}
+							onkeydown={onTabKeydown}
+							role="tab"
+							tabindex={tab === "database" ? 0 : -1}
+							type="button"
+						>
+							Database
+						</button>
+					</div>
+				{/if}
 				<footer class="shrink-0 border-t border-line px-3 py-2">
 					<button class="btn w-full" onclick={forget} type="button">Forget token</button>
 				</footer>
@@ -1033,68 +1100,6 @@ onMount((): (() => void) => {
 							{restarting ? "Restarting…" : confirmRestart ? "Click again to confirm" : "Restart"}
 						</button>
 					</header>
-
-					<div
-						aria-label="{selected} sections"
-						class="flex shrink-0 border-b border-line-soft bg-surface"
-						role="tablist"
-						bind:this={tablistEl}
-					>
-						<button
-							aria-controls="app-panel-overview"
-							aria-selected={tab === "overview"}
-							class={[
-								"-mb-px flex-1 cursor-pointer border-b-2 px-3 py-2 text-sm transition-colors",
-								tab === "overview"
-									? "border-primary-500 bg-primary-500/5 font-medium text-primary-300"
-									: "border-transparent text-neutral-400 hover:bg-neutral-800/40 hover:text-neutral-200",
-							]}
-							id="app-tab-overview"
-							onclick={() => openTab("overview")}
-							onkeydown={onTabKeydown}
-							role="tab"
-							tabindex={tab === "overview" ? 0 : -1}
-							type="button"
-						>
-							Overview
-						</button>
-						<button
-							aria-controls="app-panel-backups"
-							aria-selected={tab === "backups"}
-							class={[
-								"-mb-px flex-1 cursor-pointer border-b-2 px-3 py-2 text-sm transition-colors",
-								tab === "backups"
-									? "border-primary-500 bg-primary-500/5 font-medium text-primary-300"
-									: "border-transparent text-neutral-400 hover:bg-neutral-800/40 hover:text-neutral-200",
-							]}
-							id="app-tab-backups"
-							onclick={() => openTab("backups")}
-							onkeydown={onTabKeydown}
-							role="tab"
-							tabindex={tab === "backups" ? 0 : -1}
-							type="button"
-						>
-							Backups
-						</button>
-						<button
-							aria-controls="app-panel-database"
-							aria-selected={tab === "database"}
-							class={[
-								"-mb-px flex-1 cursor-pointer border-b-2 px-3 py-2 text-sm transition-colors",
-								tab === "database"
-									? "border-primary-500 bg-primary-500/5 font-medium text-primary-300"
-									: "border-transparent text-neutral-400 hover:bg-neutral-800/40 hover:text-neutral-200",
-							]}
-							id="app-tab-database"
-							onclick={() => openTab("database")}
-							onkeydown={onTabKeydown}
-							role="tab"
-							tabindex={tab === "database" ? 0 : -1}
-							type="button"
-						>
-							Database
-						</button>
-					</div>
 
 					{#if tab === "overview"}
 						<div
