@@ -45,10 +45,15 @@ const FOLLOW_THRESHOLD = 24
 /** Thirty minutes at the supervisor's one-second sampling interval. */
 const MAX_HISTORY_POINTS = 1800
 
+const tabs = ["overview", "backups"] as const
+type Tab = (typeof tabs)[number]
+
 let token = $state<string | null>(null)
 let tokenInput = $state("")
 let apps = $state<AppInfo[]>([])
 let selected = $state<string | null>(null)
+let tab = $state<Tab>("overview")
+let tablistEl = $state<HTMLDivElement | null>(null)
 let detail = $state<AppInfo | null>(null)
 let logs = $state<LogEntry[]>([])
 let tail = $state(200)
@@ -526,6 +531,21 @@ function onLogsSeparatorKeydown(event: KeyboardEvent): void {
 	logsHeight = clampLogsHeight(logsHeight + (event.key === "ArrowUp" ? step : -step))
 }
 
+/** Move between tabs with the arrow keys (and Home/End), as expected of an ARIA tablist. */
+function onTabKeydown(event: KeyboardEvent): void {
+	let next: number | null = null
+	const index = tabs.indexOf(tab)
+	if (event.key === "ArrowRight") next = (index + 1) % tabs.length
+	else if (event.key === "ArrowLeft") next = (index - 1 + tabs.length) % tabs.length
+	else if (event.key === "Home") next = 0
+	else if (event.key === "End") next = tabs.length - 1
+	if (next === null) return
+	event.preventDefault()
+	const nextTab = tabs[next]
+	if (nextTab) tab = nextTab
+	tablistEl?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus()
+}
+
 /** The grip tracks the pointer along the separator, hinting where the drag will grab. */
 function moveGrip(event: PointerEvent): void {
 	const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect()
@@ -845,281 +865,347 @@ onMount((): (() => void) => {
 						</button>
 					</header>
 
-					<div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
-						{#if detail}
-							<dl class="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-4">
-								<div class="flex flex-col">
-									<dt class="text-xs tracking-wide text-neutral-500 uppercase">Host</dt>
-									<dd class="text-sm wrap-break-word">{detail.host}</dd>
-								</div>
-								<div class="flex flex-col">
-									<dt class="text-xs tracking-wide text-neutral-500 uppercase">Status</dt>
-									<dd class="text-sm">{detail.status}</dd>
-								</div>
-								<div class="flex flex-col">
-									<dt class="text-xs tracking-wide text-neutral-500 uppercase">Started</dt>
-									<dd class="text-sm">{formatTime(detail.startedAt)}</dd>
-								</div>
-								<div class="flex flex-col">
-									<dt class="text-xs tracking-wide text-neutral-500 uppercase">PID</dt>
-									<dd class="text-sm tabular-nums">{detail.pid ?? "–"}</dd>
-								</div>
-							</dl>
-
-							<section
-								aria-labelledby="resources-title"
-								class="flex flex-col gap-2 border border-line-soft bg-surface p-2"
-							>
-								<div class="flex items-center justify-between gap-2">
-									<h3
-										class="text-xs font-semibold tracking-wide text-neutral-400 uppercase"
-										id="resources-title"
-									>
-										Resources
-									</h3>
-									<select
-										aria-label="Resources timespan"
-										class="field px-1 py-0 text-xs"
-										bind:value={detailSpan}
-									>
-										{#each spans as option (option.seconds)}
-											<option value={option.seconds}>{option.label}</option>
-										{/each}
-									</select>
-								</div>
-								<div class="flex flex-col gap-4">
-									<ResourceChart
-										color="primary"
-										format={formatCPU}
-										label="CPU"
-										samples={resourceHistory}
-										span={detailSpan}
-										unit={1}
-										value={(sample: ResourceSample) => sample.cpuPercent}
-									/>
-									<ResourceChart
-										color="sky"
-										format={formatMemory}
-										label="Memory"
-										samples={resourceHistory}
-										span={detailSpan}
-										unit={1024 * 1024}
-										value={(sample: ResourceSample) => sample.memoryBytes}
-									/>
-								</div>
-							</section>
-						{/if}
-
-						<section
-							aria-labelledby="backups-title"
-							class="flex flex-col gap-3 border border-line-soft bg-surface p-2"
+					<div
+						aria-label="{selected} sections"
+						class="flex shrink-0 border-b border-line-soft bg-surface"
+						role="tablist"
+						bind:this={tablistEl}
+					>
+						<button
+							aria-controls="app-panel-overview"
+							aria-selected={tab === "overview"}
+							class={[
+								"-mb-px flex-1 cursor-pointer border-b-2 px-3 py-2 text-sm transition-colors",
+								tab === "overview"
+									? "border-primary-500 bg-primary-500/5 font-medium text-primary-300"
+									: "border-transparent text-neutral-400 hover:bg-neutral-800/40 hover:text-neutral-200",
+							]}
+							id="app-tab-overview"
+							onclick={() => (tab = "overview")}
+							onkeydown={onTabKeydown}
+							role="tab"
+							tabindex={tab === "overview" ? 0 : -1}
+							type="button"
 						>
-							<div class="flex items-center justify-between gap-2">
-								<h3
-									class="text-xs font-semibold tracking-wide text-neutral-400 uppercase"
-									id="backups-title"
-								>
-									Backups
-								</h3>
-								<span class="text-xs text-neutral-500">
-									{backupList.length}
-									{backupList.length === 1 ? "snapshot" : "snapshots"}
-								</span>
-							</div>
+							Overview
+						</button>
+						<button
+							aria-controls="app-panel-backups"
+							aria-selected={tab === "backups"}
+							class={[
+								"-mb-px flex-1 cursor-pointer border-b-2 px-3 py-2 text-sm transition-colors",
+								tab === "backups"
+									? "border-primary-500 bg-primary-500/5 font-medium text-primary-300"
+									: "border-transparent text-neutral-400 hover:bg-neutral-800/40 hover:text-neutral-200",
+							]}
+							id="app-tab-backups"
+							onclick={() => (tab = "backups")}
+							onkeydown={onTabKeydown}
+							role="tab"
+							tabindex={tab === "backups" ? 0 : -1}
+							type="button"
+						>
+							Backups
+						</button>
+					</div>
 
-							<form class="flex flex-wrap items-end gap-3" onsubmit={saveBackupConfig}>
-								<label class="flex items-center gap-2 pb-1.5 text-sm">
-									<input
-										aria-label="Automatic backups"
-										class="accent-primary-500"
-										type="checkbox"
-										bind:checked={backupSettings.enabled}
-									>
-									Automatic backups
+					{#if tab === "overview"}
+						<div
+							aria-labelledby="app-tab-overview"
+							class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4"
+							id="app-panel-overview"
+							role="tabpanel"
+						>
+							{#if detail}
+								<dl class="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-4">
+									<div class="flex flex-col">
+										<dt class="text-xs tracking-wide text-neutral-500 uppercase">Host</dt>
+										<dd class="text-sm wrap-break-word">{detail.host}</dd>
+									</div>
+									<div class="flex flex-col">
+										<dt class="text-xs tracking-wide text-neutral-500 uppercase">Status</dt>
+										<dd class="text-sm">{detail.status}</dd>
+									</div>
+									<div class="flex flex-col">
+										<dt class="text-xs tracking-wide text-neutral-500 uppercase">Started</dt>
+										<dd class="text-sm">{formatTime(detail.startedAt)}</dd>
+									</div>
+									<div class="flex flex-col">
+										<dt class="text-xs tracking-wide text-neutral-500 uppercase">PID</dt>
+										<dd class="text-sm tabular-nums">{detail.pid ?? "–"}</dd>
+									</div>
+								</dl>
+
+								<section
+									aria-labelledby="resources-title"
+									class="flex flex-col gap-2 border border-line-soft bg-surface p-2"
+								>
+									<div class="flex items-center justify-between gap-2">
+										<h3
+											class="text-xs font-semibold tracking-wide text-neutral-400 uppercase"
+											id="resources-title"
+										>
+											Resources
+										</h3>
+										<select
+											aria-label="Resources timespan"
+											class="field px-1 py-0 text-xs"
+											bind:value={detailSpan}
+										>
+											{#each spans as option (option.seconds)}
+												<option value={option.seconds}>{option.label}</option>
+											{/each}
+										</select>
+									</div>
+									<div class="flex flex-col gap-4">
+										<ResourceChart
+											color="primary"
+											format={formatCPU}
+											label="CPU"
+											samples={resourceHistory}
+											span={detailSpan}
+											unit={1}
+											value={(sample: ResourceSample) => sample.cpuPercent}
+										/>
+										<ResourceChart
+											color="sky"
+											format={formatMemory}
+											label="Memory"
+											samples={resourceHistory}
+											span={detailSpan}
+											unit={1024 * 1024}
+											value={(sample: ResourceSample) => sample.memoryBytes}
+										/>
+									</div>
+								</section>
+							{/if}
+
+							{#if actionMessage}
+								<p
+									class="border border-primary-500/40 bg-primary-500/10 px-2 py-1 text-sm text-primary-300"
+								>
+									{actionMessage}
+								</p>
+							{/if}
+
+							<form
+								class="flex flex-wrap items-center gap-2 border-t border-line-soft pt-4"
+								onsubmit={upload}
+							>
+								<label class="text-xs tracking-wide text-neutral-400 uppercase" for="bundle">
+									Deploy bundle
 								</label>
-								<label class="flex flex-col gap-1">
-									<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Every</span>
-									<input
-										aria-label="Backup interval"
-										class="field w-24"
-										placeholder="24h"
-										bind:value={backupSettings.every}
-									>
-								</label>
-								<label class="flex flex-col gap-1">
-									<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Keep</span>
-									<input
-										aria-label="Backups to keep"
-										class="field w-20"
-										max={100}
-										min={1}
-										type="number"
-										bind:value={backupSettings.keep}
-									>
-								</label>
-								<button class="btn" disabled={savingBackups} type="submit">
-									{savingBackups ? "Saving…" : "Save"}
+								<input
+									accept=".tar.gz, application/gzip"
+									class="field file:mr-2 file:cursor-pointer file:border-0 file:bg-neutral-800 file:px-2 file:py-0.5 file:text-sm file:text-neutral-200 file:transition-colors hover:file:bg-neutral-700"
+									id="bundle"
+									type="file"
+								>
+								<button class="btn btn-primary" disabled={deploying} type="submit">
+									{deploying ? "Deploying…" : "Deploy"}
 								</button>
 							</form>
 
-							<p class="text-xs text-neutral-500">
-								Snapshots use SQLite's online backup, so the app keeps serving while one is taken.
-							</p>
-
-							{#if backupsError}
+							{#if error}
 								<p
 									class="border border-red-500/80 bg-red-500/10 px-2 py-1 text-sm text-red-400"
 									role="alert"
 								>
-									{backupsError}
+									{error}
 								</p>
 							{/if}
-
-							{#if backupList.length === 0}
-								<div class="flex flex-col items-start gap-2">
-									<p class="text-sm text-neutral-500">
-										{backupsLoading
-											? "Loading backups…"
-											: backupDatabase
-												? "No backups yet."
-												: "No database yet. One is created the first time the app uses storage."}
-									</p>
-									{#if backupDatabase}
-										<button
-											class="btn btn-primary"
-											disabled={backingUp}
-											onclick={backupNow}
-											title="Snapshot the live database"
-											type="button"
-										>
-											{backingUp ? "Backing up…" : "Back up current state"}
-										</button>
-									{/if}
+						</div>
+					{:else}
+						<div
+							aria-labelledby="app-tab-backups"
+							class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4"
+							id="app-panel-backups"
+							role="tabpanel"
+						>
+							<section
+								aria-labelledby="backups-title"
+								class="flex flex-col gap-3 border border-line-soft bg-surface p-2"
+							>
+								<div class="flex items-center justify-between gap-2">
+									<h3
+										class="text-xs font-semibold tracking-wide text-neutral-400 uppercase"
+										id="backups-title"
+									>
+										Backups
+									</h3>
+									<span class="text-xs text-neutral-500">
+										{backupList.length}
+										{backupList.length === 1 ? "snapshot" : "snapshots"}
+									</span>
 								</div>
-							{:else}
-								<BackupTree
-									backups={backupList}
-									current={backupCurrent}
-									onselect={selectBackup}
-									selected={selectedBackup}
-								/>
 
-								{#if selectedBackupInfo}
-									<div class="flex flex-col gap-2 border-t border-line-soft pt-2">
-										<div class="flex flex-wrap items-center gap-2">
-											<h4 class="text-sm font-semibold">
-												{formatTime(selectedBackupInfo.createdAt)}
-											</h4>
-											<span
-												class="border border-line px-1 text-[10px] tracking-wide text-neutral-400 uppercase"
-											>
-												{backupKindLabel(selectedBackupInfo.kind)}
-											</span>
-											{#if selectedBackup === backupCurrent}
-												<span
-													class="border border-primary-500/40 bg-primary-500/10 px-1 text-[10px] tracking-wide text-primary-300 uppercase"
-												>
-													Current
-												</span>
-											{/if}
-										</div>
+								<form class="flex flex-wrap items-end gap-3" onsubmit={saveBackupConfig}>
+									<label class="flex items-center gap-2 pb-1.5 text-sm">
+										<input
+											aria-label="Automatic backups"
+											class="accent-primary-500"
+											type="checkbox"
+											bind:checked={backupSettings.enabled}
+										>
+										Automatic backups
+									</label>
+									<label class="flex flex-col gap-1">
+										<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Every</span>
+										<input
+											aria-label="Backup interval"
+											class="field w-24"
+											placeholder="24h"
+											bind:value={backupSettings.every}
+										>
+									</label>
+									<label class="flex flex-col gap-1">
+										<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Keep</span>
+										<input
+											aria-label="Backups to keep"
+											class="field w-20"
+											max={100}
+											min={1}
+											type="number"
+											bind:value={backupSettings.keep}
+										>
+									</label>
+									<button class="btn" disabled={savingBackups} type="submit">
+										{savingBackups ? "Saving…" : "Save"}
+									</button>
+								</form>
 
-										<dl class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-3">
-											<div>
-												<dt class="text-neutral-500">Size</dt>
-												<dd class="tabular-nums">{formatSize(selectedBackupInfo.size)}</dd>
-											</div>
-											<div>
-												<dt class="text-neutral-500">After</dt>
-												<dd>
-													{selectedBackupParent
-														? formatTime(selectedBackupParent.createdAt)
-														: "Start of tree"}
-												</dd>
-											</div>
-											<div>
-												<dt class="text-neutral-500">Children</dt>
-												<dd class="tabular-nums">{selectedBackupChildren}</dd>
-											</div>
-										</dl>
+								<p class="text-xs text-neutral-500">
+									Snapshots use SQLite's online backup, so the app keeps serving while one is taken.
+								</p>
 
-										<p class="text-xs text-neutral-500">
-											{#if selectedBackup === backupCurrent}
-												The live database follows this snapshot, so a new backup continues this
-												branch.
-											{:else}
-												Reverting replaces the live database, and the next backup becomes a new
-												branch from this snapshot.
-											{/if}
+								{#if backupsError}
+									<p
+										class="border border-red-500/80 bg-red-500/10 px-2 py-1 text-sm text-red-400"
+										role="alert"
+									>
+										{backupsError}
+									</p>
+								{/if}
+
+								{#if backupList.length === 0}
+									<div class="flex flex-col items-start gap-2">
+										<p class="text-sm text-neutral-500">
+											{backupsLoading
+												? "Loading backups…"
+												: backupDatabase
+													? "No backups yet."
+													: "No database yet. One is created the first time the app uses storage."}
 										</p>
-
-										<div class="flex flex-wrap items-center gap-2">
+										{#if backupDatabase}
 											<button
 												class="btn btn-primary"
 												disabled={backingUp}
 												onclick={backupNow}
-												title="Snapshot the live database; the snapshot continues from the current node"
+												title="Snapshot the live database"
 												type="button"
 											>
 												{backingUp ? "Backing up…" : "Back up current state"}
 											</button>
-											{#if selectedBackupInfo.name !== backupCurrent}
+										{/if}
+									</div>
+								{:else}
+									<BackupTree
+										backups={backupList}
+										current={backupCurrent}
+										onselect={selectBackup}
+										selected={selectedBackup}
+									/>
+
+									{#if selectedBackupInfo}
+										<div class="flex flex-col gap-2 border-t border-line-soft pt-2">
+											<div class="flex flex-wrap items-center gap-2">
+												<h4 class="text-sm font-semibold">
+													{formatTime(selectedBackupInfo.createdAt)}
+												</h4>
+												<span
+													class="border border-line px-1 text-[10px] tracking-wide text-neutral-400 uppercase"
+												>
+													{backupKindLabel(selectedBackupInfo.kind)}
+												</span>
+												{#if selectedBackup === backupCurrent}
+													<span
+														class="border border-primary-500/40 bg-primary-500/10 px-1 text-[10px] tracking-wide text-primary-300 uppercase"
+													>
+														Current
+													</span>
+												{/if}
+											</div>
+
+											<dl class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-3">
+												<div>
+													<dt class="text-neutral-500">Size</dt>
+													<dd class="tabular-nums">{formatSize(selectedBackupInfo.size)}</dd>
+												</div>
+												<div>
+													<dt class="text-neutral-500">After</dt>
+													<dd>
+														{selectedBackupParent
+															? formatTime(selectedBackupParent.createdAt)
+															: "Start of tree"}
+													</dd>
+												</div>
+												<div>
+													<dt class="text-neutral-500">Children</dt>
+													<dd class="tabular-nums">{selectedBackupChildren}</dd>
+												</div>
+											</dl>
+
+											<p class="text-xs text-neutral-500">
+												{#if selectedBackup === backupCurrent}
+													The live database follows this snapshot, so a new backup continues
+													this branch.
+												{:else}
+													Reverting replaces the live database, and the next backup becomes a
+													new branch from this snapshot.
+												{/if}
+											</p>
+
+											<div class="flex flex-wrap items-center gap-2">
 												<button
-													class={confirmRestore === selectedBackupInfo.name
-														? "btn btn-danger"
-														: "btn"}
-													disabled={restoringBackup !== null}
-													onclick={(): Promise<void> => revertBackup(selectedBackupInfo.name)}
+													class="btn btn-primary"
+													disabled={backingUp}
+													onclick={backupNow}
+													title="Snapshot the live database; the snapshot continues from the current node"
 													type="button"
 												>
-													{restoringBackup === selectedBackupInfo.name
-														? "Reverting…"
-														: confirmRestore === selectedBackupInfo.name
-															? "Click again to confirm"
-															: "Revert to this snapshot"}
+													{backingUp ? "Backing up…" : "Back up current state"}
 												</button>
-											{/if}
+												{#if selectedBackupInfo.name !== backupCurrent}
+													<button
+														class={confirmRestore === selectedBackupInfo.name
+															? "btn btn-danger"
+															: "btn"}
+														disabled={restoringBackup !== null}
+														onclick={(): Promise<void> =>
+															revertBackup(selectedBackupInfo.name)}
+														type="button"
+													>
+														{restoringBackup === selectedBackupInfo.name
+															? "Reverting…"
+															: confirmRestore === selectedBackupInfo.name
+																? "Click again to confirm"
+																: "Revert to this snapshot"}
+													</button>
+												{/if}
+											</div>
 										</div>
-									</div>
+									{/if}
 								{/if}
+							</section>
+							{#if actionMessage}
+								<p
+									class="border border-primary-500/40 bg-primary-500/10 px-2 py-1 text-sm text-primary-300"
+								>
+									{actionMessage}
+								</p>
 							{/if}
-						</section>
-
-						{#if actionMessage}
-							<p
-								class="border border-primary-500/40 bg-primary-500/10 px-2 py-1 text-sm text-primary-300"
-							>
-								{actionMessage}
-							</p>
-						{/if}
-
-						<form
-							class="flex flex-wrap items-center gap-2 border-t border-line-soft pt-4"
-							onsubmit={upload}
-						>
-							<label class="text-xs tracking-wide text-neutral-400 uppercase" for="bundle">
-								Deploy bundle
-							</label>
-							<input
-								accept=".tar.gz, application/gzip"
-								class="field file:mr-2 file:cursor-pointer file:border-0 file:bg-neutral-800 file:px-2 file:py-0.5 file:text-sm file:text-neutral-200 file:transition-colors hover:file:bg-neutral-700"
-								id="bundle"
-								type="file"
-							>
-							<button class="btn btn-primary" disabled={deploying} type="submit">
-								{deploying ? "Deploying…" : "Deploy"}
-							</button>
-						</form>
-
-						{#if error}
-							<p
-								class="border border-red-500/80 bg-red-500/10 px-2 py-1 text-sm text-red-400"
-								role="alert"
-							>
-								{error}
-							</p>
-						{/if}
-					</div>
+						</div>
+					{/if}
 				{:else if error}
 					<div class="p-4">
 						<p class="border border-red-500/80 bg-red-500/10 px-2 py-1 text-sm text-red-400" role="alert">
