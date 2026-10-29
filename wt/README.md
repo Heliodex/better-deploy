@@ -239,7 +239,7 @@ PUT  /apps/<name>/backups/config                   {"enabled": true, "every": "2
 POST /apps/<name>/backups/<file>/restore           replace the live database
 ```
 
-`every` is a Go duration between `1m` and `720h`, and `keep` is between 1 and 100. A manual snapshot works even when automatic backups are disabled. A restore validates the snapshot with SQLite's `quick_check` first, then copies it through the online backup API; connections stay open, but any writes made after the snapshot are lost.
+`every` is a Go duration between `1m` and `720h`, and `keep` is between 1 and 100. A manual snapshot works even when automatic backups are disabled. A restore validates the snapshot with SQLite's `quick_check` first, then copies it through the online backup API; connections stay open, but any writes made after the snapshot are lost. Responses include each snapshot's `parent`, its `kind` (`auto`, `manual`, or empty for one from before the tree index) and the `current` snapshot the live database follows.
 
 ## Bindings
 
