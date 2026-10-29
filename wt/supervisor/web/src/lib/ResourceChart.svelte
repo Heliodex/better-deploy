@@ -36,6 +36,11 @@ let peak = $derived(values.length > 0 ? Math.max(...values) : 0)
 let scale = $derived(tickScale(peak / unit, 1))
 let ticks = $derived(scale.ticks.map(tick => tick * unit))
 let maxValue = $derived(Math.max(scale.max * unit, 1))
+
+function yFor(value: number): number {
+	return height - padding - (value / maxValue) * (height - padding * 2)
+}
+
 let points = $derived.by(() => {
 	const first = visible.at(0)
 	const last = visible.at(-1)
@@ -44,8 +49,7 @@ let points = $derived.by(() => {
 	const range = Math.max(Date.parse(last.at) - firstAt, 1)
 	return visible.map(sample => {
 		const x = ((Date.parse(sample.at) - firstAt) / range) * (width - padding * 2) + padding
-		const y = height - padding - (value(sample) / maxValue) * (height - padding * 2)
-		return { x, y }
+		return { x, y: yFor(value(sample)) }
 	})
 })
 let line = $derived(
@@ -80,17 +84,12 @@ let fill = $derived(color === "primary" ? "fill-primary-500/10" : "fill-sky-500/
 		<div class="flex h-24 items-center justify-center text-xs text-neutral-500">Collecting samples…</div>
 	{:else}
 		<div class="flex gap-1.5">
+			<!-- Labels share the plot's y mapping so each sits centred on its gridline and the gaps between them stay even. -->
 			<div aria-hidden="true" class="relative h-24 w-12 shrink-0 text-xs text-neutral-500">
 				{#each ticks as tick (tick)}
-					{const percent = maxValue > 0 ? (tick / maxValue) * 100 : 0}
-					{const placement = percent <= 8 ? "bottom" : percent >= 92 ? "top" : "middle"}
 					<span
-						class="absolute right-0 tabular-nums {placement === "bottom"
-							? "bottom-0"
-							: placement === "top"
-								? "top-0"
-								: "-translate-y-1/2"}"
-						style={placement === "middle" ? `bottom: ${percent}%` : ""}
+						class="absolute right-0 -translate-y-1/2 tabular-nums"
+						style={`top: ${(yFor(tick) / height) * 100}%`}
 					>
 						{format(tick)}
 					</span>
@@ -110,8 +109,8 @@ let fill = $derived(color === "primary" ? "fill-primary-500/10" : "fill-sky-500/
 						vector-effect="non-scaling-stroke"
 						x1={padding}
 						x2={width - padding}
-						y1={height - padding - (tick / maxValue) * (height - padding * 2)}
-						y2={height - padding - (tick / maxValue) * (height - padding * 2)}
+						y1={yFor(tick)}
+						y2={yFor(tick)}
 					></line>
 				{/each}
 				<path class={fill} d={area}></path>

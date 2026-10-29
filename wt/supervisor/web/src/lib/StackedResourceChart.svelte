@@ -132,17 +132,12 @@ let spanLabel = $derived.by(() => {
 		<div class="flex h-24 items-center justify-center text-xs text-neutral-500">Collecting samples…</div>
 	{:else}
 		<div class="flex gap-1.5">
+			<!-- Labels share the plot's y mapping so each sits centred on its gridline and the gaps between them stay even. -->
 			<div aria-hidden="true" class="relative h-24 w-12 shrink-0 text-xs text-neutral-500">
 				{#each ticks as tick (tick)}
-					{const percent = maxValue > 0 ? (tick / maxValue) * 100 : 0}
-					{const placement = percent <= 8 ? "bottom" : percent >= 92 ? "top" : "middle"}
 					<span
-						class="absolute right-0 tabular-nums {placement === "bottom"
-							? "bottom-0"
-							: placement === "top"
-								? "top-0"
-								: "-translate-y-1/2"}"
-						style={placement === "middle" ? `bottom: ${percent}%` : ""}
+						class="absolute right-0 -translate-y-1/2 tabular-nums"
+						style={`top: ${(yFor(tick) / height) * 100}%`}
 					>
 						{format(tick)}
 					</span>
