@@ -43,18 +43,44 @@ const palette: PaletteEntry[] = [
 let ordered = $derived([...series].toSorted((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)))
 let colors = $derived(new Map(ordered.map((entry, index) => [entry.name, palette[index % palette.length]])))
 
+const spans = [
+	{ label: "1m", seconds: 60 },
+	{ label: "5m", seconds: 300 },
+	{ label: "15m", seconds: 900 },
+	{ label: "30m", seconds: 1800 },
+]
+
+let span = $state(300)
+
+/** Per-series samples inside the selected timespan, cut from the newest sample across all apps. */
+let visible = $derived.by(() => {
+	let lastAt = Number.NaN
+	for (const entry of ordered) {
+		const last = entry.samples.at(-1)
+		if (!last) continue
+		const at = Date.parse(last.at)
+		if (!Number.isNaN(at) && (Number.isNaN(lastAt) || at > lastAt)) lastAt = at
+	}
+	if (Number.isNaN(lastAt)) return ordered
+	const cutoff = lastAt - span * 1000
+	return ordered.map(entry => ({
+		name: entry.name,
+		samples: entry.samples.filter(sample => Date.parse(sample.at) >= cutoff),
+	}))
+})
+
 let timeline = $derived.by(() => {
 	const times = new Set<string>()
-	for (const entry of ordered)
+	for (const entry of visible)
 		for (const sample of entry.samples) if (!Number.isNaN(Date.parse(sample.at))) times.add(sample.at)
 
-	// Five minutes at the supervisor's one-second sampling interval.
-	return [...times].toSorted((a, b) => Date.parse(a) - Date.parse(b)).slice(-300)
+	// Thirty minutes at the supervisor's one-second sampling interval.
+	return [...times].toSorted((a, b) => Date.parse(a) - Date.parse(b)).slice(-1800)
 })
 
 let byTime = $derived.by(() => {
 	const maps = new Map<string, Map<string, number>>()
-	for (const entry of ordered) {
+	for (const entry of visible) {
 		const perSample = new Map<string, number>()
 		for (const sample of entry.samples) perSample.set(sample.at, value(sample))
 		maps.set(entry.name, perSample)
@@ -66,11 +92,11 @@ let stacked = $derived.by(() => {
 	if (ordered.length === 0 || timeline.length === 0) return []
 	const firstAt = Date.parse(timeline[0] ?? "")
 	const lastAt = Date.parse(timeline.at(-1) ?? "")
-	const span = Math.max(lastAt - firstAt, 1)
+	const range = Math.max(lastAt - firstAt, 1)
 	return timeline.map(at => {
 		const timestamp = Date.parse(at)
-		const x = ((timestamp - firstAt) / span) * (width - padding * 2) + padding
-		const values = ordered.map(entry => byTime.get(entry.name)?.get(at) ?? 0)
+		const x = ((timestamp - firstAt) / range) * (width - padding * 2) + padding
+		const values = visible.map(entry => byTime.get(entry.name)?.get(at) ?? 0)
 		return { at, values, x }
 	})
 })
@@ -119,7 +145,7 @@ let spanLabel = $derived.by(() => {
 })
 
 let currents = $derived(
-	ordered.map(entry => {
+	visible.map(entry => {
 		const { samples } = entry
 		const last = samples.at(-1)
 		return { current: last ? value(last) : 0, name: entry.name }
@@ -130,6 +156,11 @@ let currents = $derived(
 <div class="flex flex-col gap-1 border border-line-soft bg-surface p-2">
 	<div class="flex items-baseline justify-between gap-2">
 		<h3 class="text-xs font-semibold tracking-wide text-neutral-400 uppercase">{label}</h3>
+		<select aria-label={`${label} timespan`} class="field px-1 py-0 text-xs" bind:value={span}>
+			{#each spans as option (option.seconds)}
+				<option value={option.seconds}>{option.label}</option>
+			{/each}
+		</select>
 		<span class="text-sm tabular-nums">{format(currentTotal)}</span>
 	</div>
 	{#if stacked.length === 0}

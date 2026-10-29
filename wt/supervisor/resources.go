@@ -26,8 +26,8 @@ const clockTicks = 100
 const (
 	// resourceSampleInterval is how often the supervisor reads CPU and memory and how often open panels receive them.
 	resourceSampleInterval = time.Second
-	// resourceHistoryWindow is how much history the panel charts; at the sample interval this is 300 points.
-	resourceHistoryWindow = 5 * time.Minute
+	// resourceHistoryWindow is how much history the panel charts; at the sample interval this is 1800 points.
+	resourceHistoryWindow = 30 * time.Minute
 	resourceHistoryPoints = int(resourceHistoryWindow / resourceSampleInterval)
 )
 

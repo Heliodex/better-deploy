@@ -15,18 +15,37 @@ const width = 100
 const height = 40
 const padding = 2
 
-let values = $derived(samples.map(sample => value(sample)))
+const spans = [
+	{ label: "1m", seconds: 60 },
+	{ label: "5m", seconds: 300 },
+	{ label: "15m", seconds: 900 },
+	{ label: "30m", seconds: 1800 },
+]
+
+let span = $state(300)
+
+/** Samples inside the selected timespan, cut from the newest sample so the chart never empties while data exists. */
+let visible = $derived.by(() => {
+	const last = samples.at(-1)
+	if (!last) return []
+	const lastAt = Date.parse(last.at)
+	if (Number.isNaN(lastAt)) return samples
+	const cutoff = lastAt - span * 1000
+	return samples.filter(sample => Date.parse(sample.at) >= cutoff)
+})
+
+let values = $derived(visible.map(sample => value(sample)))
 let current = $derived(values.at(-1) ?? 0)
 let peak = $derived(values.length > 0 ? Math.max(...values) : 0)
 let maxValue = $derived(Math.max(peak, 1))
 let points = $derived.by(() => {
-	const first = samples.at(0)
-	const last = samples.at(-1)
+	const first = visible.at(0)
+	const last = visible.at(-1)
 	if (!first || !last) return []
 	const firstAt = Date.parse(first.at)
-	const span = Math.max(Date.parse(last.at) - firstAt, 1)
-	return samples.map(sample => {
-		const x = ((Date.parse(sample.at) - firstAt) / span) * (width - padding * 2) + padding
+	const range = Math.max(Date.parse(last.at) - firstAt, 1)
+	return visible.map(sample => {
+		const x = ((Date.parse(sample.at) - firstAt) / range) * (width - padding * 2) + padding
 		const y = height - padding - (value(sample) / maxValue) * (height - padding * 2)
 		return { x, y }
 	})
@@ -42,8 +61,8 @@ let area = $derived.by(() => {
 })
 let marker = $derived(points.length === 1 ? (points.at(0) ?? null) : null)
 let spanLabel = $derived.by(() => {
-	const first = samples.at(0)
-	const last = samples.at(-1)
+	const first = visible.at(0)
+	const last = visible.at(-1)
 	if (!first || !last) return ""
 	const seconds = Math.round((Date.parse(last.at) - Date.parse(first.at)) / 1000)
 	if (seconds <= 0) return "now"
@@ -57,6 +76,11 @@ let fill = $derived(color === "primary" ? "fill-primary-500/10" : "fill-sky-500/
 <div class="flex flex-col gap-1 border border-line-soft bg-surface p-2">
 	<div class="flex items-baseline justify-between gap-2">
 		<h3 class="text-xs font-semibold tracking-wide text-neutral-400 uppercase">{label}</h3>
+		<select aria-label={`${label} timespan`} class="field px-1 py-0 text-xs" bind:value={span}>
+			{#each spans as option (option.seconds)}
+				<option value={option.seconds}>{option.label}</option>
+			{/each}
+		</select>
 		<span class="text-sm tabular-nums">{format(current)}</span>
 	</div>
 	{#if points.length === 0}

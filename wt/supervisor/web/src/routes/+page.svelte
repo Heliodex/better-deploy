@@ -32,8 +32,8 @@ const MAX_LOGS = 600
 const MAX_LOG_LINES = 5000
 /** Treat the log view as "following" until the user scrolls this far from the bottom. */
 const FOLLOW_THRESHOLD = 24
-/** Five minutes at the supervisor's one-second sampling interval. */
-const MAX_HISTORY_POINTS = 300
+/** Thirty minutes at the supervisor's one-second sampling interval. */
+const MAX_HISTORY_POINTS = 1800
 
 let token = $state<string | null>(null)
 let tokenInput = $state("")
