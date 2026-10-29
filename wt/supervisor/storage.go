@@ -46,9 +46,10 @@ type storageServer struct {
 	listener     net.Listener
 	server       *http.Server
 
-	mu     sync.Mutex
-	tokens map[string]string // token -> app name
-	dbs    map[string]*sql.DB
+	mu       sync.Mutex
+	changeMu sync.Mutex
+	tokens   map[string]string // token -> app name
+	dbs      map[string]*sql.DB
 }
 
 type storageRequest struct {
@@ -420,6 +421,12 @@ func (s *storageServer) exec(w http.ResponseWriter, r *http.Request, app string)
 		writeStorageError(w, err)
 		return
 	}
+	s.logChanges(app, []storageChange{{
+		Time:         time.Now().UTC(),
+		SQL:          req.SQL,
+		Params:       req.Params,
+		RowsAffected: result.RowsAffected,
+	}})
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -476,6 +483,16 @@ func (s *storageServer) batch(w http.ResponseWriter, r *http.Request, app string
 		writeStorageError(w, err)
 		return
 	}
+	changes := make([]storageChange, len(req.Statements))
+	for i, statement := range req.Statements {
+		changes[i] = storageChange{
+			Time:         time.Now().UTC(),
+			SQL:          statement.SQL,
+			Params:       statement.Params,
+			RowsAffected: results[i].RowsAffected,
+		}
+	}
+	s.logChanges(app, changes)
 	writeJSON(w, http.StatusOK, storageBatchResponse{Results: results})
 }
 
