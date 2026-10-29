@@ -226,6 +226,21 @@ const databaseRowsSchema = object({
 
 export type DatabaseRows = InferOutput<typeof databaseRowsSchema>
 
+const storageChangeSchema = object({
+	params: array(unknownSchema()),
+	rowsAffected: pipe(number(), integer(), minValue(0)),
+	sql: pipe(string(), minLength(1)),
+	time: pipe(string(), minLength(1)),
+})
+
+export type StorageChange = InferOutput<typeof storageChangeSchema>
+
+const storageChangesResponseSchema = object({
+	changes: array(storageChangeSchema),
+})
+
+export type StorageChangesResult = InferOutput<typeof storageChangesResponseSchema>
+
 const logStreamSchema = union([
 	object({
 		logs: array(logEntrySchema),
@@ -316,4 +331,13 @@ export function fetchDatabaseRows(
 ): Promise<DatabaseRows> {
 	const query = new URLSearchParams({ limit: `${limit}`, offset: `${offset}`, table })
 	return request(`/apps/${encodeURIComponent(name)}/database/rows?${query}`, { token }, databaseRowsSchema)
+}
+
+export function fetchChanges(token: string, name: string, limit = 200): Promise<StorageChangesResult> {
+	const query = new URLSearchParams({ limit: `${limit}` })
+	return request(
+		`/apps/${encodeURIComponent(name)}/database/changes?${query}`,
+		{ token },
+		storageChangesResponseSchema,
+	)
 }

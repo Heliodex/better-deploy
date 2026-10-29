@@ -11,6 +11,7 @@ import {
 	fetchApp,
 	fetchApps,
 	fetchBackups,
+	fetchChanges,
 	fetchDatabase,
 	fetchDatabaseRows,
 	fetchResourceHistory,
@@ -22,6 +23,7 @@ import {
 	type ResourceSample,
 	restartApp,
 	restoreBackup,
+	type StorageChange,
 	saveBackupSettings,
 	setToken,
 	subscribe,
@@ -101,6 +103,9 @@ let databaseRowsLoading = $state(false)
 let databaseError = $state("")
 let databaseLimit = $state(50)
 let databaseOffset = $state(0)
+let changes = $state<StorageChange[]>([])
+let changesLoading = $state(false)
+let changesError = $state("")
 
 function uptime(startedAt: string): string {
 	const seconds = Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1000))
@@ -149,6 +154,10 @@ function formatDatabaseValue(value: unknown): string {
 		return `blob (${formatSize(bytes)})`
 	}
 	return JSON.stringify(value) ?? String(value)
+}
+
+function formatChangeParams(params: unknown[]): string {
+	return JSON.stringify(params) ?? "[]"
 }
 
 /** One supervisor access line, parsed from its `METHOD status duration path` shape. */
@@ -408,6 +417,9 @@ function resetDatabase(): void {
 	databaseRowsLoading = false
 	databaseError = ""
 	databaseOffset = 0
+	changes = []
+	changesLoading = false
+	changesError = ""
 }
 
 function openTab(next: Tab): void {
@@ -418,6 +430,7 @@ function openTab(next: Tab): void {
 async function loadDatabase(key: string, name: string): Promise<void> {
 	databaseLoading = true
 	databaseError = ""
+	void loadChanges(key, name)
 	try {
 		const overview = await fetchDatabase(key, name)
 		if (selected !== name) return
@@ -453,6 +466,20 @@ async function loadDatabaseRows(key: string, name: string, table: string, offset
 			databaseError = err instanceof Error ? err.message : "Could not load the table."
 	} finally {
 		if (selected === name && databaseTable === table) databaseRowsLoading = false
+	}
+}
+
+async function loadChanges(key: string, name: string): Promise<void> {
+	changesLoading = true
+	changesError = ""
+	try {
+		const { changes: nextChanges } = await fetchChanges(key, name)
+		if (selected !== name) return
+		changes = nextChanges
+	} catch (err) {
+		if (selected === name) changesError = err instanceof Error ? err.message : "Could not load changes."
+	} finally {
+		if (selected === name) changesLoading = false
 	}
 }
 
@@ -1491,6 +1518,62 @@ onMount((): (() => void) => {
 									</div>
 								{/if}
 							{/if}
+
+							<section
+								aria-labelledby="changes-title"
+								class="flex flex-col gap-2 border border-line-soft bg-surface p-2"
+							>
+								<div class="flex items-center justify-between gap-2">
+									<h3
+										class="text-xs font-semibold tracking-wide text-neutral-400 uppercase"
+										id="changes-title"
+									>
+										Change log
+									</h3>
+									<span class="text-xs text-neutral-500">{changes.length} recent</span>
+								</div>
+
+								{#if changesError}
+									<p
+										class="border border-red-500/80 bg-red-500/10 px-2 py-1 text-sm text-red-400"
+										role="alert"
+									>
+										{changesError}
+									</p>
+								{/if}
+
+								{#if changesLoading}
+									<p class="text-sm text-neutral-500">Loading changes…</p>
+								{:else if changes.length === 0}
+									<p class="text-sm text-neutral-500">No changes logged yet.</p>
+								{:else}
+									<ul class="flex flex-col">
+										{#each changes as change, index (index)}
+											<li
+												class="flex flex-col gap-1 border-t border-line-soft py-2 text-xs first:border-t-0 first:pt-0"
+											>
+												<div
+													class="flex flex-wrap items-center justify-between gap-2 text-neutral-500"
+												>
+													<time datetime={change.time}>{formatTime(change.time)}</time>
+													<span class="tabular-nums">
+														{change.rowsAffected}
+														{change.rowsAffected === 1 ? "row" : "rows"}
+													</span>
+												</div>
+												<code class="whitespace-pre-wrap wrap-break-word text-neutral-200">
+													{change.sql}
+												</code>
+												{#if change.params.length > 0}
+													<code class="whitespace-pre-wrap wrap-break-word text-neutral-500">
+														{formatChangeParams(change.params)}
+													</code>
+												{/if}
+											</li>
+										{/each}
+									</ul>
+								{/if}
+							</section>
 						</div>
 					{/if}
 				{:else if error}
