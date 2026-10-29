@@ -7,23 +7,15 @@ interface Props {
 	format(value: number): string
 	label: string
 	samples: ResourceSample[]
+	span: number
 	value(sample: ResourceSample): number
 }
 
-let { color, format, label, samples, value }: Props = $props()
+let { color, format, label, samples, span, value }: Props = $props()
 
 const width = 100
 const height = 40
 const padding = 2
-
-const spans = [
-	{ label: "1m", seconds: 60 },
-	{ label: "5m", seconds: 300 },
-	{ label: "15m", seconds: 900 },
-	{ label: "30m", seconds: 1800 },
-]
-
-let span = $state(300)
 
 /** Samples inside the selected timespan, cut from the newest sample so the chart never empties while data exists. */
 let visible = $derived.by(() => {
@@ -75,14 +67,9 @@ let stroke = $derived(color === "primary" ? "stroke-primary-400" : "stroke-sky-4
 let fill = $derived(color === "primary" ? "fill-primary-500/10" : "fill-sky-500/10")
 </script>
 
-<div class="flex flex-col gap-1 border border-line-soft bg-surface p-2">
+<div class="flex flex-col gap-1">
 	<div class="flex items-baseline justify-between gap-2">
 		<h3 class="text-xs font-semibold tracking-wide text-neutral-400 uppercase">{label}</h3>
-		<select aria-label={`${label} timespan`} class="field px-1 py-0 text-xs" bind:value={span}>
-			{#each spans as option (option.seconds)}
-				<option value={option.seconds}>{option.label}</option>
-			{/each}
-		</select>
 		<span class="text-sm tabular-nums">{format(current)}</span>
 	</div>
 	{#if points.length === 0}

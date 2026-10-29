@@ -1,5 +1,6 @@
 <script lang="ts">
 import type { ResourceSample } from "./api"
+import { palette } from "./chart"
 import { niceTicks } from "./ticks"
 
 interface Series {
@@ -11,47 +12,18 @@ interface Props {
 	format(value: number): string
 	label: string
 	series: Series[]
+	span: number
 	value(sample: ResourceSample): number
 }
 
-let { format, label, series, value }: Props = $props()
+let { format, label, series, span, value }: Props = $props()
 
 const width = 100
 const height = 40
 const padding = 2
 
-interface PaletteEntry {
-	dot: string
-	fill: string
-	stroke: string
-}
-
-// One entry per app, cycled when there are more apps than colours. Full literal
-// class names so Tailwind emits them.
-const palette: PaletteEntry[] = [
-	{ dot: "bg-emerald-400", fill: "fill-emerald-500/25", stroke: "stroke-emerald-400" },
-	{ dot: "bg-sky-400", fill: "fill-sky-500/25", stroke: "stroke-sky-400" },
-	{ dot: "bg-amber-400", fill: "fill-amber-500/25", stroke: "stroke-amber-400" },
-	{ dot: "bg-violet-400", fill: "fill-violet-500/25", stroke: "stroke-violet-400" },
-	{ dot: "bg-rose-400", fill: "fill-rose-500/25", stroke: "stroke-rose-400" },
-	{ dot: "bg-cyan-400", fill: "fill-cyan-500/25", stroke: "stroke-cyan-400" },
-	{ dot: "bg-lime-400", fill: "fill-lime-500/25", stroke: "stroke-lime-400" },
-	{ dot: "bg-orange-400", fill: "fill-orange-500/25", stroke: "stroke-orange-400" },
-	{ dot: "bg-fuchsia-400", fill: "fill-fuchsia-500/25", stroke: "stroke-fuchsia-400" },
-	{ dot: "bg-teal-400", fill: "fill-teal-500/25", stroke: "stroke-teal-400" },
-]
-
 let ordered = $derived([...series].toSorted((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)))
 let colors = $derived(new Map(ordered.map((entry, index) => [entry.name, palette[index % palette.length]])))
-
-const spans = [
-	{ label: "1m", seconds: 60 },
-	{ label: "5m", seconds: 300 },
-	{ label: "15m", seconds: 900 },
-	{ label: "30m", seconds: 1800 },
-]
-
-let span = $state(300)
 
 /** Per-series samples inside the selected timespan, cut from the newest sample across all apps. */
 let visible = $derived.by(() => {
@@ -145,24 +117,11 @@ let spanLabel = $derived.by(() => {
 	if (seconds < 60) return `${seconds}s`
 	return `${Math.round(seconds / 60)} min`
 })
-
-let currents = $derived(
-	visible.map(entry => {
-		const { samples } = entry
-		const last = samples.at(-1)
-		return { current: last ? value(last) : 0, name: entry.name }
-	}),
-)
 </script>
 
-<div class="flex flex-col gap-1 border border-line-soft bg-surface p-2">
+<div class="flex flex-col gap-1">
 	<div class="flex items-baseline justify-between gap-2">
 		<h3 class="text-xs font-semibold tracking-wide text-neutral-400 uppercase">{label}</h3>
-		<select aria-label={`${label} timespan`} class="field px-1 py-0 text-xs" bind:value={span}>
-			{#each spans as option (option.seconds)}
-				<option value={option.seconds}>{option.label}</option>
-			{/each}
-		</select>
 		<span class="text-sm tabular-nums">{format(currentTotal)}</span>
 	</div>
 	{#if stacked.length === 0}
@@ -216,15 +175,5 @@ let currents = $derived(
 			<span>{spanLabel}</span>
 			<span>peak {format(peakTotal)}</span>
 		</div>
-		<ul class="flex flex-col gap-1 pt-1">
-			{#each currents as item (item.name)}
-				{const color = colors.get(item.name)}
-				<li class="flex items-center gap-2 text-xs">
-					<span aria-hidden="true" class="size-2 shrink-0 {color?.dot}"></span>
-					<span class="flex-1 truncate text-neutral-300">{item.name}</span>
-					<span class="text-neutral-400 tabular-nums">{format(item.current)}</span>
-				</li>
-			{/each}
-		</ul>
 	{/if}
 </div>

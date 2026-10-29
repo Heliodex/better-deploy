@@ -17,6 +17,7 @@ import {
 	subscribe,
 	subscribeLogs,
 } from "../lib/api"
+import { palette, spans } from "../lib/chart"
 import ResourceChart from "../lib/ResourceChart.svelte"
 import StackedResourceChart from "../lib/StackedResourceChart.svelte"
 
@@ -484,6 +485,14 @@ const overviewSeries = $derived(
 		})),
 )
 
+/** One legend for both overview charts: colours are assigned by sorted app name. */
+const legendApps = $derived(
+	overviewSeries.map((entry, index) => ({ color: palette[index % palette.length], name: entry.name })),
+)
+
+let detailSpan = $state(300)
+let overviewSpan = $state(300)
+
 const levelClasses: { [_: string]: string } = {
 	debug: "text-neutral-500",
 	error: "text-red-400",
@@ -703,19 +712,34 @@ onMount((): (() => void) => {
 								</div>
 							</dl>
 
-							<section aria-labelledby="resources-title" class="flex flex-col gap-2">
-								<h3
-									class="text-xs font-semibold tracking-wide text-neutral-400 uppercase"
-									id="resources-title"
-								>
-									Resources
-								</h3>
+							<section
+								aria-labelledby="resources-title"
+								class="flex flex-col gap-2 border border-line-soft bg-surface p-2"
+							>
+								<div class="flex items-center justify-between gap-2">
+									<h3
+										class="text-xs font-semibold tracking-wide text-neutral-400 uppercase"
+										id="resources-title"
+									>
+										Resources
+									</h3>
+									<select
+										aria-label="Resources timespan"
+										class="field px-1 py-0 text-xs"
+										bind:value={detailSpan}
+									>
+										{#each spans as option (option.seconds)}
+											<option value={option.seconds}>{option.label}</option>
+										{/each}
+									</select>
+								</div>
 								<div class="flex flex-col gap-4">
 									<ResourceChart
 										color="primary"
 										format={formatCPU}
 										label="CPU"
 										samples={resourceHistory}
+										span={detailSpan}
 										value={(sample: ResourceSample) => sample.cpuPercent}
 									/>
 									<ResourceChart
@@ -723,6 +747,7 @@ onMount((): (() => void) => {
 										format={formatMemory}
 										label="Memory"
 										samples={resourceHistory}
+										span={detailSpan}
 										value={(sample: ResourceSample) => sample.memoryBytes}
 									/>
 								</div>
@@ -778,27 +803,51 @@ onMount((): (() => void) => {
 					</div>
 				{:else}
 					<div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
-						<section aria-labelledby="overview-title" class="flex flex-col gap-2">
-							<h2
-								class="text-xs font-semibold tracking-wide text-neutral-400 uppercase"
-								id="overview-title"
-							>
-								All apps
-							</h2>
+						<section
+							aria-labelledby="overview-title"
+							class="flex flex-col gap-2 border border-line-soft bg-surface p-2"
+						>
+							<div class="flex items-center justify-between gap-2">
+								<h2
+									class="text-xs font-semibold tracking-wide text-neutral-400 uppercase"
+									id="overview-title"
+								>
+									All apps
+								</h2>
+								<select
+									aria-label="All apps timespan"
+									class="field px-1 py-0 text-xs"
+									bind:value={overviewSpan}
+								>
+									{#each spans as option (option.seconds)}
+										<option value={option.seconds}>{option.label}</option>
+									{/each}
+								</select>
+							</div>
 							<div class="flex flex-col gap-4">
 								<StackedResourceChart
 									format={formatCPU}
 									label="CPU"
 									series={overviewSeries}
+									span={overviewSpan}
 									value={(sample: ResourceSample) => sample.cpuPercent}
 								/>
 								<StackedResourceChart
 									format={formatMemory}
 									label="Memory"
 									series={overviewSeries}
+									span={overviewSpan}
 									value={(sample: ResourceSample) => sample.memoryBytes}
 								/>
 							</div>
+							<ul class="flex flex-wrap gap-x-4 gap-y-1">
+								{#each legendApps as item (item.name)}
+									<li class="flex items-center gap-2 text-xs">
+										<span aria-hidden="true" class="size-2 shrink-0 {item.color.dot}"></span>
+										<span class="text-neutral-300">{item.name}</span>
+									</li>
+								{/each}
+							</ul>
 						</section>
 					</div>
 				{/if}
@@ -866,7 +915,8 @@ onMount((): (() => void) => {
 								<tbody>
 									{#each filteredLogs as entry, index (index)}
 										{const timeParts = logTimeParts(entry.time)}
-										{const access = entry.source === "supervisor" ? parseAccessLine(entry.message) : null}
+										{const access =
+											entry.source === "supervisor" ? parseAccessLine(entry.message) : null}
 										<tr class={entry.source === "supervisor" ? "bg-violet-500/5" : ""}>
 											<td
 												class="w-0 pr-3 align-top whitespace-nowrap text-neutral-500 tabular-nums"
@@ -914,10 +964,22 @@ onMount((): (() => void) => {
 											>
 												{#if access}
 													<span class="inline-flex flex-wrap items-baseline gap-x-2">
-														<span class="inline-block w-14 shrink-0 font-mono text-neutral-200">{access.method}</span>
-														<span class="shrink-0 tabular-nums {accessStatusClass(access.status)}">{access.status}</span>
-														<span class="shrink-0 text-neutral-500 tabular-nums">{access.duration}</span>
-														<span class="min-w-0 flex-1 wrap-break-word">{access.path}</span>
+														<span
+															class="inline-block w-14 shrink-0 font-mono text-neutral-200"
+															>{access.method}</span
+														>
+														<span
+															class="shrink-0 tabular-nums {accessStatusClass(
+																access.status,
+															)}"
+															>{access.status}</span
+														>
+														<span class="shrink-0 text-neutral-500 tabular-nums"
+															>{access.duration}</span
+														>
+														<span class="min-w-0 flex-1 wrap-break-word"
+															>{access.path}</span
+														>
 													</span>
 												{:else}
 													{entry.message}
