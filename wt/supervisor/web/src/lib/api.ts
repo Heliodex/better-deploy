@@ -182,9 +182,15 @@ const backupSettingsSchema = object({
 
 export type BackupSettings = InferOutput<typeof backupSettingsSchema>
 
+export const backupKinds = ["auto", "manual", ""] as const
+
+export type BackupKind = (typeof backupKinds)[number]
+
 const backupInfoSchema = object({
 	createdAt: pipe(string(), minLength(1)),
+	kind: picklist(backupKinds),
 	name: pipe(string(), minLength(1)),
+	parent: string(),
 	size: pipe(number(), minValue(0)),
 })
 
@@ -192,6 +198,7 @@ export type BackupInfo = InferOutput<typeof backupInfoSchema>
 
 const backupsResponseSchema = object({
 	backups: array(backupInfoSchema),
+	current: string(),
 	database: boolean(),
 	settings: backupSettingsSchema,
 })

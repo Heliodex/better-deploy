@@ -24,6 +24,8 @@ import {
 	subscribe,
 	subscribeLogs,
 } from "../lib/api"
+import BackupTree from "../lib/BackupTree.svelte"
+import { backupKindLabel } from "../lib/backup-tree"
 import { palette, spans } from "../lib/chart"
 import ResourceChart from "../lib/ResourceChart.svelte"
 import StackedResourceChart from "../lib/StackedResourceChart.svelte"
@@ -72,6 +74,8 @@ let overviewHistories = $state<{ [_: string]: ResourceSample[] }>({})
 let overviewPending = $state<{ [_: string]: boolean }>({})
 let backupSettings = $state<BackupSettings>({ enabled: true, every: "24h", keep: 7 })
 let backupList = $state<BackupInfo[]>([])
+let backupCurrent = $state("")
+let selectedBackup = $state<string | null>(null)
 let backupDatabase = $state(false)
 let backupsLoading = $state(false)
 let backupsError = $state("")
@@ -232,6 +236,8 @@ function select(name: string | null): void {
 	confirmRestart = false
 	backupSettings = { enabled: true, every: "24h", keep: 7 }
 	backupList = []
+	backupCurrent = ""
+	selectedBackup = null
 	backupDatabase = false
 	backupsLoading = false
 	backupsError = ""
@@ -259,10 +265,14 @@ async function loadDetail(key: string, name: string): Promise<void> {
 	}
 }
 
-function applyBackups(result: BackupsResult): void {
+function applyBackups(result: BackupsResult, selectName: string | null = null): void {
 	backupSettings = result.settings
 	backupList = result.backups
 	backupDatabase = result.database
+	backupCurrent = result.current
+	const keepSelection = selectedBackup !== null && result.backups.some(backup => backup.name === selectedBackup)
+	if (selectName && result.backups.some(backup => backup.name === selectName)) selectedBackup = selectName
+	else if (!keepSelection) selectedBackup = result.current || result.backups[0]?.name || null
 	confirmRestore = null
 }
 
@@ -287,7 +297,8 @@ async function backupNow(): Promise<void> {
 	backupsError = ""
 	actionMessage = ""
 	try {
-		applyBackups(await createBackup(token, selected))
+		const result = await createBackup(token, selected)
+		applyBackups(result, result.current)
 		actionMessage = `${selected} backed up.`
 	} catch (err) {
 		backupsError = err instanceof Error ? err.message : "Could not back up the database."
@@ -328,7 +339,8 @@ async function revertBackup(name: string): Promise<void> {
 	restoringBackup = name
 	backupsError = ""
 	try {
-		applyBackups(await restoreBackup(token, selected, name))
+		const result = await restoreBackup(token, selected, name)
+		applyBackups(result, name)
 		actionMessage = restored
 			? `${selected} reverted to the snapshot from ${formatTime(restored.createdAt)}.`
 			: `${selected} reverted.`
@@ -613,6 +625,14 @@ const legendApps = $derived(
 	}),
 )
 
+const selectedBackupInfo = $derived(backupList.find(backup => backup.name === selectedBackup) ?? null)
+
+const selectedBackupParent = $derived(
+	selectedBackupInfo?.parent ? (backupList.find(backup => backup.name === selectedBackupInfo.parent) ?? null) : null,
+)
+
+const selectedBackupChildren = $derived(backupList.filter(backup => backup.parent === selectedBackup).length)
+
 let detailSpan = $state(300)
 let overviewSpan = $state(300)
 
@@ -884,21 +904,17 @@ onMount((): (() => void) => {
 							aria-labelledby="backups-title"
 							class="flex flex-col gap-3 border border-line-soft bg-surface p-2"
 						>
-							<div class="flex flex-wrap items-center justify-between gap-2">
+							<div class="flex items-center justify-between gap-2">
 								<h3
 									class="text-xs font-semibold tracking-wide text-neutral-400 uppercase"
 									id="backups-title"
 								>
 									Backups
 								</h3>
-								<button
-									class="btn btn-primary"
-									disabled={backingUp || backupsLoading}
-									onclick={backupNow}
-									type="button"
-								>
-									{backingUp ? "Backing up…" : "Back up now"}
-								</button>
+								<span class="text-xs text-neutral-500">
+									{backupList.length}
+									{backupList.length === 1 ? "snapshot" : "snapshots"}
+								</span>
 							</div>
 
 							<form class="flex flex-wrap items-end gap-3" onsubmit={saveBackupConfig}>
@@ -950,53 +966,108 @@ onMount((): (() => void) => {
 							{/if}
 
 							{#if backupList.length === 0}
-								<p class="text-sm text-neutral-500">
-									{backupsLoading
-										? "Loading backups…"
-										: backupDatabase
-											? "No backups yet."
-											: "No database yet. One is created the first time the app uses storage."}
-								</p>
-							{:else}
-								<div class="overflow-x-auto">
-									<table class="w-full border-collapse text-left text-xs">
-										<thead class="text-[10px] tracking-wide text-neutral-500 uppercase">
-											<tr>
-												<th class="py-1 pr-3 font-normal">Created</th>
-												<th class="py-1 pr-3 font-normal">Size</th>
-												<th class="py-1 text-right font-normal">Revert</th>
-											</tr>
-										</thead>
-										<tbody>
-											{#each backupList as backup (backup.name)}
-												<tr class="border-t border-line-soft">
-													<td class="py-1 pr-3 whitespace-nowrap">
-														{formatTime(backup.createdAt)}
-													</td>
-													<td class="py-1 pr-3 text-neutral-400 tabular-nums">
-														{formatSize(backup.size)}
-													</td>
-													<td class="py-1 text-right">
-														<button
-															class={confirmRestore === backup.name
-																? "btn btn-danger"
-																: "btn"}
-															disabled={restoringBackup !== null}
-															onclick={(): Promise<void> => revertBackup(backup.name)}
-															type="button"
-														>
-															{restoringBackup === backup.name
-																? "Reverting…"
-																: confirmRestore === backup.name
-																	? "Click again to confirm"
-																	: "Revert"}
-														</button>
-													</td>
-												</tr>
-											{/each}
-										</tbody>
-									</table>
+								<div class="flex flex-col items-start gap-2">
+									<p class="text-sm text-neutral-500">
+										{backupsLoading
+											? "Loading backups…"
+											: backupDatabase
+												? "No backups yet."
+												: "No database yet. One is created the first time the app uses storage."}
+									</p>
+									{#if backupDatabase}
+										<button
+											class="btn btn-primary"
+											disabled={backingUp}
+											onclick={backupNow}
+											type="button"
+										>
+											{backingUp ? "Backing up…" : "Back up current state"}
+										</button>
+									{/if}
 								</div>
+							{:else}
+								<BackupTree
+									backups={backupList}
+									current={backupCurrent}
+									onselect={name => (selectedBackup = name)}
+									selected={selectedBackup}
+								/>
+
+								{#if selectedBackupInfo}
+									<div class="flex flex-col gap-2 border-t border-line-soft pt-2">
+										<div class="flex flex-wrap items-center gap-2">
+											<h4 class="text-sm font-semibold">
+												{formatTime(selectedBackupInfo.createdAt)}
+											</h4>
+											<span
+												class="border border-line px-1 text-[10px] tracking-wide text-neutral-400 uppercase"
+											>
+												{backupKindLabel(selectedBackupInfo.kind)}
+											</span>
+											{#if selectedBackup === backupCurrent}
+												<span
+													class="border border-primary-500/40 bg-primary-500/10 px-1 text-[10px] tracking-wide text-primary-300 uppercase"
+												>
+													Current
+												</span>
+											{/if}
+										</div>
+
+										<dl class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-3">
+											<div>
+												<dt class="text-neutral-500">Size</dt>
+												<dd class="tabular-nums">{formatSize(selectedBackupInfo.size)}</dd>
+											</div>
+											<div>
+												<dt class="text-neutral-500">After</dt>
+												<dd>
+													{selectedBackupParent
+														? formatTime(selectedBackupParent.createdAt)
+														: "Start of tree"}
+												</dd>
+											</div>
+											<div>
+												<dt class="text-neutral-500">Children</dt>
+												<dd class="tabular-nums">{selectedBackupChildren}</dd>
+											</div>
+										</dl>
+
+										<p class="text-xs text-neutral-500">
+											{#if selectedBackup === backupCurrent}
+												The live database follows this snapshot, so a new backup continues this
+												branch.
+											{:else}
+												Reverting replaces the live database, and the next backup becomes a new
+												branch from this snapshot.
+											{/if}
+										</p>
+
+										<div class="flex flex-wrap items-center gap-2">
+											<button
+												class="btn btn-primary"
+												disabled={backingUp}
+												onclick={backupNow}
+												type="button"
+											>
+												{backingUp ? "Backing up…" : "Back up current state"}
+											</button>
+											<button
+												class={confirmRestore === selectedBackupInfo.name
+													? "btn btn-danger"
+													: "btn"}
+												disabled={restoringBackup !== null}
+												onclick={(): Promise<void> => revertBackup(selectedBackupInfo.name)}
+												type="button"
+											>
+												{restoringBackup === selectedBackupInfo.name
+													? "Reverting…"
+													: confirmRestore === selectedBackupInfo.name
+														? "Click again to confirm"
+														: "Revert to this snapshot"}
+											</button>
+										</div>
+									</div>
+								{/if}
 							{/if}
 						</section>
 
