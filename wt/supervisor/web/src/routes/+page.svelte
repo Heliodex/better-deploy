@@ -160,6 +160,23 @@ function formatChangeParams(params: unknown[]): string {
 	return JSON.stringify(params) ?? "[]"
 }
 
+function formatRowValue(values: unknown[] | undefined, index: number): string {
+	return values && index < values.length ? formatDatabaseValue(values[index]) : "–"
+}
+
+function rowOpClass(op: string): string {
+	switch (op) {
+		case "insert":
+			return "text-primary-300"
+		case "update":
+			return "text-amber-300"
+		case "delete":
+			return "text-red-300"
+		default:
+			return "text-neutral-400"
+	}
+}
+
 /** One supervisor access line, parsed from its `METHOD status duration path` shape. */
 interface AccessLine {
 	duration: string
@@ -1568,6 +1585,81 @@ onMount((): (() => void) => {
 													<code class="whitespace-pre-wrap wrap-break-word text-neutral-500">
 														{formatChangeParams(change.params)}
 													</code>
+												{/if}
+												{#if change.rows && change.rows.length > 0}
+													<div class="flex flex-col gap-1.5 pt-0.5">
+														{#each change.rows as row, rowIndex (rowIndex)}
+															<div class="border border-line-soft bg-black/30 p-1.5">
+																<div
+																	class="flex flex-wrap items-center gap-2 pb-1 text-[10px] tracking-wide uppercase"
+																>
+																	<span class={rowOpClass(row.op)}>{row.op}</span>
+																	<span class="normal-case text-neutral-400">
+																		{row.table}
+																	</span>
+																	{#if row.rowId !== undefined}
+																		<span
+																			class="normal-case text-neutral-500 tabular-nums"
+																		>
+																			row {row.rowId}
+																		</span>
+																	{/if}
+																</div>
+																<dl
+																	class="grid grid-cols-1 gap-x-3 gap-y-1 text-xs sm:grid-cols-2"
+																>
+																	{#each row.columns as column, columnIndex (column)}
+																		<div
+																			class="flex min-w-0 items-baseline gap-1.5"
+																		>
+																			<dt class="shrink-0 text-neutral-500">
+																				{column}
+																			</dt>
+																			<dd
+																				class="min-w-0 wrap-break-word text-neutral-300"
+																			>
+																				{#if row.op === "update"}
+																					<span class="text-neutral-500">
+																						{formatRowValue(
+																							row.old,
+																							columnIndex,
+																						)}
+																					</span>
+																					<span class="text-neutral-600">
+																						→
+																					</span>
+																				{/if}
+																				{#if row.op === "delete"}
+																					<span>
+																						{formatRowValue(
+																							row.old,
+																							columnIndex,
+																						)}
+																					</span>
+																				{:else}
+																					<span>
+																						{formatRowValue(
+																							row.new,
+																							columnIndex,
+																						)}
+																					</span>
+																				{/if}
+																			</dd>
+																		</div>
+																	{/each}
+																</dl>
+															</div>
+														{/each}
+														{#if change.rowsTruncated}
+															<p class="text-[10px] text-neutral-500">
+																Some row details were omitted.
+															</p>
+														{/if}
+													</div>
+												{:else if change.rowsTruncated}
+													<p class="text-[10px] text-neutral-500">
+														Row details were omitted because the change was too large.
+													</p>
 												{/if}
 											</li>
 										{/each}

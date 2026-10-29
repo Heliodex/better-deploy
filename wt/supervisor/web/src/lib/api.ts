@@ -226,9 +226,22 @@ const databaseRowsSchema = object({
 
 export type DatabaseRows = InferOutput<typeof databaseRowsSchema>
 
+const rowChangeSchema = object({
+	columns: array(string()),
+	new: optional(array(unknownSchema())),
+	old: optional(array(unknownSchema())),
+	op: picklist(["insert", "update", "delete"]),
+	rowId: optional(pipe(number(), integer(), minValue(0))),
+	table: pipe(string(), minLength(1)),
+})
+
+export type RowChange = InferOutput<typeof rowChangeSchema>
+
 const storageChangeSchema = object({
 	params: array(unknownSchema()),
+	rows: optional(array(rowChangeSchema)),
 	rowsAffected: pipe(number(), integer(), minValue(0)),
+	rowsTruncated: optional(boolean()),
 	sql: pipe(string(), minLength(1)),
 	time: pipe(string(), minLength(1)),
 })
