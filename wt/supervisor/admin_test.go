@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -207,6 +208,23 @@ func TestAuthorizedAcceptsCookie(t *testing.T) {
 	req.AddCookie(&http.Cookie{Name: "wt_token", Value: "wrong"})
 	if s.authorized(req) {
 		t.Error("wrong cookie token should not authorize")
+	}
+}
+
+func TestAdminStaticCacheHeaders(t *testing.T) {
+	if _, err := fs.Stat(adminFiles, "web/build/index.html"); err != nil {
+		t.Skip("admin panel not built")
+	}
+	for _, tc := range []struct{ path, want string }{
+		{"/", "no-cache"},
+		{"/_app/immutable/nodes/2.C_8-dSv8.js", "public, max-age=31536000, immutable"},
+	} {
+		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		rec := httptest.NewRecorder()
+		adminStatic().ServeHTTP(rec, req)
+		if got := rec.Header().Get("Cache-Control"); got != tc.want {
+			t.Errorf("GET %s Cache-Control = %q, want %q", tc.path, got, tc.want)
+		}
 	}
 }
 

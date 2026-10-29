@@ -574,6 +574,9 @@ func adminStatic() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/_app/immutable/") {
 			w.Header().Set("cache-control", "public, max-age=31536000, immutable")
+		} else {
+			// Entry HTML must revalidate so panels pick up new bundles after a supervisor update.
+			w.Header().Set("cache-control", "no-cache")
 		}
 		files.ServeHTTP(w, r)
 	})
