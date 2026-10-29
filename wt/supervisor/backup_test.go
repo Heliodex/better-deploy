@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -87,6 +88,142 @@ func TestBackupCreateAndRestore(t *testing.T) {
 	}
 	if got := storageCount(t, storage, token); got != 1 {
 		t.Errorf("count after restore = %d, want 1", got)
+	}
+}
+
+func TestBackupTreeBranches(t *testing.T) {
+	storage, backups := testBackupManager(t)
+	token := storage.tokenFor("notes")
+	createItems(t, storage, token)
+	ctx := context.Background()
+
+	first, err := backups.create(ctx, "notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := backups.create(ctx, "notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Parent != first.Name {
+		t.Errorf("second parent = %q, want %q", second.Parent, first.Name)
+	}
+
+	view, err := backups.overview("notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Current != second.Name {
+		t.Errorf("current = %q, want %q", view.Current, second.Name)
+	}
+
+	if err := backups.restore(ctx, "notes", first.Name); err != nil {
+		t.Fatal(err)
+	}
+	view, err = backups.overview("notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Current != first.Name {
+		t.Errorf("current after restore = %q, want %q", view.Current, first.Name)
+	}
+
+	third, err := backups.create(ctx, "notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if third.Parent != first.Name {
+		t.Errorf("third parent = %q, want %q (a new branch)", third.Parent, first.Name)
+	}
+	view, err = backups.overview("notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Current != third.Name {
+		t.Errorf("current after branch = %q, want %q", view.Current, third.Name)
+	}
+	for _, backup := range view.Backups {
+		if backup.Name == second.Name && backup.Parent != first.Name {
+			t.Errorf("abandoned branch parent = %q, want %q", backup.Parent, first.Name)
+		}
+	}
+}
+
+func TestBackupTreePruneKeepsCurrentBranch(t *testing.T) {
+	storage, backups := testBackupManager(t)
+	token := storage.tokenFor("notes")
+	createItems(t, storage, token)
+	ctx := context.Background()
+
+	first, err := backups.create(ctx, "notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := backups.create(ctx, "notes"); err != nil {
+		t.Fatal(err)
+	}
+	if err := backups.restore(ctx, "notes", first.Name); err != nil {
+		t.Fatal(err)
+	}
+	branch, err := backups.create(ctx, "notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := backups.saveSettings("notes", backupSettings{Enabled: true, Every: "24h", Keep: 1}); err != nil {
+		t.Fatal(err)
+	}
+	view, err := backups.overview("notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Backups) != 1 || view.Backups[0].Name != branch.Name {
+		t.Fatalf("kept backups = %+v, want only %q", view.Backups, branch.Name)
+	}
+	if view.Current != branch.Name {
+		t.Errorf("current = %q, want %q", view.Current, branch.Name)
+	}
+	if view.Backups[0].Parent != "" {
+		t.Errorf("promoted root parent = %q, want empty", view.Backups[0].Parent)
+	}
+}
+
+func TestBackupTreeRebuildsLegacyChain(t *testing.T) {
+	storage, backups := testBackupManager(t)
+	token := storage.tokenFor("notes")
+	createItems(t, storage, token)
+	ctx := context.Background()
+
+	first, err := backups.create(ctx, "notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := backups.create(ctx, "notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(backups.treePath("notes")); err != nil {
+		t.Fatal(err)
+	}
+
+	view, err := backups.overview("notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Current != second.Name {
+		t.Errorf("current = %q, want %q", view.Current, second.Name)
+	}
+	for _, backup := range view.Backups {
+		switch backup.Name {
+		case first.Name:
+			if backup.Parent != "" {
+				t.Errorf("first parent = %q, want empty", backup.Parent)
+			}
+		case second.Name:
+			if backup.Parent != first.Name {
+				t.Errorf("second parent = %q, want %q", backup.Parent, first.Name)
+			}
+		}
 	}
 }
 
@@ -250,10 +387,14 @@ func TestHandleBackupRoutes(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("create = %d %s", rec.Code, rec.Body.String())
 	}
-	if len(result.Backups) != 1 || !result.Database {
+	if len(result.Backups) != 1 || !result.Database || result.Current != result.Backups[0].Name {
 		t.Fatalf("after create = %+v", result)
 	}
-	backup := result.Backups[0].Name
+	first := result.Backups[0]
+	backup := first.Name
+	if first.Parent != "" || first.Kind != backupKindManual {
+		t.Errorf("first backup = %+v, want a manual root", first)
+	}
 
 	rec, result = do(http.MethodPut, "/apps/notes/backups/config", `{"enabled":false,"every":"6h","keep":3}`)
 	if rec.Code != http.StatusOK {
@@ -272,9 +413,12 @@ func TestHandleBackupRoutes(t *testing.T) {
 		"sql": `insert into items (value) values ('two')`,
 	})
 	resp.Body.Close()
-	rec, _ = do(http.MethodPost, "/apps/notes/backups/"+backup+"/restore", "")
+	rec, result = do(http.MethodPost, "/apps/notes/backups/"+backup+"/restore", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("restore = %d %s", rec.Code, rec.Body.String())
+	}
+	if result.Current != backup {
+		t.Errorf("current after restore = %q, want %q", result.Current, backup)
 	}
 	if got := storageCount(t, storage, token); got != 1 {
 		t.Errorf("count after restore = %d, want 1", got)
