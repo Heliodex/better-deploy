@@ -705,7 +705,7 @@ onMount((): (() => void) => {
 	<title>wt admin</title>
 </svelte:head>
 
-<div class="flex min-h-dvh flex-col">
+<div class={token ? "flex h-dvh flex-col overflow-hidden" : "flex min-h-dvh flex-col"}>
 	{#if !token}
 		<main class="flex flex-1 items-center justify-center p-4">
 			<form
