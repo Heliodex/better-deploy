@@ -1,5 +1,6 @@
 <script lang="ts">
 import type { ResourceSample } from "./api"
+import { niceTicks } from "./ticks"
 
 interface Props {
 	color: "primary" | "sky"
@@ -38,6 +39,7 @@ let values = $derived(visible.map(sample => value(sample)))
 let current = $derived(values.at(-1) ?? 0)
 let peak = $derived(values.length > 0 ? Math.max(...values) : 0)
 let maxValue = $derived(Math.max(peak, 1))
+let ticks = $derived(niceTicks(maxValue, 2))
 let points = $derived.by(() => {
 	const first = visible.at(0)
 	const last = visible.at(-1)
@@ -86,36 +88,55 @@ let fill = $derived(color === "primary" ? "fill-primary-500/10" : "fill-sky-500/
 	{#if points.length === 0}
 		<div class="flex h-24 items-center justify-center text-xs text-neutral-500">Collecting samples…</div>
 	{:else}
-		<svg
-			aria-label={`${label} history`}
-			class="h-24 w-full"
-			preserveAspectRatio="none"
-			role="img"
-			viewBox={`0 0 ${width} ${height}`}
-		>
-			<title>{label} history</title>
-			<line
-				class="stroke-line-soft"
-				vector-effect="non-scaling-stroke"
-				x1={padding}
-				x2={width - padding}
-				y1={height / 2}
-				y2={height / 2}
-			></line>
-			<path class={fill} d={area}></path>
-			<path class={stroke} d={line} fill="none" vector-effect="non-scaling-stroke"></path>
-			{#if marker}
-				<line
-					class={stroke}
-					stroke-linecap="round"
-					vector-effect="non-scaling-stroke"
-					x1={marker.x}
-					x2={marker.x}
-					y1={marker.y - 1}
-					y2={marker.y + 1}
-				></line>
-			{/if}
-		</svg>
+		<div class="flex gap-1.5">
+			<div aria-hidden="true" class="relative h-24 w-12 shrink-0 text-xs text-neutral-500">
+				{#each ticks as tick (tick)}
+					{const percent = maxValue > 0 ? (tick / maxValue) * 100 : 0}
+					<span
+						class="absolute right-0 tabular-nums {tick === 0
+							? "bottom-0"
+							: tick >= maxValue
+								? "top-0"
+								: "-translate-y-1/2"}"
+						style={tick === 0 || tick >= maxValue ? "" : `bottom: ${percent}%`}
+					>
+						{format(tick)}
+					</span>
+				{/each}
+			</div>
+			<svg
+				aria-label={`${label} history`}
+				class="h-24 min-w-0 flex-1"
+				preserveAspectRatio="none"
+				role="img"
+				viewBox={`0 0 ${width} ${height}`}
+			>
+				<title>{label} history</title>
+				{#each ticks as tick (tick)}
+					<line
+						class="stroke-line-soft"
+						vector-effect="non-scaling-stroke"
+						x1={padding}
+						x2={width - padding}
+						y1={height - padding - (tick / maxValue) * (height - padding * 2)}
+						y2={height - padding - (tick / maxValue) * (height - padding * 2)}
+					></line>
+				{/each}
+				<path class={fill} d={area}></path>
+				<path class={stroke} d={line} fill="none" vector-effect="non-scaling-stroke"></path>
+				{#if marker}
+					<line
+						class={stroke}
+						stroke-linecap="round"
+						vector-effect="non-scaling-stroke"
+						x1={marker.x}
+						x2={marker.x}
+						y1={marker.y - 1}
+						y2={marker.y + 1}
+					></line>
+				{/if}
+			</svg>
+		</div>
 		<div class="flex justify-between text-xs text-neutral-500">
 			<span>{spanLabel}</span>
 			<span>peak {format(peak)}</span>

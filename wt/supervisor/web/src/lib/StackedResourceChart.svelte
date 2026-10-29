@@ -1,5 +1,6 @@
 <script lang="ts">
 import type { ResourceSample } from "./api"
+import { niceTicks } from "./ticks"
 
 interface Series {
 	name: string
@@ -105,6 +106,7 @@ let totals = $derived(stacked.map(point => point.values.reduce((sum, current) =>
 let currentTotal = $derived(totals.at(-1) ?? 0)
 let peakTotal = $derived(totals.length > 0 ? Math.max(...totals) : 0)
 let maxValue = $derived(Math.max(peakTotal, 1))
+let ticks = $derived(niceTicks(maxValue, 2))
 
 function yFor(stackedValue: number): number {
 	return height - padding - (stackedValue / maxValue) * (height - padding * 2)
@@ -166,31 +168,50 @@ let currents = $derived(
 	{#if stacked.length === 0}
 		<div class="flex h-24 items-center justify-center text-xs text-neutral-500">Collecting samples…</div>
 	{:else}
-		<svg
-			aria-label={`${label} history for all apps`}
-			class="h-24 w-full"
-			preserveAspectRatio="none"
-			role="img"
-			viewBox={`0 0 ${width} ${height}`}
-		>
-			<title>{label} history for all apps</title>
-			<line
-				class="stroke-line-soft"
-				vector-effect="non-scaling-stroke"
-				x1={padding}
-				x2={width - padding}
-				y1={height / 2}
-				y2={height / 2}
-			></line>
-			{#each layers as layer (layer.entry.name)}
-				{const color = colors.get(layer.entry.name)}
-				<path class={color?.fill} d={layer.area}></path>
-			{/each}
-			{#each layers as layer (layer.entry.name)}
-				{const color = colors.get(layer.entry.name)}
-				<path class={color?.stroke} d={layer.line} fill="none" vector-effect="non-scaling-stroke"></path>
-			{/each}
-		</svg>
+		<div class="flex gap-1.5">
+			<div aria-hidden="true" class="relative h-24 w-12 shrink-0 text-xs text-neutral-500">
+				{#each ticks as tick (tick)}
+					{const percent = maxValue > 0 ? (tick / maxValue) * 100 : 0}
+					<span
+						class="absolute right-0 tabular-nums {tick === 0
+							? "bottom-0"
+							: tick >= maxValue
+								? "top-0"
+								: "-translate-y-1/2"}"
+						style={tick === 0 || tick >= maxValue ? "" : `bottom: ${percent}%`}
+					>
+						{format(tick)}
+					</span>
+				{/each}
+			</div>
+			<svg
+				aria-label={`${label} history for all apps`}
+				class="h-24 min-w-0 flex-1"
+				preserveAspectRatio="none"
+				role="img"
+				viewBox={`0 0 ${width} ${height}`}
+			>
+				<title>{label} history for all apps</title>
+				{#each ticks as tick (tick)}
+					<line
+						class="stroke-line-soft"
+						vector-effect="non-scaling-stroke"
+						x1={padding}
+						x2={width - padding}
+						y1={yFor(tick)}
+						y2={yFor(tick)}
+					></line>
+				{/each}
+				{#each layers as layer (layer.entry.name)}
+					{const color = colors.get(layer.entry.name)}
+					<path class={color?.fill} d={layer.area}></path>
+				{/each}
+				{#each layers as layer (layer.entry.name)}
+					{const color = colors.get(layer.entry.name)}
+					<path class={color?.stroke} d={layer.line} fill="none" vector-effect="non-scaling-stroke"></path>
+				{/each}
+			</svg>
+		</div>
 		<div class="flex justify-between text-xs text-neutral-500">
 			<span>{spanLabel}</span>
 			<span>peak {format(peakTotal)}</span>
