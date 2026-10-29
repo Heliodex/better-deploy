@@ -219,11 +219,11 @@ func TestHandleProxyLogsRequest(t *testing.T) {
 	if len(entries) != 2 {
 		t.Fatalf("logged %d requests, want 2: %+v", len(entries), entries)
 	}
-	if entries[0].Level != "info" || entries[0].Source != "supervisor" || !strings.HasPrefix(entries[0].Message, "GET /hello?x=1 200 ") {
-		t.Errorf("first entry = %+v, want a supervisor access line for GET /hello?x=1 200", entries[0])
+	if entries[0].Level != "info" || entries[0].Source != "supervisor" || !strings.HasPrefix(entries[0].Message, "GET     ") || !strings.Contains(entries[0].Message, " /hello?x=1 200 ") {
+		t.Errorf("first entry = %+v, want a structured supervisor access line for GET /hello?x=1 200", entries[0])
 	}
-	if entries[1].Level != "info" || entries[1].Source != "supervisor" || !strings.HasPrefix(entries[1].Message, "GET /missing 404 ") {
-		t.Errorf("second entry = %+v, want a supervisor access line for GET /missing 404", entries[1])
+	if entries[1].Level != "info" || entries[1].Source != "supervisor" || !strings.HasPrefix(entries[1].Message, "GET     ") || !strings.Contains(entries[1].Message, " /missing 404 ") {
+		t.Errorf("second entry = %+v, want a structured supervisor access line for GET /missing 404", entries[1])
 	}
 }
 
@@ -239,6 +239,28 @@ func TestFormatProxyDuration(t *testing.T) {
 	for _, tc := range cases {
 		if got := formatProxyDuration(tc.elapsed); got != tc.want {
 			t.Errorf("formatProxyDuration(%s) = %q, want %q", tc.elapsed, got, tc.want)
+		}
+	}
+}
+
+func TestFormatAccessLog(t *testing.T) {
+	at, err := time.Parse(logTimeFormat, "2026-10-29T00:46:34.123456789Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := formatAccessLog("GET", "/hello?x=1", 200, 1500*time.Microsecond, at)
+	want := "GET     00:46:34 /hello?x=1 200 1.5ms"
+	if got != want {
+		t.Errorf("formatAccessLog = %q, want %q", got, want)
+	}
+	// The method segment is a constant seven characters, the longest standard method.
+	for _, method := range []string{"GET", "POST", "DELETE", "OPTIONS"} {
+		line := formatAccessLog(method, "/x", 200, time.Millisecond, at)
+		if !strings.HasPrefix(line[len(method):], strings.Repeat(" ", 7-len(method))+" ") {
+			t.Errorf("formatAccessLog(%s) = %q, want the method padded to seven characters", method, line)
+		}
+		if segment := line[8:16]; len(segment) != 8 || segment[2] != ':' || segment[5] != ':' {
+			t.Errorf("formatAccessLog(%s) = %q, want an eight-character HH:MM:SS time segment", method, line)
 		}
 	}
 }

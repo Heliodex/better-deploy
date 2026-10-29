@@ -88,6 +88,32 @@ function formatMemory(bytes: number): string {
 	return megabytes < 10 ? `${megabytes.toFixed(1)} MB` : `${Math.round(megabytes)} MB`
 }
 
+/** One supervisor access line, parsed from its constant-width `METHOD TIME path status duration` shape. */
+interface AccessLine {
+	duration: string
+	method: string
+	path: string
+	status: number
+	time: string
+}
+
+const accessLinePattern = /^([A-Za-z]+)\s+(\d{2}:\d{2}:\d{2}) (\S+) (\d{3}) (\S+)$/
+
+function parseAccessLine(message: string): AccessLine | null {
+	const match = accessLinePattern.exec(message)
+	if (!match) return null
+	const [, method, time, path, status, duration] = match
+	if (!method || !time || !path || !status || !duration) return null
+	return { duration, method, path, status: Number(status), time }
+}
+
+function accessStatusClass(status: number): string {
+	if (status < 300) return "text-primary-300"
+	if (status < 400) return "text-sky-300"
+	if (status < 500) return "text-amber-300"
+	return "text-red-300"
+}
+
 /** Merge history by timestamp so a late fetch cannot clobber samples that arrived over SSE. */
 function mergeHistory(existing: ResourceSample[], incoming: ResourceSample[]): ResourceSample[] {
 	const byTime = new Map<string, ResourceSample>()
@@ -884,7 +910,22 @@ onMount((): (() => void) => {
 													entry.level
 												]}"
 											>
-												{entry.message}
+												{#if entry.source === "supervisor"}
+													{const access = parseAccessLine(entry.message)}
+													{#if access}
+														<span class="inline-flex flex-wrap items-baseline gap-x-2">
+															<span class="inline-block w-14 shrink-0 font-mono text-neutral-200">{access.method}</span>
+															<span class="shrink-0 font-mono text-neutral-500 tabular-nums">{access.time}</span>
+															<span class="min-w-0 flex-1 wrap-break-word">{access.path}</span>
+															<span class="shrink-0 tabular-nums {accessStatusClass(access.status)}">{access.status}</span>
+															<span class="shrink-0 text-neutral-500 tabular-nums">{access.duration}</span>
+														</span>
+													{:else}
+														{entry.message}
+													{/if}
+												{:else}
+													{entry.message}
+												{/if}
 											</td>
 										</tr>
 									{/each}
