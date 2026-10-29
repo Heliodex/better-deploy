@@ -710,7 +710,7 @@ onMount((): (() => void) => {
 								>
 									Resources
 								</h3>
-								<div class="grid gap-4 sm:grid-cols-2">
+								<div class="flex flex-col gap-4">
 									<ResourceChart
 										color="primary"
 										format={formatCPU}
@@ -785,7 +785,7 @@ onMount((): (() => void) => {
 							>
 								All apps
 							</h2>
-							<div class="grid gap-4 sm:grid-cols-2">
+							<div class="flex flex-col gap-4">
 								<StackedResourceChart
 									format={formatCPU}
 									label="CPU"
