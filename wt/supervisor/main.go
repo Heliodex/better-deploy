@@ -1031,11 +1031,10 @@ func formatProxyDuration(d time.Duration) string {
 	return fmt.Sprintf("%.2fs", d.Seconds())
 }
 
-// formatAccessLog renders a supervisor access line with constant-width method and
-// time segments, so the panel can recognise and structure it. The path, status and
-// duration follow in fixed order.
-func formatAccessLog(method, uri string, status int, duration time.Duration, at time.Time) string {
-	return fmt.Sprintf("%-7s %s %s %d %s", method, at.UTC().Format("15:04:05"), uri, status, formatProxyDuration(duration))
+// formatAccessLog renders a supervisor access line as METHOD status duration path,
+// so the panel can recognise and structure it.
+func formatAccessLog(method string, status int, duration time.Duration, uri string) string {
+	return fmt.Sprintf("%s %d %s %s", method, status, formatProxyDuration(duration), uri)
 }
 
 func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
@@ -1054,7 +1053,7 @@ func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
 	wrapped := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 	a.proxy.ServeHTTP(wrapped, r)
 	if a.logs != nil {
-		a.logs.logSupervisor(formatAccessLog(r.Method, r.URL.RequestURI(), wrapped.status, time.Since(started), started))
+		a.logs.logSupervisor(formatAccessLog(r.Method, wrapped.status, time.Since(started), r.URL.RequestURI()))
 	}
 }
 

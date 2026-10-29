@@ -460,7 +460,7 @@ func TestAppLogSeparatesSupervisorLines(t *testing.T) {
 	if _, err := io.WriteString(logs, "WARN careful\n"); err != nil {
 		t.Fatal(err)
 	}
-	logs.logSupervisor("GET /hello 200 1.5ms")
+	logs.logSupervisor("GET 200 1.5ms /hello")
 	if _, err := io.WriteString(logs, "plain line\n"); err != nil {
 		t.Fatal(err)
 	}
@@ -470,7 +470,7 @@ func TestAppLogSeparatesSupervisorLines(t *testing.T) {
 	}
 	want := []logEntry{
 		{Level: "warn", Source: "app", Message: "careful"},
-		{Level: "info", Source: "supervisor", Message: "GET /hello 200 1.5ms"},
+		{Level: "info", Source: "supervisor", Message: "GET 200 1.5ms /hello"},
 		{Level: "info", Source: "app", Message: "plain line"},
 	}
 	if len(entries) != len(want) {

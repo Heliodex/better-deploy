@@ -88,23 +88,22 @@ function formatMemory(bytes: number): string {
 	return megabytes < 10 ? `${megabytes.toFixed(1)} MB` : `${Math.round(megabytes)} MB`
 }
 
-/** One supervisor access line, parsed from its constant-width `METHOD TIME path status duration` shape. */
+/** One supervisor access line, parsed from its `METHOD status duration path` shape. */
 interface AccessLine {
 	duration: string
 	method: string
 	path: string
 	status: number
-	time: string
 }
 
-const accessLinePattern = /^([A-Za-z]+)\s+(\d{2}:\d{2}:\d{2}) (\S+) (\d{3}) (\S+)$/
+const accessLinePattern = /^([A-Za-z]+) (\d{3}) (\S+) (.+)$/
 
 function parseAccessLine(message: string): AccessLine | null {
 	const match = accessLinePattern.exec(message)
 	if (!match) return null
-	const [, method, time, path, status, duration] = match
-	if (!method || !time || !path || !status || !duration) return null
-	return { duration, method, path, status: Number(status), time }
+	const [, method, status, duration, path] = match
+	if (!method || !status || !duration || !path) return null
+	return { duration, method, path, status: Number(status) }
 }
 
 function accessStatusClass(status: number): string {
@@ -867,6 +866,7 @@ onMount((): (() => void) => {
 								<tbody>
 									{#each filteredLogs as entry, index (index)}
 										{const timeParts = logTimeParts(entry.time)}
+										{const access = entry.source === "supervisor" ? parseAccessLine(entry.message) : null}
 										<tr class={entry.source === "supervisor" ? "bg-violet-500/5" : ""}>
 											<td
 												class="w-0 pr-3 align-top whitespace-nowrap text-neutral-500 tabular-nums"
@@ -903,26 +903,22 @@ onMount((): (() => void) => {
 											<td
 												class="w-0 pr-3 align-top whitespace-nowrap {levelClasses[entry.level]}"
 											>
-												{entry.level.toUpperCase()}
+												{#if !access}
+													{entry.level.toUpperCase()}
+												{/if}
 											</td>
 											<td
 												class="align-top whitespace-pre-wrap wrap-break-word {levelMessageClasses[
 													entry.level
 												]}"
 											>
-												{#if entry.source === "supervisor"}
-													{const access = parseAccessLine(entry.message)}
-													{#if access}
-														<span class="inline-flex flex-wrap items-baseline gap-x-2">
-															<span class="inline-block w-14 shrink-0 font-mono text-neutral-200">{access.method}</span>
-															<span class="shrink-0 font-mono text-neutral-500 tabular-nums">{access.time}</span>
-															<span class="min-w-0 flex-1 wrap-break-word">{access.path}</span>
-															<span class="shrink-0 tabular-nums {accessStatusClass(access.status)}">{access.status}</span>
-															<span class="shrink-0 text-neutral-500 tabular-nums">{access.duration}</span>
-														</span>
-													{:else}
-														{entry.message}
-													{/if}
+												{#if access}
+													<span class="inline-flex flex-wrap items-baseline gap-x-2">
+														<span class="inline-block w-14 shrink-0 font-mono text-neutral-200">{access.method}</span>
+														<span class="shrink-0 tabular-nums {accessStatusClass(access.status)}">{access.status}</span>
+														<span class="shrink-0 text-neutral-500 tabular-nums">{access.duration}</span>
+														<span class="min-w-0 flex-1 wrap-break-word">{access.path}</span>
+													</span>
 												{:else}
 													{entry.message}
 												{/if}
