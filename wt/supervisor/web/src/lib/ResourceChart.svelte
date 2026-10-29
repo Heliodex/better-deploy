@@ -1,6 +1,6 @@
 <script lang="ts">
 import type { ResourceSample } from "./api"
-import { niceTicks } from "./ticks"
+import { tickScale } from "./ticks"
 
 interface Props {
 	color: "primary" | "sky"
@@ -32,9 +32,10 @@ let visible = $derived.by(() => {
 let values = $derived(visible.map(sample => value(sample)))
 let current = $derived(values.at(-1) ?? 0)
 let peak = $derived(values.length > 0 ? Math.max(...values) : 0)
-let maxValue = $derived(Math.max(peak, 1))
-/** Ticks picked in display units, so memory lands on round megabytes rather than round bytes. */
-let ticks = $derived(niceTicks(peak / unit, 2).map(tick => tick * unit))
+/** Ticks picked in display units, so memory lands on round megabytes rather than round bytes. The domain ceiling is the top tick, so gridlines are evenly spaced to the top of the chart. */
+let scale = $derived(tickScale(peak / unit, 2))
+let ticks = $derived(scale.ticks.map(tick => tick * unit))
+let maxValue = $derived(Math.max(scale.max * unit, 1))
 let points = $derived.by(() => {
 	const first = visible.at(0)
 	const last = visible.at(-1)
