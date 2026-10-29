@@ -1,0 +1,294 @@
+package main
+
+import (
+	"context"
+	"encoding/json/v2"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+func testBackupManager(t *testing.T) (*storageServer, *backupManager) {
+	t.Helper()
+	storage, err := newStorageServer(t.TempDir(), "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(storage.close)
+	return storage, newBackupManager(t.TempDir(), storage)
+}
+
+// storageCount returns the number of rows in the test table.
+func storageCount(t *testing.T, storage *storageServer, token string) int {
+	t.Helper()
+	resp := storageSQL(t, storage, token, "/v1/query", map[string]any{"sql": `select count(*) from items`})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("count: %d %s", resp.StatusCode, readBody(t, resp))
+	}
+	result := storageResultOf(t, resp)
+	if len(result.Rows) != 1 {
+		t.Fatalf("count rows = %v", result.Rows)
+	}
+	return int(result.Rows[0][0].(float64))
+}
+
+func createItems(t *testing.T, storage *storageServer, token string) {
+	t.Helper()
+	for _, statement := range []string{
+		`create table items (value text not null)`,
+		`insert into items (value) values ('one')`,
+	} {
+		resp := storageSQL(t, storage, token, "/v1/exec", map[string]any{"sql": statement})
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("exec %q: %d %s", statement, resp.StatusCode, readBody(t, resp))
+		}
+		resp.Body.Close()
+	}
+}
+
+func TestBackupCreateAndRestore(t *testing.T) {
+	storage, backups := testBackupManager(t)
+	token := storage.tokenFor("notes")
+	createItems(t, storage, token)
+
+	info, err := backups.create(context.Background(), "notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size == 0 {
+		t.Error("backup is empty")
+	}
+	if _, ok := backupTime(info.Name); !ok {
+		t.Errorf("backup name %q does not carry a timestamp", info.Name)
+	}
+
+	infos, err := backups.list("notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 1 || infos[0].Name != info.Name {
+		t.Fatalf("list = %+v", infos)
+	}
+
+	resp := storageSQL(t, storage, token, "/v1/exec", map[string]any{
+		"sql": `insert into items (value) values ('two')`,
+	})
+	resp.Body.Close()
+	if got := storageCount(t, storage, token); got != 2 {
+		t.Fatalf("count before restore = %d, want 2", got)
+	}
+
+	if err := backups.restore(context.Background(), "notes", info.Name); err != nil {
+		t.Fatal(err)
+	}
+	if got := storageCount(t, storage, token); got != 1 {
+		t.Errorf("count after restore = %d, want 1", got)
+	}
+}
+
+func TestBackupSettings(t *testing.T) {
+	_, backups := testBackupManager(t)
+
+	settings, err := backups.settings("notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := defaultBackupSettings()
+	if settings != want {
+		t.Errorf("default settings = %+v, want %+v", settings, want)
+	}
+
+	custom := backupSettings{Enabled: false, Every: "6h", Keep: 3}
+	if err := backups.saveSettings("notes", custom); err != nil {
+		t.Fatal(err)
+	}
+	settings, err = backups.settings("notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings != custom {
+		t.Errorf("saved settings = %+v, want %+v", settings, custom)
+	}
+
+	for _, invalid := range []backupSettings{
+		{Enabled: true, Every: "soon", Keep: 3},
+		{Enabled: true, Every: "0s", Keep: 3},
+		{Enabled: true, Every: "24h", Keep: 0},
+		{Enabled: true, Every: "24h", Keep: maxBackupKeep + 1},
+	} {
+		if err := backups.saveSettings("notes", invalid); err == nil {
+			t.Errorf("saved invalid settings %+v", invalid)
+		}
+	}
+}
+
+func TestBackupPrune(t *testing.T) {
+	storage, backups := testBackupManager(t)
+	token := storage.tokenFor("notes")
+	createItems(t, storage, token)
+	if err := backups.saveSettings("notes", backupSettings{Enabled: true, Every: "1h", Keep: 2}); err != nil {
+		t.Fatal(err)
+	}
+
+	for range 3 {
+		if _, err := backups.create(context.Background(), "notes"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	infos, err := backups.list("notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 2 {
+		t.Errorf("retained %d backups, want 2", len(infos))
+	}
+}
+
+func TestBackupDue(t *testing.T) {
+	storage, backups := testBackupManager(t)
+	token := storage.tokenFor("notes")
+	createItems(t, storage, token)
+
+	now := time.Now().UTC()
+	if err := backups.backupIfDue(context.Background(), "notes", now); err != nil {
+		t.Fatal(err)
+	}
+	infos, err := backups.list("notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 1 {
+		t.Fatalf("first due run created %d backups, want 1", len(infos))
+	}
+
+	if err := backups.backupIfDue(context.Background(), "notes", now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	infos, _ = backups.list("notes")
+	if len(infos) != 1 {
+		t.Errorf("early run created a backup: %d backups", len(infos))
+	}
+
+	if err := backups.backupIfDue(context.Background(), "notes", now.Add(25*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	infos, _ = backups.list("notes")
+	if len(infos) != 2 {
+		t.Errorf("later run left %d backups, want 2", len(infos))
+	}
+
+	if err := backups.saveSettings("notes", backupSettings{Enabled: false, Every: "24h", Keep: 7}); err != nil {
+		t.Fatal(err)
+	}
+	if err := backups.backupIfDue(context.Background(), "notes", now.Add(100*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	infos, _ = backups.list("notes")
+	if len(infos) != 2 {
+		t.Errorf("disabled policy created a backup: %d backups", len(infos))
+	}
+}
+
+func TestBackupRestoreRejectsBadNames(t *testing.T) {
+	_, backups := testBackupManager(t)
+	for _, name := range []string{"", "../storage-20260101T000000.000000000Z.db", "config.json", "storage-nope.db"} {
+		if err := backups.restore(context.Background(), "notes", name); !errors.Is(err, errInvalidBackupName) {
+			t.Errorf("restore(%q) = %v, want invalid name", name, err)
+		}
+	}
+	valid, err := validBackupName("storage-20260101T000000.000000000Z.db")
+	if err != nil || valid == "" {
+		t.Errorf("valid name rejected: %v", err)
+	}
+	if err := backups.restore(context.Background(), "notes", valid); !errors.Is(err, errBackupNotFound) {
+		t.Errorf("missing backup = %v, want not found", err)
+	}
+}
+
+func TestHandleBackupRoutes(t *testing.T) {
+	storage, backups := testBackupManager(t)
+	s := testSupervisor()
+	s.storage = storage
+	s.backups = backups
+	s.apps["notes"] = &app{name: "notes"}
+	token := storage.tokenFor("notes")
+
+	do := func(method, target, body string) (*httptest.ResponseRecorder, backupsResponse) {
+		t.Helper()
+		req := httptest.NewRequest(method, target, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer secret")
+		rec := httptest.NewRecorder()
+		s.handleApp(rec, req)
+		var result backupsResponse
+		if rec.Code == http.StatusOK {
+			if err := json.UnmarshalRead(rec.Body, &result); err != nil {
+				t.Fatalf("%s %s: %v", method, target, err)
+			}
+		}
+		return rec, result
+	}
+
+	rec, result := do(http.MethodGet, "/apps/notes/backups", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list = %d %s", rec.Code, rec.Body.String())
+	}
+	if result.Settings != defaultBackupSettings() || len(result.Backups) != 0 || result.Database {
+		t.Errorf("initial overview = %+v", result)
+	}
+
+	rec, _ = do(http.MethodPost, "/apps/notes/backups", "")
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("backup without database = %d, want 400", rec.Code)
+	}
+
+	createItems(t, storage, token)
+	rec, result = do(http.MethodPost, "/apps/notes/backups", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create = %d %s", rec.Code, rec.Body.String())
+	}
+	if len(result.Backups) != 1 || !result.Database {
+		t.Fatalf("after create = %+v", result)
+	}
+	backup := result.Backups[0].Name
+
+	rec, result = do(http.MethodPut, "/apps/notes/backups/config", `{"enabled":false,"every":"6h","keep":3}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("config = %d %s", rec.Code, rec.Body.String())
+	}
+	if result.Settings.Enabled || result.Settings.Every != "6h" || result.Settings.Keep != 3 {
+		t.Errorf("saved settings = %+v", result.Settings)
+	}
+
+	rec, _ = do(http.MethodPut, "/apps/notes/backups/config", `{"enabled":true,"every":"24h","keep":0}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("invalid config = %d, want 400", rec.Code)
+	}
+
+	resp := storageSQL(t, storage, token, "/v1/exec", map[string]any{
+		"sql": `insert into items (value) values ('two')`,
+	})
+	resp.Body.Close()
+	rec, _ = do(http.MethodPost, "/apps/notes/backups/"+backup+"/restore", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("restore = %d %s", rec.Code, rec.Body.String())
+	}
+	if got := storageCount(t, storage, token); got != 1 {
+		t.Errorf("count after restore = %d, want 1", got)
+	}
+
+	rec, _ = do(http.MethodPost, "/apps/notes/backups/../config/restore", "")
+	if rec.Code != http.StatusBadRequest && rec.Code != http.StatusNotFound {
+		t.Errorf("traversal name = %d, want 400 or 404", rec.Code)
+	}
+}
+
+func TestBackupManagerUsesBackupDirOutsideStorage(t *testing.T) {
+	storage, backups := testBackupManager(t)
+	if filepath.Dir(backups.dir) == storage.dir {
+		t.Errorf("backups dir %q sits inside storage dir %q", backups.dir, storage.dir)
+	}
+}

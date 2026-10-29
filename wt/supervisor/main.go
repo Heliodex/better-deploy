@@ -89,6 +89,7 @@ type app struct {
 type supervisor struct {
 	cfg     config
 	storage *storageServer
+	backups *backupManager
 	events  *hub
 
 	mu          sync.RWMutex
@@ -909,6 +910,11 @@ func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if action == "backups" || strings.HasPrefix(action, "backups/") {
+		s.handleBackupRoute(w, r, name, strings.TrimPrefix(action, "backups"))
+		return
+	}
+
 	switch action {
 	case "":
 		switch r.Method {
@@ -1131,6 +1137,7 @@ func main() {
 	s := &supervisor{
 		cfg:     cfg,
 		storage: storage,
+		backups: newBackupManager(filepath.Join(cfg.stateDir, ".backups"), storage),
 		events:  newHub(),
 		apps:    map[string]*app{},
 		hosts:   map[string]*app{},
@@ -1138,6 +1145,9 @@ func main() {
 	if err := s.loadApps(); err != nil {
 		log.Fatalf("load apps: %v", err)
 	}
+	backupCtx, stopBackups := context.WithCancel(context.Background())
+	defer stopBackups()
+	go s.backups.loop(backupCtx)
 	go s.monitorResources(resourceSampleInterval)
 
 	server := &http.Server{

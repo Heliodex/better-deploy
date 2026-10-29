@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"embed"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log"
@@ -560,6 +561,107 @@ func (s *supervisor) handleRestart(w http.ResponseWriter, r *http.Request, a *ap
 	}
 	a.sampleResources(time.Now())
 	writeJSON(w, http.StatusOK, s.info(a))
+}
+
+// maxBackupRequestBytes caps the small JSON body used to change backup settings.
+const maxBackupRequestBytes = 4 << 10
+
+// handleBackupRoute serves the app's database snapshots, their policy and restores.
+func (s *supervisor) handleBackupRoute(w http.ResponseWriter, r *http.Request, name, rest string) {
+	if !s.requireAuth(w, r) {
+		return
+	}
+	if s.lookup(name) == nil {
+		http.Error(w, "app not found", http.StatusNotFound)
+		return
+	}
+	if s.backups == nil {
+		http.Error(w, "backups unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	rest = strings.TrimPrefix(rest, "/")
+	switch {
+	case rest == "":
+		s.handleBackups(w, r, name)
+	case rest == "config":
+		s.handleBackupSettings(w, r, name)
+	case strings.HasSuffix(rest, "/restore"):
+		s.handleBackupRestore(w, r, name, strings.TrimSuffix(rest, "/restore"))
+	default:
+		http.Error(w, "unknown endpoint", http.StatusNotFound)
+	}
+}
+
+func (s *supervisor) handleBackups(w http.ResponseWriter, r *http.Request, name string) {
+	switch r.Method {
+	case http.MethodGet:
+		s.writeBackups(w, name)
+	case http.MethodPost:
+		if _, err := s.backups.create(r.Context(), name); err != nil {
+			writeBackupError(w, err)
+			return
+		}
+		s.writeBackups(w, name)
+	default:
+		w.Header().Set("Allow", "GET, POST")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *supervisor) handleBackupSettings(w http.ResponseWriter, r *http.Request, name string) {
+	if r.Method != http.MethodPut {
+		w.Header().Set("Allow", http.MethodPut)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxBackupRequestBytes)
+	var settings backupSettings
+	if err := json.UnmarshalRead(r.Body, &settings); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if err := settings.validate(); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.backups.saveSettings(name, settings); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.writeBackups(w, name)
+}
+
+func (s *supervisor) handleBackupRestore(w http.ResponseWriter, r *http.Request, name, file string) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := s.backups.restore(r.Context(), name, file); err != nil {
+		writeBackupError(w, err)
+		return
+	}
+	s.writeBackups(w, name)
+}
+
+func (s *supervisor) writeBackups(w http.ResponseWriter, name string) {
+	overview, err := s.backups.overview(name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, overview)
+}
+
+func writeBackupError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, errNoStorageDatabase), errors.Is(err, errInvalidBackupName):
+		writeError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, errBackupNotFound):
+		writeError(w, http.StatusNotFound, err.Error())
+	default:
+		writeError(w, http.StatusInternalServerError, err.Error())
+	}
 }
 
 // adminStatic serves the embedded admin panel. SvelteKit emits root-relative URLs under the /admin base path, so the mux strips the prefix first.

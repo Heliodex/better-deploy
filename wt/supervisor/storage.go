@@ -184,6 +184,87 @@ func (s *storageServer) dbFor(app string) (*sql.DB, error) {
 	return db, nil
 }
 
+// databasePath is the app's live SQLite file, outside the app's /data preopen.
+func (s *storageServer) databasePath(app string) string {
+	return filepath.Join(s.dir, app, "storage.db")
+}
+
+// hasDatabase reports whether the app has used storage yet. Checking the file avoids creating an empty database just to inspect it.
+func (s *storageServer) hasDatabase(app string) bool {
+	info, err := os.Stat(s.databasePath(app))
+	return err == nil && info.Mode().IsRegular()
+}
+
+// sqliteBackup is the slice of modernc.org/sqlite's connection API used by the online backup calls.
+type sqliteBackup interface {
+	NewBackup(dst string) (*sqlite.Backup, error)
+	NewRestore(src string) (*sqlite.Backup, error)
+}
+
+// runSQLiteBackup drives SQLite's online backup API to completion on one connection.
+func runSQLiteBackup(conn *sql.Conn, start func(sqliteBackup) (*sqlite.Backup, error)) error {
+	return conn.Raw(func(driverConn any) error {
+		driver, ok := driverConn.(sqliteBackup)
+		if !ok {
+			return fmt.Errorf("sqlite driver does not support online backups")
+		}
+		backup, err := start(driver)
+		if err != nil {
+			return err
+		}
+		for {
+			more, err := backup.Step(-1)
+			if err != nil {
+				_ = backup.Finish()
+				return err
+			}
+			if !more {
+				break
+			}
+		}
+		return backup.Finish()
+	})
+}
+
+// backupTo writes a consistent snapshot to dst while the app keeps reading and writing.
+func (s *storageServer) backupTo(ctx context.Context, app, dst string) error {
+	return s.withConn(ctx, app, func(conn *sql.Conn) error {
+		return runSQLiteBackup(conn, func(driver sqliteBackup) (*sqlite.Backup, error) {
+			return driver.NewBackup(dst)
+		})
+	})
+}
+
+// restoreFrom copies a snapshot over the live database. The storage pool has one connection, so no query can be in flight while the copy runs.
+func (s *storageServer) restoreFrom(ctx context.Context, app, src string) error {
+	return s.withConn(ctx, app, func(conn *sql.Conn) error {
+		return runSQLiteBackup(conn, func(driver sqliteBackup) (*sqlite.Backup, error) {
+			return driver.NewRestore(src)
+		})
+	})
+}
+
+// checkBackupDatabase rejects a truncated or corrupt snapshot before it is restored over live data.
+func checkBackupDatabase(path string) error {
+	db, err := sql.Open("sqlite", path+"?mode=ro")
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+
+	ctx, cancel := context.WithTimeout(context.Background(), storageTimeout)
+	defer cancel()
+	var result string
+	if err := db.QueryRowContext(ctx, "pragma quick_check").Scan(&result); err != nil {
+		return err
+	}
+	if result != "ok" {
+		return fmt.Errorf("quick_check: %s", result)
+	}
+	return nil
+}
+
 func (s *storageServer) withConn(ctx context.Context, app string, fn func(*sql.Conn) error) error {
 	db, err := s.dbFor(app)
 	if err != nil {
