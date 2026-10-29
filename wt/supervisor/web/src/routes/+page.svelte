@@ -904,6 +904,7 @@ onMount((): (() => void) => {
 							<form class="flex flex-wrap items-end gap-3" onsubmit={saveBackupConfig}>
 								<label class="flex items-center gap-2 pb-1.5 text-sm">
 									<input
+										aria-label="Automatic backups"
 										class="accent-primary-500"
 										type="checkbox"
 										bind:checked={backupSettings.enabled}

@@ -28,6 +28,8 @@ const (
 	maxBackupKeep      = 100
 	// backupCheckInterval is how often the manager looks for apps whose next snapshot is due. Intervals are stored as durations, so this only bounds how late a snapshot can be.
 	backupCheckInterval = time.Minute
+	// backupCheckTimeout bounds the integrity check on a snapshot before it is restored. It is longer than the query timeout because quick_check reads the whole database.
+	backupCheckTimeout = 30 * time.Second
 )
 
 // backupTimeLayout names each snapshot by the UTC instant it was taken, so the name alone survives a missing or odd modification time.

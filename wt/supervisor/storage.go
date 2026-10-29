@@ -253,7 +253,7 @@ func checkBackupDatabase(path string) error {
 	defer db.Close()
 	db.SetMaxOpenConns(1)
 
-	ctx, cancel := context.WithTimeout(context.Background(), storageTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), backupCheckTimeout)
 	defer cancel()
 	var result string
 	if err := db.QueryRowContext(ctx, "pragma quick_check").Scan(&result); err != nil {
