@@ -242,9 +242,11 @@ function canvasGestures(node: HTMLDivElement): () => void {
 							aria-hidden="true"
 							class="pointer-events-none absolute top-1/2 left-full ml-1.5 -translate-y-1/2 whitespace-nowrap text-xs {node.current
 								? "text-primary-300"
-								: node.onPath
-									? "text-neutral-300"
-									: "text-neutral-500"}"
+								: node.id === selected
+									? "text-primary-200"
+									: node.onPath
+										? "text-neutral-300"
+										: "text-neutral-500"}"
 						>
 							{node.label}
 						</span>
