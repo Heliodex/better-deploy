@@ -983,6 +983,10 @@ func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.handleResources(w, r, a)
+	case "database":
+		s.handleDatabase(w, r, name)
+	case "database/rows":
+		s.handleDatabaseRows(w, r, name)
 	case "restart":
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", http.MethodPost)
