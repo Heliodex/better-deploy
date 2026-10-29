@@ -979,6 +979,7 @@ onMount((): (() => void) => {
 											class="btn btn-primary"
 											disabled={backingUp}
 											onclick={backupNow}
+											title="Snapshot the live database"
 											type="button"
 										>
 											{backingUp ? "Backing up…" : "Back up current state"}
@@ -1047,6 +1048,7 @@ onMount((): (() => void) => {
 												class="btn btn-primary"
 												disabled={backingUp}
 												onclick={backupNow}
+												title="Snapshot the live database; the snapshot continues from the current node"
 												type="button"
 											>
 												{backingUp ? "Backing up…" : "Back up current state"}

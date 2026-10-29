@@ -175,7 +175,7 @@ function canvasGestures(node: HTMLDivElement): () => void {
 	</div>
 	<div
 		aria-label="Backup tree. Drag to pan, scroll to zoom, and activate a snapshot to see its details."
-		class="relative h-64 touch-none overflow-hidden border border-line-soft bg-black select-none {dragging
+		class="relative h-52 touch-none overflow-hidden border border-line-soft bg-black select-none {dragging
 			? "cursor-grabbing"
 			: "cursor-grab"}"
 		onpointercancel={endPan}
