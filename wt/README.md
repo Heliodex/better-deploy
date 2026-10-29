@@ -65,7 +65,7 @@ The supervisor scans `WT_APPS_DIR` at boot, starts every app found there, and se
 
 ## Admin panel
 
-The supervisor serves a small admin panel at `/admin/` on its own address (for example `http://127.0.0.1:8080/admin/` locally, or the deploy host in production). It lists apps with status and ticking uptime, streams each app's log live over server-sent events, restarts apps, and uploads new bundles. Updates stream over server-sent events, so the dashboard reflects deploys and restarts without refreshing. Every endpoint except `/healthz` requires the deploy bearer token, which the panel asks for once and keeps in the browser (a `wt_token` cookie carries it on the event streams, where headers cannot go). App logs persist under `/var/lib/wt/.logs` (or `WT_STATE_DIR`), outside each app's `/data` preopen, and every line is stamped with the time the supervisor received it so timestamps do not depend on how an app logs. The supervisor also logs each proxied request at info level into a separate per-app supervisor log, as `METHOD status duration path`; the panel recognises the shape and lays it out as structured columns with each line badged by origin.
+The supervisor serves a small admin panel at `/admin/` on its own address (for example `http://127.0.0.1:8080/admin/` locally, or the deploy host in production). It lists apps with status and ticking uptime, streams each app's log live over server-sent events, restarts apps, uploads new bundles, and configures and restores database backups. Updates stream over server-sent events, so the dashboard reflects deploys and restarts without refreshing. Every endpoint except `/healthz` requires the deploy bearer token, which the panel asks for once and keeps in the browser (a `wt_token` cookie carries it on the event streams, where headers cannot go). App logs persist under `/var/lib/wt/.logs` (or `WT_STATE_DIR`), outside each app's `/data` preopen, and every line is stamped with the time the supervisor received it so timestamps do not depend on how an app logs. The supervisor also logs each proxied request at info level into a separate per-app supervisor log, as `METHOD status duration path`; the panel recognises the shape and lays it out as structured columns with each line badged by origin.
 
 ## Resource usage
 
@@ -223,6 +223,23 @@ There is no durable, standard WASI storage interface to target in this setup:
 The app still uses a WASI API for transport: `wasi:http` over loopback. If wasmtime grows a persistent `wasi:keyvalue` or `wasi:sql` provider, the client package can switch without changing the app's SQL.
 
 The supervisor grants outbound network with `-S inherit-network` so apps can reach that loopback endpoint. A production version would scope outbound access per app.
+
+## Database backups
+
+The supervisor snapshots each app's SQLite database with SQLite's online backup API, so a snapshot is consistent even while the app is reading and writing, and the app keeps serving throughout. Snapshots are ordinary SQLite files at `WT_STATE_DIR/.backups/<app>/storage-<timestamp>.db`, outside both the storage directory and the app's `/data` preopen. Each app's policy lives in `config.json` beside them.
+
+Automatic backups are on by default: every app with a database is snapshotted every 24 hours, and the newest 7 snapshots are kept. The supervisor checks once a minute for policies that are due; an app that has not used storage yet has no database and is skipped until its first write. Changing the policy takes effect on the next check, and reducing `keep` prunes older snapshots immediately. Snapshots survive deploys, restarts and pod rolls with the rest of the state volume.
+
+The admin panel's app detail has a Backups section listing each snapshot with its time and size. It can turn automatic backups on or off, set the interval and retention, take a snapshot immediately with **Back up now**, and revert the live database to a snapshot. Reverting is a two-click action because it replaces all data written since that snapshot. The same operations are available over the authenticated API:
+
+```text
+GET  /apps/<name>/backups                          list settings and snapshots
+POST /apps/<name>/backups                          take a snapshot now
+PUT  /apps/<name>/backups/config                   {"enabled": true, "every": "24h", "keep": 7}
+POST /apps/<name>/backups/<file>/restore           replace the live database
+```
+
+`every` is a Go duration between `1m` and `720h`, and `keep` is between 1 and 100. A manual snapshot works even when automatic backups are disabled. A restore validates the snapshot with SQLite's `quick_check` first, then copies it through the online backup API; connections stay open, but any writes made after the snapshot are lost.
 
 ## Bindings
 
