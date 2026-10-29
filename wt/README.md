@@ -255,7 +255,9 @@ GET /apps/<name>/database/changes?limit=200
 
 Rows default to 50 per page and accept `limit` up to 500. The rows response includes the columns, the page of rows, the table's total row count, and whether more rows remain.
 
-Every successful statement sent through `/v1/exec` or `/v1/batch` is appended to the app's change log at `WT_STATE_DIR/.storage/<app>/changes.log`, and the Database tab shows the newest entries below the table. Each entry records its UTC time, SQL, bound parameters and rows affected. Entries larger than 256 KiB keep the statement but replace the parameters with a marker. The log rotates at 1 MiB and keeps one rotated file; failed statements are not logged, and neither are page-level restores, which bypass SQL.
+Every successful statement sent through `/v1/exec` or `/v1/batch` is appended to the app's change log at `WT_STATE_DIR/.storage/<app>/changes.log`, and the Database tab shows the newest entries below the table. Each entry records its UTC time, SQL, bound parameters and rows affected. SQLite's pre-update hook also captures the affected rows, with old values for updates and deletes and new values for inserts and updates. The UI shows the operation, table, row id and per-column values, using `old → new` for updates.
+
+Row capture is capped at 500 rows or 256 KiB per write operation; if that limit is reached, the entry is marked as truncated. Entries larger than 256 KiB keep the statement but replace the parameters with a marker, and if they are still too large they drop the row details. The log rotates at 1 MiB and keeps one rotated file. Failed statements are not logged, DDL has no row values, and page-level restores bypass SQL entirely.
 
 ## Bindings
 
