@@ -488,6 +488,19 @@ func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// loopbackListen reports whether addr only accepts loopback connections.
+func loopbackListen(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 func main() {
 	log.SetFlags(log.LstdFlags | log.LUTC)
 
@@ -498,10 +511,17 @@ func main() {
 	flag.StringVar(&cfg.domain, "domain", cfg.domain, "default app host suffix")
 	flag.StringVar(&cfg.wasmtime, "wasmtime", cfg.wasmtime, "wasmtime binary")
 	flag.StringVar(&cfg.wasmtimeTarget, "wasmtime-target", cfg.wasmtimeTarget, "wasmtime target triple (must match the compiler)")
-	flag.StringVar(&cfg.token, "token", cfg.token, "deploy bearer token (empty disables auth)")
+	flag.StringVar(&cfg.token, "token", cfg.token, "deploy bearer token (required off loopback)")
 	flag.StringVar(&cfg.tlsCert, "tls-cert", cfg.tlsCert, "TLS certificate (with --tls-key)")
 	flag.StringVar(&cfg.tlsKey, "tls-key", cfg.tlsKey, "TLS private key (with --tls-cert)")
 	flag.Parse()
+
+	if cfg.token == "" && !loopbackListen(cfg.listen) {
+		log.Fatalf("WT_TOKEN is required when listening on %s", cfg.listen)
+	}
+	if cfg.token == "" {
+		log.Printf("warning: WT_TOKEN is empty; admin and deploy APIs are unauthenticated on the loopback listener")
+	}
 
 	absoluteApps, err := filepath.Abs(cfg.appsDir)
 	if err != nil {

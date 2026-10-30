@@ -442,3 +442,20 @@ func TestHandlerLetsAppHostsOwnAdminPaths(t *testing.T) {
 		t.Errorf("non-app healthz = %d %q, want 200 \"ok\\n\"", rec.Code, rec.Body.String())
 	}
 }
+
+func TestLoopbackListen(t *testing.T) {
+	cases := map[string]bool{
+		"127.0.0.1:8080":   true,
+		"localhost:8080":   true,
+		"[::1]:8080":       true,
+		"0.0.0.0:8080":     false,
+		":8080":            false,
+		"example.com:8080": false,
+		"not-an-address":   false,
+	}
+	for addr, want := range cases {
+		if got := loopbackListen(addr); got != want {
+			t.Errorf("loopbackListen(%q) = %v, want %v", addr, got, want)
+		}
+	}
+}
