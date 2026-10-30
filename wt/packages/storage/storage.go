@@ -123,68 +123,6 @@ func (c *Client) post(ctx context.Context, path string, body, out any) error {
 	return nil
 }
 
-// Exec runs one statement and returns the number of affected rows.
-func (c *Client) Exec(ctx context.Context, query string, args ...any) (Result, error) {
-	var resp response
-	if err := c.post(ctx, "/v1/exec", request{SQL: query, Params: encodeParams(args)}, &resp); err != nil {
-		return Result{}, err
-	}
-	return Result{RowsAffected: resp.RowsAffected, LastInsertID: resp.LastInsertID}, nil
-}
-
-// Query runs one statement and returns all rows up to the server's row limit.
-func (c *Client) Query(ctx context.Context, query string, args ...any) (*Rows, error) {
-	var resp response
-	if err := c.post(ctx, "/v1/query", request{SQL: query, Params: encodeParams(args)}, &resp); err != nil {
-		return nil, err
-	}
-	rows := make([][]any, len(resp.Rows))
-	for i, rawRow := range resp.Rows {
-		if len(rawRow) != len(resp.Columns) {
-			return nil, fmt.Errorf("storage: row %d has %d values for %d columns", i+1, len(rawRow), len(resp.Columns))
-		}
-		row := make([]any, len(rawRow))
-		for j, raw := range rawRow {
-			value, err := decodeValue(raw)
-			if err != nil {
-				return nil, fmt.Errorf("storage: row %d column %q: %w", i+1, resp.Columns[j], err)
-			}
-			row[j] = value
-		}
-		rows[i] = row
-	}
-	return &Rows{Columns: resp.Columns, Truncated: resp.Truncated, rows: rows}, nil
-}
-
-// QueryRow runs a query expected to return at most one row.
-func (c *Client) QueryRow(ctx context.Context, query string, args ...any) *Row {
-	rows, err := c.Query(ctx, query, args...)
-	if err != nil {
-		return &Row{rows: &Rows{err: err}}
-	}
-	return &Row{rows: rows}
-}
-
-// Batch runs statements in one transaction. A failing statement rolls the whole batch back.
-func (c *Client) Batch(ctx context.Context, statements ...Statement) ([]Result, error) {
-	if len(statements) == 0 {
-		return nil, nil
-	}
-	req := batchRequest{Statements: make([]batchStatement, len(statements))}
-	for i, statement := range statements {
-		req.Statements[i] = batchStatement{SQL: statement.SQL, Params: encodeParams(statement.Args)}
-	}
-	var resp batchResponse
-	if err := c.post(ctx, "/v1/batch", req, &resp); err != nil {
-		return nil, err
-	}
-	results := make([]Result, len(resp.Results))
-	for i, result := range resp.Results {
-		results[i] = Result{RowsAffected: result.RowsAffected, LastInsertID: result.LastInsertID}
-	}
-	return results, nil
-}
-
 // Next advances to the next row.
 func (r *Rows) Next() bool {
 	if r.closed || r.err != nil || r.index >= len(r.rows) {
@@ -192,29 +130,6 @@ func (r *Rows) Next() bool {
 	}
 	r.index++
 	return true
-}
-
-// Scan copies the current row into dest. It supports *string, *[]byte, *int64, *int, *float64, *bool, *time.Time, *any and anything with a Scan(any) error method.
-func (r *Rows) Scan(dest ...any) error {
-	if r.err != nil {
-		return r.err
-	}
-	if r.closed {
-		return fmt.Errorf("storage: rows are closed")
-	}
-	if r.index == 0 || r.index > len(r.rows) {
-		return ErrNoRows
-	}
-	if len(dest) != len(r.Columns) {
-		return fmt.Errorf("storage: scan %d destinations into %d columns", len(dest), len(r.Columns))
-	}
-	row := r.rows[r.index-1]
-	for i, target := range dest {
-		if err := scanValue(target, row[i]); err != nil {
-			return fmt.Errorf("storage: column %q: %w", r.Columns[i], err)
-		}
-	}
-	return nil
 }
 
 // Close releases the rows. It exists so callers can use defer rows.Close().
@@ -227,34 +142,6 @@ func (r *Rows) Close() error {
 // Err returns the error that stopped iteration, if any.
 func (r *Rows) Err() error {
 	return r.err
-}
-
-// Scan copies the first row into dest, or returns ErrNoRows.
-func (r *Row) Scan(dest ...any) error {
-	if r.rows == nil {
-		return ErrNoRows
-	}
-	if !r.rows.Next() {
-		if err := r.rows.Err(); err != nil {
-			return err
-		}
-		return ErrNoRows
-	}
-	if err := r.rows.Scan(dest...); err != nil {
-		return err
-	}
-	return r.rows.Close()
-}
-
-func encodeParams(args []any) []any {
-	if len(args) == 0 {
-		return nil
-	}
-	params := make([]any, len(args))
-	for i, arg := range args {
-		params[i] = encodeParam(arg)
-	}
-	return params
 }
 
 func encodeParam(arg any) any {
@@ -287,6 +174,46 @@ func encodeParam(arg any) any {
 	default:
 		return arg
 	}
+}
+
+func encodeParams(args []any) []any {
+	if len(args) == 0 {
+		return nil
+	}
+	params := make([]any, len(args))
+	for i, arg := range args {
+		params[i] = encodeParam(arg)
+	}
+	return params
+}
+
+// Exec runs one statement and returns the number of affected rows.
+func (c *Client) Exec(ctx context.Context, query string, args ...any) (Result, error) {
+	var resp response
+	if err := c.post(ctx, "/v1/exec", request{SQL: query, Params: encodeParams(args)}, &resp); err != nil {
+		return Result{}, err
+	}
+	return Result{RowsAffected: resp.RowsAffected, LastInsertID: resp.LastInsertID}, nil
+}
+
+// Batch runs statements in one transaction. A failing statement rolls the whole batch back.
+func (c *Client) Batch(ctx context.Context, statements ...Statement) ([]Result, error) {
+	if len(statements) == 0 {
+		return nil, nil
+	}
+	req := batchRequest{Statements: make([]batchStatement, len(statements))}
+	for i, statement := range statements {
+		req.Statements[i] = batchStatement{SQL: statement.SQL, Params: encodeParams(statement.Args)}
+	}
+	var resp batchResponse
+	if err := c.post(ctx, "/v1/batch", req, &resp); err != nil {
+		return nil, err
+	}
+	results := make([]Result, len(resp.Results))
+	for i, result := range resp.Results {
+		results[i] = Result{RowsAffected: result.RowsAffected, LastInsertID: result.LastInsertID}
+	}
+	return results, nil
 }
 
 func decodeValue(raw jsontext.Value) (any, error) {
@@ -334,6 +261,93 @@ func decodeValue(raw jsontext.Value) (any, error) {
 			return nil, err
 		}
 		return value, nil
+	}
+}
+
+// Query runs one statement and returns all rows up to the server's row limit.
+func (c *Client) Query(ctx context.Context, query string, args ...any) (*Rows, error) {
+	var resp response
+	if err := c.post(ctx, "/v1/query", request{SQL: query, Params: encodeParams(args)}, &resp); err != nil {
+		return nil, err
+	}
+	rows := make([][]any, len(resp.Rows))
+	for i, rawRow := range resp.Rows {
+		if len(rawRow) != len(resp.Columns) {
+			return nil, fmt.Errorf("storage: row %d has %d values for %d columns", i+1, len(rawRow), len(resp.Columns))
+		}
+		row := make([]any, len(rawRow))
+		for j, raw := range rawRow {
+			value, err := decodeValue(raw)
+			if err != nil {
+				return nil, fmt.Errorf("storage: row %d column %q: %w", i+1, resp.Columns[j], err)
+			}
+			row[j] = value
+		}
+		rows[i] = row
+	}
+	return &Rows{Columns: resp.Columns, Truncated: resp.Truncated, rows: rows}, nil
+}
+
+// QueryRow runs a query expected to return at most one row.
+func (c *Client) QueryRow(ctx context.Context, query string, args ...any) *Row {
+	rows, err := c.Query(ctx, query, args...)
+	if err != nil {
+		return &Row{rows: &Rows{err: err}}
+	}
+	return &Row{rows: rows}
+}
+
+func int64Value(value any) (int64, error) {
+	switch value := value.(type) {
+	case int64:
+		return value, nil
+	case float64:
+		if value != math.Trunc(value) || value < math.MinInt64 || value > math.MaxInt64 {
+			return 0, fmt.Errorf("cannot convert %v to int64", value)
+		}
+		return int64(value), nil
+	case bool:
+		if value {
+			return 1, nil
+		}
+		return 0, nil
+	case string:
+		return strconv.ParseInt(value, 10, 64)
+	default:
+		return 0, fmt.Errorf("cannot convert %T to int64", value)
+	}
+}
+
+func float64Value(value any) (float64, error) {
+	switch value := value.(type) {
+	case float64:
+		return value, nil
+	case int64:
+		return float64(value), nil
+	case string:
+		return strconv.ParseFloat(value, 64)
+	default:
+		return 0, fmt.Errorf("cannot convert %T to float64", value)
+	}
+}
+
+func boolValue(value any) (bool, error) {
+	switch value := value.(type) {
+	case bool:
+		return value, nil
+	case int64:
+		switch value {
+		case 0:
+			return false, nil
+		case 1:
+			return true, nil
+		default:
+			return false, fmt.Errorf("cannot convert %d to bool", value)
+		}
+	case string:
+		return strconv.ParseBool(value)
+	default:
+		return false, fmt.Errorf("cannot convert %T to bool", value)
 	}
 }
 
@@ -409,56 +423,42 @@ func scanValue(dest, value any) error {
 	return nil
 }
 
-func int64Value(value any) (int64, error) {
-	switch value := value.(type) {
-	case int64:
-		return value, nil
-	case float64:
-		if value != math.Trunc(value) || value < math.MinInt64 || value > math.MaxInt64 {
-			return 0, fmt.Errorf("cannot convert %v to int64", value)
-		}
-		return int64(value), nil
-	case bool:
-		if value {
-			return 1, nil
-		}
-		return 0, nil
-	case string:
-		return strconv.ParseInt(value, 10, 64)
-	default:
-		return 0, fmt.Errorf("cannot convert %T to int64", value)
+// Scan copies the current row into dest. It supports *string, *[]byte, *int64, *int, *float64, *bool, *time.Time, *any and anything with a Scan(any) error method.
+func (r *Rows) Scan(dest ...any) error {
+	if r.err != nil {
+		return r.err
 	}
+	if r.closed {
+		return fmt.Errorf("storage: rows are closed")
+	}
+	if r.index == 0 || r.index > len(r.rows) {
+		return ErrNoRows
+	}
+	if len(dest) != len(r.Columns) {
+		return fmt.Errorf("storage: scan %d destinations into %d columns", len(dest), len(r.Columns))
+	}
+	row := r.rows[r.index-1]
+	for i, target := range dest {
+		if err := scanValue(target, row[i]); err != nil {
+			return fmt.Errorf("storage: column %q: %w", r.Columns[i], err)
+		}
+	}
+	return nil
 }
 
-func float64Value(value any) (float64, error) {
-	switch value := value.(type) {
-	case float64:
-		return value, nil
-	case int64:
-		return float64(value), nil
-	case string:
-		return strconv.ParseFloat(value, 64)
-	default:
-		return 0, fmt.Errorf("cannot convert %T to float64", value)
+// Scan copies the first row into dest, or returns ErrNoRows.
+func (r *Row) Scan(dest ...any) error {
+	if r.rows == nil {
+		return ErrNoRows
 	}
-}
-
-func boolValue(value any) (bool, error) {
-	switch value := value.(type) {
-	case bool:
-		return value, nil
-	case int64:
-		switch value {
-		case 0:
-			return false, nil
-		case 1:
-			return true, nil
-		default:
-			return false, fmt.Errorf("cannot convert %d to bool", value)
+	if !r.rows.Next() {
+		if err := r.rows.Err(); err != nil {
+			return err
 		}
-	case string:
-		return strconv.ParseBool(value)
-	default:
-		return false, fmt.Errorf("cannot convert %T to bool", value)
+		return ErrNoRows
 	}
+	if err := r.rows.Scan(dest...); err != nil {
+		return err
+	}
+	return r.rows.Close()
 }

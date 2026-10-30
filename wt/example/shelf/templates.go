@@ -19,18 +19,6 @@ var (
 	detailTmpl = parseTemplate("detail", "templates/base.html", "templates/detail.html")
 )
 
-func parseTemplate(name string, files ...string) *template.Template {
-	var content strings.Builder
-	for _, file := range files {
-		data, err := templateFiles.ReadFile(file)
-		if err != nil {
-			panic(err)
-		}
-		content.Write(data)
-	}
-	return template.Must(template.New(name).Funcs(templateFuncs()).Parse(content.String()))
-}
-
 func templateFuncs() template.FuncMap {
 	return template.FuncMap{
 		"formatTime": func(value string) string {
@@ -51,6 +39,18 @@ func templateFuncs() template.FuncMap {
 			return parsed.Format("2 Jan")
 		},
 	}
+}
+
+func parseTemplate(name string, files ...string) *template.Template {
+	var content strings.Builder
+	for _, file := range files {
+		data, err := templateFiles.ReadFile(file)
+		if err != nil {
+			panic(err)
+		}
+		content.Write(data)
+	}
+	return template.Must(template.New(name).Funcs(templateFuncs()).Parse(content.String()))
 }
 
 func render(w http.ResponseWriter, status int, tmpl *template.Template, data any) {

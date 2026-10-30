@@ -10,6 +10,7 @@ import (
 
 // Assert `bodyReader` implements the required interfaces
 var _ io.Reader = &bodyReader{}
+
 var _ io.ReadCloser = &bodyReader{}
 
 type bodyReader struct {

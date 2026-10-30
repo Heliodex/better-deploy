@@ -115,39 +115,6 @@ func init() {
 
 func main() {}
 
-func migrate(ctx context.Context) error {
-	_, err := store.Batch(ctx,
-		storage.Statement{SQL: `create table if not exists links (
-			id text primary key,
-			url text not null,
-			title text not null,
-			description text not null default '',
-			created_at text not null
-		)`},
-		storage.Statement{SQL: `create table if not exists tags (
-			link_id text not null,
-			tag text not null,
-			primary key (link_id, tag)
-		)`},
-		storage.Statement{SQL: `create table if not exists clicks (
-			id text primary key,
-			link_id text not null,
-			clicked_at text not null
-		)`},
-		storage.Statement{SQL: `create table if not exists meta (
-			key text primary key,
-			value text not null
-		)`},
-		storage.Statement{SQL: `create index if not exists tags_tag_idx on tags(tag)`},
-		storage.Statement{SQL: `create index if not exists clicks_link_idx on clicks(link_id, clicked_at)`},
-		storage.Statement{SQL: `create index if not exists links_created_idx on links(created_at)`},
-	)
-	if err != nil {
-		return err
-	}
-	return seed(ctx)
-}
-
 func seed(ctx context.Context) error {
 	var seeded int64
 	if err := store.QueryRow(ctx, `select count(*) from meta where key = 'seeded'`).Scan(&seeded); err != nil {
@@ -207,19 +174,298 @@ func seed(ctx context.Context) error {
 	return err
 }
 
-func handleIndex(w http.ResponseWriter, r *http.Request) {
-	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	tag := normalizeTag(r.URL.Query().Get("tag"))
-	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-
-	data, err := loadIndex(r.Context(), q, tag, page)
+func migrate(ctx context.Context) error {
+	_, err := store.Batch(ctx,
+		storage.Statement{SQL: `create table if not exists links (
+			id text primary key,
+			url text not null,
+			title text not null,
+			description text not null default '',
+			created_at text not null
+		)`},
+		storage.Statement{SQL: `create table if not exists tags (
+			link_id text not null,
+			tag text not null,
+			primary key (link_id, tag)
+		)`},
+		storage.Statement{SQL: `create table if not exists clicks (
+			id text primary key,
+			link_id text not null,
+			clicked_at text not null
+		)`},
+		storage.Statement{SQL: `create table if not exists meta (
+			key text primary key,
+			value text not null
+		)`},
+		storage.Statement{SQL: `create index if not exists tags_tag_idx on tags(tag)`},
+		storage.Statement{SQL: `create index if not exists clicks_link_idx on clicks(link_id, clicked_at)`},
+		storage.Statement{SQL: `create index if not exists links_created_idx on links(created_at)`},
+	)
 	if err != nil {
-		http.Error(w, "load shelf: "+err.Error(), http.StatusInternalServerError)
+		return err
+	}
+	return seed(ctx)
+}
+
+func loadStats(ctx context.Context) (appStats, error) {
+	var stats appStats
+	err := store.QueryRow(ctx, `select
+		(select count(*) from links),
+		(select count(*) from clicks),
+		(select count(distinct tag) from tags)`).Scan(&stats.Links, &stats.Clicks, &stats.Tags)
+	return stats, err
+}
+
+func handleDelete(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		http.NotFound(w, r)
 		return
 	}
-	data.Added = r.URL.Query().Get("added") == "1"
-	data.Deleted = r.URL.Query().Get("deleted") == "1"
-	render(w, http.StatusOK, indexTmpl, data)
+	_, err := store.Batch(r.Context(),
+		storage.Statement{SQL: `delete from tags where link_id = ?`, Args: []any{id}},
+		storage.Statement{SQL: `delete from clicks where link_id = ?`, Args: []any{id}},
+		storage.Statement{SQL: `delete from links where id = ?`, Args: []any{id}},
+	)
+	if err != nil {
+		http.Error(w, "delete link: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/?deleted=1", http.StatusSeeOther)
+}
+
+func handleGo(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		http.NotFound(w, r)
+		return
+	}
+	var target string
+	err := store.QueryRow(r.Context(), `select url from links where id = ?`, id).Scan(&target)
+	if errors.Is(err, storage.ErrNoRows) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		http.Error(w, "load link: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if _, err := store.Exec(r.Context(), `insert into clicks (id, link_id, clicked_at) values (?, ?, ?)`,
+		app.NewID(), id, time.Now().UTC().Format(app.TimestampFormat)); err != nil {
+		http.Error(w, "record click: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, target, http.StatusFound)
+}
+
+func loadClicks(ctx context.Context, id string) ([]click, error) {
+	rows, err := store.Query(ctx, `select clicked_at from clicks where link_id = ? order by clicked_at desc limit 30`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	clicks := []click{}
+	for rows.Next() {
+		var item click
+		if err := rows.Scan(&item.At); err != nil {
+			return nil, err
+		}
+		clicks = append(clicks, item)
+	}
+	return clicks, rows.Err()
+}
+
+func loadDays(ctx context.Context, id string) ([]dayCount, error) {
+	rows, err := store.Query(ctx, `select substr(clicked_at, 1, 10) as day, count(*) as count
+		from clicks where link_id = ? group by day order by day desc limit 14`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	days := []dayCount{}
+	for rows.Next() {
+		var item dayCount
+		if err := rows.Scan(&item.Day, &item.Count); err != nil {
+			return nil, err
+		}
+		days = append(days, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	slices.Reverse(days)
+	var maxCount int64
+	for _, day := range days {
+		if day.Count > maxCount {
+			maxCount = day.Count
+		}
+	}
+	for i := range days {
+		if maxCount > 0 {
+			days[i].Percent = int(days[i].Count * 100 / maxCount)
+		}
+		if days[i].Count > 0 && days[i].Percent < 4 {
+			days[i].Percent = 4
+		}
+	}
+	return days, nil
+}
+
+func normalizeTag(tag string) string {
+	tag = strings.ToLower(strings.TrimSpace(tag))
+	return strings.TrimPrefix(tag, "#")
+}
+
+func validTag(tag string) bool {
+	if len(tag) == 0 || len(tag) > 24 {
+		return false
+	}
+	for i, r := range tag {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= '0' && r <= '9':
+		case r == '-' && i > 0 && i < len(tag)-1:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func parseTags(raw string) ([]string, error) {
+	seen := map[string]bool{}
+	tags := []string{}
+	for part := range strings.SplitSeq(raw, ",") {
+		tag := normalizeTag(part)
+		if tag == "" || seen[tag] {
+			continue
+		}
+		if !validTag(tag) {
+			return nil, fmt.Errorf("tag %q must be 1-24 lowercase letters, digits, or dashes", tag)
+		}
+		seen[tag] = true
+		tags = append(tags, tag)
+	}
+	if len(tags) > maxTags {
+		return nil, fmt.Errorf("use at most %d tags", maxTags)
+	}
+	sort.Strings(tags)
+	return tags, nil
+}
+
+func parseLinkInput(r *http.Request) (linkInput, error) {
+	rawURL := strings.TrimSpace(r.FormValue("url"))
+	if rawURL == "" {
+		return linkInput{}, fmt.Errorf("URL is required")
+	}
+	if len(rawURL) > maxURL {
+		return linkInput{}, fmt.Errorf("URL is too long")
+	}
+	if !strings.Contains(rawURL, "://") {
+		rawURL = "https://" + rawURL
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return linkInput{}, fmt.Errorf("URL must be an http or https address")
+	}
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
+	parsed.Host = strings.ToLower(parsed.Host)
+
+	title := strings.TrimSpace(r.FormValue("title"))
+	if title == "" {
+		title = parsed.Host
+	}
+	if len(title) > maxTitle {
+		return linkInput{}, fmt.Errorf("title is too long")
+	}
+	description := strings.TrimSpace(r.FormValue("description"))
+	if len(description) > maxDescription {
+		return linkInput{}, fmt.Errorf("description is too long")
+	}
+	tags, err := parseTags(r.FormValue("tags"))
+	if err != nil {
+		return linkInput{}, err
+	}
+	return linkInput{URL: parsed.String(), Title: title, Description: description, Tags: tags}, nil
+}
+
+func splitTags(raw string) []string {
+	if raw == "" {
+		return []string{}
+	}
+	tags := slices.Collect(strings.SplitSeq(raw, ","))
+	for i := range tags {
+		tags[i] = strings.TrimSpace(tags[i])
+	}
+	sort.Strings(tags)
+	return tags
+}
+
+func scanLink(scanner rowScanner) (link, error) {
+	var item link
+	var tags string
+	if err := scanner.Scan(&item.ID, &item.URL, &item.Title, &item.Description, &item.CreatedAt, &item.Clicks, &item.LastClickedAt, &tags); err != nil {
+		return link{}, err
+	}
+	if parsed, err := url.Parse(item.URL); err == nil {
+		item.Host = parsed.Host
+	}
+	item.Tags = splitTags(tags)
+	return item, nil
+}
+
+type linkInput struct {
+	URL, Title, Description string
+	Tags                    []string
+}
+
+func loadLink(ctx context.Context, id string) (link, error) {
+	return scanLink(store.QueryRow(ctx, `select `+linkColumns+` from links l where l.id = ?`, id))
+}
+
+func pageURL(q, tag string, page int) string {
+	values := url.Values{}
+	if q != "" {
+		values.Set("q", q)
+	}
+	if tag != "" {
+		values.Set("tag", tag)
+	}
+	if page > 1 {
+		values.Set("page", strconv.Itoa(page))
+	}
+	if len(values) == 0 {
+		return "/"
+	}
+	return "/?" + values.Encode()
+}
+
+func tagPageURL(q, tag string) string {
+	return pageURL(q, tag, 0)
+}
+
+func loadTags(ctx context.Context, q string) ([]tagCount, error) {
+	rows, err := store.Query(ctx, `select tag, count(*) as count from tags group by tag order by count desc, tag asc limit 50`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	tags := []tagCount{}
+	for rows.Next() {
+		var item tagCount
+		if err := rows.Scan(&item.Tag, &item.Count); err != nil {
+			return nil, err
+		}
+		item.URL = tagPageURL(q, item.Tag)
+		tags = append(tags, item)
+	}
+	return tags, rows.Err()
+}
+
+type rowScanner interface {
+	Scan(...any) error
 }
 
 func loadIndex(ctx context.Context, q, tag string, page int) (indexData, error) {
@@ -290,32 +536,19 @@ func loadIndex(ctx context.Context, q, tag string, page int) (indexData, error) 
 	return data, nil
 }
 
-func loadTags(ctx context.Context, q string) ([]tagCount, error) {
-	rows, err := store.Query(ctx, `select tag, count(*) as count from tags group by tag order by count desc, tag asc limit 50`)
+func handleIndex(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	tag := normalizeTag(r.URL.Query().Get("tag"))
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+
+	data, err := loadIndex(r.Context(), q, tag, page)
 	if err != nil {
-		return nil, err
+		http.Error(w, "load shelf: "+err.Error(), http.StatusInternalServerError)
+		return
 	}
-	defer rows.Close()
-
-	tags := []tagCount{}
-	for rows.Next() {
-		var item tagCount
-		if err := rows.Scan(&item.Tag, &item.Count); err != nil {
-			return nil, err
-		}
-		item.URL = tagPageURL(q, item.Tag)
-		tags = append(tags, item)
-	}
-	return tags, rows.Err()
-}
-
-func loadStats(ctx context.Context) (appStats, error) {
-	var stats appStats
-	err := store.QueryRow(ctx, `select
-		(select count(*) from links),
-		(select count(*) from clicks),
-		(select count(distinct tag) from tags)`).Scan(&stats.Links, &stats.Clicks, &stats.Tags)
-	return stats, err
+	data.Added = r.URL.Query().Get("added") == "1"
+	data.Deleted = r.URL.Query().Get("deleted") == "1"
+	render(w, http.StatusOK, indexTmpl, data)
 }
 
 func handleCreate(w http.ResponseWriter, r *http.Request) {
@@ -354,48 +587,6 @@ func handleCreate(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/?added=1", http.StatusSeeOther)
 }
 
-func handleDelete(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if id == "" {
-		http.NotFound(w, r)
-		return
-	}
-	_, err := store.Batch(r.Context(),
-		storage.Statement{SQL: `delete from tags where link_id = ?`, Args: []any{id}},
-		storage.Statement{SQL: `delete from clicks where link_id = ?`, Args: []any{id}},
-		storage.Statement{SQL: `delete from links where id = ?`, Args: []any{id}},
-	)
-	if err != nil {
-		http.Error(w, "delete link: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	http.Redirect(w, r, "/?deleted=1", http.StatusSeeOther)
-}
-
-func handleGo(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if id == "" {
-		http.NotFound(w, r)
-		return
-	}
-	var target string
-	err := store.QueryRow(r.Context(), `select url from links where id = ?`, id).Scan(&target)
-	if errors.Is(err, storage.ErrNoRows) {
-		http.NotFound(w, r)
-		return
-	}
-	if err != nil {
-		http.Error(w, "load link: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if _, err := store.Exec(r.Context(), `insert into clicks (id, link_id, clicked_at) values (?, ?, ?)`,
-		app.NewID(), id, time.Now().UTC().Format(app.TimestampFormat)); err != nil {
-		http.Error(w, "record click: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	http.Redirect(w, r, target, http.StatusFound)
-}
-
 func handleDetail(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
@@ -428,195 +619,4 @@ func handleDetail(w http.ResponseWriter, r *http.Request) {
 		Days:   days,
 		TagURL: func(value string) string { return tagPageURL("", value) },
 	})
-}
-
-func loadLink(ctx context.Context, id string) (link, error) {
-	return scanLink(store.QueryRow(ctx, `select `+linkColumns+` from links l where l.id = ?`, id))
-}
-
-func loadClicks(ctx context.Context, id string) ([]click, error) {
-	rows, err := store.Query(ctx, `select clicked_at from clicks where link_id = ? order by clicked_at desc limit 30`, id)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	clicks := []click{}
-	for rows.Next() {
-		var item click
-		if err := rows.Scan(&item.At); err != nil {
-			return nil, err
-		}
-		clicks = append(clicks, item)
-	}
-	return clicks, rows.Err()
-}
-
-func loadDays(ctx context.Context, id string) ([]dayCount, error) {
-	rows, err := store.Query(ctx, `select substr(clicked_at, 1, 10) as day, count(*) as count
-		from clicks where link_id = ? group by day order by day desc limit 14`, id)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	days := []dayCount{}
-	for rows.Next() {
-		var item dayCount
-		if err := rows.Scan(&item.Day, &item.Count); err != nil {
-			return nil, err
-		}
-		days = append(days, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	slices.Reverse(days)
-	var maxCount int64
-	for _, day := range days {
-		if day.Count > maxCount {
-			maxCount = day.Count
-		}
-	}
-	for i := range days {
-		if maxCount > 0 {
-			days[i].Percent = int(days[i].Count * 100 / maxCount)
-		}
-		if days[i].Count > 0 && days[i].Percent < 4 {
-			days[i].Percent = 4
-		}
-	}
-	return days, nil
-}
-
-type linkInput struct {
-	URL, Title, Description string
-	Tags                    []string
-}
-
-func parseLinkInput(r *http.Request) (linkInput, error) {
-	rawURL := strings.TrimSpace(r.FormValue("url"))
-	if rawURL == "" {
-		return linkInput{}, fmt.Errorf("URL is required")
-	}
-	if len(rawURL) > maxURL {
-		return linkInput{}, fmt.Errorf("URL is too long")
-	}
-	if !strings.Contains(rawURL, "://") {
-		rawURL = "https://" + rawURL
-	}
-	parsed, err := url.Parse(rawURL)
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return linkInput{}, fmt.Errorf("URL must be an http or https address")
-	}
-	parsed.Scheme = strings.ToLower(parsed.Scheme)
-	parsed.Host = strings.ToLower(parsed.Host)
-
-	title := strings.TrimSpace(r.FormValue("title"))
-	if title == "" {
-		title = parsed.Host
-	}
-	if len(title) > maxTitle {
-		return linkInput{}, fmt.Errorf("title is too long")
-	}
-	description := strings.TrimSpace(r.FormValue("description"))
-	if len(description) > maxDescription {
-		return linkInput{}, fmt.Errorf("description is too long")
-	}
-	tags, err := parseTags(r.FormValue("tags"))
-	if err != nil {
-		return linkInput{}, err
-	}
-	return linkInput{URL: parsed.String(), Title: title, Description: description, Tags: tags}, nil
-}
-
-func parseTags(raw string) ([]string, error) {
-	seen := map[string]bool{}
-	tags := []string{}
-	for part := range strings.SplitSeq(raw, ",") {
-		tag := normalizeTag(part)
-		if tag == "" || seen[tag] {
-			continue
-		}
-		if !validTag(tag) {
-			return nil, fmt.Errorf("tag %q must be 1-24 lowercase letters, digits, or dashes", tag)
-		}
-		seen[tag] = true
-		tags = append(tags, tag)
-	}
-	if len(tags) > maxTags {
-		return nil, fmt.Errorf("use at most %d tags", maxTags)
-	}
-	sort.Strings(tags)
-	return tags, nil
-}
-
-func normalizeTag(tag string) string {
-	tag = strings.ToLower(strings.TrimSpace(tag))
-	return strings.TrimPrefix(tag, "#")
-}
-
-func validTag(tag string) bool {
-	if len(tag) == 0 || len(tag) > 24 {
-		return false
-	}
-	for i, r := range tag {
-		switch {
-		case r >= 'a' && r <= 'z':
-		case r >= '0' && r <= '9':
-		case r == '-' && i > 0 && i < len(tag)-1:
-		default:
-			return false
-		}
-	}
-	return true
-}
-
-type rowScanner interface {
-	Scan(...any) error
-}
-
-func scanLink(scanner rowScanner) (link, error) {
-	var item link
-	var tags string
-	if err := scanner.Scan(&item.ID, &item.URL, &item.Title, &item.Description, &item.CreatedAt, &item.Clicks, &item.LastClickedAt, &tags); err != nil {
-		return link{}, err
-	}
-	if parsed, err := url.Parse(item.URL); err == nil {
-		item.Host = parsed.Host
-	}
-	item.Tags = splitTags(tags)
-	return item, nil
-}
-
-func splitTags(raw string) []string {
-	if raw == "" {
-		return []string{}
-	}
-	tags := slices.Collect(strings.SplitSeq(raw, ","))
-	for i := range tags {
-		tags[i] = strings.TrimSpace(tags[i])
-	}
-	sort.Strings(tags)
-	return tags
-}
-
-func tagPageURL(q, tag string) string {
-	return pageURL(q, tag, 0)
-}
-
-func pageURL(q, tag string, page int) string {
-	values := url.Values{}
-	if q != "" {
-		values.Set("q", q)
-	}
-	if tag != "" {
-		values.Set("tag", tag)
-	}
-	if page > 1 {
-		values.Set("page", strconv.Itoa(page))
-	}
-	if len(values) == 0 {
-		return "/"
-	}
-	return "/?" + values.Encode()
 }
