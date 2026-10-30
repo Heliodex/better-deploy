@@ -42,6 +42,10 @@ let { actionMessage, deploying, detail, error, history, onupload, span = $bindab
 				<dd class="text-sm tabular-nums">{detail.pid ?? "–"}</dd>
 			</div>
 			<div class="flex flex-col">
+				<dt class="text-xs tracking-wide text-neutral-500 uppercase">History</dt>
+				<dd class="text-sm tabular-nums">{formatSize(detail.historyBytes ?? 0)}</dd>
+			</div>
+			<div class="flex flex-col">
 				<dt class="text-xs tracking-wide text-neutral-500 uppercase">Disk</dt>
 				<dd class={detail.overQuota ? "text-sm text-red-400" : "text-sm"}>
 					{formatSize(detail.diskBytes ?? 0)}

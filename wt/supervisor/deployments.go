@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
+	"syscall"
 	"time"
 )
 
@@ -19,19 +21,25 @@ const (
 	deploymentKeep       = 10
 	deploymentTimeLayout = "20060102T150405.000000000Z"
 	deploymentMetaName   = "meta.json"
+	deploymentBlobDir    = ".blobs"
 )
+
+// deploymentMaxBytes bounds one app's retained history. Identical artifacts are shared, so this is generous.
+var deploymentMaxBytes int64 = 1 << 30
 
 var errDeploymentNotFound = errors.New("deployment not found")
 
 // deploymentInfo describes one retained bundle.
 type deploymentInfo struct {
-	ID          string    `json:"id"`
-	DeployedAt  time.Time `json:"deployedAt"`
-	Digest      string    `json:"digest"`
-	Size        int64     `json:"size"`
-	Runtime     string    `json:"runtime,omitempty"`
-	Target      string    `json:"target,omitempty"`
-	Rebuildable bool      `json:"rebuildable"`
+	ID          string            `json:"id"`
+	DeployedAt  time.Time         `json:"deployedAt"`
+	Digest      string            `json:"digest"`
+	Size        int64             `json:"size"`
+	Runtime     string            `json:"runtime,omitempty"`
+	Target      string            `json:"target,omitempty"`
+	Rebuildable bool              `json:"rebuildable"`
+	Bytes       int64             `json:"bytes"`
+	Blobs       map[string]string `json:"blobs,omitempty"`
 }
 
 // deploymentManager keeps a bounded history of app bundles under the state directory.
@@ -45,6 +53,10 @@ func newDeploymentManager(dir string) *deploymentManager {
 
 func (m *deploymentManager) appDir(app string) string {
 	return filepath.Join(m.dir, app)
+}
+
+func (m *deploymentManager) blobDir(app string) string {
+	return filepath.Join(m.appDir(app), deploymentBlobDir)
 }
 
 func validDeploymentID(id string) error {
@@ -114,6 +126,147 @@ func (m *deploymentManager) bundle(app, id string) (string, error) {
 	return "", errDeploymentNotFound
 }
 
+// storeBlob puts a file in the content-addressed store and returns its digest and size.
+func (m *deploymentManager) storeBlob(app, source string) (string, int64, error) {
+	info, err := os.Stat(source)
+	if err != nil {
+		return "", 0, err
+	}
+	digest, err := fileDigest(source)
+	if err != nil {
+		return "", 0, err
+	}
+	if err := os.MkdirAll(m.blobDir(app), 0o755); err != nil {
+		return "", 0, err
+	}
+	blob := filepath.Join(m.blobDir(app), digest)
+	if existing, err := os.Stat(blob); err == nil && existing.Size() == info.Size() {
+		return digest, info.Size(), nil
+	}
+	if err := os.Link(source, blob); err == nil {
+		return digest, info.Size(), nil
+	}
+
+	temp, err := os.CreateTemp(m.blobDir(app), ".blob-")
+	if err != nil {
+		return "", 0, err
+	}
+	name := temp.Name()
+	src, err := os.Open(source)
+	if err != nil {
+		_ = temp.Close()
+		_ = os.Remove(name)
+		return "", 0, err
+	}
+	_, copyErr := io.Copy(temp, src)
+	closeErr := src.Close()
+	if copyErr == nil {
+		copyErr = temp.Close()
+	} else {
+		_ = temp.Close()
+	}
+	if copyErr == nil {
+		copyErr = closeErr
+	}
+	if copyErr != nil {
+		_ = os.Remove(name)
+		return "", 0, copyErr
+	}
+	if err := os.Rename(name, blob); err != nil {
+		_ = os.Remove(name)
+		return "", 0, err
+	}
+	return digest, info.Size(), nil
+}
+
+func linkBlob(blob, dst string) error {
+	if err := os.Link(blob, dst); err == nil {
+		return nil
+	}
+	return copyFile(blob, dst)
+}
+
+// gcBlobs removes stored artifacts no retained bundle references.
+func (m *deploymentManager) gcBlobs(app string) error {
+	ids, err := m.ids(app)
+	if err != nil {
+		return err
+	}
+	referenced := map[string]struct{}{}
+	for _, id := range ids {
+		data, err := os.ReadFile(filepath.Join(m.appDir(app), id, deploymentMetaName))
+		if err != nil {
+			continue
+		}
+		var info deploymentInfo
+		if err := json.Unmarshal(data, &info); err != nil {
+			continue
+		}
+		for _, digest := range info.Blobs {
+			referenced[digest] = struct{}{}
+		}
+	}
+
+	entries, err := os.ReadDir(m.blobDir(app))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if _, ok := referenced[entry.Name()]; ok {
+			continue
+		}
+		if err := os.Remove(filepath.Join(m.blobDir(app), entry.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type fileKey struct {
+	device, inode uint64
+}
+
+// usage counts the bytes stored for one app, following hardlinks only once.
+func (m *deploymentManager) usage(app string) (int64, error) {
+	var total int64
+	seen := map[fileKey]struct{}{}
+	err := filepath.WalkDir(m.appDir(app), func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if stat, ok := info.Sys().(*syscall.Stat_t); ok {
+			key := fileKey{device: uint64(stat.Dev), inode: stat.Ino}
+			if _, ok := seen[key]; ok {
+				return nil
+			}
+			seen[key] = struct{}{}
+		}
+		total += info.Size()
+		return nil
+	})
+	if os.IsNotExist(err) {
+		return 0, nil
+	}
+	return total, err
+}
+
+// prune keeps the newest bundles within both the count and byte limits, then drops unreferenced blobs.
 func (m *deploymentManager) prune(app string) error {
 	ids, err := m.ids(app)
 	if err != nil {
@@ -125,7 +278,23 @@ func (m *deploymentManager) prune(app string) error {
 		}
 		ids = ids[1:]
 	}
-	return nil
+	for len(ids) > 1 {
+		used, err := m.usage(app)
+		if err != nil {
+			return err
+		}
+		if used <= deploymentMaxBytes {
+			break
+		}
+		if err := os.RemoveAll(filepath.Join(m.appDir(app), ids[0])); err != nil {
+			return err
+		}
+		ids = ids[1:]
+		if err := m.gcBlobs(app); err != nil {
+			return err
+		}
+	}
+	return m.gcBlobs(app)
 }
 
 func copyFile(src, dst string) error {
@@ -200,36 +369,58 @@ func (m *deploymentManager) record(app, source string) (deploymentInfo, error) {
 	defer os.RemoveAll(temp)
 
 	artifact, _ := readArtifact(source)
-	cwasm := filepath.Join(source, "main.cwasm")
-	info, err := os.Stat(cwasm)
-	rebuildable := false
-	if _, err := os.Stat(filepath.Join(source, "main.wasm")); err == nil {
-		rebuildable = true
-		if info == nil {
-			info, err = os.Stat(filepath.Join(source, "main.wasm"))
+	files := map[string]string{}
+	var total, cwasmSize, wasmSize int64
+	digest := ""
+	for _, name := range []string{"main.cwasm", "main.wasm"} {
+		info, err := os.Stat(filepath.Join(source, name))
+		if err != nil {
+			continue
+		}
+		stored, size, err := m.storeBlob(app, filepath.Join(source, name))
+		if err != nil {
+			return deploymentInfo{}, fmt.Errorf("store %s: %w", name, err)
+		}
+		if err := linkBlob(filepath.Join(m.blobDir(app), stored), filepath.Join(temp, name)); err != nil {
+			return deploymentInfo{}, fmt.Errorf("link %s: %w", name, err)
+		}
+		files[name] = stored
+		total += size
+		switch name {
+		case "main.cwasm":
+			digest, cwasmSize = stored, info.Size()
+		case "main.wasm":
+			wasmSize = info.Size()
 		}
 	}
-	if err != nil {
-		return deploymentInfo{}, fmt.Errorf("read main.cwasm: %w", err)
+	if digest == "" {
+		digest = files["main.wasm"]
+		cwasmSize = wasmSize
 	}
-	digest, err := fileDigest(cwasm)
-	if os.IsNotExist(err) {
-		digest, err = fileDigest(filepath.Join(source, "main.wasm"))
+	if digest == "" {
+		return deploymentInfo{}, errNoComponent
 	}
-	if err != nil {
+	if err := copyFile(filepath.Join(source, "app.json"), filepath.Join(temp, "app.json")); err != nil {
 		return deploymentInfo{}, err
 	}
-	if err := copyBundle(source, temp); err != nil {
+	if err := copyOptional(source, temp, artifactName); err != nil {
 		return deploymentInfo{}, err
+	}
+	for _, name := range []string{"app.json", artifactName} {
+		if info, err := os.Stat(filepath.Join(temp, name)); err == nil {
+			total += info.Size()
+		}
 	}
 	recorded := deploymentInfo{
 		ID:          id,
 		DeployedAt:  now,
 		Digest:      digest,
-		Size:        info.Size(),
+		Size:        cwasmSize,
 		Runtime:     artifact.Wasmtime,
 		Target:      artifact.Target,
-		Rebuildable: rebuildable,
+		Rebuildable: files["main.wasm"] != "",
+		Bytes:       total,
+		Blobs:       files,
 	}
 	meta, err := json.Marshal(recorded)
 	if err != nil {
@@ -247,12 +438,42 @@ func (m *deploymentManager) record(app, source string) (deploymentInfo, error) {
 	return recorded, nil
 }
 
+// historyBytes returns cached on-disk deployment history size, counting shared artifacts once.
+func (s *supervisor) historyBytes(a *app) int64 {
+	if s.deployments == nil {
+		return 0
+	}
+	now := time.Now()
+	a.history.mu.Lock()
+	if !a.history.at.IsZero() && now.Sub(a.history.at) < diskUsageInterval {
+		bytes := a.history.bytes
+		a.history.mu.Unlock()
+		return bytes
+	}
+	a.history.mu.Unlock()
+
+	bytes, err := s.deployments.usage(a.name)
+	if err != nil {
+		log.Printf("app %s: deployment history usage: %v", a.name, err)
+	}
+	a.history.mu.Lock()
+	a.history.bytes = bytes
+	a.history.at = now
+	a.history.mu.Unlock()
+	return bytes
+}
+
 func (s *supervisor) recordDeployment(name, dir string) {
 	if s.deployments == nil {
 		return
 	}
 	if _, err := s.deployments.record(name, dir); err != nil {
 		log.Printf("deploy history %s: %v", name, err)
+	}
+	if a := s.lookup(name); a != nil {
+		a.history.mu.Lock()
+		a.history.at = time.Time{}
+		a.history.mu.Unlock()
 	}
 }
 

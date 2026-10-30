@@ -65,7 +65,7 @@ async function rollback(id: string): Promise<void> {
 						{formatTime(deployment.deployedAt)}
 					</time>
 					<code class="text-neutral-500">{deployment.digest.slice(0, 12)}</code>
-					<span class="text-neutral-500 tabular-nums">{formatSize(deployment.size)}</span>
+					<span class="text-neutral-500 tabular-nums">{formatSize(deployment.bytes)}</span>
 					<span class="flex-1"></span>
 					<button
 						class={confirming === deployment.id ? "btn btn-danger" : "btn"}

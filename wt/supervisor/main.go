@@ -79,6 +79,7 @@ type app struct {
 	logs      *appLog
 	stats     appStats
 	disk      diskUsageCache
+	history   diskUsageCache
 	requests  sync.WaitGroup // in-flight proxied requests, drained before a replaced version stops
 
 	mu              sync.Mutex
@@ -386,6 +387,7 @@ func (s *supervisor) info(a *app) appInfo {
 	}
 	a.mu.Unlock()
 	info.DiskBytes = s.diskBytes(a)
+	info.HistoryBytes = s.historyBytes(a)
 	info.OverQuota = info.DiskLimitBytes > 0 && info.DiskBytes > info.DiskLimitBytes
 	info.CPUPercent, info.MemoryBytes, info.SampledAt = a.resourceStats()
 	return info
@@ -430,6 +432,7 @@ type appInfo struct {
 	MemoryBytes    int64     `json:"memoryBytes"`
 	DiskBytes      int64     `json:"diskBytes"`
 	DiskLimitBytes int64     `json:"diskLimitBytes,omitempty"`
+	HistoryBytes   int64     `json:"historyBytes"`
 	OverQuota      bool      `json:"overQuota,omitempty"`
 	SampledAt      time.Time `json:"sampledAt"`
 	LastHealthy    time.Time `json:"lastHealthy,omitempty"`

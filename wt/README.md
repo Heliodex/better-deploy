@@ -155,7 +155,7 @@ POST   /apps/<name>?dry_run=1   validate an uploaded bundle without installing i
 
 `disk_mb` is a soft per-app quota over `/data` plus the app's SQLite database files. Logs, backups and deployment bundles are not counted. The app snapshot reports `diskBytes`, `diskLimitBytes` and `overQuota`; the supervisor does not stop an app for exceeding the quota. `0` or an omitted value means unlimited.
 
-Every successful deploy or rollback retains a bundle under `WT_STATE_DIR/.deployments/<app>`: `app.json`, `main.cwasm`, `main.wasm`, `artifact.json`, and a `meta.json` with its digest, size and artifact metadata. The newest ten are kept. A rollback installs the retained code and config but leaves the live database and `/data` untouched, so schema changes between the two versions still matter.
+Every successful deploy or rollback retains a bundle under `WT_STATE_DIR/.deployments/<app>`: `app.json`, `main.cwasm`, `main.wasm`, `artifact.json`, and a `meta.json` with its digest, size and artifact metadata. Identical artifacts are stored once under `.deployments/<app>/.blobs` and hardlinked into each bundle, so a config-only redeploy does not copy the component again. The newest ten bundles are kept, and history is capped at 1 GiB per app; the panel shows the resulting on-disk size. A rollback installs the retained code and config but leaves the live database and `/data` untouched, so schema changes between the two versions still matter.
 
 `DELETE` is deliberately conservative: it removes the app directory and stops the process, but leaves the database, backups, logs, resource history, deployment history and `/data` intact unless `purge=1` is set.
 

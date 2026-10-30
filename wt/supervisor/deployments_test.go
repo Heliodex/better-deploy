@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -99,5 +101,110 @@ func TestRollbackInstallsPreviousBundle(t *testing.T) {
 	}
 	if len(infos) != 2 {
 		t.Errorf("history length after rollback = %d, want 2", len(infos))
+	}
+}
+
+func TestDeploymentHistorySharesArtifacts(t *testing.T) {
+	manager := newDeploymentManager(t.TempDir())
+	source := writeDeploymentSource(t, "demo.localhost")
+	if err := os.WriteFile(filepath.Join(source, "main.cwasm"), bytes.Repeat([]byte("c"), 10<<10), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "main.wasm"), bytes.Repeat([]byte("w"), 10<<10), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := manager.record("demo", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := manager.record("demo", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	firstDir, err := manager.bundle("demo", first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondDir, err := manager.bundle("demo", second.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstInfo, err := os.Stat(filepath.Join(firstDir, "main.cwasm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondInfo, err := os.Stat(filepath.Join(secondDir, "main.cwasm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(firstInfo, secondInfo) {
+		t.Error("identical artifacts were copied instead of shared")
+	}
+
+	blobs, err := os.ReadDir(filepath.Join(manager.appDir("demo"), deploymentBlobDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blobs) != 2 {
+		t.Errorf("blob count = %d, want 2 (cwasm and wasm)", len(blobs))
+	}
+
+	used, err := manager.usage("demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if used >= first.Bytes+second.Bytes {
+		t.Errorf("usage = %d, want less than the logical total %d", used, first.Bytes+second.Bytes)
+	}
+}
+
+func TestDeploymentHistoryPrunesUnreferencedBlobs(t *testing.T) {
+	manager := newDeploymentManager(t.TempDir())
+	source := writeDeploymentSource(t, "demo.localhost")
+	if err := os.WriteFile(filepath.Join(source, "main.wasm"), []byte("wasm"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for i := range deploymentKeep + 2 {
+		if err := os.WriteFile(filepath.Join(source, "main.cwasm"), []byte(fmt.Sprintf("cwasm %d", i)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := manager.record("demo", source); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	blobs, err := os.ReadDir(filepath.Join(manager.appDir("demo"), deploymentBlobDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// One shared wasm blob plus one cwasm per retained bundle.
+	if len(blobs) != deploymentKeep+1 {
+		t.Errorf("blob count = %d, want %d", len(blobs), deploymentKeep+1)
+	}
+}
+
+func TestDeploymentHistoryByteBudget(t *testing.T) {
+	previous := deploymentMaxBytes
+	deploymentMaxBytes = 16
+	defer func() { deploymentMaxBytes = previous }()
+
+	manager := newDeploymentManager(t.TempDir())
+	source := writeDeploymentSource(t, "demo.localhost")
+	for i := range 3 {
+		if err := os.WriteFile(filepath.Join(source, "main.cwasm"), []byte(fmt.Sprintf("cwasm %d", i)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := manager.record("demo", source); err != nil {
+			t.Fatal(err)
+		}
+	}
+	infos, err := manager.list("demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 1 {
+		t.Errorf("history length = %d, want 1 under a tiny byte budget", len(infos))
 	}
 }
