@@ -213,8 +213,8 @@ func backupOldestRoot(tree backupTree) string {
 	return root
 }
 
-// loadTreeLocked reads the index and reconciles it with the files on disk. Snapshots from before the index existed are chained in creation order.
-func (m *backupManager) loadTreeLocked(app string, files []backupInfo) (backupTree, bool, error) {
+// readTreeLocked reads an app's index, starting empty when the file is missing or broken.
+func (m *backupManager) readTreeLocked(app string) (backupTree, bool, error) {
 	tree := backupTree{Nodes: map[string]backupNode{}}
 	changed := false
 
@@ -234,7 +234,83 @@ func (m *backupManager) loadTreeLocked(app string, files []backupInfo) (backupTr
 		tree.Nodes = map[string]backupNode{}
 		changed = true
 	}
+	return tree, changed, nil
+}
 
+// chainMissingNodes links snapshots the index has not recorded to the current node, so a file written just before a crash still has a place in the tree.
+func chainMissingNodes(tree *backupTree, chronological []backupInfo) bool {
+	changed := false
+	parent := tree.Current
+	if len(tree.Nodes) == 0 {
+		parent = ""
+	} else if _, ok := tree.Nodes[parent]; !ok {
+		parent = ""
+	}
+	for _, file := range chronological {
+		if _, ok := tree.Nodes[file.Name]; ok {
+			continue
+		}
+		tree.Nodes[file.Name] = backupNode{Parent: parent, Kind: backupKindLegacy}
+		parent = file.Name
+		changed = true
+	}
+	return changed
+}
+
+// repairParentLinks detaches nodes whose parent was pruned or never existed.
+func repairParentLinks(tree *backupTree) bool {
+	changed := false
+	for name, node := range tree.Nodes {
+		if node.Parent == "" {
+			continue
+		}
+		if _, ok := tree.Nodes[node.Parent]; !ok {
+			node.Parent = ""
+			tree.Nodes[name] = node
+			changed = true
+		}
+	}
+	return changed
+}
+
+// flattenTree rebuilds a broken index in creation order, keeping each node's kind.
+func flattenTree(tree *backupTree, chronological []backupInfo) {
+	parent := ""
+	for _, file := range chronological {
+		tree.Nodes[file.Name] = backupNode{Parent: parent, Kind: tree.Nodes[file.Name].Kind}
+		parent = file.Name
+	}
+}
+
+// adoptSingleRoot makes the oldest root the only one, so the graph starts in one place.
+func adoptSingleRoot(tree *backupTree) bool {
+	root := backupOldestRoot(*tree)
+	changed := false
+	for name, node := range tree.Nodes {
+		if node.Parent == "" && name != root {
+			node.Parent = root
+			tree.Nodes[name] = node
+			changed = true
+		}
+	}
+	return changed
+}
+
+// syncCurrentNode moves the current marker to the newest snapshot when it no longer names one.
+func syncCurrentNode(tree *backupTree, chronological []backupInfo) bool {
+	if _, ok := tree.Nodes[tree.Current]; ok {
+		return false
+	}
+	tree.Current = ""
+	if len(chronological) > 0 {
+		tree.Current = chronological[len(chronological)-1].Name
+	}
+	return true
+}
+
+// reconcileTree makes the index match the files on disk and reports whether it changed.
+func reconcileTree(tree *backupTree, files []backupInfo) bool {
+	changed := false
 	existing := make(map[string]struct{}, len(files))
 	for _, file := range files {
 		existing[file.Name] = struct{}{}
@@ -249,66 +325,32 @@ func (m *backupManager) loadTreeLocked(app string, files []backupInfo) (backupTr
 	chronological := append([]backupInfo(nil), files...)
 	sort.Slice(chronological, func(i, j int) bool { return chronological[i].CreatedAt.Before(chronological[j].CreatedAt) })
 
-	if len(tree.Nodes) == 0 {
-		parent := ""
-		for _, file := range chronological {
-			tree.Nodes[file.Name] = backupNode{Parent: parent, Kind: backupKindLegacy}
-			parent = file.Name
-			changed = true
-		}
-	} else {
-		// A file the index has not recorded yet, such as one written just before a crash, continues from the current node.
-		parent := tree.Current
-		if _, ok := tree.Nodes[parent]; !ok {
-			parent = ""
-		}
-		for _, file := range chronological {
-			if _, ok := tree.Nodes[file.Name]; ok {
-				continue
-			}
-			tree.Nodes[file.Name] = backupNode{Parent: parent, Kind: backupKindLegacy}
-			parent = file.Name
-			changed = true
-		}
-	}
-
-	for name, node := range tree.Nodes {
-		if node.Parent == "" {
-			continue
-		}
-		if _, ok := tree.Nodes[node.Parent]; !ok {
-			node.Parent = ""
-			tree.Nodes[name] = node
-			changed = true
-		}
-	}
-	if !backupTreeAcyclic(tree) {
-		parent := ""
-		for _, file := range chronological {
-			tree.Nodes[file.Name] = backupNode{Parent: parent, Kind: tree.Nodes[file.Name].Kind}
-			parent = file.Name
-		}
+	if chainMissingNodes(tree, chronological) {
 		changed = true
 	}
-
-	// Keep one root so the graph starts in one place; any extra roots become children of the oldest.
-	root := backupOldestRoot(tree)
-	for name, node := range tree.Nodes {
-		if node.Parent == "" && name != root {
-			node.Parent = root
-			tree.Nodes[name] = node
-			changed = true
-		}
-	}
-
-	if _, ok := tree.Nodes[tree.Current]; !ok {
-		tree.Current = ""
-		if len(chronological) > 0 {
-			tree.Current = chronological[len(chronological)-1].Name
-		}
+	if repairParentLinks(tree) {
 		changed = true
 	}
-	return tree, changed, nil
+	if !backupTreeAcyclic(*tree) {
+		flattenTree(tree, chronological)
+		changed = true
+	}
+	if adoptSingleRoot(tree) {
+		changed = true
+	}
+	if syncCurrentNode(tree, chronological) {
+		changed = true
+	}
+	return changed
+}
+
+// loadTreeLocked loads snapshot files and their tree index together, rebuilding the index when it is missing, stale or broken.
+func (m *backupManager) loadTreeLocked(app string, files []backupInfo) (backupTree, bool, error) {
+	tree, changed, err := m.readTreeLocked(app)
+	if err != nil {
+		return tree, false, err
+	}
+	return tree, reconcileTree(&tree, files) || changed, nil
 }
 
 func (m *backupManager) saveTreeLocked(app string, tree backupTree) error {
