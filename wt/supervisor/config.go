@@ -13,12 +13,14 @@ const maxConfigRequestBytes = 64 << 10
 
 // appConfigPatch changes only the fields it names. A null env value removes that key.
 type appConfigPatch struct {
-	Host     *string            `json:"host"`
-	Health   *string            `json:"health"`
-	Env      map[string]*string `json:"env"`
-	MemoryMB *int               `json:"memory_mb"`
-	DiskMB   *int               `json:"disk_mb"`
-	Schedule *[]scheduleConfig  `json:"schedule"`
+	Host           *string            `json:"host"`
+	Health         *string            `json:"health"`
+	Env            map[string]*string `json:"env"`
+	MemoryMB       *int               `json:"memory_mb"`
+	DiskMB         *int               `json:"disk_mb"`
+	MaxConcurrent  *int               `json:"max_concurrency"`
+	RequestTimeout *string            `json:"request_timeout"`
+	Schedule       *[]scheduleConfig  `json:"schedule"`
 }
 
 // appConfigResponse is the runtime config the panel may show. Env values stay hidden; only their keys are listed.
@@ -29,6 +31,8 @@ type appConfigResponse struct {
 	EnvKeys         []string         `json:"env_keys"`
 	MemoryMB        int              `json:"memory_mb"`
 	DiskMB          int              `json:"disk_mb"`
+	MaxConcurrent   int              `json:"max_concurrency"`
+	RequestTimeout  string           `json:"request_timeout"`
 	Schedule        []scheduleConfig `json:"schedule"`
 	RestartRequired bool             `json:"restart_required,omitempty"`
 }
@@ -39,13 +43,15 @@ func configResponse(cfg appConfig) appConfigResponse {
 		schedule = []scheduleConfig{}
 	}
 	return appConfigResponse{
-		Name:     cfg.Name,
-		Host:     cfg.Host,
-		Health:   cfg.Health,
-		EnvKeys:  sortedKeys(cfg.Env),
-		MemoryMB: cfg.MemoryMB,
-		DiskMB:   cfg.DiskMB,
-		Schedule: schedule,
+		Name:           cfg.Name,
+		Host:           cfg.Host,
+		Health:         cfg.Health,
+		EnvKeys:        sortedKeys(cfg.Env),
+		MemoryMB:       cfg.MemoryMB,
+		DiskMB:         cfg.DiskMB,
+		MaxConcurrent:  cfg.MaxConcurrent,
+		RequestTimeout: cfg.RequestTimeout,
+		Schedule:       schedule,
 	}
 }
 
@@ -61,6 +67,12 @@ func applyConfigPatch(cfg appConfig, patch appConfigPatch) appConfig {
 	}
 	if patch.DiskMB != nil {
 		cfg.DiskMB = *patch.DiskMB
+	}
+	if patch.MaxConcurrent != nil {
+		cfg.MaxConcurrent = *patch.MaxConcurrent
+	}
+	if patch.RequestTimeout != nil {
+		cfg.RequestTimeout = *patch.RequestTimeout
 	}
 	if patch.Schedule != nil {
 		cfg.Schedule = append([]scheduleConfig(nil), (*patch.Schedule)...)
@@ -151,7 +163,8 @@ func (s *supervisor) handleAppConfig(w http.ResponseWriter, r *http.Request, nam
 	s.hosts[next.Host] = a
 	s.mu.Unlock()
 
-	restartRequired := !maps.Equal(cfg.Env, next.Env) || cfg.MemoryMB != next.MemoryMB
+	restartRequired := !maps.Equal(cfg.Env, next.Env) || cfg.MemoryMB != next.MemoryMB ||
+		cfg.MaxConcurrent != next.MaxConcurrent || cfg.RequestTimeout != next.RequestTimeout
 	if !slices.Equal(cfg.Schedule, next.Schedule) {
 		a.mu.Lock()
 		running := a.cmd != nil && !a.exited

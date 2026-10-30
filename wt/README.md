@@ -61,7 +61,7 @@ WT_TOKEN=dev \
 
 `WT_WASMTIME_COMPILER` (or `--wasmtime-compiler`) selects the binary used to rebuild a stale `main.cwasm`; it defaults to `WT_WASMTIME`. A runtime-only wasmtime build cannot compile, so leave the default there and redeploy from a machine with the matching wasmtime instead.
 
-The supervisor speaks plain HTTP by default; set `WT_TLS_CERT` and `WT_TLS_KEY` (or `--tls-cert`/`--tls-key`) to terminate TLS itself. Behind the Orchard ingress, leave TLS to the ingress and keep the supervisor on HTTP. The proxy preserves the original `Host` and sets `X-Forwarded-Host` and `X-Forwarded-Proto` for the app. It connects within five seconds and waits at most thirty seconds for response headers, so a hung app returns `502` instead of holding the client connection open.
+The supervisor speaks plain HTTP by default; set `WT_TLS_CERT` and `WT_TLS_KEY` (or `--tls-cert`/`--tls-key`) to terminate TLS itself. Behind the Orchard ingress, leave TLS to the ingress and keep the supervisor on HTTP. The proxy preserves the original `Host` and sets `X-Forwarded-Host` and `X-Forwarded-Proto` for the app. It connects within five seconds and waits at most thirty seconds for response headers, so a hung app returns `502` instead of holding the client connection open. An app can set `max_concurrency` to cap simultaneous proxied requests (extra requests get `429`) and `request_timeout` to cancel a request that runs too long.
 
 Every ten seconds the supervisor probes each running app's health path (three-second timeout) and reports `running`, `unhealthy`, `restarting` or `stopped`. Two consecutive failures mark it `unhealthy` and record `lastError`; a later success clears it and updates `lastHealthy`. Health state appears in `GET /apps`, the SSE snapshot and the admin panel, and does not stop or restart the process by itself.
 
@@ -152,7 +152,7 @@ DELETE /apps/<name>?purge=1     also remove the database, backups, logs, history
 POST   /apps/<name>?dry_run=1   validate an uploaded bundle without installing it
 ```
 
-`PATCH` accepts any of `host`, `health`, `env`, `memory_mb`, `disk_mb` and `schedule`. Env changes are a merge; a `null` value removes a key. `GET` returns `env_keys` rather than values, so secrets are never echoed back. Host and schedule changes take effect immediately; env and memory changes are saved to `app.json` and applied on the next start or restart, which the response reports as `restart_required`. Host changes update routing at once, and are rejected with `409` if another app already owns the host.
+`PATCH` accepts any of `host`, `health`, `env`, `memory_mb`, `disk_mb`, `max_concurrency`, `request_timeout` and `schedule`. Env changes are a merge; a `null` value removes a key. `GET` returns `env_keys` rather than values, so secrets are never echoed back. Host and schedule changes take effect immediately; env and memory changes are saved to `app.json` and applied on the next start or restart, which the response reports as `restart_required`. Host changes update routing at once, and are rejected with `409` if another app already owns the host.
 
 `disk_mb` is a soft per-app quota over `/data` plus the app's SQLite database files. Logs, backups and deployment bundles are not counted. The app snapshot reports `diskBytes`, `diskLimitBytes` and `overQuota`; the supervisor does not stop an app for exceeding the quota. `0` or an omitted value means unlimited.
 
@@ -189,7 +189,7 @@ wasmtime serve -Scli -Sp3 -S inherit-network -W component-model-async=y \
   main.cwasm
 ```
 
-`app.json` carries `name`, `host`, `health`, `env`, `memory_mb`, `disk_mb`, `schedule` and the local `build` command. `memory_mb`, when set, becomes wasmtime's `-W max-memory-size`. The health path must answer with a 2xx status before a new version is considered ready. The runtime-only image has no compiler, so `main.wasm` cannot run there: `main.cwasm` is required. At startup the supervisor compares `artifact.json` with its own wasmtime version and target and rebuilds `main.cwasm` from `main.wasm` when they differ. The compiler defaults to `WT_WASMTIME`; set `WT_WASMTIME_COMPILER` (or `--wasmtime-compiler`) to a wasmtime build with the `compile` subcommand when the runtime binary cannot compile. If no compiler is available, the existing `main.cwasm` is kept; if it is missing or incompatible, the app fails to start and keeps its previous version, and you redeploy with a matching `wt-deploy`.
+`app.json` carries `name`, `host`, `health`, `env`, `memory_mb`, `disk_mb`, `max_concurrency`, `request_timeout`, `schedule` and the local `build` command. `memory_mb`, when set, becomes wasmtime's `-W max-memory-size`; `max_concurrency` and `request_timeout` are enforced by the supervisor proxy. `request_timeout` is a Go duration between `1s` and `24h`; leave it unset for streaming or long-running responses. The health path must answer with a 2xx status before a new version is considered ready. The runtime-only image has no compiler, so `main.wasm` cannot run there: `main.cwasm` is required. At startup the supervisor compares `artifact.json` with its own wasmtime version and target and rebuilds `main.cwasm` from `main.wasm` when they differ. The compiler defaults to `WT_WASMTIME`; set `WT_WASMTIME_COMPILER` (or `--wasmtime-compiler`) to a wasmtime build with the `compile` subcommand when the runtime binary cannot compile. If no compiler is available, the existing `main.cwasm` is kept; if it is missing or incompatible, the app fails to start and keeps its previous version, and you redeploy with a matching `wt-deploy`.
 
 ## Scheduled work
 
@@ -338,7 +338,7 @@ The `net/http` adapter in `packages/wasihttp` is adapted from [spin-go-sdk v3](h
 
 - One `wasmtime serve` process per app. A crashed app restarts with exponential backoff (2s up to 30s), reusing its port and proxy route.
 - `memory_mb` is a per-app linear-memory cap; CPU stays a container-level concern.
-- `disk_mb` is a soft quota over `/data` and database files only. It reports `overQuota` but does not block writes; logs, backups and deployment bundles are outside it.
+- `disk_mb` is a soft quota over `/data` and database files only. It reports `overQuota` but does not block writes; logs, backups and deployment bundles are outside it. `max_concurrency` and `request_timeout` bound proxy work, but there is no CPU/fuel limit yet.
 - TLS is optional and basic (certificate files); use the Orchard ingress for real certificates and wildcard hosts.
 - Storage is a per-app SQLite SQL service, not a standard WASI import. The SQLite file is private to the supervisor; apps get a preopen at `/data` as well.
 - Outbound network is granted to every app (`-S inherit-network`), including the loopback storage service.

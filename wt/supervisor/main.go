@@ -45,14 +45,18 @@ type config struct {
 }
 
 type appConfig struct {
-	Name     string            `json:"name"`
-	Host     string            `json:"host"`
-	Health   string            `json:"health"`
-	Env      map[string]string `json:"env"`
-	Build    string            `json:"build,omitempty"`
-	MemoryMB int               `json:"memory_mb,omitempty"`
-	DiskMB   int               `json:"disk_mb,omitempty"`
-	Schedule []scheduleConfig  `json:"schedule,omitempty"`
+	Name           string            `json:"name"`
+	Host           string            `json:"host"`
+	Health         string            `json:"health"`
+	Env            map[string]string `json:"env"`
+	Build          string            `json:"build,omitempty"`
+	MemoryMB       int               `json:"memory_mb,omitempty"`
+	DiskMB         int               `json:"disk_mb,omitempty"`
+	MaxConcurrent  int               `json:"max_concurrency,omitempty"`
+	RequestTimeout string            `json:"request_timeout,omitempty"`
+	Schedule       []scheduleConfig  `json:"schedule,omitempty"`
+
+	requestTimeout time.Duration
 }
 
 // scheduleConfig asks the supervisor to call an app endpoint on a timer. Components cannot run their own background loops under `wasmtime serve`, so time is driven from the host.
@@ -89,6 +93,7 @@ type app struct {
 	exited, retired bool
 	starting        bool
 
+	slots          chan struct{}
 	healthOK       bool
 	healthFailures int
 	lastHealthy    time.Time
@@ -182,6 +187,18 @@ func validateAppHost(host string) error {
 	return nil
 }
 
+// parseRequestTimeout validates an optional per-request deadline. Empty or zero means no supervisor deadline.
+func parseRequestTimeout(value string) (time.Duration, error) {
+	if strings.TrimSpace(value) == "" {
+		return 0, nil
+	}
+	timeout, err := time.ParseDuration(value)
+	if err != nil || timeout < time.Second || timeout > 24*time.Hour {
+		return 0, fmt.Errorf("request_timeout %q must be a duration between 1s and 24h", value)
+	}
+	return timeout, nil
+}
+
 // parseScheduleInterval validates an entry's period and reports how often it fires.
 func parseScheduleInterval(entry scheduleConfig) (time.Duration, error) {
 	every, err := time.ParseDuration(entry.Every)
@@ -226,6 +243,14 @@ func normalizeAppConfig(cfg appConfig, name, domain string) (appConfig, error) {
 	if cfg.DiskMB < 0 {
 		return cfg, fmt.Errorf("disk_mb must be 0 or more")
 	}
+	if cfg.MaxConcurrent < 0 {
+		return cfg, fmt.Errorf("max_concurrency must be 0 or more")
+	}
+	timeout, err := parseRequestTimeout(cfg.RequestTimeout)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.requestTimeout = timeout
 	for i := range cfg.Schedule {
 		entry := &cfg.Schedule[i]
 		if !strings.HasPrefix(entry.Path, "/") {

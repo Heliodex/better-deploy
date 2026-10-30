@@ -186,6 +186,11 @@ func (s *supervisor) restart(a *app) {
 func (s *supervisor) launch(a *app, source string) error {
 	a.mu.Lock()
 	a.starting = true
+	if a.cfg.MaxConcurrent > 0 {
+		a.slots = make(chan struct{}, a.cfg.MaxConcurrent)
+	} else {
+		a.slots = nil
+	}
 	a.mu.Unlock()
 	defer func() {
 		a.mu.Lock()

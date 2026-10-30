@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -105,6 +106,26 @@ func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer a.requests.Done()
+
+	a.mu.Lock()
+	slots := a.slots
+	timeout := a.cfg.requestTimeout
+	a.mu.Unlock()
+	if slots != nil {
+		select {
+		case slots <- struct{}{}:
+			defer func() { <-slots }()
+		default:
+			http.Error(w, "app is busy", http.StatusTooManyRequests)
+			return
+		}
+	}
+	if timeout > 0 {
+		ctx, cancel := context.WithTimeout(r.Context(), timeout)
+		defer cancel()
+		r = r.WithContext(ctx)
+	}
+
 	started := time.Now()
 	wrapped := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 	a.proxy.ServeHTTP(wrapped, r)
