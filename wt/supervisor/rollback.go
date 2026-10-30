@@ -35,7 +35,7 @@ func writeRollbackJournal(stateDir string, journal rollbackJournal) (string, err
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	path := filepath.Join(dir, fmt.Sprintf("%s-%d.json", journal.Name, time.Now().UnixNano()))
+	path := filepath.Join(dir, fmt.Sprintf("%s.%d.json", journal.Name, time.Now().UnixNano()))
 	data, err := json.Marshal(journal)
 	if err != nil {
 		return "", err
@@ -109,7 +109,7 @@ func pendingRollback(stateDir, name string) bool {
 		return false
 	}
 	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasPrefix(entry.Name(), name+"-") && filepath.Ext(entry.Name()) == ".json" {
+		if !entry.IsDir() && strings.HasPrefix(entry.Name(), name+".") && filepath.Ext(entry.Name()) == ".json" {
 			return true
 		}
 	}
