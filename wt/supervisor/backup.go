@@ -650,6 +650,32 @@ func (m *backupManager) saveSettings(app string, settings backupSettings) error 
 }
 
 // createLocked snapshots the live database as a child of the current node. Reverting moves the current node, so the next snapshot branches from there.
+// backupName picks an unused snapshot name, stepping it forward when two land in the same nanosecond.
+func (m *backupManager) backupName(app string, now time.Time) (string, time.Time) {
+	name := backupFilePrefix + now.Format(backupTimeLayout) + backupFileSuffix
+	for exists(m.appDir(app), name) {
+		now = now.Add(time.Nanosecond)
+		name = backupFilePrefix + now.Format(backupTimeLayout) + backupFileSuffix
+	}
+	return name, now
+}
+
+// parentSnapshotHash returns the current node's hash, recording one for snapshots that predate hashes.
+func (m *backupManager) parentSnapshotHash(app, parent string, tree *backupTree) string {
+	node := tree.Nodes[parent]
+	if node.Hash != "" {
+		return node.Hash
+	}
+	hash, err := backupHash(filepath.Join(m.appDir(app), parent))
+	if err != nil {
+		log.Printf("backup %s: hash current: %v", app, err)
+		return ""
+	}
+	node.Hash = hash
+	tree.Nodes[parent] = node
+	return hash
+}
+
 func (m *backupManager) createLocked(ctx context.Context, app, kind string) (backupInfo, error) {
 	if !m.storage.hasDatabase(app) {
 		return backupInfo{}, errNoStorageDatabase
@@ -671,11 +697,7 @@ func (m *backupManager) createLocked(ctx context.Context, app, kind string) (bac
 	}
 
 	now := time.Now().UTC()
-	name := backupFilePrefix + now.Format(backupTimeLayout) + backupFileSuffix
-	for exists(m.appDir(app), name) {
-		now = now.Add(time.Nanosecond)
-		name = backupFilePrefix + now.Format(backupTimeLayout) + backupFileSuffix
-	}
+	name, now := m.backupName(app, now)
 	path := filepath.Join(m.appDir(app), name)
 	temp := path + backupTempSuffix
 	_ = os.Remove(temp)
@@ -691,19 +713,7 @@ func (m *backupManager) createLocked(ctx context.Context, app, kind string) (bac
 	tree := state.Tree
 	parentHash := ""
 	if parent != "" {
-		node := tree.Nodes[parent]
-		parentHash = node.Hash
-		if parentHash == "" {
-			// Snapshots from before hashes were recorded get one now, so the next attempt can compare cheaply.
-			hash, err := backupHash(filepath.Join(m.appDir(app), parent))
-			if err != nil {
-				log.Printf("backup %s: hash current: %v", app, err)
-			} else {
-				parentHash = hash
-				node.Hash = hash
-				tree.Nodes[parent] = node
-			}
-		}
+		parentHash = m.parentSnapshotHash(app, parent, &tree)
 	}
 	if candidateHash != "" && candidateHash == parentHash {
 		_ = os.Remove(temp)
