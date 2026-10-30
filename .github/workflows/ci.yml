@@ -52,6 +52,15 @@ jobs:
         working-directory: wt/packages
         run: go test ./app/... ./storage/...
 
+      - name: Generate guestbook contract and assets
+        working-directory: wt/example/guestbook
+        run: |
+          (cd web && bun install --frozen-lockfile)
+          go generate ./...
+          (cd web && bun run build)
+          rm -rf static
+          cp -r web/build static
+
       - name: Vet host packages
         run: |
           (cd wt/supervisor && go vet ./...)
@@ -71,10 +80,7 @@ jobs:
 
       - name: Check guestbook frontend
         working-directory: wt/example/guestbook/web
-        run: |
-          bun install --frozen-lockfile
-          bun run svelte:check
-          bun run build
+        run: bun run svelte:check
 
       - name: Check scaffold frontend
         working-directory: wt/deploy/testdata/template/web
