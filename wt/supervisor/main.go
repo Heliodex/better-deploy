@@ -249,6 +249,68 @@ func (s *supervisor) stopAll() {
 	wg.Wait()
 }
 
+// handleAppRoot serves the app resource itself: inspect, deploy, or delete.
+func (s *supervisor) handleAppRoot(w http.ResponseWriter, r *http.Request, name string) {
+	switch r.Method {
+	case http.MethodGet:
+		a, ok := s.requireApp(w, r, name)
+		if !ok {
+			return
+		}
+		a.sampleResources(time.Now())
+		writeJSON(w, http.StatusOK, s.info(a))
+	case http.MethodPost:
+		if !s.requireAuth(w, r) {
+			return
+		}
+		s.deploy(w, r, name)
+	case http.MethodDelete:
+		s.handleDelete(w, r, name)
+	default:
+		w.Header().Set("Allow", "GET, POST, DELETE")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleAppLogs serves either the log tail or the live log stream.
+func (s *supervisor) handleAppLogs(w http.ResponseWriter, r *http.Request, name, action string) {
+	a, ok := s.requireAppMethod(w, r, name, http.MethodGet)
+	if !ok {
+		return
+	}
+	if action == "logs/stream" {
+		s.handleLogStream(w, r, a)
+		return
+	}
+	s.handleLogs(w, r, a)
+}
+
+// handleAppDatabase dispatches the database endpoints for one app.
+func (s *supervisor) handleAppDatabase(w http.ResponseWriter, r *http.Request, name, action string) {
+	switch action {
+	case "database":
+		s.handleDatabase(w, r, name)
+	case "database/rows":
+		s.handleDatabaseRows(w, r, name)
+	case "database/changes":
+		s.handleDatabaseChanges(w, r, name)
+	case "database/export":
+		s.handleDatabaseExport(w, r, name)
+	case "database/import":
+		s.handleDatabaseImport(w, r, name)
+	case "database/maintenance":
+		s.handleDatabaseMaintenance(w, r, name)
+	}
+}
+
+// requireAppMethod checks an app route's method before looking the app up.
+func (s *supervisor) requireAppMethod(w http.ResponseWriter, r *http.Request, name, method string) (*app, bool) {
+	if !requireMethod(w, r, method) {
+		return nil, false
+	}
+	return s.requireApp(w, r, name)
+}
+
 func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/apps/")
 	name, action, _ := strings.Cut(rest, "/")
@@ -271,25 +333,7 @@ func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
 
 	switch action {
 	case "":
-		switch r.Method {
-		case http.MethodGet:
-			a, ok := s.requireApp(w, r, name)
-			if !ok {
-				return
-			}
-			a.sampleResources(time.Now())
-			writeJSON(w, http.StatusOK, s.info(a))
-		case http.MethodPost:
-			if !s.requireAuth(w, r) {
-				return
-			}
-			s.deploy(w, r, name)
-		case http.MethodDelete:
-			s.handleDelete(w, r, name)
-		default:
-			w.Header().Set("Allow", "GET, POST, DELETE")
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		}
+		s.handleAppRoot(w, r, name)
 	case "config":
 		s.handleAppConfig(w, r, name)
 	case "deployments":
@@ -307,50 +351,18 @@ func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.handleStart(w, r, name)
-	case "logs/stream":
-		if !requireMethod(w, r, http.MethodGet) {
-			return
-		}
-		a, ok := s.requireApp(w, r, name)
-		if !ok {
-			return
-		}
-		s.handleLogStream(w, r, a)
-	case "logs":
-		if !requireMethod(w, r, http.MethodGet) {
-			return
-		}
-		a, ok := s.requireApp(w, r, name)
-		if !ok {
-			return
-		}
-		s.handleLogs(w, r, a)
+	case "logs/stream", "logs":
+		s.handleAppLogs(w, r, name, action)
 	case "resources":
-		if !requireMethod(w, r, http.MethodGet) {
-			return
-		}
-		a, ok := s.requireApp(w, r, name)
+		a, ok := s.requireAppMethod(w, r, name, http.MethodGet)
 		if !ok {
 			return
 		}
 		s.handleResources(w, r, a)
-	case "database":
-		s.handleDatabase(w, r, name)
-	case "database/rows":
-		s.handleDatabaseRows(w, r, name)
-	case "database/changes":
-		s.handleDatabaseChanges(w, r, name)
-	case "database/export":
-		s.handleDatabaseExport(w, r, name)
-	case "database/import":
-		s.handleDatabaseImport(w, r, name)
-	case "database/maintenance":
-		s.handleDatabaseMaintenance(w, r, name)
+	case "database", "database/rows", "database/changes", "database/export", "database/import", "database/maintenance":
+		s.handleAppDatabase(w, r, name, action)
 	case "restart":
-		if !requireMethod(w, r, http.MethodPost) {
-			return
-		}
-		a, ok := s.requireApp(w, r, name)
+		a, ok := s.requireAppMethod(w, r, name, http.MethodPost)
 		if !ok {
 			return
 		}
@@ -373,9 +385,8 @@ func loopbackListen(addr string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-func main() {
-	log.SetFlags(log.LstdFlags | log.LUTC)
-
+// parseConfig reads flags and environment, then prepares the runtime directories.
+func parseConfig() config {
 	cfg := configFromEnv()
 	flag.StringVar(&cfg.listen, "listen", cfg.listen, "public listen address")
 	flag.StringVar(&cfg.appsDir, "apps", cfg.appsDir, "directory containing one directory per app")
@@ -411,7 +422,11 @@ func main() {
 	if err := os.MkdirAll(cfg.stateDir, 0o755); err != nil {
 		log.Fatalf("state dir: %v", err)
 	}
+	return cfg
+}
 
+// startSupervisor builds the storage service, recovers interrupted rollbacks and loads every app.
+func startSupervisor(cfg config) *supervisor {
 	storage, err := newStorageServer(filepath.Join(cfg.stateDir, ".storage"), cfg.storageListen)
 	if err != nil {
 		log.Fatalf("storage: %v", err)
@@ -431,6 +446,12 @@ func main() {
 	if err := s.loadApps(); err != nil {
 		log.Fatalf("load apps: %v", err)
 	}
+	return s
+}
+
+// serve runs the HTTP server and background monitors until a signal arrives.
+func serve(s *supervisor) {
+	cfg := s.cfg
 	backupCtx, stopBackups := context.WithCancel(context.Background())
 	defer stopBackups()
 	go s.backups.loop(backupCtx)
@@ -458,6 +479,7 @@ func main() {
 		log.Fatalf("--tls-cert and --tls-key must be set together")
 	}
 	log.Printf("supervisor listening on %s with %d app(s)", cfg.listen, len(s.apps))
+	var err error
 	if cfg.tlsCert != "" {
 		err = server.ListenAndServeTLS(cfg.tlsCert, cfg.tlsKey)
 	} else {
@@ -465,8 +487,13 @@ func main() {
 	}
 	s.stopAll()
 	s.persistResources()
-	storage.close()
+	s.storage.close()
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("listen: %v", err)
 	}
+}
+
+func main() {
+	log.SetFlags(log.LstdFlags | log.LUTC)
+	serve(startSupervisor(parseConfig()))
 }
