@@ -112,62 +112,44 @@ func init() {
 func main() {}
 
 func seed(ctx context.Context) error {
-	var seeded int64
-	if err := store.QueryRow(ctx, `select count(*) from meta where key = 'seeded'`).Scan(&seeded); err != nil {
-		return err
-	}
-	if seeded > 0 {
-		return nil
-	}
-	var count int64
-	if err := store.QueryRow(ctx, `select count(*) from links`).Scan(&count); err != nil {
-		return err
-	}
-	if count > 0 {
-		_, err := store.Exec(ctx, `insert or ignore into meta (key, value) values ('seeded', '1')`)
-		return err
-	}
-
-	now := time.Now().UTC()
-	seeds := []struct {
-		id, url, title, description string
-		tags                        []string
-		clicks                      int
-	}{
-		{"wasmtime", "https://wasmtime.dev", "Wasmtime", "Fast, secure, and configurable WebAssembly runtime.", []string{"wasm", "runtime"}, 6},
-		{"wasi", "https://wasi.dev", "WASI", "The WebAssembly System Interface.", []string{"wasm", "wasi"}, 4},
-		{"go", "https://go.dev", "The Go Programming Language", "Build fast, reliable, and efficient software.", []string{"go", "language"}, 5},
-		{"components", "https://component-model.bytecodealliance.org", "Component Model", "WebAssembly components, explained.", []string{"wasm", "components"}, 3},
-		{"sqlite", "https://sqlite.org", "SQLite", "Small, fast, self-contained SQL database.", []string{"sqlite", "database"}, 2},
-	}
-
-	statements := make([]storage.Statement, 0, 64)
-	for i, seed := range seeds {
-		createdAt := now.Add(-time.Duration(i*2) * 24 * time.Hour).Format(app.TimestampFormat)
-		statements = append(statements, storage.Statement{
-			SQL:  `insert or ignore into links (id, url, title, description, created_at) values (?, ?, ?, ?, ?)`,
-			Args: []any{seed.id, seed.url, seed.title, seed.description, createdAt},
-		})
-		for _, tag := range seed.tags {
-			statements = append(statements, storage.Statement{
-				SQL:  `insert or ignore into tags (link_id, tag) values (?, ?)`,
-				Args: []any{seed.id, tag},
-			})
+	return app.SeedOnce(ctx, store, "links", func(ctx context.Context) error {
+		now := time.Now().UTC()
+		seeds := []struct {
+			id, url, title, description string
+			tags                        []string
+			clicks                      int
+		}{
+			{"wasmtime", "https://wasmtime.dev", "Wasmtime", "Fast, secure, and configurable WebAssembly runtime.", []string{"wasm", "runtime"}, 6},
+			{"wasi", "https://wasi.dev", "WASI", "The WebAssembly System Interface.", []string{"wasm", "wasi"}, 4},
+			{"go", "https://go.dev", "The Go Programming Language", "Build fast, reliable, and efficient software.", []string{"go", "language"}, 5},
+			{"components", "https://component-model.bytecodealliance.org", "Component Model", "WebAssembly components, explained.", []string{"wasm", "components"}, 3},
+			{"sqlite", "https://sqlite.org", "SQLite", "Small, fast, self-contained SQL database.", []string{"sqlite", "database"}, 2},
 		}
-		for n := range seed.clicks {
-			clickedAt := now.Add(-time.Duration(((n/2)*3+i)%14) * 24 * time.Hour).Add(time.Duration(n) * time.Hour).Format(app.TimestampFormat)
+
+		statements := make([]storage.Statement, 0, 64)
+		for i, seed := range seeds {
+			createdAt := now.Add(-time.Duration(i*2) * 24 * time.Hour).Format(app.TimestampFormat)
 			statements = append(statements, storage.Statement{
-				SQL:  `insert or ignore into clicks (id, link_id, clicked_at) values (?, ?, ?)`,
-				Args: []any{fmt.Sprintf("seed-%s-%d", seed.id, n), seed.id, clickedAt},
+				SQL:  `insert or ignore into links (id, url, title, description, created_at) values (?, ?, ?, ?, ?)`,
+				Args: []any{seed.id, seed.url, seed.title, seed.description, createdAt},
 			})
+			for _, tag := range seed.tags {
+				statements = append(statements, storage.Statement{
+					SQL:  `insert or ignore into tags (link_id, tag) values (?, ?)`,
+					Args: []any{seed.id, tag},
+				})
+			}
+			for n := range seed.clicks {
+				clickedAt := now.Add(-time.Duration(((n/2)*3+i)%14) * 24 * time.Hour).Add(time.Duration(n) * time.Hour).Format(app.TimestampFormat)
+				statements = append(statements, storage.Statement{
+					SQL:  `insert or ignore into clicks (id, link_id, clicked_at) values (?, ?, ?)`,
+					Args: []any{fmt.Sprintf("seed-%s-%d", seed.id, n), seed.id, clickedAt},
+				})
+			}
 		}
-	}
-	statements = append(statements, storage.Statement{
-		SQL:  `insert or ignore into meta (key, value) values ('seeded', '1')`,
-		Args: []any{},
+		_, err := store.Batch(ctx, statements...)
+		return err
 	})
-	_, err := store.Batch(ctx, statements...)
-	return err
 }
 
 func migrate(ctx context.Context) error {
@@ -188,10 +170,6 @@ func migrate(ctx context.Context) error {
 			id text primary key,
 			link_id text not null,
 			clicked_at text not null
-		)`},
-		storage.Statement{SQL: `create table if not exists meta (
-			key text primary key,
-			value text not null
 		)`},
 		storage.Statement{SQL: `create index if not exists tags_tag_idx on tags(tag)`},
 		storage.Statement{SQL: `create index if not exists clicks_link_idx on clicks(link_id, clicked_at)`},

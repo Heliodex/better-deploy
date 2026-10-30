@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"embed"
-	"encoding/json/v2"
-	"fmt"
 	"io/fs"
 	"net/http"
 	"strconv"
@@ -40,42 +38,6 @@ var (
 	store    *storage.Client
 	storeErr error
 )
-
-func lowerFieldName(message string) string {
-	const prefix = "field "
-	if !strings.HasPrefix(message, prefix) {
-		return message
-	}
-	rest := message[len(prefix):]
-	if rest == "" {
-		return message
-	}
-	return prefix + strings.ToLower(rest[:1]) + rest[1:]
-}
-
-// requestError trims the encoding/json/v2 wrapper from a generated validation error, leaving the field and the rule that failed.
-func requestError(err error) string {
-	message := err.Error()
-	if index := strings.Index(message, ": field "); index >= 0 {
-		return lowerFieldName(message[index+2:])
-	}
-	if index := strings.Index(message, ": invalid value"); index >= 0 {
-		return "field text: " + message[index+2:]
-	}
-	if _, after, ok := strings.CutLast(message, ": "); ok {
-		return after
-	}
-	return message
-}
-
-func readJSON(w http.ResponseWriter, r *http.Request, out any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
-	if err := json.UnmarshalRead(r.Body, out); err != nil {
-		app.WriteError(w, http.StatusBadRequest, requestError(err))
-		return false
-	}
-	return true
-}
 
 func migrate(ctx context.Context) error {
 	_, err := store.Exec(ctx, `create table if not exists notes (
@@ -129,7 +91,7 @@ func handleListNotes(w http.ResponseWriter, r *http.Request) {
 
 func handleCreateNote(w http.ResponseWriter, r *http.Request) {
 	var request contract.CreateNoteRequest
-	if !readJSON(w, r, &request) {
+	if !app.ReadJSON(w, r, maxBody, "text", &request) {
 		return
 	}
 
@@ -156,17 +118,10 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
-	files := http.FileServer(http.FS(sub))
-
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/notes", handleListNotes)
 	mux.HandleFunc("POST /api/notes", handleCreateNote)
-	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/_app/") {
-			w.Header().Set("cache-control", "public, max-age=31536000, immutable")
-		}
-		files.ServeHTTP(w, r)
-	}))
+	mux.Handle("/", app.StaticFiles(sub))
 
 	wasihttp.Handle(app.ServeStorage(storeErr, migrate, mux))
 }

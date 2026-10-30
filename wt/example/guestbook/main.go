@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"embed"
-	"encoding/json/v2"
 	"io/fs"
 	"net/http"
 	"strconv"
@@ -63,109 +62,56 @@ var (
 	storeErr error
 )
 
-func lowerFieldName(message string) string {
-	const prefix = "field "
-	if !strings.HasPrefix(message, prefix) {
-		return message
-	}
-	rest := message[len(prefix):]
-	if rest == "" {
-		return message
-	}
-	return prefix + strings.ToLower(rest[:1]) + rest[1:]
-}
-
-// requestError trims the encoding/json/v2 wrapper from a generated validation error, leaving the field and the rule that failed.
-func requestError(err error) string {
-	message := err.Error()
-	if index := strings.Index(message, ": field "); index >= 0 {
-		return lowerFieldName(message[index+2:])
-	}
-	if index := strings.Index(message, ": invalid value"); index >= 0 {
-		return "field reaction: " + message[index+2:]
-	}
-	if _, after, ok := strings.CutLast(message, ": "); ok {
-		return after
-	}
-	return message
-}
-
-func readJSON(w http.ResponseWriter, r *http.Request, out any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
-	if err := json.UnmarshalRead(r.Body, out); err != nil {
-		app.WriteError(w, http.StatusBadRequest, requestError(err))
-		return false
-	}
-	return true
-}
-
 func seed(ctx context.Context) error {
-	var seeded int64
-	if err := store.QueryRow(ctx, `select count(*) from meta where key = 'seeded'`).Scan(&seeded); err != nil {
-		return err
-	}
-	if seeded > 0 {
-		return nil
-	}
-	var count int64
-	if err := store.QueryRow(ctx, `select count(*) from messages`).Scan(&count); err != nil {
-		return err
-	}
-	if count > 0 {
-		_, err := store.Exec(ctx, `insert or ignore into meta (key, value) values ('seeded', '1')`)
-		return err
-	}
-
-	now := time.Now().UTC()
-	seeds := []struct {
-		id, name, body string
-		reactions      map[string]int64
-	}{
-		{
-			"ada",
-			"Ada",
-			"The component model finally makes this feel like one platform.",
-			map[string]int64{reactionRocket: 3, reactionHeart: 2},
-		},
-		{
-			"grace",
-			"Grace",
-			"Static pages, a live Go API, one .wasm. That is a very tidy stack.",
-			map[string]int64{reactionRocket: 2, reactionBrain: 3},
-		},
-		{
-			"linus",
-			"Linus",
-			"I came for the demo and stayed for the SQLite.",
-			map[string]int64{reactionEyes: 1, reactionHeart: 1},
-		},
-		{
-			"margaret",
-			"Margaret",
-			"Shipping a SvelteKit page inside a Wasm component is delightfully strange.",
-			map[string]int64{reactionBrain: 2, reactionRocket: 4},
-		},
-	}
-
-	statements := make([]storage.Statement, 0, 16)
-	for i, seed := range seeds {
-		createdAt := now.Add(-time.Duration(i*3+1) * time.Hour).Format(app.TimestampFormat)
-		statements = append(statements, storage.Statement{
-			SQL:  `insert or ignore into messages (id, name, body, created_at) values (?, ?, ?, ?)`,
-			Args: []any{seed.id, seed.name, seed.body, createdAt},
-		})
-		for reaction, count := range seed.reactions {
-			statements = append(statements, storage.Statement{
-				SQL:  `insert or ignore into reactions (message_id, reaction, count) values (?, ?, ?)`,
-				Args: []any{seed.id, reaction, count},
-			})
+	return app.SeedOnce(ctx, store, "messages", func(ctx context.Context) error {
+		now := time.Now().UTC()
+		seeds := []struct {
+			id, name, body string
+			reactions      map[string]int64
+		}{
+			{
+				"ada",
+				"Ada",
+				"The component model finally makes this feel like one platform.",
+				map[string]int64{reactionRocket: 3, reactionHeart: 2},
+			},
+			{
+				"grace",
+				"Grace",
+				"Static pages, a live Go API, one .wasm. That is a very tidy stack.",
+				map[string]int64{reactionRocket: 2, reactionBrain: 3},
+			},
+			{
+				"linus",
+				"Linus",
+				"I came for the demo and stayed for the SQLite.",
+				map[string]int64{reactionEyes: 1, reactionHeart: 1},
+			},
+			{
+				"margaret",
+				"Margaret",
+				"Shipping a SvelteKit page inside a Wasm component is delightfully strange.",
+				map[string]int64{reactionBrain: 2, reactionRocket: 4},
+			},
 		}
-	}
-	statements = append(statements, storage.Statement{
-		SQL: `insert or ignore into meta (key, value) values ('seeded', '1')`,
+
+		statements := make([]storage.Statement, 0, 16)
+		for i, seed := range seeds {
+			createdAt := now.Add(-time.Duration(i*3+1) * time.Hour).Format(app.TimestampFormat)
+			statements = append(statements, storage.Statement{
+				SQL:  `insert or ignore into messages (id, name, body, created_at) values (?, ?, ?, ?)`,
+				Args: []any{seed.id, seed.name, seed.body, createdAt},
+			})
+			for reaction, count := range seed.reactions {
+				statements = append(statements, storage.Statement{
+					SQL:  `insert or ignore into reactions (message_id, reaction, count) values (?, ?, ?)`,
+					Args: []any{seed.id, reaction, count},
+				})
+			}
+		}
+		_, err := store.Batch(ctx, statements...)
+		return err
 	})
-	_, err := store.Batch(ctx, statements...)
-	return err
 }
 
 func migrate(ctx context.Context) error {
@@ -181,10 +127,6 @@ func migrate(ctx context.Context) error {
 			reaction text not null,
 			count integer not null default 0,
 			primary key (message_id, reaction)
-		)`},
-		storage.Statement{SQL: `create table if not exists meta (
-			key text primary key,
-			value text not null
 		)`},
 		storage.Statement{SQL: `create index if not exists messages_created_idx on messages(created_at)`},
 	)
@@ -244,7 +186,7 @@ func handleListMessages(w http.ResponseWriter, r *http.Request) {
 
 func handleCreateMessage(w http.ResponseWriter, r *http.Request) {
 	var request contract.CreateMessageRequest
-	if !readJSON(w, r, &request) {
+	if !app.ReadJSON(w, r, maxBody, "reaction", &request) {
 		return
 	}
 
@@ -269,7 +211,7 @@ func handleReact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request contract.ReactMessageRequest
-	if !readJSON(w, r, &request) {
+	if !app.ReadJSON(w, r, maxBody, "reaction", &request) {
 		return
 	}
 	reaction := string(request.Reaction)
@@ -321,19 +263,12 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
-	files := http.FileServer(http.FS(sub))
-
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/messages", handleListMessages)
 	mux.HandleFunc("POST /api/messages", handleCreateMessage)
 	mux.HandleFunc("POST /api/messages/{id}/react", handleReact)
 	mux.HandleFunc("GET /api/stats", handleStats)
-	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/_app/") {
-			w.Header().Set("cache-control", "public, max-age=31536000, immutable")
-		}
-		files.ServeHTTP(w, r)
-	}))
+	mux.Handle("/", app.StaticFiles(sub))
 
 	wasihttp.Handle(app.ServeStorage(storeErr, migrate, mux).ServeHTTP)
 }
