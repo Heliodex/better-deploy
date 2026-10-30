@@ -43,17 +43,6 @@ type appLog struct {
 	subs           map[chan logEntry]struct{}
 }
 
-func newAppLog(dir string) (*appLog, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, err
-	}
-	out := &appLog{dir: dir, subs: map[chan logEntry]struct{}{}}
-	if err := out.open(); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (l *appLog) subscribe() chan logEntry {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -133,52 +122,15 @@ func (l *appLog) open() error {
 	return nil
 }
 
-// Write implements io.Writer. Output arrives in arbitrary chunks, so lines are buffered until their newline and each one is written with a receive timestamp.
-func (l *appLog) Write(p []byte) (int, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.pending = append(l.pending, p...)
-	for {
-		index := bytes.IndexByte(l.pending, '\n')
-		if index < 0 {
-			break
-		}
-		line := string(l.pending[:index])
-		l.pending = l.pending[index+1:]
-		if err := l.writeLine(line); err != nil {
-			return 0, err
-		}
+func newAppLog(dir string) (*appLog, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
 	}
-	// A writer that never emits a newline must not grow the buffer without bound.
-	if len(l.pending) > maxLogBytes {
-		l.pending = append([]byte{}, l.pending[len(l.pending)-maxLogBytes:]...)
+	out := &appLog{dir: dir, subs: map[chan logEntry]struct{}{}}
+	if err := out.open(); err != nil {
+		return nil, err
 	}
-	return len(p), nil
-}
-
-// guestStderr matches wasmtime's prefix for a guest's own stderr/stdout, e.g. "stderr [1] :: ".
-var guestStderr = regexp.MustCompile(`^(?:stderr|stdout) \[\d+\] :: `)
-
-// writeLine stamps one complete line of the app's own output and appends it, rotating past maxLogBytes.
-func (l *appLog) writeLine(line string) error {
-	line = guestStderr.ReplaceAllString(line, "")
-	level, message := splitLevelPrefix(line)
-	stamp := time.Now().UTC().Format(logTimeFormat)
-	data := []byte(stamp + " " + level + " " + message + "\n")
-	if l.size+int64(len(data)) > maxLogBytes {
-		file, size, err := rotateLogFile(l.file, l.path(), l.backupPath())
-		if err != nil {
-			return err
-		}
-		l.file, l.size = file, size
-	}
-	written, err := l.file.Write(data)
-	l.size += int64(written)
-	if err != nil {
-		return err
-	}
-	l.publish(logEntry{Time: stamp, Level: strings.ToLower(level), Source: "app", Message: message})
-	return nil
+	return out, nil
 }
 
 // logSupervisor records a supervisor-side line for the app, such as a proxied request.
@@ -203,18 +155,8 @@ func (l *appLog) logSupervisor(message string) {
 	l.publish(logEntry{Time: stamp, Level: "info", Source: "supervisor", Message: message})
 }
 
-// logLevels are the prefixes an app may put at the start of a line, most verbose first.
-var logLevels = []string{"TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"}
-
-// logEntry is one log line with the time the supervisor received it, its level, and
-// which side wrote it: the app process or the supervisor. Lines written before
-// sources existed have no marker and read as app output.
-type logEntry struct {
-	Time    string `json:"time"`
-	Level   string `json:"level"`
-	Source  string `json:"source"`
-	Message string `json:"message"`
-}
+// guestStderr matches wasmtime's prefix for a guest's own stderr/stdout, e.g. "stderr [1] :: ".
+var guestStderr = regexp.MustCompile(`^(?:stderr|stdout) \[\d+\] :: `)
 
 // splitLevelPrefix pulls an app's "<LEVEL> " prefix off a line. Anything unrecognized is part of the message and the level is info.
 func splitLevelPrefix(line string) (string, string) {
@@ -231,9 +173,62 @@ func splitLevelPrefix(line string) (string, string) {
 	return "INFO", line
 }
 
-// parseLogLine splits a stamped line into its time and message.
-func parseLogLine(line string) logEntry {
-	return parseSourcedLogLine(line, "app")
+// writeLine stamps one complete line of the app's own output and appends it, rotating past maxLogBytes.
+func (l *appLog) writeLine(line string) error {
+	line = guestStderr.ReplaceAllString(line, "")
+	level, message := splitLevelPrefix(line)
+	stamp := time.Now().UTC().Format(logTimeFormat)
+	data := []byte(stamp + " " + level + " " + message + "\n")
+	if l.size+int64(len(data)) > maxLogBytes {
+		file, size, err := rotateLogFile(l.file, l.path(), l.backupPath())
+		if err != nil {
+			return err
+		}
+		l.file, l.size = file, size
+	}
+	written, err := l.file.Write(data)
+	l.size += int64(written)
+	if err != nil {
+		return err
+	}
+	l.publish(logEntry{Time: stamp, Level: strings.ToLower(level), Source: "app", Message: message})
+	return nil
+}
+
+// logLevels are the prefixes an app may put at the start of a line, most verbose first.
+var logLevels = []string{"TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"}
+
+// logEntry is one log line with the time the supervisor received it, its level, and
+// which side wrote it: the app process or the supervisor. Lines written before
+// sources existed have no marker and read as app output.
+type logEntry struct {
+	Time    string `json:"time"`
+	Level   string `json:"level"`
+	Source  string `json:"source"`
+	Message string `json:"message"`
+}
+
+// Write implements io.Writer. Output arrives in arbitrary chunks, so lines are buffered until their newline and each one is written with a receive timestamp.
+func (l *appLog) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.pending = append(l.pending, p...)
+	for {
+		index := bytes.IndexByte(l.pending, '\n')
+		if index < 0 {
+			break
+		}
+		line := string(l.pending[:index])
+		l.pending = l.pending[index+1:]
+		if err := l.writeLine(line); err != nil {
+			return 0, err
+		}
+	}
+	// A writer that never emits a newline must not grow the buffer without bound.
+	if len(l.pending) > maxLogBytes {
+		l.pending = append([]byte{}, l.pending[len(l.pending)-maxLogBytes:]...)
+	}
+	return len(p), nil
 }
 
 // parseSourcedLogLine parses a line from one of the app's log files, marking which side wrote it.
@@ -247,6 +242,11 @@ func parseSourcedLogLine(line, source string) logEntry {
 	}
 	level, message := splitLevelPrefix(rest)
 	return logEntry{Time: stamp, Level: strings.ToLower(level), Source: source, Message: message}
+}
+
+// parseLogLine splits a stamped line into its time and message.
+func parseLogLine(line string) logEntry {
+	return parseSourcedLogLine(line, "app")
 }
 
 // tail returns the last n log lines from both the app and the supervisor, oldest first.
@@ -570,43 +570,14 @@ func (s *supervisor) handleRestart(w http.ResponseWriter, _ *http.Request, a *ap
 // maxBackupRequestBytes caps the small JSON body used to change backup settings.
 const maxBackupRequestBytes = 4 << 10
 
-// handleBackupRoute serves the app's database snapshots, their policy and restores.
-func (s *supervisor) handleBackupRoute(w http.ResponseWriter, r *http.Request, name, rest string) {
-	if _, ok := s.requireApp(w, r, name); !ok {
+func (s *supervisor) writeBackups(w http.ResponseWriter, name, created string) {
+	overview, err := s.backups.overview(name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if s.backups == nil {
-		http.Error(w, "backups unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	rest = strings.TrimPrefix(rest, "/")
-	switch {
-	case rest == "":
-		s.handleBackups(w, r, name)
-	case rest == "config":
-		s.handleBackupSettings(w, r, name)
-	case strings.HasSuffix(rest, "/restore"):
-		s.handleBackupRestore(w, r, name, strings.TrimSuffix(rest, "/restore"))
-	default:
-		http.Error(w, "unknown endpoint", http.StatusNotFound)
-	}
-}
-
-func (s *supervisor) handleBackups(w http.ResponseWriter, r *http.Request, name string) {
-	switch r.Method {
-	case http.MethodGet:
-		s.writeBackups(w, name, "")
-	case http.MethodPost:
-		info, err := s.backups.create(r.Context(), name)
-		if err != nil && !errors.Is(err, errBackupUnchanged) {
-			writeBackupError(w, err)
-			return
-		}
-		s.writeBackups(w, name, info.Name)
-	default:
-		w.Header().Set("Allow", "GET, POST")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-	}
+	overview.Created = created
+	writeJSON(w, http.StatusOK, overview)
 }
 
 func (s *supervisor) handleBackupSettings(w http.ResponseWriter, r *http.Request, name string) {
@@ -630,6 +601,34 @@ func (s *supervisor) handleBackupSettings(w http.ResponseWriter, r *http.Request
 	s.writeBackups(w, name, "")
 }
 
+func writeBackupError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, errNoStorageDatabase), errors.Is(err, errInvalidBackupName):
+		writeError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, errBackupNotFound):
+		writeError(w, http.StatusNotFound, err.Error())
+	default:
+		writeError(w, http.StatusInternalServerError, err.Error())
+	}
+}
+
+func (s *supervisor) handleBackups(w http.ResponseWriter, r *http.Request, name string) {
+	switch r.Method {
+	case http.MethodGet:
+		s.writeBackups(w, name, "")
+	case http.MethodPost:
+		info, err := s.backups.create(r.Context(), name)
+		if err != nil && !errors.Is(err, errBackupUnchanged) {
+			writeBackupError(w, err)
+			return
+		}
+		s.writeBackups(w, name, info.Name)
+	default:
+		w.Header().Set("Allow", "GET, POST")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
 func (s *supervisor) handleBackupRestore(w http.ResponseWriter, r *http.Request, name, file string) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
@@ -641,24 +640,25 @@ func (s *supervisor) handleBackupRestore(w http.ResponseWriter, r *http.Request,
 	s.writeBackups(w, name, "")
 }
 
-func (s *supervisor) writeBackups(w http.ResponseWriter, name, created string) {
-	overview, err := s.backups.overview(name)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+// handleBackupRoute serves the app's database snapshots, their policy and restores.
+func (s *supervisor) handleBackupRoute(w http.ResponseWriter, r *http.Request, name, rest string) {
+	if _, ok := s.requireApp(w, r, name); !ok {
 		return
 	}
-	overview.Created = created
-	writeJSON(w, http.StatusOK, overview)
-}
-
-func writeBackupError(w http.ResponseWriter, err error) {
+	if s.backups == nil {
+		http.Error(w, "backups unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	rest = strings.TrimPrefix(rest, "/")
 	switch {
-	case errors.Is(err, errNoStorageDatabase), errors.Is(err, errInvalidBackupName):
-		writeError(w, http.StatusBadRequest, err.Error())
-	case errors.Is(err, errBackupNotFound):
-		writeError(w, http.StatusNotFound, err.Error())
+	case rest == "":
+		s.handleBackups(w, r, name)
+	case rest == "config":
+		s.handleBackupSettings(w, r, name)
+	case strings.HasSuffix(rest, "/restore"):
+		s.handleBackupRestore(w, r, name, strings.TrimSuffix(rest, "/restore"))
 	default:
-		writeError(w, http.StatusInternalServerError, err.Error())
+		http.Error(w, "unknown endpoint", http.StatusNotFound)
 	}
 }
 

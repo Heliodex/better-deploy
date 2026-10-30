@@ -54,6 +54,11 @@ func (s *storageServer) databaseTables(ctx context.Context, app string) ([]strin
 	return tables, err
 }
 
+// quoteSQLiteIdentifier quotes a table name for the few statements that cannot bind it as a parameter.
+func quoteSQLiteIdentifier(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
+
 // databaseRows returns one page from a table. The table name is checked against sqlite_master before it is quoted into SQL, so the query parameter can never select anything other than an existing table in this app's database.
 func (s *storageServer) databaseRows(ctx context.Context, app, table string, limit, offset int) (databaseRowsResponse, error) {
 	result := databaseRowsResponse{
@@ -129,11 +134,6 @@ func (s *storageServer) databaseRows(ctx context.Context, app, table string, lim
 		return databaseRowsResponse{}, err
 	}
 	return result, nil
-}
-
-// quoteSQLiteIdentifier quotes a table name for the few statements that cannot bind it as a parameter.
-func quoteSQLiteIdentifier(name string) string {
-	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
 // databaseRowsParam reads the page size and offset, writing 400 when either is out of range.

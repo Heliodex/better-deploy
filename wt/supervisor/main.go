@@ -168,6 +168,18 @@ func validateAppHost(host string) error {
 	return nil
 }
 
+// parseScheduleInterval validates an entry's period and reports how often it fires.
+func parseScheduleInterval(entry scheduleConfig) (time.Duration, error) {
+	every, err := time.ParseDuration(entry.Every)
+	if err != nil {
+		return 0, fmt.Errorf("invalid every %q: use a duration such as 10s", entry.Every)
+	}
+	if every < minScheduleInterval || every > maxScheduleInterval {
+		return 0, fmt.Errorf("every %q must be between %s and %s", entry.Every, minScheduleInterval, maxScheduleInterval)
+	}
+	return every, nil
+}
+
 func readAppConfig(dir, name, domain string) (appConfig, error) {
 	cfg := appConfig{Name: name, Env: map[string]string{}}
 
@@ -211,18 +223,6 @@ func readAppConfig(dir, name, domain string) (appConfig, error) {
 		}
 	}
 	return cfg, nil
-}
-
-// parseScheduleInterval validates an entry's period and reports how often it fires.
-func parseScheduleInterval(entry scheduleConfig) (time.Duration, error) {
-	every, err := time.ParseDuration(entry.Every)
-	if err != nil {
-		return 0, fmt.Errorf("invalid every %q: use a duration such as 10s", entry.Every)
-	}
-	if every < minScheduleInterval || every > maxScheduleInterval {
-		return 0, fmt.Errorf("every %q must be between %s and %s", entry.Every, minScheduleInterval, maxScheduleInterval)
-	}
-	return every, nil
 }
 
 func freePort() (int, error) {
@@ -417,6 +417,307 @@ func (s *supervisor) cancelRestart(a *app) {
 	}
 }
 
+func (s *supervisor) register(a *app) {
+	s.mu.Lock()
+	if old := s.apps[a.name]; old != nil {
+		delete(s.hosts, old.cfg.Host)
+	}
+	s.apps[a.name] = a
+	s.hosts[a.cfg.Host] = a
+	s.mu.Unlock()
+	s.broadcast()
+}
+
+func (s *supervisor) hostTaken(host, except string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for name, a := range s.apps {
+		if name != except && a.cfg.Host == host {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *supervisor) authorized(r *http.Request) bool {
+	if s.cfg.token == "" {
+		return true
+	}
+	const prefix = "Bearer "
+	header := r.Header.Get("Authorization")
+	if token, ok := strings.CutPrefix(header, prefix); ok {
+		got := strings.TrimSpace(token)
+		if subtle.ConstantTimeCompare([]byte(got), []byte(s.cfg.token)) == 1 {
+			return true
+		}
+	}
+	cookie, err := r.Cookie("wt_token")
+	if err != nil {
+		return false
+	}
+	got := strings.TrimSpace(cookie.Value)
+	return subtle.ConstantTimeCompare([]byte(got), []byte(s.cfg.token)) == 1
+}
+
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	data, _ := json.Marshal(value)
+	_, _ = w.Write(append(data, '\n'))
+}
+
+func writeError(w http.ResponseWriter, status int, message string) {
+	writeJSON(w, status, map[string]string{"error": message})
+}
+
+// requireMethod writes 405 with an Allow header unless the request uses method.
+func requireMethod(w http.ResponseWriter, r *http.Request, method string) bool {
+	if r.Method == method {
+		return true
+	}
+	w.Header().Set("Allow", method)
+	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	return false
+}
+
+func (s *supervisor) info(a *app) appInfo {
+	info := appInfo{Name: a.name, Host: a.cfg.Host, Port: a.port}
+	a.mu.Lock()
+	info.StartedAt = a.started
+	if a.cmd != nil && a.cmd.Process != nil && !a.exited {
+		info.Status = "running"
+		info.PID = a.cmd.Process.Pid
+	} else {
+		info.Status = "stopped"
+	}
+	a.mu.Unlock()
+	info.CPUPercent, info.MemoryBytes, info.SampledAt = a.resourceStats()
+	return info
+}
+
+func replaceDir(src, dst string) error {
+	backup := ""
+	if _, err := os.Stat(dst); err == nil {
+		backup = filepath.Join(filepath.Dir(dst), "."+filepath.Base(dst)+".old-"+strconv.FormatInt(time.Now().UnixNano(), 36))
+		if err := os.Rename(dst, backup); err != nil {
+			return fmt.Errorf("move old app aside: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat app directory: %w", err)
+	}
+
+	if err := os.Rename(src, dst); err != nil {
+		if backup != "" {
+			_ = os.Rename(backup, dst)
+		}
+		return fmt.Errorf("install app: %w", err)
+	}
+	if backup != "" {
+		if err := os.RemoveAll(backup); err != nil {
+			log.Printf("remove old app %s: %v", backup, err)
+		}
+	}
+	return nil
+}
+
+func extractTarGz(src, dst string) error {
+	file, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("open archive: %w", err)
+	}
+	defer file.Close()
+
+	gz, err := gzip.NewReader(file)
+	if err != nil {
+		return fmt.Errorf("read gzip: %w", err)
+	}
+	defer gz.Close()
+
+	tr := tar.NewReader(gz)
+	var total int64
+	var files int
+
+	for {
+		header, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("read tar: %w", err)
+		}
+
+		name := path.Clean(strings.TrimPrefix(header.Name, "./"))
+		if name == "." || name == "" {
+			continue
+		}
+		if path.IsAbs(name) || name == ".." || strings.HasPrefix(name, "../") {
+			return fmt.Errorf("archive entry %q escapes the app directory", header.Name)
+		}
+		target := filepath.Join(dst, filepath.FromSlash(name))
+		rel, err := filepath.Rel(dst, target)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("archive entry %q escapes the app directory", header.Name)
+		}
+
+		files++
+		if files > maxTarFiles {
+			return fmt.Errorf("archive has too many entries")
+		}
+
+		switch header.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				return fmt.Errorf("create directory %s: %w", name, err)
+			}
+		case tar.TypeReg:
+			if header.Size < 0 || total+header.Size > maxExtractBytes {
+				return fmt.Errorf("archive is too large")
+			}
+			total += header.Size
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return fmt.Errorf("create parent of %s: %w", name, err)
+			}
+			mode := os.FileMode(0o644)
+			if header.FileInfo().Mode()&0o111 != 0 {
+				mode = 0o755
+			}
+			out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+			if err != nil {
+				return fmt.Errorf("create %s: %w", name, err)
+			}
+			_, copyErr := io.CopyN(out, tr, header.Size)
+			closeErr := out.Close()
+			if copyErr != nil {
+				return fmt.Errorf("write %s: %w", name, copyErr)
+			}
+			if closeErr != nil {
+				return fmt.Errorf("close %s: %w", name, closeErr)
+			}
+		case tar.TypeSymlink, tar.TypeLink:
+			return fmt.Errorf("archive entry %q is a link, which is not allowed", header.Name)
+		default:
+		}
+	}
+	return nil
+}
+
+func (s *supervisor) handleApps(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	if !s.requireAuth(w, r) {
+		return
+	}
+	writeJSON(w, http.StatusOK, s.snapshot())
+}
+
+// lookup returns the app with the given name, or nil.
+func (s *supervisor) lookup(name string) *app {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.apps[name]
+}
+
+// allApps returns a snapshot of the registered apps in an unspecified order.
+func (s *supervisor) allApps() []*app {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	apps := make([]*app, 0, len(s.apps))
+	for _, a := range s.apps {
+		apps = append(apps, a)
+	}
+	return apps
+}
+
+type appInfo struct {
+	Name        string    `json:"name"`
+	Host        string    `json:"host"`
+	Port        int       `json:"port"`
+	Status      string    `json:"status"`
+	PID         int       `json:"pid,omitempty"`
+	StartedAt   time.Time `json:"startedAt"`
+	CPUPercent  float64   `json:"cpuPercent"`
+	MemoryBytes int64     `json:"memoryBytes"`
+	SampledAt   time.Time `json:"sampledAt"`
+}
+
+func (w *statusWriter) WriteHeader(status int) {
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *statusWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
+// formatProxyDuration renders a request duration compactly for the access log.
+func formatProxyDuration(d time.Duration) string {
+	if d < time.Millisecond {
+		return fmt.Sprintf("%dµs", d.Microseconds())
+	}
+	if d < time.Second {
+		return fmt.Sprintf("%.1fms", float64(d.Microseconds())/1000)
+	}
+	return fmt.Sprintf("%.2fs", d.Seconds())
+}
+
+// formatAccessLog renders a supervisor access line as METHOD status duration path,
+// so the panel can recognise and structure it.
+func formatAccessLog(method string, status int, duration time.Duration, uri string) string {
+	return fmt.Sprintf("%s %d %s %s", method, status, formatProxyDuration(duration), uri)
+}
+
+func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
+	host := strings.ToLower(r.Host)
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	s.mu.RLock()
+	a := s.hosts[host]
+	s.mu.RUnlock()
+	if a == nil {
+		http.Error(w, "no app for this host", http.StatusNotFound)
+		return
+	}
+	started := time.Now()
+	wrapped := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+	a.proxy.ServeHTTP(wrapped, r)
+	if a.logs != nil {
+		a.logs.logSupervisor(formatAccessLog(r.Method, wrapped.status, time.Since(started), r.URL.RequestURI()))
+	}
+}
+
+func (s *supervisor) handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("content-type", "text/plain; charset=utf-8")
+		_, _ = io.WriteString(w, "ok\n")
+	})
+	mux.HandleFunc("/apps", s.handleApps)
+	mux.HandleFunc("/apps/", s.handleApp)
+	mux.HandleFunc("GET /events", s.handleEvents)
+	mux.HandleFunc("/admin", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/admin/", http.StatusFound)
+	})
+	mux.Handle("/admin/", http.StripPrefix("/admin", adminStatic()))
+	mux.HandleFunc("/", s.handleProxy)
+	return mux
+}
+
+func (s *supervisor) stopAll() {
+	apps := s.allApps()
+
+	var wg sync.WaitGroup
+	for _, a := range apps {
+		wg.Add(1)
+		go func(a *app) {
+			defer wg.Done()
+			s.stop(a)
+		}(a)
+	}
+	wg.Wait()
+}
+
 func (s *supervisor) scheduleRestart(a *app, delay time.Duration) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -431,6 +732,13 @@ func (s *supervisor) scheduleRestart(a *app, delay time.Duration) {
 			s.restart(a)
 		}
 	})
+}
+
+// statusWriter captures the status code a proxied response is written with. Unwrap
+// hands the underlying writer's optional interfaces (Flusher, Hijacker) through.
+type statusWriter struct {
+	http.ResponseWriter
+	status int
 }
 
 func (s *supervisor) scheduleRetry(a *app) {
@@ -565,28 +873,6 @@ func (s *supervisor) spawn(name, dir string, cfg appConfig, port int) (*app, err
 	return a, nil
 }
 
-func (s *supervisor) register(a *app) {
-	s.mu.Lock()
-	if old := s.apps[a.name]; old != nil {
-		delete(s.hosts, old.cfg.Host)
-	}
-	s.apps[a.name] = a
-	s.hosts[a.cfg.Host] = a
-	s.mu.Unlock()
-	s.broadcast()
-}
-
-func (s *supervisor) hostTaken(host, except string) bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for name, a := range s.apps {
-		if name != except && a.cfg.Host == host {
-			return true
-		}
-	}
-	return false
-}
-
 func (s *supervisor) loadApps() error {
 	entries, err := os.ReadDir(s.cfg.appsDir)
 	if os.IsNotExist(err) {
@@ -622,180 +908,6 @@ func (s *supervisor) loadApps() error {
 			continue
 		}
 		s.register(a)
-	}
-	return nil
-}
-
-func (s *supervisor) authorized(r *http.Request) bool {
-	if s.cfg.token == "" {
-		return true
-	}
-	const prefix = "Bearer "
-	header := r.Header.Get("Authorization")
-	if token, ok := strings.CutPrefix(header, prefix); ok {
-		got := strings.TrimSpace(token)
-		if subtle.ConstantTimeCompare([]byte(got), []byte(s.cfg.token)) == 1 {
-			return true
-		}
-	}
-	cookie, err := r.Cookie("wt_token")
-	if err != nil {
-		return false
-	}
-	got := strings.TrimSpace(cookie.Value)
-	return subtle.ConstantTimeCompare([]byte(got), []byte(s.cfg.token)) == 1
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	data, _ := json.Marshal(value)
-	_, _ = w.Write(append(data, '\n'))
-}
-
-func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, map[string]string{"error": message})
-}
-
-// requireMethod writes 405 with an Allow header unless the request uses method.
-func requireMethod(w http.ResponseWriter, r *http.Request, method string) bool {
-	if r.Method == method {
-		return true
-	}
-	w.Header().Set("Allow", method)
-	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-	return false
-}
-
-type appInfo struct {
-	Name        string    `json:"name"`
-	Host        string    `json:"host"`
-	Port        int       `json:"port"`
-	Status      string    `json:"status"`
-	PID         int       `json:"pid,omitempty"`
-	StartedAt   time.Time `json:"startedAt"`
-	CPUPercent  float64   `json:"cpuPercent"`
-	MemoryBytes int64     `json:"memoryBytes"`
-	SampledAt   time.Time `json:"sampledAt"`
-}
-
-func (s *supervisor) info(a *app) appInfo {
-	info := appInfo{Name: a.name, Host: a.cfg.Host, Port: a.port}
-	a.mu.Lock()
-	info.StartedAt = a.started
-	if a.cmd != nil && a.cmd.Process != nil && !a.exited {
-		info.Status = "running"
-		info.PID = a.cmd.Process.Pid
-	} else {
-		info.Status = "stopped"
-	}
-	a.mu.Unlock()
-	info.CPUPercent, info.MemoryBytes, info.SampledAt = a.resourceStats()
-	return info
-}
-
-func replaceDir(src, dst string) error {
-	backup := ""
-	if _, err := os.Stat(dst); err == nil {
-		backup = filepath.Join(filepath.Dir(dst), "."+filepath.Base(dst)+".old-"+strconv.FormatInt(time.Now().UnixNano(), 36))
-		if err := os.Rename(dst, backup); err != nil {
-			return fmt.Errorf("move old app aside: %w", err)
-		}
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("stat app directory: %w", err)
-	}
-
-	if err := os.Rename(src, dst); err != nil {
-		if backup != "" {
-			_ = os.Rename(backup, dst)
-		}
-		return fmt.Errorf("install app: %w", err)
-	}
-	if backup != "" {
-		if err := os.RemoveAll(backup); err != nil {
-			log.Printf("remove old app %s: %v", backup, err)
-		}
-	}
-	return nil
-}
-
-func extractTarGz(src, dst string) error {
-	file, err := os.Open(src)
-	if err != nil {
-		return fmt.Errorf("open archive: %w", err)
-	}
-	defer file.Close()
-
-	gz, err := gzip.NewReader(file)
-	if err != nil {
-		return fmt.Errorf("read gzip: %w", err)
-	}
-	defer gz.Close()
-
-	tr := tar.NewReader(gz)
-	var total int64
-	var files int
-
-	for {
-		header, err := tr.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("read tar: %w", err)
-		}
-
-		name := path.Clean(strings.TrimPrefix(header.Name, "./"))
-		if name == "." || name == "" {
-			continue
-		}
-		if path.IsAbs(name) || name == ".." || strings.HasPrefix(name, "../") {
-			return fmt.Errorf("archive entry %q escapes the app directory", header.Name)
-		}
-		target := filepath.Join(dst, filepath.FromSlash(name))
-		rel, err := filepath.Rel(dst, target)
-		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return fmt.Errorf("archive entry %q escapes the app directory", header.Name)
-		}
-
-		files++
-		if files > maxTarFiles {
-			return fmt.Errorf("archive has too many entries")
-		}
-
-		switch header.Typeflag {
-		case tar.TypeDir:
-			if err := os.MkdirAll(target, 0o755); err != nil {
-				return fmt.Errorf("create directory %s: %w", name, err)
-			}
-		case tar.TypeReg:
-			if header.Size < 0 || total+header.Size > maxExtractBytes {
-				return fmt.Errorf("archive is too large")
-			}
-			total += header.Size
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				return fmt.Errorf("create parent of %s: %w", name, err)
-			}
-			mode := os.FileMode(0o644)
-			if header.FileInfo().Mode()&0o111 != 0 {
-				mode = 0o755
-			}
-			out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
-			if err != nil {
-				return fmt.Errorf("create %s: %w", name, err)
-			}
-			_, copyErr := io.CopyN(out, tr, header.Size)
-			closeErr := out.Close()
-			if copyErr != nil {
-				return fmt.Errorf("write %s: %w", name, copyErr)
-			}
-			if closeErr != nil {
-				return fmt.Errorf("close %s: %w", name, closeErr)
-			}
-		case tar.TypeSymlink, tar.TypeLink:
-			return fmt.Errorf("archive entry %q is a link, which is not allowed", header.Name)
-		default:
-		}
 	}
 	return nil
 }
@@ -897,16 +1009,6 @@ func (s *supervisor) deploy(w http.ResponseWriter, r *http.Request, name string)
 	writeJSON(w, http.StatusOK, s.info(next))
 }
 
-func (s *supervisor) handleApps(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodGet) {
-		return
-	}
-	if !s.requireAuth(w, r) {
-		return
-	}
-	writeJSON(w, http.StatusOK, s.snapshot())
-}
-
 func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/apps/")
 	name, action, _ := strings.Cut(rest, "/")
@@ -984,108 +1086,6 @@ func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "unknown endpoint", http.StatusNotFound)
 	}
-}
-
-// lookup returns the app with the given name, or nil.
-func (s *supervisor) lookup(name string) *app {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.apps[name]
-}
-
-// allApps returns a snapshot of the registered apps in an unspecified order.
-func (s *supervisor) allApps() []*app {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	apps := make([]*app, 0, len(s.apps))
-	for _, a := range s.apps {
-		apps = append(apps, a)
-	}
-	return apps
-}
-
-// statusWriter captures the status code a proxied response is written with. Unwrap
-// hands the underlying writer's optional interfaces (Flusher, Hijacker) through.
-type statusWriter struct {
-	http.ResponseWriter
-	status int
-}
-
-func (w *statusWriter) WriteHeader(status int) {
-	w.status = status
-	w.ResponseWriter.WriteHeader(status)
-}
-
-func (w *statusWriter) Unwrap() http.ResponseWriter {
-	return w.ResponseWriter
-}
-
-// formatProxyDuration renders a request duration compactly for the access log.
-func formatProxyDuration(d time.Duration) string {
-	if d < time.Millisecond {
-		return fmt.Sprintf("%dµs", d.Microseconds())
-	}
-	if d < time.Second {
-		return fmt.Sprintf("%.1fms", float64(d.Microseconds())/1000)
-	}
-	return fmt.Sprintf("%.2fs", d.Seconds())
-}
-
-// formatAccessLog renders a supervisor access line as METHOD status duration path,
-// so the panel can recognise and structure it.
-func formatAccessLog(method string, status int, duration time.Duration, uri string) string {
-	return fmt.Sprintf("%s %d %s %s", method, status, formatProxyDuration(duration), uri)
-}
-
-func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
-	host := strings.ToLower(r.Host)
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		host = h
-	}
-	s.mu.RLock()
-	a := s.hosts[host]
-	s.mu.RUnlock()
-	if a == nil {
-		http.Error(w, "no app for this host", http.StatusNotFound)
-		return
-	}
-	started := time.Now()
-	wrapped := &statusWriter{ResponseWriter: w, status: http.StatusOK}
-	a.proxy.ServeHTTP(wrapped, r)
-	if a.logs != nil {
-		a.logs.logSupervisor(formatAccessLog(r.Method, wrapped.status, time.Since(started), r.URL.RequestURI()))
-	}
-}
-
-func (s *supervisor) handler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("content-type", "text/plain; charset=utf-8")
-		_, _ = io.WriteString(w, "ok\n")
-	})
-	mux.HandleFunc("/apps", s.handleApps)
-	mux.HandleFunc("/apps/", s.handleApp)
-	mux.HandleFunc("GET /events", s.handleEvents)
-	mux.HandleFunc("/admin", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/admin/", http.StatusFound)
-	})
-	mux.Handle("/admin/", http.StripPrefix("/admin", adminStatic()))
-	mux.HandleFunc("/", s.handleProxy)
-	return mux
-}
-
-func (s *supervisor) stopAll() {
-	apps := s.allApps()
-
-	var wg sync.WaitGroup
-	for _, a := range apps {
-		wg.Add(1)
-		go func(a *app) {
-			defer wg.Done()
-			s.stop(a)
-		}(a)
-	}
-	wg.Wait()
 }
 
 func main() {

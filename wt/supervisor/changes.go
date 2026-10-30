@@ -58,25 +58,23 @@ type rowChangeCollector struct {
 	bytes   int
 }
 
-func (c *rowChangeCollector) add(data sqlite.SQLitePreUpdateData) {
-	if len(c.rows) >= maxCollectedChanges || c.bytes >= maxCollectedRowBytes {
-		c.omitted++
-		return
+func preUpdateValues(data sqlite.SQLitePreUpdateData, new bool) ([]any, error) {
+	count := data.Count()
+	values := make([]any, count)
+	var err error
+	if new {
+		err = data.New(values...)
+	} else {
+		err = data.Old(values...)
 	}
-	change, err := collectRowChange(data)
 	if err != nil {
-		log.Printf("storage: pre-update hook: %v", err)
-		c.omitted++
-		return
+		return nil, err
 	}
-	size := rowChangeSize(change)
-	if c.bytes+size > maxCollectedRowBytes {
-		c.omitted++
-		c.bytes = maxCollectedRowBytes
-		return
+	encoded := make([]any, count)
+	for i, value := range values {
+		encoded[i] = encodeStorageValue(value)
 	}
-	c.rows = append(c.rows, change)
-	c.bytes += size
+	return encoded, nil
 }
 
 func collectRowChange(data sqlite.SQLitePreUpdateData) (rowChange, error) {
@@ -120,23 +118,12 @@ func collectRowChange(data sqlite.SQLitePreUpdateData) (rowChange, error) {
 	return change, nil
 }
 
-func preUpdateValues(data sqlite.SQLitePreUpdateData, new bool) ([]any, error) {
-	count := data.Count()
-	values := make([]any, count)
-	var err error
-	if new {
-		err = data.New(values...)
-	} else {
-		err = data.Old(values...)
+// changeValueSize measures encoded values; blobs arrive as a base64 wrapper, which storageValueSize does not know about.
+func changeValueSize(value any) int {
+	if blob, ok := value.(map[string]string); ok {
+		return len(blob["$b64"])
 	}
-	if err != nil {
-		return nil, err
-	}
-	encoded := make([]any, count)
-	for i, value := range values {
-		encoded[i] = encodeStorageValue(value)
-	}
-	return encoded, nil
+	return storageValueSize(value)
 }
 
 func rowChangeSize(change rowChange) int {
@@ -150,12 +137,44 @@ func rowChangeSize(change rowChange) int {
 	return size
 }
 
-// changeValueSize measures encoded values; blobs arrive as a base64 wrapper, which storageValueSize does not know about.
-func changeValueSize(value any) int {
-	if blob, ok := value.(map[string]string); ok {
-		return len(blob["$b64"])
+func (c *rowChangeCollector) add(data sqlite.SQLitePreUpdateData) {
+	if len(c.rows) >= maxCollectedChanges || c.bytes >= maxCollectedRowBytes {
+		c.omitted++
+		return
 	}
-	return storageValueSize(value)
+	change, err := collectRowChange(data)
+	if err != nil {
+		log.Printf("storage: pre-update hook: %v", err)
+		c.omitted++
+		return
+	}
+	size := rowChangeSize(change)
+	if c.bytes+size > maxCollectedRowBytes {
+		c.omitted++
+		c.bytes = maxCollectedRowBytes
+		return
+	}
+	c.rows = append(c.rows, change)
+	c.bytes += size
+}
+
+func tableColumns(ctx context.Context, conn *sql.Conn, table string) ([]string, error) {
+	rows, err := conn.QueryContext(ctx, "pragma table_xinfo("+quoteSQLiteIdentifier(table)+")")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	columns := []string{}
+	for rows.Next() {
+		var cid, notnull, pk, hidden int
+		var name, columnType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notnull, &defaultValue, &pk, &hidden); err != nil {
+			return nil, err
+		}
+		columns = append(columns, name)
+	}
+	return columns, rows.Err()
 }
 
 // resolveColumns adds column names to collected rows. It runs after the statement or transaction has finished, when the connection can run schema queries again.
@@ -178,25 +197,6 @@ func (c *rowChangeCollector) resolveColumns(ctx context.Context, conn *sql.Conn)
 			row.Columns = append(row.Columns, fmt.Sprintf("column_%d", len(row.Columns)+1))
 		}
 	}
-}
-
-func tableColumns(ctx context.Context, conn *sql.Conn, table string) ([]string, error) {
-	rows, err := conn.QueryContext(ctx, "pragma table_xinfo("+quoteSQLiteIdentifier(table)+")")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	columns := []string{}
-	for rows.Next() {
-		var cid, notnull, pk, hidden int
-		var name, columnType string
-		var defaultValue any
-		if err := rows.Scan(&cid, &name, &columnType, &notnull, &defaultValue, &pk, &hidden); err != nil {
-			return nil, err
-		}
-		columns = append(columns, name)
-	}
-	return columns, rows.Err()
 }
 
 // registerRowHook installs the driver's pre-update hook for one write. The hook is replaced on the next write, so it never accumulates callbacks.
@@ -255,6 +255,26 @@ type storageChangesResponse struct {
 	Changes []storageChange `json:"changes"`
 }
 
+// trimChange keeps a single statement from filling the log with a huge parameter blob.
+func trimChange(change storageChange) storageChange {
+	line, err := json.Marshal(change)
+	if err != nil || len(line) <= maxChangeEntrySize {
+		return change
+	}
+	if len(change.Params) > 0 {
+		change.Params = []jsontext.Value{jsontext.Value([]byte(`"<params omitted: too large>"`))}
+	}
+	line, err = json.Marshal(change)
+	if err != nil || len(line) <= maxChangeEntrySize {
+		return change
+	}
+	if len(change.Rows) > 0 {
+		change.Rows = nil
+		change.RowsTruncated = true
+	}
+	return change
+}
+
 // logChanges appends successful statements to the app's change log. Logging is best effort: a full disk or bad permissions must not make the app's write fail.
 func (s *storageServer) logChanges(app string, changes []storageChange) {
 	if len(changes) == 0 {
@@ -302,26 +322,6 @@ func (s *storageServer) logChanges(app string, changes []storageChange) {
 	if err := file.Close(); err != nil {
 		log.Printf("storage %s: change log: %v", app, err)
 	}
-}
-
-// trimChange keeps a single statement from filling the log with a huge parameter blob.
-func trimChange(change storageChange) storageChange {
-	line, err := json.Marshal(change)
-	if err != nil || len(line) <= maxChangeEntrySize {
-		return change
-	}
-	if len(change.Params) > 0 {
-		change.Params = []jsontext.Value{jsontext.Value([]byte(`"<params omitted: too large>"`))}
-	}
-	line, err = json.Marshal(change)
-	if err != nil || len(line) <= maxChangeEntrySize {
-		return change
-	}
-	if len(change.Rows) > 0 {
-		change.Rows = nil
-		change.RowsTruncated = true
-	}
-	return change
 }
 
 // recentChanges returns the newest entries first. The log keeps one rotated file, so the read is bounded by the two files.

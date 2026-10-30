@@ -51,50 +51,6 @@ type appStats struct {
 	history     []resourceSample
 }
 
-// sampleResources refreshes the app's CPU and memory figures from procfs. Calling it
-// more than twice per sample interval reuses the previous sample so CPU deltas stay meaningful.
-func (a *app) sampleResources(now time.Time) {
-	a.mu.Lock()
-	pid := 0
-	started := a.started
-	if a.cmd != nil && a.cmd.Process != nil && !a.exited {
-		pid = a.cmd.Process.Pid
-	}
-	a.mu.Unlock()
-
-	stats := &a.stats
-	stats.mu.Lock()
-	defer stats.mu.Unlock()
-	if pid == 0 {
-		stats.pid = 0
-		stats.lastTicks = 0
-		stats.lastSample = time.Time{}
-		stats.sampledAt = now.UTC()
-		stats.cpuPercent = 0
-		stats.memoryBytes = 0
-		return
-	}
-	if stats.pid == pid && !stats.lastSample.IsZero() && now.Sub(stats.lastSample) < resourceSampleInterval/2 {
-		return
-	}
-
-	ticks, memory, err := readProcessStats(pid)
-	if err != nil {
-		return
-	}
-	if stats.pid == pid && !stats.lastSample.IsZero() {
-		stats.cpuPercent = cpuPercent(stats.lastTicks, ticks, now.Sub(stats.lastSample))
-	} else if !started.IsZero() {
-		// A fresh process has no previous sample, so report its average since launch.
-		stats.cpuPercent = cpuPercent(0, ticks, now.Sub(started))
-	}
-	stats.pid = pid
-	stats.lastTicks = ticks
-	stats.lastSample = now
-	stats.sampledAt = now.UTC()
-	stats.memoryBytes = memory
-}
-
 // appendHistory records a point when the chart interval has passed. The caller holds stats.mu.
 func (s *appStats) appendHistory(now time.Time, cpu float64, memory int64) {
 	if !s.lastAppend.IsZero() && now.Sub(s.lastAppend) < resourceSampleInterval/2 {
@@ -134,25 +90,6 @@ func (a *app) resourceHistory() []resourceSample {
 	return out
 }
 
-type resourceHistoryResponse struct {
-	Samples []resourceSample `json:"samples"`
-}
-
-// handleResources returns the app's CPU and memory history for the charts.
-func (s *supervisor) handleResources(w http.ResponseWriter, _ *http.Request, a *app) {
-	a.sampleResources(time.Now())
-	writeJSON(w, http.StatusOK, resourceHistoryResponse{Samples: a.resourceHistory()})
-}
-
-// sampleAll refreshes resource usage for every app.
-func (s *supervisor) sampleAll() {
-	apps := s.allApps()
-	now := time.Now()
-	for _, a := range apps {
-		a.sampleResources(now)
-	}
-}
-
 // recordAll appends one history point per app; the monitor calls it after sampling.
 func (s *supervisor) recordAll() {
 	for _, a := range s.allApps() {
@@ -160,29 +97,8 @@ func (s *supervisor) recordAll() {
 	}
 }
 
-// monitorResources samples every app in the background so the charts have history
-// before a panel opens, and pushes a fresh snapshot while one is subscribed.
-func (s *supervisor) monitorResources(every time.Duration) {
-	s.sampleAll()
-	s.recordAll()
-	s.persistResources()
-	lastPersist := time.Now()
-	ticker := time.NewTicker(every)
-	defer ticker.Stop()
-	for range ticker.C {
-		if s.stopping.Load() {
-			return
-		}
-		s.sampleAll()
-		s.recordAll()
-		if time.Since(lastPersist) >= resourcePersistInterval {
-			s.persistResources()
-			lastPersist = time.Now()
-		}
-		if s.events != nil && s.events.hasSubscribers() {
-			s.broadcast()
-		}
-	}
+type resourceHistoryResponse struct {
+	Samples []resourceSample `json:"samples"`
 }
 
 // resourcesDir holds one JSON history file per app, outside any app's /data preopen.
@@ -266,27 +182,6 @@ func cpuPercent(previous, current uint64, elapsed time.Duration) float64 {
 	return float64(current-previous) / clockTicks / elapsed.Seconds() * 100
 }
 
-// readProcessStats reads CPU ticks and resident memory for a process from procfs.
-func readProcessStats(pid int) (uint64, int64, error) {
-	stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
-	if err != nil {
-		return 0, 0, err
-	}
-	ticks, err := parseProcStat(stat)
-	if err != nil {
-		return 0, 0, err
-	}
-	statm, err := os.ReadFile(fmt.Sprintf("/proc/%d/statm", pid))
-	if err != nil {
-		return 0, 0, err
-	}
-	memory, err := parseProcStatm(statm)
-	if err != nil {
-		return 0, 0, err
-	}
-	return ticks, memory, nil
-}
-
 // parseProcStat returns utime+stime from a /proc/<pid>/stat line. The command name
 // can contain spaces and parentheses, so fields are counted after the last ')'.
 func parseProcStat(data []byte) (uint64, error) {
@@ -321,4 +216,109 @@ func parseProcStatm(data []byte) (int64, error) {
 		return 0, err
 	}
 	return pages * int64(os.Getpagesize()), nil
+}
+
+// readProcessStats reads CPU ticks and resident memory for a process from procfs.
+func readProcessStats(pid int) (uint64, int64, error) {
+	stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return 0, 0, err
+	}
+	ticks, err := parseProcStat(stat)
+	if err != nil {
+		return 0, 0, err
+	}
+	statm, err := os.ReadFile(fmt.Sprintf("/proc/%d/statm", pid))
+	if err != nil {
+		return 0, 0, err
+	}
+	memory, err := parseProcStatm(statm)
+	if err != nil {
+		return 0, 0, err
+	}
+	return ticks, memory, nil
+}
+
+// sampleResources refreshes the app's CPU and memory figures from procfs. Calling it
+// more than twice per sample interval reuses the previous sample so CPU deltas stay meaningful.
+func (a *app) sampleResources(now time.Time) {
+	a.mu.Lock()
+	pid := 0
+	started := a.started
+	if a.cmd != nil && a.cmd.Process != nil && !a.exited {
+		pid = a.cmd.Process.Pid
+	}
+	a.mu.Unlock()
+
+	stats := &a.stats
+	stats.mu.Lock()
+	defer stats.mu.Unlock()
+	if pid == 0 {
+		stats.pid = 0
+		stats.lastTicks = 0
+		stats.lastSample = time.Time{}
+		stats.sampledAt = now.UTC()
+		stats.cpuPercent = 0
+		stats.memoryBytes = 0
+		return
+	}
+	if stats.pid == pid && !stats.lastSample.IsZero() && now.Sub(stats.lastSample) < resourceSampleInterval/2 {
+		return
+	}
+
+	ticks, memory, err := readProcessStats(pid)
+	if err != nil {
+		return
+	}
+	if stats.pid == pid && !stats.lastSample.IsZero() {
+		stats.cpuPercent = cpuPercent(stats.lastTicks, ticks, now.Sub(stats.lastSample))
+	} else if !started.IsZero() {
+		// A fresh process has no previous sample, so report its average since launch.
+		stats.cpuPercent = cpuPercent(0, ticks, now.Sub(started))
+	}
+	stats.pid = pid
+	stats.lastTicks = ticks
+	stats.lastSample = now
+	stats.sampledAt = now.UTC()
+	stats.memoryBytes = memory
+}
+
+// handleResources returns the app's CPU and memory history for the charts.
+func (s *supervisor) handleResources(w http.ResponseWriter, _ *http.Request, a *app) {
+	a.sampleResources(time.Now())
+	writeJSON(w, http.StatusOK, resourceHistoryResponse{Samples: a.resourceHistory()})
+}
+
+// sampleAll refreshes resource usage for every app.
+func (s *supervisor) sampleAll() {
+	apps := s.allApps()
+	now := time.Now()
+	for _, a := range apps {
+		a.sampleResources(now)
+	}
+}
+
+// monitorResources samples every app in the background so the charts have history
+// before a panel opens, and pushes a fresh snapshot while one is subscribed.
+func (s *supervisor) monitorResources(every time.Duration) {
+	s.sampleAll()
+	s.recordAll()
+	s.persistResources()
+	lastPersist := time.Now()
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+	for range ticker.C {
+		if s.stopping.Load() {
+			return
+		}
+		s.sampleAll()
+		s.recordAll()
+		if time.Since(lastPersist) >= resourcePersistInterval {
+			s.persistResources()
+			lastPersist = time.Now()
+		}
+		if s.events != nil && s.events.hasSubscribers() {
+			s.broadcast()
+		}
+	}
 }

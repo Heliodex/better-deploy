@@ -168,16 +168,6 @@ func (m *backupManager) settings(app string) (backupSettings, error) {
 	return settings, nil
 }
 
-// saveSettings validates and persists an app's policy, then prunes snapshots the new keep count no longer covers.
-func (m *backupManager) saveSettings(app string, settings backupSettings) error {
-	if err := settings.validate(); err != nil {
-		return err
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.saveSettingsLocked(app, settings)
-}
-
 // writeFileAtomic replaces path through a temp file, so a crash leaves the previous contents intact.
 func writeFileAtomic(path string, data []byte) error {
 	temp := path + backupTempSuffix
@@ -191,84 +181,36 @@ func writeFileAtomic(path string, data []byte) error {
 	return nil
 }
 
-func (m *backupManager) saveSettingsLocked(app string, settings backupSettings) error {
-	if err := os.MkdirAll(m.appDir(app), 0o755); err != nil {
-		return fmt.Errorf("backup dir: %w", err)
-	}
-	data, err := json.Marshal(settings)
-	if err != nil {
-		return err
-	}
-	if err := writeFileAtomic(m.configPath(app), append(data, '\n')); err != nil {
-		return fmt.Errorf("write backup config: %w", err)
-	}
-	return m.pruneLocked(app, settings.Keep)
-}
-
-// list returns an app's snapshots, newest first.
-func (m *backupManager) list(app string) ([]backupInfo, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.listLocked(app)
-}
-
-func (m *backupManager) listLocked(app string) ([]backupInfo, error) {
-	state, err := m.stateLocked(app)
-	if err != nil {
-		return nil, err
-	}
-	return state.Files, nil
-}
-
-// stateLocked loads snapshot files and their tree index together, rebuilding the index when it is missing, stale or broken.
-func (m *backupManager) stateLocked(app string) (backupState, error) {
-	files, err := m.filesLocked(app)
-	if err != nil {
-		return backupState{}, err
-	}
-	tree, changed, err := m.loadTreeLocked(app, files)
-	if err != nil {
-		return backupState{}, err
-	}
-	if changed {
-		if err := m.saveTreeLocked(app, tree); err != nil {
-			return backupState{}, err
+// backupTreeAcyclic reports whether every parent chain ends at a root instead of looping.
+func backupTreeAcyclic(tree backupTree) bool {
+	for name := range tree.Nodes {
+		seen := map[string]struct{}{}
+		for id := name; id != ""; {
+			if _, ok := seen[id]; ok {
+				return false
+			}
+			seen[id] = struct{}{}
+			node, ok := tree.Nodes[id]
+			if !ok {
+				break
+			}
+			id = node.Parent
 		}
 	}
-	for i := range files {
-		node := tree.Nodes[files[i].Name]
-		files[i].Parent = node.Parent
-		files[i].Kind = node.Kind
-	}
-	return backupState{Files: files, Tree: tree}, nil
+	return true
 }
 
-// filesLocked reads the snapshot files without their tree metadata, newest first.
-func (m *backupManager) filesLocked(app string) ([]backupInfo, error) {
-	entries, err := os.ReadDir(m.appDir(app))
-	if os.IsNotExist(err) {
-		return []backupInfo{}, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	infos := make([]backupInfo, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasPrefix(entry.Name(), backupFilePrefix) || !strings.HasSuffix(entry.Name(), backupFileSuffix) {
+func backupOldestRoot(tree backupTree) string {
+	root := ""
+	for name, node := range tree.Nodes {
+		if node.Parent != "" {
 			continue
 		}
-		created, ok := backupTime(entry.Name())
-		if !ok {
-			continue
+		if root == "" || name < root {
+			root = name
 		}
-		info, err := entry.Info()
-		if err != nil {
-			return nil, err
-		}
-		infos = append(infos, backupInfo{Name: entry.Name(), Size: info.Size(), CreatedAt: created})
 	}
-	sort.Slice(infos, func(i, j int) bool { return infos[i].CreatedAt.After(infos[j].CreatedAt) })
-	return infos, nil
+	return root
 }
 
 // loadTreeLocked reads the index and reconciles it with the files on disk. Snapshots from before the index existed are chained in creation order.
@@ -369,38 +311,6 @@ func (m *backupManager) loadTreeLocked(app string, files []backupInfo) (backupTr
 	return tree, changed, nil
 }
 
-// backupTreeAcyclic reports whether every parent chain ends at a root instead of looping.
-func backupTreeAcyclic(tree backupTree) bool {
-	for name := range tree.Nodes {
-		seen := map[string]struct{}{}
-		for id := name; id != ""; {
-			if _, ok := seen[id]; ok {
-				return false
-			}
-			seen[id] = struct{}{}
-			node, ok := tree.Nodes[id]
-			if !ok {
-				break
-			}
-			id = node.Parent
-		}
-	}
-	return true
-}
-
-func backupOldestRoot(tree backupTree) string {
-	root := ""
-	for name, node := range tree.Nodes {
-		if node.Parent != "" {
-			continue
-		}
-		if root == "" || name < root {
-			root = name
-		}
-	}
-	return root
-}
-
 func (m *backupManager) saveTreeLocked(app string, tree backupTree) error {
 	if tree.Nodes == nil {
 		tree.Nodes = map[string]backupNode{}
@@ -423,6 +333,72 @@ func backupTime(name string) (time.Time, bool) {
 	stamp := strings.TrimSuffix(strings.TrimPrefix(name, backupFilePrefix), backupFileSuffix)
 	created, err := time.Parse(backupTimeLayout, stamp)
 	return created, err == nil
+}
+
+// filesLocked reads the snapshot files without their tree metadata, newest first.
+func (m *backupManager) filesLocked(app string) ([]backupInfo, error) {
+	entries, err := os.ReadDir(m.appDir(app))
+	if os.IsNotExist(err) {
+		return []backupInfo{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	infos := make([]backupInfo, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasPrefix(entry.Name(), backupFilePrefix) || !strings.HasSuffix(entry.Name(), backupFileSuffix) {
+			continue
+		}
+		created, ok := backupTime(entry.Name())
+		if !ok {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return nil, err
+		}
+		infos = append(infos, backupInfo{Name: entry.Name(), Size: info.Size(), CreatedAt: created})
+	}
+	sort.Slice(infos, func(i, j int) bool { return infos[i].CreatedAt.After(infos[j].CreatedAt) })
+	return infos, nil
+}
+
+// stateLocked loads snapshot files and their tree index together, rebuilding the index when it is missing, stale or broken.
+func (m *backupManager) stateLocked(app string) (backupState, error) {
+	files, err := m.filesLocked(app)
+	if err != nil {
+		return backupState{}, err
+	}
+	tree, changed, err := m.loadTreeLocked(app, files)
+	if err != nil {
+		return backupState{}, err
+	}
+	if changed {
+		if err := m.saveTreeLocked(app, tree); err != nil {
+			return backupState{}, err
+		}
+	}
+	for i := range files {
+		node := tree.Nodes[files[i].Name]
+		files[i].Parent = node.Parent
+		files[i].Kind = node.Kind
+	}
+	return backupState{Files: files, Tree: tree}, nil
+}
+
+func (m *backupManager) listLocked(app string) ([]backupInfo, error) {
+	state, err := m.stateLocked(app)
+	if err != nil {
+		return nil, err
+	}
+	return state.Files, nil
+}
+
+// list returns an app's snapshots, newest first.
+func (m *backupManager) list(app string) ([]backupInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.listLocked(app)
 }
 
 // overview returns everything the panel shows for one app.
@@ -459,11 +435,176 @@ func backupHash(path string) (string, error) {
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
-// create takes a snapshot now even when automatic backups are disabled.
-func (m *backupManager) create(ctx context.Context, app string) (backupInfo, error) {
+func exists(dir, name string) bool {
+	_, err := os.Stat(filepath.Join(dir, name))
+	return err == nil
+}
+
+// validBackupName ensures a name from the API is one of the manager's own snapshot files and cannot escape the app's backup directory.
+func validBackupName(name string) (string, error) {
+	if name == "" || filepath.Base(name) != name || !strings.HasPrefix(name, backupFilePrefix) || !strings.HasSuffix(name, backupFileSuffix) {
+		return "", errInvalidBackupName
+	}
+	if _, ok := backupTime(name); !ok {
+		return "", errInvalidBackupName
+	}
+	return name, nil
+}
+
+// restore replaces the live database with a snapshot using SQLite's online backup API, so the file is never copied while a writer has it open.
+func (m *backupManager) restore(ctx context.Context, app, name string) error {
+	name, err := validBackupName(name)
+	if err != nil {
+		return err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.createLocked(ctx, app, backupKindManual)
+	path := filepath.Join(m.appDir(app), name)
+	if info, err := os.Stat(path); err != nil || !info.Mode().IsRegular() {
+		return errBackupNotFound
+	}
+	if err := checkBackupDatabase(path); err != nil {
+		return fmt.Errorf("backup is not a valid database: %w", err)
+	}
+	if err := m.storage.restoreFrom(ctx, app, path); err != nil {
+		return err
+	}
+	state, err := m.stateLocked(app)
+	if err != nil {
+		return err
+	}
+	tree := state.Tree
+	if _, ok := tree.Nodes[name]; !ok {
+		tree.Nodes[name] = backupNode{Parent: tree.Current, Kind: backupKindLegacy}
+	}
+	// Later snapshots continue from the restored node, which is what makes the next backup a new branch.
+	tree.Current = name
+	if err := m.saveTreeLocked(app, tree); err != nil {
+		return err
+	}
+	log.Printf("backup %s: restored %s", app, name)
+	return nil
+}
+
+// backupPathNames is the current node and its ancestors, which pruning must not remove while another choice exists.
+func backupPathNames(tree backupTree) map[string]struct{} {
+	protected := map[string]struct{}{}
+	for id := tree.Current; id != ""; {
+		if _, seen := protected[id]; seen {
+			break
+		}
+		protected[id] = struct{}{}
+		node, ok := tree.Nodes[id]
+		if !ok {
+			break
+		}
+		id = node.Parent
+	}
+	return protected
+}
+
+// backupOldestLeaf returns the oldest node with no children outside the protected branch.
+func backupOldestLeaf(tree backupTree, protected map[string]struct{}) string {
+	children := map[string]int{}
+	for _, node := range tree.Nodes {
+		if node.Parent != "" {
+			children[node.Parent]++
+		}
+	}
+	oldest := ""
+	for name := range tree.Nodes {
+		if _, ok := protected[name]; ok {
+			continue
+		}
+		if children[name] > 0 {
+			continue
+		}
+		if oldest == "" || name < oldest {
+			oldest = name
+		}
+	}
+	return oldest
+}
+
+// backupPathChild returns the child of root that lies on the protected branch.
+func backupPathChild(tree backupTree, root string, protected map[string]struct{}) string {
+	for name, node := range tree.Nodes {
+		if node.Parent != root {
+			continue
+		}
+		if _, ok := protected[name]; ok {
+			return name
+		}
+	}
+	return ""
+}
+
+// pruneLocked removes the oldest snapshots beyond keep, keeping the branch the live database follows for as long as possible. Abandoned leaves go first; only when the current branch alone is too long is its oldest node dropped and its child promoted to root.
+func (m *backupManager) pruneLocked(app string, keep int) error {
+	state, err := m.stateLocked(app)
+	if err != nil {
+		return err
+	}
+	tree := state.Tree
+	if len(tree.Nodes) <= keep {
+		return nil
+	}
+	changed := false
+	for len(tree.Nodes) > keep {
+		protected := backupPathNames(tree)
+		if leaf := backupOldestLeaf(tree, protected); leaf != "" {
+			if err := os.Remove(filepath.Join(m.appDir(app), leaf)); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			delete(tree.Nodes, leaf)
+			changed = true
+			continue
+		}
+
+		root := backupOldestRoot(tree)
+		if root == "" || root == tree.Current {
+			break
+		}
+		child := backupPathChild(tree, root, protected)
+		if err := os.Remove(filepath.Join(m.appDir(app), root)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		delete(tree.Nodes, root)
+		if child != "" {
+			node := tree.Nodes[child]
+			node.Parent = ""
+			tree.Nodes[child] = node
+		}
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	return m.saveTreeLocked(app, tree)
+}
+
+func (m *backupManager) saveSettingsLocked(app string, settings backupSettings) error {
+	if err := os.MkdirAll(m.appDir(app), 0o755); err != nil {
+		return fmt.Errorf("backup dir: %w", err)
+	}
+	data, err := json.Marshal(settings)
+	if err != nil {
+		return err
+	}
+	if err := writeFileAtomic(m.configPath(app), append(data, '\n')); err != nil {
+		return fmt.Errorf("write backup config: %w", err)
+	}
+	return m.pruneLocked(app, settings.Keep)
+}
+
+// saveSettings validates and persists an app's policy, then prunes snapshots the new keep count no longer covers.
+func (m *backupManager) saveSettings(app string, settings backupSettings) error {
+	if err := settings.validate(); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.saveSettingsLocked(app, settings)
 }
 
 // createLocked snapshots the live database as a child of the current node. Reverting moves the current node, so the next snapshot branches from there.
@@ -553,190 +694,11 @@ func (m *backupManager) createLocked(ctx context.Context, app, kind string) (bac
 	return backupInfo{Name: name, Size: info.Size(), CreatedAt: now, Parent: parent, Kind: kind}, nil
 }
 
-func exists(dir, name string) bool {
-	_, err := os.Stat(filepath.Join(dir, name))
-	return err == nil
-}
-
-// restore replaces the live database with a snapshot using SQLite's online backup API, so the file is never copied while a writer has it open.
-func (m *backupManager) restore(ctx context.Context, app, name string) error {
-	name, err := validBackupName(name)
-	if err != nil {
-		return err
-	}
+// create takes a snapshot now even when automatic backups are disabled.
+func (m *backupManager) create(ctx context.Context, app string) (backupInfo, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	path := filepath.Join(m.appDir(app), name)
-	if info, err := os.Stat(path); err != nil || !info.Mode().IsRegular() {
-		return errBackupNotFound
-	}
-	if err := checkBackupDatabase(path); err != nil {
-		return fmt.Errorf("backup is not a valid database: %w", err)
-	}
-	if err := m.storage.restoreFrom(ctx, app, path); err != nil {
-		return err
-	}
-	state, err := m.stateLocked(app)
-	if err != nil {
-		return err
-	}
-	tree := state.Tree
-	if _, ok := tree.Nodes[name]; !ok {
-		tree.Nodes[name] = backupNode{Parent: tree.Current, Kind: backupKindLegacy}
-	}
-	// Later snapshots continue from the restored node, which is what makes the next backup a new branch.
-	tree.Current = name
-	if err := m.saveTreeLocked(app, tree); err != nil {
-		return err
-	}
-	log.Printf("backup %s: restored %s", app, name)
-	return nil
-}
-
-// validBackupName ensures a name from the API is one of the manager's own snapshot files and cannot escape the app's backup directory.
-func validBackupName(name string) (string, error) {
-	if name == "" || filepath.Base(name) != name || !strings.HasPrefix(name, backupFilePrefix) || !strings.HasSuffix(name, backupFileSuffix) {
-		return "", errInvalidBackupName
-	}
-	if _, ok := backupTime(name); !ok {
-		return "", errInvalidBackupName
-	}
-	return name, nil
-}
-
-// pruneLocked removes the oldest snapshots beyond keep, keeping the branch the live database follows for as long as possible. Abandoned leaves go first; only when the current branch alone is too long is its oldest node dropped and its child promoted to root.
-func (m *backupManager) pruneLocked(app string, keep int) error {
-	state, err := m.stateLocked(app)
-	if err != nil {
-		return err
-	}
-	tree := state.Tree
-	if len(tree.Nodes) <= keep {
-		return nil
-	}
-	changed := false
-	for len(tree.Nodes) > keep {
-		protected := backupPathNames(tree)
-		if leaf := backupOldestLeaf(tree, protected); leaf != "" {
-			if err := os.Remove(filepath.Join(m.appDir(app), leaf)); err != nil && !os.IsNotExist(err) {
-				return err
-			}
-			delete(tree.Nodes, leaf)
-			changed = true
-			continue
-		}
-
-		root := backupOldestRoot(tree)
-		if root == "" || root == tree.Current {
-			break
-		}
-		child := backupPathChild(tree, root, protected)
-		if err := os.Remove(filepath.Join(m.appDir(app), root)); err != nil && !os.IsNotExist(err) {
-			return err
-		}
-		delete(tree.Nodes, root)
-		if child != "" {
-			node := tree.Nodes[child]
-			node.Parent = ""
-			tree.Nodes[child] = node
-		}
-		changed = true
-	}
-	if !changed {
-		return nil
-	}
-	return m.saveTreeLocked(app, tree)
-}
-
-// backupPathNames is the current node and its ancestors, which pruning must not remove while another choice exists.
-func backupPathNames(tree backupTree) map[string]struct{} {
-	protected := map[string]struct{}{}
-	for id := tree.Current; id != ""; {
-		if _, seen := protected[id]; seen {
-			break
-		}
-		protected[id] = struct{}{}
-		node, ok := tree.Nodes[id]
-		if !ok {
-			break
-		}
-		id = node.Parent
-	}
-	return protected
-}
-
-// backupOldestLeaf returns the oldest node with no children outside the protected branch.
-func backupOldestLeaf(tree backupTree, protected map[string]struct{}) string {
-	children := map[string]int{}
-	for _, node := range tree.Nodes {
-		if node.Parent != "" {
-			children[node.Parent]++
-		}
-	}
-	oldest := ""
-	for name := range tree.Nodes {
-		if _, ok := protected[name]; ok {
-			continue
-		}
-		if children[name] > 0 {
-			continue
-		}
-		if oldest == "" || name < oldest {
-			oldest = name
-		}
-	}
-	return oldest
-}
-
-// backupPathChild returns the child of root that lies on the protected branch.
-func backupPathChild(tree backupTree, root string, protected map[string]struct{}) string {
-	for name, node := range tree.Nodes {
-		if node.Parent != root {
-			continue
-		}
-		if _, ok := protected[name]; ok {
-			return name
-		}
-	}
-	return ""
-}
-
-// loop runs the periodic snapshots until the context is cancelled.
-func (m *backupManager) loop(ctx context.Context) {
-	m.runDue(ctx, time.Now())
-	ticker := time.NewTicker(backupCheckInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case now := <-ticker.C:
-			m.runDue(ctx, now)
-		}
-	}
-}
-
-// runDue snapshots every app whose policy is enabled and whose newest snapshot is older than its interval. Apps without a database are skipped; one appears after the app's first storage use.
-func (m *backupManager) runDue(ctx context.Context, now time.Time) {
-	entries, err := os.ReadDir(m.storage.dir)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			log.Printf("backup: scan storage: %v", err)
-		}
-		return
-	}
-	for _, entry := range entries {
-		if !entry.IsDir() || !validName(entry.Name()) {
-			continue
-		}
-		app := entry.Name()
-		if !m.storage.hasDatabase(app) {
-			continue
-		}
-		if err := m.backupIfDue(ctx, app, now); err != nil {
-			log.Printf("backup %s: %v", app, err)
-		}
-	}
+	return m.createLocked(ctx, app, backupKindManual)
 }
 
 func (m *backupManager) backupIfDue(ctx context.Context, app string, now time.Time) error {
@@ -769,4 +731,42 @@ func (m *backupManager) backupIfDue(ctx context.Context, app string, now time.Ti
 		return nil
 	}
 	return err
+}
+
+// runDue snapshots every app whose policy is enabled and whose newest snapshot is older than its interval. Apps without a database are skipped; one appears after the app's first storage use.
+func (m *backupManager) runDue(ctx context.Context, now time.Time) {
+	entries, err := os.ReadDir(m.storage.dir)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("backup: scan storage: %v", err)
+		}
+		return
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !validName(entry.Name()) {
+			continue
+		}
+		app := entry.Name()
+		if !m.storage.hasDatabase(app) {
+			continue
+		}
+		if err := m.backupIfDue(ctx, app, now); err != nil {
+			log.Printf("backup %s: %v", app, err)
+		}
+	}
+}
+
+// loop runs the periodic snapshots until the context is cancelled.
+func (m *backupManager) loop(ctx context.Context) {
+	m.runDue(ctx, time.Now())
+	ticker := time.NewTicker(backupCheckInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			m.runDue(ctx, now)
+		}
+	}
 }

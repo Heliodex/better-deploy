@@ -9,20 +9,6 @@ import (
 	"time"
 )
 
-// startSchedule launches one goroutine per scheduled endpoint. It runs once the app is serving, and is cancelled when the app stops or is replaced.
-func (s *supervisor) startSchedule(a *app) {
-	if len(a.cfg.Schedule) == 0 {
-		return
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	a.mu.Lock()
-	a.scheduleCancel = cancel
-	a.mu.Unlock()
-	for _, entry := range a.cfg.Schedule {
-		go s.runSchedule(ctx, a, entry)
-	}
-}
-
 // runSchedule calls one endpoint on its interval. Calls are sequential, so a slow endpoint delays the next tick instead of letting requests pile up.
 func (s *supervisor) runSchedule(ctx context.Context, a *app, entry scheduleConfig) {
 	every, err := parseScheduleInterval(entry)
@@ -67,5 +53,19 @@ func (s *supervisor) runSchedule(ctx context.Context, a *app, entry scheduleConf
 		if response.StatusCode >= http.StatusBadRequest {
 			log.Printf("app %s: schedule %s: %s", a.name, entry.Path, response.Status)
 		}
+	}
+}
+
+// startSchedule launches one goroutine per scheduled endpoint. It runs once the app is serving, and is cancelled when the app stops or is replaced.
+func (s *supervisor) startSchedule(a *app) {
+	if len(a.cfg.Schedule) == 0 {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	a.mu.Lock()
+	a.scheduleCancel = cancel
+	a.mu.Unlock()
+	for _, entry := range a.cfg.Schedule {
+		go s.runSchedule(ctx, a, entry)
 	}
 }
