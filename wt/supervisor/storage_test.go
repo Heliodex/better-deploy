@@ -370,3 +370,75 @@ func TestStorageSchemaAndMigrate(t *testing.T) {
 	}
 	resp.Body.Close()
 }
+
+func TestStorageTransaction(t *testing.T) {
+	s, err := newStorageServer(t.TempDir(), "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.close()
+	token := s.tokenFor("notes")
+
+	for _, statement := range []string{
+		`create table items (id text primary key, value text not null)`,
+		`insert into items (id, value) values ('a', 'one')`,
+	} {
+		resp := storageSQL(t, s, token, "/v1/exec", map[string]any{"sql": statement})
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("exec %q: %d %s", statement, resp.StatusCode, readBody(t, resp))
+		}
+		resp.Body.Close()
+	}
+
+	resp := storageSQL(t, s, token, "/v1/transaction", map[string]any{
+		"statements": []map[string]any{
+			{"sql": `update items set value = ? where id = ?`, "params": []any{"two", "a"}},
+			{"sql": `select value from items where id = ?`, "params": []any{"a"}, "query": true},
+			{"sql": `insert into items (id, value) values ('b', 'three')`},
+		},
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("transaction: %d %s", resp.StatusCode, readBody(t, resp))
+	}
+	var result storageTransactionResponse
+	if err := json.UnmarshalRead(resp.Body, &result); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if len(result.Results) != 3 {
+		t.Fatalf("results = %+v", result.Results)
+	}
+	if result.Results[0].RowsAffected != 1 {
+		t.Errorf("update affected = %d, want 1", result.Results[0].RowsAffected)
+	}
+	if len(result.Results[1].Rows) != 1 || result.Results[1].Rows[0][0] != "two" {
+		t.Errorf("select rows = %+v", result.Results[1].Rows)
+	}
+	if result.Results[2].RowsAffected != 1 {
+		t.Errorf("insert affected = %d, want 1", result.Results[2].RowsAffected)
+	}
+
+	// A failing statement rolls the earlier writes back.
+	resp = storageSQL(t, s, token, "/v1/transaction", map[string]any{
+		"statements": []map[string]any{
+			{"sql": `insert into items (id, value) values ('c', 'four')`},
+			{"sql": `insert into items (id, value) values ('a', 'duplicate')`},
+		},
+	})
+	if resp.StatusCode == http.StatusOK {
+		t.Error("failed transaction reported success")
+	}
+	resp.Body.Close()
+
+	resp = storageSQL(t, s, token, "/v1/query", map[string]any{"sql": `select count(*) from items where id = 'c'`})
+	resultRows := storageResultOf(t, resp)
+	if len(resultRows.Rows) != 1 || resultRows.Rows[0][0].(float64) != 0 {
+		t.Errorf("rolled-back row count = %+v", resultRows.Rows)
+	}
+
+	resp = storageSQL(t, s, token, "/v1/transaction", map[string]any{"statements": []map[string]any{}})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("empty transaction = %d, want 400", resp.StatusCode)
+	}
+	resp.Body.Close()
+}

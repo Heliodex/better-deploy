@@ -203,3 +203,33 @@ func TestClientSchemaAndMigrate(t *testing.T) {
 		t.Errorf("migration request = %+v", migration)
 	}
 }
+
+func TestClientTransaction(t *testing.T) {
+	var request transactionRequest
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/transaction" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		if err := json.UnmarshalRead(r.Body, &request); err != nil {
+			t.Errorf("body: %v", err)
+		}
+		_, _ = io.WriteString(w, `{"results":[{"rows_affected":1,"last_insert_id":3},{"columns":["value"],"rows":[["two"]]}]}`)
+	})
+
+	results, err := client.Transaction(context.Background(),
+		TransactionStatement{SQL: `insert into items (value) values (?)`, Args: []any{"two"}},
+		TransactionStatement{SQL: `select value from items where id = ?`, Args: []any{3}, Query: true},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(request.Statements) != 2 || request.Statements[0].Query || !request.Statements[1].Query {
+		t.Errorf("request = %+v", request)
+	}
+	if len(results) != 2 || results[0].RowsAffected != 1 || results[0].LastInsertID != 3 {
+		t.Errorf("write result = %+v", results)
+	}
+	if len(results[1].Rows) != 1 || results[1].Rows[0][0] != "two" {
+		t.Errorf("read rows = %+v", results[1].Rows)
+	}
+}

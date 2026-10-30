@@ -44,8 +44,10 @@ type storageServer struct {
 	server       *http.Server
 
 	mu, changeMu sync.Mutex
-	tokens       map[string]string // token -> app name
-	dbs          map[string]*sql.DB
+	// opMu blocks new queries while a restore replaces the database file; normal queries share it as readers.
+	opMu   sync.RWMutex
+	tokens map[string]string // token -> app name
+	dbs    map[string]*sql.DB
 }
 
 type storageRequest struct {
@@ -176,8 +178,9 @@ func (s *storageServer) dbFor(app string) (*sql.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open storage: %w", err)
 	}
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
+	// WAL allows concurrent readers; SQLite still serialises writers. A small pool keeps big reads from blocking every other query.
+	db.SetMaxOpenConns(4)
+	db.SetMaxIdleConns(4)
 	db.SetConnMaxLifetime(0)
 	db.SetConnMaxIdleTime(0)
 
@@ -291,6 +294,12 @@ func configureStorageConn(ctx context.Context, conn *sql.Conn) error {
 }
 
 func (s *storageServer) withConn(ctx context.Context, app string, fn func(*sql.Conn) error) error {
+	s.opMu.RLock()
+	defer s.opMu.RUnlock()
+	return s.withConnUnlocked(ctx, app, fn)
+}
+
+func (s *storageServer) withConnUnlocked(ctx context.Context, app string, fn func(*sql.Conn) error) error {
 	db, err := s.dbFor(app)
 	if err != nil {
 		return fmt.Errorf("%w: %v", errStorageUnavailable, err)
@@ -315,9 +324,11 @@ func (s *storageServer) backupTo(ctx context.Context, app, dst string) error {
 	})
 }
 
-// restoreFrom copies a snapshot over the live database. The storage pool has one connection, so no query can be in flight while the copy runs.
+// restoreFrom copies a snapshot over the live database. It holds opMu exclusively, so no query is in flight while the copy runs.
 func (s *storageServer) restoreFrom(ctx context.Context, app, src string) error {
-	return s.withConn(ctx, app, func(conn *sql.Conn) error {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	return s.withConnUnlocked(ctx, app, func(conn *sql.Conn) error {
 		return runSQLiteBackup(conn, func(driver sqliteBackup) (*sqlite.Backup, error) {
 			return driver.NewRestore(src)
 		})
@@ -602,6 +613,10 @@ func (s *storageServer) handle(w http.ResponseWriter, r *http.Request) {
 	case "/v1/batch":
 		s.handleSQL(w, r, func(w http.ResponseWriter, r *http.Request) {
 			s.batch(w, r, app)
+		})
+	case "/v1/transaction":
+		s.handleSQL(w, r, func(w http.ResponseWriter, r *http.Request) {
+			s.transaction(w, r, app)
 		})
 	case "/v1/schema":
 		s.readSchema(w, r, app)

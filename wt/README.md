@@ -229,9 +229,10 @@ The API is deliberately small SQL rather than a key-value shim:
 POST /v1/query   {"sql": "...", "params": [...], "max_rows": 1000}
 POST /v1/exec    {"sql": "...", "params": [...]}
 POST /v1/batch   {"statements": [{"sql": "...", "params": [...]}, ...]}
+POST /v1/transaction {"statements": [{"sql": "...", "query": true}, ...]}
 ```
 
-`query` returns `{"columns": [...], "rows": [[...]], "truncated": false}`. `exec` returns `{"rows_affected": n, "last_insert_id": n}`. `batch` runs every write statement in one transaction and returns one result per statement; use `query` for reads (it also runs `INSERT ... RETURNING`). Values are JSON scalars; blobs are `{"$b64": "..."}`. Parameters are bound, not interpolated. A few SQLite features are blocked (`ATTACH`, `VACUUM INTO`, `PRAGMA`, `load_extension`, `readfile`, `writefile`, transaction-control statements) and `SQLITE_LIMIT_ATTACHED` is zero, so a component cannot read another app's database or write files through SQL. Queries time out after five seconds and are capped at 10,000 rows, 1 MiB per value and 8 MiB per response.
+`query` returns `{"columns": [...], "rows": [[...]], "truncated": false}`. `exec` returns `{"rows_affected": n, "last_insert_id": n}`. `batch` runs every write statement in one transaction and returns one result per statement; use `query` for reads (it also runs `INSERT ... RETURNING`). `transaction` runs reads and writes in one transaction: mark read statements with `"query": true` to get their rows back, and the rest return `rows_affected` and `last_insert_id`. This keeps a read-modify-write in one atomic request without an open session; in Go, `store.Transaction(ctx, statements...)` returns the same shape. Queries use a small WAL-backed connection pool, so reads can proceed while one write is in flight, while SQLite still serialises writers. Values are JSON scalars; blobs are `{"$b64": "..."}`. Parameters are bound, not interpolated. A few SQLite features are blocked (`ATTACH`, `VACUUM INTO`, `PRAGMA`, `load_extension`, `readfile`, `writefile`, transaction-control statements) and `SQLITE_LIMIT_ATTACHED` is zero, so a component cannot read another app's database or write files through SQL. Queries time out after five seconds and are capped at 10,000 rows, 1 MiB per value and 8 MiB per response.
 
 Schema changes go through a versioned migration instead of raw `PRAGMA`:
 
@@ -305,7 +306,7 @@ GET /apps/<name>/database/changes?limit=200
 
 Rows default to 50 per page and accept `limit` up to 500. The rows response includes the columns, the page of rows, the table's total row count, and whether more rows remain.
 
-Every successful statement sent through `/v1/exec` or `/v1/batch` is appended to the app's change log at `WT_STATE_DIR/.storage/<app>/changes.log`, and the Database tab shows the newest entries below the table. Each entry records its UTC time, SQL, bound parameters and rows affected. SQLite's pre-update hook also captures the affected rows, with old values for updates and deletes and new values for inserts and updates. The UI shows the operation, table, row id and per-column values, using `old → new` for updates.
+Every successful write sent through `/v1/exec`, `/v1/batch` or `/v1/transaction` is appended to the app's change log at `WT_STATE_DIR/.storage/<app>/changes.log`, and the Database tab shows the newest entries below the table. Each entry records its UTC time, SQL, bound parameters and rows affected. SQLite's pre-update hook also captures the affected rows, with old values for updates and deletes and new values for inserts and updates. The UI shows the operation, table, row id and per-column values, using `old → new` for updates.
 
 Row capture is capped at 500 rows or 256 KiB per write operation; if that limit is reached, the entry is marked as truncated. Entries larger than 256 KiB keep the statement but replace the parameters with a marker, and if they are still too large they drop the row details. The log rotates at 1 MiB and keeps one rotated file. Failed statements are not logged, DDL has no row values, and page-level restores bypass SQL entirely.
 

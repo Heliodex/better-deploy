@@ -26,6 +26,21 @@ type Result struct {
 	RowsAffected, LastInsertID int64
 }
 
+// TransactionStatement is one entry in a Transaction. Set Query to return its rows instead of write counts.
+type TransactionStatement struct {
+	SQL   string
+	Args  []any
+	Query bool
+}
+
+// TransactionResult is one statement's result. Read statements fill Columns and Rows; writes fill RowsAffected and LastInsertID.
+type TransactionResult struct {
+	Columns                    []string
+	Rows                       [][]any
+	RowsAffected, LastInsertID int64
+	Truncated                  bool
+}
+
 // Rows is the result of a Query.
 type Rows struct {
 	Columns   []string
@@ -87,6 +102,20 @@ type Column struct {
 	NotNull    bool    `json:"notNull"`
 	Default    *string `json:"default,omitempty"`
 	PrimaryKey int     `json:"primaryKey,omitempty"`
+}
+
+type transactionStatement struct {
+	SQL    string `json:"sql"`
+	Params []any  `json:"params,omitempty"`
+	Query  bool   `json:"query,omitempty"`
+}
+
+type transactionRequest struct {
+	Statements []transactionStatement `json:"statements"`
+}
+
+type transactionResponse struct {
+	Results []response `json:"results"`
 }
 
 type migrationRequest struct {

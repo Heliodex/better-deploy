@@ -75,12 +75,7 @@ func (c *Client) get(ctx context.Context, path string, out any) error {
 	return nil
 }
 
-// Query runs one statement and returns all rows up to the server's row limit.
-func (c *Client) Query(ctx context.Context, query string, args ...any) (*Rows, error) {
-	var resp response
-	if err := c.post(ctx, "/v1/query", request{SQL: query, Params: encodeParams(args)}, &resp); err != nil {
-		return nil, err
-	}
+func decodeResponseRows(resp response) ([][]any, error) {
 	rows := make([][]any, len(resp.Rows))
 	for i, rawRow := range resp.Rows {
 		if len(rawRow) != len(resp.Columns) {
@@ -95,6 +90,19 @@ func (c *Client) Query(ctx context.Context, query string, args ...any) (*Rows, e
 			row[j] = value
 		}
 		rows[i] = row
+	}
+	return rows, nil
+}
+
+// Query runs one statement and returns all rows up to the server's row limit.
+func (c *Client) Query(ctx context.Context, query string, args ...any) (*Rows, error) {
+	var resp response
+	if err := c.post(ctx, "/v1/query", request{SQL: query, Params: encodeParams(args)}, &resp); err != nil {
+		return nil, err
+	}
+	rows, err := decodeResponseRows(resp)
+	if err != nil {
+		return nil, err
 	}
 	return &Rows{Columns: resp.Columns, Truncated: resp.Truncated, rows: rows}, nil
 }
@@ -115,6 +123,36 @@ func (c *Client) Exec(ctx context.Context, query string, args ...any) (Result, e
 		return Result{}, err
 	}
 	return Result{RowsAffected: resp.RowsAffected, LastInsertID: resp.LastInsertID}, nil
+}
+
+// Transaction runs statements in one transaction and returns each result, including rows for statements marked Query. A failure rolls back every statement.
+func (c *Client) Transaction(ctx context.Context, statements ...TransactionStatement) ([]TransactionResult, error) {
+	if len(statements) == 0 {
+		return nil, nil
+	}
+	req := transactionRequest{Statements: make([]transactionStatement, len(statements))}
+	for i, statement := range statements {
+		req.Statements[i] = transactionStatement{SQL: statement.SQL, Params: encodeParams(statement.Args), Query: statement.Query}
+	}
+	var resp transactionResponse
+	if err := c.post(ctx, "/v1/transaction", req, &resp); err != nil {
+		return nil, err
+	}
+	results := make([]TransactionResult, len(resp.Results))
+	for i, result := range resp.Results {
+		rows, err := decodeResponseRows(result)
+		if err != nil {
+			return nil, err
+		}
+		results[i] = TransactionResult{
+			Columns:      result.Columns,
+			Rows:         rows,
+			RowsAffected: result.RowsAffected,
+			LastInsertID: result.LastInsertID,
+			Truncated:    result.Truncated,
+		}
+	}
+	return results, nil
 }
 
 // Schema returns the database's user_version and table definitions.
