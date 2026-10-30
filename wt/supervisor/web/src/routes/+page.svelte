@@ -749,7 +749,7 @@ async function submitToken(event: SubmitEvent): Promise<void> {
 	if (!value) return
 	try {
 		await fetchApps(value)
-		setToken(value)
+		await setToken(value)
 		token = value
 		tokenInput = ""
 		error = ""
@@ -762,7 +762,7 @@ async function submitToken(event: SubmitEvent): Promise<void> {
 
 function forget(event: MouseEvent): void {
 	event.preventDefault()
-	forgetToken()
+	void forgetToken()
 	disconnect()
 	token = null
 	apps = []
@@ -870,7 +870,7 @@ onMount((): (() => void) => {
 	if (saved) {
 		token = saved
 		selected = name
-		connect(saved)
+		void setToken(saved).finally(() => connect(saved))
 		void refresh(saved)
 		if (name) {
 			void loadResourceHistory(saved, name)

@@ -150,6 +150,8 @@ func (s *supervisor) handler() http.Handler {
 	mux.HandleFunc("/apps", s.handleApps)
 	mux.HandleFunc("/apps/", s.handleApp)
 	mux.HandleFunc("GET /events", s.handleEvents)
+	mux.HandleFunc("POST /login", s.handleLogin)
+	mux.HandleFunc("POST /logout", s.handleLogout)
 	mux.HandleFunc("/admin", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin/", http.StatusFound)
 	})

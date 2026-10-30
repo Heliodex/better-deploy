@@ -70,23 +70,22 @@ const errorResponseSchema = object({
 })
 
 const tokenKey = "wt-admin-token"
-const cookieName = "wt_token"
 
 export const getToken = (): string | null => localStorage.getItem(tokenKey)
 
-export function setToken(token: string): void {
+/** Store the token for bearer requests and ask the supervisor for its HttpOnly cookie, which EventSource needs. */
+export async function setToken(token: string): Promise<void> {
 	localStorage.setItem(tokenKey, token)
-	setCookie(cookieName, token, 31536000)
+	await fetch("/login", {
+		body: JSON.stringify({ token }),
+		headers: { "content-type": "application/json" },
+		method: "POST",
+	}).catch(() => undefined)
 }
 
-export function forgetToken(): void {
+export async function forgetToken(): Promise<void> {
 	localStorage.removeItem(tokenKey)
-	setCookie(cookieName, "", 0)
-}
-
-function setCookie(name: string, value: string, maxAge: number): void {
-	// biome-ignore lint/suspicious/noDocumentCookie: document.cookie is the only cross-browser way to manage cookies; the Cookie Store API is Chromium-only.
-	document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; path=/; max-age=${maxAge}; SameSite=Lax`
+	await fetch("/logout", { method: "POST" }).catch(() => undefined)
 }
 
 interface RequestOptions {
