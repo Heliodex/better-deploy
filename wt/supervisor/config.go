@@ -20,6 +20,7 @@ type appConfigPatch struct {
 	DiskMB         *int               `json:"disk_mb"`
 	MaxConcurrent  *int               `json:"max_concurrency"`
 	RequestTimeout *string            `json:"request_timeout"`
+	Network        *string            `json:"network"`
 	Schedule       *[]scheduleConfig  `json:"schedule"`
 }
 
@@ -33,6 +34,7 @@ type appConfigResponse struct {
 	DiskMB          int              `json:"disk_mb"`
 	MaxConcurrent   int              `json:"max_concurrency"`
 	RequestTimeout  string           `json:"request_timeout"`
+	Network         string           `json:"network"`
 	Schedule        []scheduleConfig `json:"schedule"`
 	RestartRequired bool             `json:"restart_required,omitempty"`
 }
@@ -51,6 +53,7 @@ func configResponse(cfg appConfig) appConfigResponse {
 		DiskMB:         cfg.DiskMB,
 		MaxConcurrent:  cfg.MaxConcurrent,
 		RequestTimeout: cfg.RequestTimeout,
+		Network:        cfg.Network,
 		Schedule:       schedule,
 	}
 }
@@ -73,6 +76,9 @@ func applyConfigPatch(cfg appConfig, patch appConfigPatch) appConfig {
 	}
 	if patch.RequestTimeout != nil {
 		cfg.RequestTimeout = *patch.RequestTimeout
+	}
+	if patch.Network != nil {
+		cfg.Network = *patch.Network
 	}
 	if patch.Schedule != nil {
 		cfg.Schedule = append([]scheduleConfig(nil), (*patch.Schedule)...)
@@ -164,7 +170,7 @@ func (s *supervisor) handleAppConfig(w http.ResponseWriter, r *http.Request, nam
 	s.mu.Unlock()
 
 	restartRequired := !maps.Equal(cfg.Env, next.Env) || cfg.MemoryMB != next.MemoryMB ||
-		cfg.MaxConcurrent != next.MaxConcurrent || cfg.RequestTimeout != next.RequestTimeout
+		cfg.MaxConcurrent != next.MaxConcurrent || cfg.RequestTimeout != next.RequestTimeout || cfg.Network != next.Network
 	if !slices.Equal(cfg.Schedule, next.Schedule) {
 		a.mu.Lock()
 		running := a.cmd != nil && !a.exited

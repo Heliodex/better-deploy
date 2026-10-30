@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -96,7 +97,7 @@ func TestNormalizeRequestLimits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.requestTimeout != 30*time.Second || cfg.MaxConcurrent != 4 {
+	if cfg.requestTimeout != 30*time.Second || cfg.MaxConcurrent != 4 || cfg.Network != "inherit" {
 		t.Errorf("normalized = %+v", cfg)
 	}
 
@@ -105,9 +106,22 @@ func TestNormalizeRequestLimits(t *testing.T) {
 		{RequestTimeout: "100ms"},
 		{RequestTimeout: "48h"},
 		{MaxConcurrent: -1},
+		{Network: "open"},
 	} {
 		if _, err := normalizeAppConfig(bad, "demo", "localhost"); err == nil {
 			t.Errorf("config %+v should be rejected", bad)
 		}
+	}
+}
+
+func TestAppArgsNetwork(t *testing.T) {
+	s := testSupervisor()
+	a := &app{name: "demo", port: 1, cfg: appConfig{Network: "inherit"}}
+	if args := strings.Join(s.appArgs(a, "main.cwasm"), " "); !strings.Contains(args, "-S inherit-network") {
+		t.Errorf("inherit args = %q", args)
+	}
+	a.cfg.Network = "none"
+	if args := strings.Join(s.appArgs(a, "main.cwasm"), " "); strings.Contains(args, "inherit-network") {
+		t.Errorf("isolated args = %q", args)
 	}
 }

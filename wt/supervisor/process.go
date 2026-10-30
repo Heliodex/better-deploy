@@ -21,11 +21,13 @@ func (s *supervisor) appArgs(a *app, source string) []string {
 		"serve",
 		"-Scli",
 		"-Sp3",
-		"-S", "inherit-network",
 		"-W", "component-model-async=y",
 		"--allow-precompiled",
 		"--target", s.cfg.wasmtimeTarget,
 		"--addr", fmt.Sprintf("127.0.0.1:%d", a.port),
+	}
+	if cfg.Network != "none" {
+		args = append(args, "-S", "inherit-network")
 	}
 	stateDir := filepath.Join(s.cfg.stateDir, a.name)
 	args = append(args, "--dir", stateDir+"::/data")

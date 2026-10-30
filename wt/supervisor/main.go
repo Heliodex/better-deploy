@@ -54,6 +54,7 @@ type appConfig struct {
 	DiskMB         int               `json:"disk_mb,omitempty"`
 	MaxConcurrent  int               `json:"max_concurrency,omitempty"`
 	RequestTimeout string            `json:"request_timeout,omitempty"`
+	Network        string            `json:"network,omitempty"`
 	Schedule       []scheduleConfig  `json:"schedule,omitempty"`
 
 	requestTimeout time.Duration
@@ -245,6 +246,13 @@ func normalizeAppConfig(cfg appConfig, name, domain string) (appConfig, error) {
 	}
 	if cfg.MaxConcurrent < 0 {
 		return cfg, fmt.Errorf("max_concurrency must be 0 or more")
+	}
+	switch cfg.Network {
+	case "", "inherit":
+		cfg.Network = "inherit"
+	case "none":
+	default:
+		return cfg, fmt.Errorf("network must be inherit or none")
 	}
 	timeout, err := parseRequestTimeout(cfg.RequestTimeout)
 	if err != nil {
