@@ -19,6 +19,7 @@ import {
 	fetchDatabaseRows,
 	fetchDeployments,
 	fetchResourceHistory,
+	importBackup,
 	forgetToken,
 	getToken,
 	type LogEntry,
@@ -97,6 +98,7 @@ let backupDatabase = $state(false)
 let backupsLoading = $state(false)
 let backupsError = $state("")
 let backingUp = $state(false)
+let importingBackups = $state(false)
 let savingBackups = $state(false)
 let restoringBackup = $state<string | null>(null)
 let confirmRestore = $state<string | null>(null)
@@ -204,6 +206,7 @@ function select(name: string | null): void {
 	backupsLoading = false
 	backupsError = ""
 	backingUp = false
+	importingBackups = false
 	savingBackups = false
 	restoringBackup = null
 	confirmRestore = null
@@ -278,6 +281,22 @@ async function backupNow(): Promise<void> {
 		backupsError = err instanceof Error ? err.message : "Could not back up the database."
 	} finally {
 		backingUp = false
+	}
+}
+
+async function importBackupFile(file: File): Promise<void> {
+	if (!token || !selected) return
+	importingBackups = true
+	backupsError = ""
+	actionMessage = ""
+	try {
+		const result = await importBackup(token, selected, file)
+		applyBackups(result, result.created ?? null)
+		actionMessage = "Snapshot imported."
+	} catch (err) {
+		backupsError = err instanceof Error ? err.message : "Could not import the snapshot."
+	} finally {
+		importingBackups = false
 	}
 }
 
@@ -955,9 +974,12 @@ onMount((): (() => void) => {
 							confirming={confirmRestore}
 							current={backupCurrent}
 							database={backupDatabase}
-							{error}
+							error={backupsError || error}
+							importing={importingBackups}
 							loading={backupsLoading}
+							name={selected}
 							onbackup={backupNow}
+							onimport={importBackupFile}
 							onrevert={revertBackup}
 							onsave={saveBackupConfig}
 							onselect={selectBackup}

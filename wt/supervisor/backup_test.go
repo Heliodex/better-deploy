@@ -1,9 +1,13 @@
 package main
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json/v2"
 	"errors"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -709,5 +713,136 @@ func TestRollbackWithBackupRestoresData(t *testing.T) {
 	}
 	if string(body) != "keep" {
 		t.Errorf("restored data = %q, want keep", body)
+	}
+}
+
+func TestBackupExportImport(t *testing.T) {
+	storage, backups := testBackupManager(t)
+	token := storage.tokenFor("notes")
+	createItems(t, storage, token)
+	dataFile := filepath.Join(backups.dataDir, "notes", "file.txt")
+	if err := os.MkdirAll(filepath.Dir(dataFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dataFile, []byte("one"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	original, err := backups.create(context.Background(), "notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	archive, err := backups.exportSnapshot("notes", original.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(archive)
+
+	other := newBackupManager(t.TempDir(), storage, t.TempDir())
+	imported, err := other.importSnapshot("notes", archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if imported.Name == original.Name || imported.Kind != backupKindImport || imported.Size == 0 || !imported.HasData {
+		t.Errorf("imported = %+v, want a new import snapshot carrying database and data", imported)
+	}
+	infos, err := other.list("notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 1 || infos[0].Name != imported.Name || infos[0].Kind != backupKindImport {
+		t.Errorf("imported list = %+v", infos)
+	}
+
+	insertItem(t, storage, token, "two")
+	if got := storageCount(t, storage, token); got != 2 {
+		t.Fatalf("count before restore = %d, want 2", got)
+	}
+	if err := other.restore(context.Background(), "notes", imported.Name); err != nil {
+		t.Fatal(err)
+	}
+	if got := storageCount(t, storage, token); got != 1 {
+		t.Errorf("count after restore = %d, want 1", got)
+	}
+}
+
+func TestBackupImportRejectsEmptyArchive(t *testing.T) {
+	_, backups := testBackupManager(t)
+	dir := t.TempDir()
+	archive := filepath.Join(dir, "empty.tar.gz")
+	file, err := os.Create(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gz := gzip.NewWriter(file)
+	tw := tar.NewWriter(gz)
+	if err := tw.WriteHeader(&tar.Header{Name: "readme.txt", Mode: 0o644, Size: 4}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write([]byte("nope")); err != nil {
+		t.Fatal(err)
+	}
+	for _, closer := range []func() error{tw.Close, gz.Close, file.Close} {
+		if err := closer(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := backups.importSnapshot("notes", archive); err == nil {
+		t.Error("archive without a database or data archive was imported")
+	}
+}
+
+func TestHandleBackupExportImport(t *testing.T) {
+	storage, backups := testBackupManager(t)
+	s := testSupervisor()
+	s.cfg.stateDir = t.TempDir()
+	s.storage = storage
+	s.backups = backups
+	s.apps["notes"] = &app{name: "notes"}
+	token := storage.tokenFor("notes")
+	createItems(t, storage, token)
+	snapshot, err := backups.create(context.Background(), "notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/apps/notes/backups/"+snapshot.Name+"/download", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+	s.handleApp(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("download = %d: %s", rec.Code, rec.Body.String())
+	}
+	archive := rec.Body.Bytes()
+	if len(archive) == 0 || !strings.Contains(rec.Header().Get("Content-Disposition"), snapshot.Name) {
+		t.Errorf("download = %d bytes, disposition %q", len(archive), rec.Header().Get("Content-Disposition"))
+	}
+
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	part, err := form.CreateFormFile("snapshot", "snapshot.tar.gz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write(archive); err != nil {
+		t.Fatal(err)
+	}
+	if err := form.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req = httptest.NewRequest(http.MethodPost, "/apps/notes/backups/import", &body)
+	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set("Content-Type", form.FormDataContentType())
+	rec = httptest.NewRecorder()
+	s.handleApp(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("import = %d: %s", rec.Code, rec.Body.String())
+	}
+	var result backupsResponse
+	if err := json.UnmarshalRead(rec.Body, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Created == "" || len(result.Backups) != 2 {
+		t.Errorf("import result = %+v, want a new snapshot", result)
 	}
 }

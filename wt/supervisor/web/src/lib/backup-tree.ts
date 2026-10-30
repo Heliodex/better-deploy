@@ -66,6 +66,7 @@ const edgePath = (x1: number, y1: number, x2: number, y2: number): string => {
 const backupKindLabels: { [_: string]: string } = {
 	"": "Backup",
 	auto: "Automatic",
+	import: "Imported",
 	manual: "Manual",
 }
 

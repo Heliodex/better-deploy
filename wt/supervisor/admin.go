@@ -6,6 +6,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"net/http"
@@ -336,11 +337,76 @@ func (s *supervisor) handleBackupRoute(w http.ResponseWriter, r *http.Request, n
 		s.handleBackups(w, r, name)
 	case rest == "config":
 		s.handleBackupSettings(w, r, name)
+	case rest == "import":
+		s.handleBackupImport(w, r, name)
+	case strings.HasSuffix(rest, "/download"):
+		s.handleBackupDownload(w, r, name, strings.TrimSuffix(rest, "/download"))
 	case strings.HasSuffix(rest, "/restore"):
 		s.handleBackupRestore(w, r, name, strings.TrimSuffix(rest, "/restore"))
 	default:
 		http.Error(w, "unknown endpoint", http.StatusNotFound)
 	}
+}
+
+// handleBackupDownload streams a portable tar.gz of one snapshot.
+func (s *supervisor) handleBackupDownload(w http.ResponseWriter, r *http.Request, name, file string) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	path, err := s.backups.exportSnapshot(name, file)
+	if err != nil {
+		writeBackupError(w, err)
+		return
+	}
+	defer os.Remove(path)
+	w.Header().Set("Content-Type", "application/gzip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", file+".tar.gz"))
+	http.ServeFile(w, r, path)
+}
+
+// handleBackupImport stores a snapshot uploaded from another installation.
+func (s *supervisor) handleBackupImport(w http.ResponseWriter, r *http.Request, name string) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxBackupExtractBytes)
+	if err := r.ParseMultipartForm(16 << 20); err != nil {
+		writeError(w, http.StatusBadRequest, "parse snapshot upload: "+err.Error())
+		return
+	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
+	}
+	file, _, err := r.FormFile("snapshot")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "missing snapshot field")
+		return
+	}
+	defer file.Close()
+
+	temp, err := os.CreateTemp(s.cfg.stateDir, ".import-*.tar.gz")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "create import file")
+		return
+	}
+	archive := temp.Name()
+	defer os.Remove(archive)
+	if _, err := io.Copy(temp, io.LimitReader(file, maxBackupExtractBytes)); err != nil {
+		_ = temp.Close()
+		writeError(w, http.StatusBadRequest, "read snapshot: "+err.Error())
+		return
+	}
+	if err := temp.Close(); err != nil {
+		writeError(w, http.StatusInternalServerError, "close import file")
+		return
+	}
+
+	info, err := s.backups.importSnapshot(name, archive)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "import snapshot: "+err.Error())
+		return
+	}
+	s.writeBackups(w, name, info.Name)
 }
 
 // adminStatic serves the embedded admin panel. SvelteKit emits root-relative URLs under the /admin base path, so the mux strips the prefix first.

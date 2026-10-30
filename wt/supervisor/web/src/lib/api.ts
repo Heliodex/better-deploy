@@ -184,7 +184,7 @@ const backupSettingsSchema = object({
 
 export type BackupSettings = InferOutput<typeof backupSettingsSchema>
 
-export const backupKinds = ["auto", "manual", ""] as const
+export const backupKinds = ["auto", "import", "manual", ""] as const
 
 export type BackupKind = (typeof backupKinds)[number]
 
@@ -343,6 +343,12 @@ export const restoreBackup = (token: string, name: string, backup: string): Prom
 		{ method: "POST", token },
 		backupsResponseSchema,
 	)
+
+export const importBackup = (token: string, name: string, file: File): Promise<BackupsResult> => {
+	const body = new FormData()
+	body.append("snapshot", file)
+	return request(`/apps/${encodeURIComponent(name)}/backups/import`, { body, method: "POST", token }, backupsResponseSchema)
+}
 
 export const fetchDeployments = (token: string, name: string): Promise<DeploymentInfo[]> =>
 	request(`/apps/${encodeURIComponent(name)}/deployments`, { token }, deploymentsSchema)

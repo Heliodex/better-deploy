@@ -14,9 +14,12 @@ interface Props {
 	enabled: boolean
 	error: string
 	every: string
+	importing: boolean
 	keep: number
 	loading: boolean
+	name: string
 	onbackup(): Promise<void>
+	onimport(file: File): Promise<void>
 	onrevert(name: string): Promise<void>
 	onsave(event: SubmitEvent): Promise<void>
 	onselect(name: string): void
@@ -35,9 +38,12 @@ let {
 	enabled = $bindable(),
 	error,
 	every = $bindable(),
+	importing,
 	keep = $bindable(),
 	loading,
+	name,
 	onbackup,
+	onimport,
 	onselect,
 	onsave,
 	onrevert,
@@ -51,6 +57,14 @@ const parent = $derived(
 	selectedInfo?.parent ? (backups.find(backup => backup.name === selectedInfo.parent) ?? null) : null,
 )
 const children = $derived(backups.filter(backup => backup.parent === selected).length)
+
+async function importFile(event: Event): Promise<void> {
+	const input = event.currentTarget as HTMLInputElement
+	const file = input.files?.[0]
+	if (!file) return
+	await onimport(file)
+	input.value = ""
+}
 </script>
 
 <div
@@ -61,10 +75,23 @@ const children = $derived(backups.filter(backup => backup.parent === selected).l
 >
 	<div class="flex items-center justify-between gap-2">
 		<h3 class="text-xs font-semibold tracking-wide text-neutral-400 uppercase" id="backups-title">Backups</h3>
-		<span class="text-xs text-neutral-500">
-			{backups.length}
-			{backups.length === 1 ? "snapshot" : "snapshots"}
-		</span>
+		<div class="flex items-center gap-3">
+			<span class="text-xs text-neutral-500">
+				{backups.length}
+				{backups.length === 1 ? "snapshot" : "snapshots"}
+			</span>
+			<label class="btn cursor-pointer">
+				{importing ? "Importing…" : "Import snapshot"}
+				<input
+					accept=".gz,application/gzip"
+					aria-label="Import snapshot"
+					class="sr-only"
+					disabled={importing}
+					onchange={(event): void => void importFile(event)}
+					type="file"
+				/>
+			</label>
+		</div>
 	</div>
 
 	<form class="flex flex-wrap items-end gap-3" onsubmit={onsave}>
@@ -180,6 +207,13 @@ const children = $derived(backups.filter(backup => backup.parent === selected).l
 					>
 						{backingUp ? "Backing up…" : "Back up current state"}
 					</button>
+					<a
+						class="btn"
+						download={`${selectedInfo.name}.tar.gz`}
+						href={`/apps/${encodeURIComponent(name)}/backups/${encodeURIComponent(selectedInfo.name)}/download`}
+					>
+						Download
+					</a>
 					{#if selectedInfo.name !== current}
 						<button
 							class={confirming === selectedInfo.name ? "btn btn-danger" : "btn"}
