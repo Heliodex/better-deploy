@@ -17,6 +17,7 @@ type appConfigPatch struct {
 	Health   *string            `json:"health"`
 	Env      map[string]*string `json:"env"`
 	MemoryMB *int               `json:"memory_mb"`
+	DiskMB   *int               `json:"disk_mb"`
 	Schedule *[]scheduleConfig  `json:"schedule"`
 }
 
@@ -27,6 +28,7 @@ type appConfigResponse struct {
 	Health          string           `json:"health"`
 	EnvKeys         []string         `json:"env_keys"`
 	MemoryMB        int              `json:"memory_mb"`
+	DiskMB          int              `json:"disk_mb"`
 	Schedule        []scheduleConfig `json:"schedule"`
 	RestartRequired bool             `json:"restart_required,omitempty"`
 }
@@ -42,6 +44,7 @@ func configResponse(cfg appConfig) appConfigResponse {
 		Health:   cfg.Health,
 		EnvKeys:  sortedKeys(cfg.Env),
 		MemoryMB: cfg.MemoryMB,
+		DiskMB:   cfg.DiskMB,
 		Schedule: schedule,
 	}
 }
@@ -55,6 +58,9 @@ func applyConfigPatch(cfg appConfig, patch appConfigPatch) appConfig {
 	}
 	if patch.MemoryMB != nil {
 		cfg.MemoryMB = *patch.MemoryMB
+	}
+	if patch.DiskMB != nil {
+		cfg.DiskMB = *patch.DiskMB
 	}
 	if patch.Schedule != nil {
 		cfg.Schedule = append([]scheduleConfig(nil), (*patch.Schedule)...)

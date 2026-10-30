@@ -72,6 +72,8 @@ func TestHandleAppMethods(t *testing.T) {
 		{http.MethodPost, "/apps/nope/logs", http.MethodGet},
 		{http.MethodPost, "/apps/nope/resources", http.MethodGet},
 		{http.MethodGet, "/apps/nope/restart", http.MethodPost},
+		{http.MethodGet, "/apps/nope/rollback/x", http.MethodPost},
+		{http.MethodGet, "/apps/nope/deployments", ""},
 		{http.MethodPut, "/apps/nope/unknown", ""},
 	}
 	for _, tc := range cases {

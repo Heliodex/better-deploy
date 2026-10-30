@@ -30,9 +30,12 @@ const (
 	maxUploadBytes  = 256 << 20
 	maxExtractBytes = 512 << 20
 	maxTarFiles     = 10_000
-	readyTimeout    = 15 * time.Second
-	stopTimeout     = 5 * time.Second
-	drainTimeout    = 10 * time.Second
+	// Backup archives are internal and may hold more data than an uploaded bundle.
+	maxBackupExtractBytes = 8 << 30
+	maxBackupTarFiles     = 100_000
+	readyTimeout          = 15 * time.Second
+	stopTimeout           = 5 * time.Second
+	drainTimeout          = 10 * time.Second
 )
 
 type config struct {
@@ -47,6 +50,7 @@ type appConfig struct {
 	Env      map[string]string `json:"env"`
 	Build    string            `json:"build,omitempty"`
 	MemoryMB int               `json:"memory_mb,omitempty"`
+	DiskMB   int               `json:"disk_mb,omitempty"`
 	Schedule []scheduleConfig  `json:"schedule,omitempty"`
 }
 
@@ -73,6 +77,7 @@ type app struct {
 	timer     *time.Timer
 	logs      *appLog
 	stats     appStats
+	disk      diskUsageCache
 	requests  sync.WaitGroup // in-flight proxied requests, drained before a replaced version stops
 
 	mu              sync.Mutex
@@ -83,10 +88,11 @@ type app struct {
 }
 
 type supervisor struct {
-	cfg     config
-	storage *storageServer
-	backups *backupManager
-	events  *hub
+	cfg         config
+	storage     *storageServer
+	backups     *backupManager
+	events      *hub
+	deployments *deploymentManager
 
 	mu          sync.RWMutex
 	apps, hosts map[string]*app
@@ -204,6 +210,9 @@ func normalizeAppConfig(cfg appConfig, name, domain string) (appConfig, error) {
 	}
 	if cfg.MemoryMB < 0 {
 		return cfg, fmt.Errorf("memory_mb must be 0 or more")
+	}
+	if cfg.DiskMB < 0 {
+		return cfg, fmt.Errorf("disk_mb must be 0 or more")
 	}
 	for i := range cfg.Schedule {
 		entry := &cfg.Schedule[i]
@@ -357,6 +366,7 @@ func (s *supervisor) info(a *app) appInfo {
 	a.mu.Lock()
 	info.Host = a.cfg.Host
 	info.StartedAt = a.started
+	info.DiskLimitBytes = int64(a.cfg.DiskMB) << 20
 	if a.cmd != nil && a.cmd.Process != nil && !a.exited {
 		info.Status = "running"
 		info.PID = a.cmd.Process.Pid
@@ -364,6 +374,8 @@ func (s *supervisor) info(a *app) appInfo {
 		info.Status = "stopped"
 	}
 	a.mu.Unlock()
+	info.DiskBytes = s.diskBytes(a)
+	info.OverQuota = info.DiskLimitBytes > 0 && info.DiskBytes > info.DiskLimitBytes
 	info.CPUPercent, info.MemoryBytes, info.SampledAt = a.resourceStats()
 	return info
 }
@@ -397,15 +409,18 @@ func (s *supervisor) allApps() []*app {
 }
 
 type appInfo struct {
-	Name        string    `json:"name"`
-	Host        string    `json:"host"`
-	Port        int       `json:"port"`
-	Status      string    `json:"status"`
-	PID         int       `json:"pid,omitempty"`
-	StartedAt   time.Time `json:"startedAt"`
-	CPUPercent  float64   `json:"cpuPercent"`
-	MemoryBytes int64     `json:"memoryBytes"`
-	SampledAt   time.Time `json:"sampledAt"`
+	Name           string    `json:"name"`
+	Host           string    `json:"host"`
+	Port           int       `json:"port"`
+	Status         string    `json:"status"`
+	PID            int       `json:"pid,omitempty"`
+	StartedAt      time.Time `json:"startedAt"`
+	CPUPercent     float64   `json:"cpuPercent"`
+	MemoryBytes    int64     `json:"memoryBytes"`
+	DiskBytes      int64     `json:"diskBytes"`
+	DiskLimitBytes int64     `json:"diskLimitBytes,omitempty"`
+	OverQuota      bool      `json:"overQuota,omitempty"`
+	SampledAt      time.Time `json:"sampledAt"`
 }
 
 func (s *supervisor) stopAll() {
@@ -434,6 +449,13 @@ func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
 		s.handleBackupRoute(w, r, name, strings.TrimPrefix(action, "backups"))
 		return
 	}
+	if id, ok := strings.CutPrefix(action, "rollback/"); ok {
+		if !requireMethod(w, r, http.MethodPost) {
+			return
+		}
+		s.handleRollback(w, r, name, id)
+		return
+	}
 
 	switch action {
 	case "":
@@ -458,6 +480,11 @@ func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
 		}
 	case "config":
 		s.handleAppConfig(w, r, name)
+	case "deployments":
+		if !requireMethod(w, r, http.MethodGet) {
+			return
+		}
+		s.handleDeployments(w, r, name)
 	case "stop":
 		if !requireMethod(w, r, http.MethodPost) {
 			return
@@ -571,12 +598,13 @@ func main() {
 		log.Fatalf("storage: %v", err)
 	}
 	s := &supervisor{
-		cfg:     cfg,
-		storage: storage,
-		backups: newBackupManager(filepath.Join(cfg.stateDir, ".backups"), storage),
-		events:  newHub(),
-		apps:    map[string]*app{},
-		hosts:   map[string]*app{},
+		cfg:         cfg,
+		storage:     storage,
+		backups:     newBackupManager(filepath.Join(cfg.stateDir, ".backups"), storage, cfg.stateDir),
+		events:      newHub(),
+		deployments: newDeploymentManager(filepath.Join(cfg.stateDir, ".deployments")),
+		apps:        map[string]*app{},
+		hosts:       map[string]*app{},
 	}
 	if err := s.loadApps(); err != nil {
 		log.Fatalf("load apps: %v", err)

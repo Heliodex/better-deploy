@@ -26,6 +26,7 @@ type manifest struct {
 	Env      map[string]string `json:"env"`
 	Build    string            `json:"build"`
 	MemoryMB int               `json:"memory_mb,omitempty"`
+	DiskMB   int               `json:"disk_mb,omitempty"`
 	Schedule []schedule        `json:"schedule,omitempty"`
 }
 
@@ -83,6 +84,9 @@ func readManifest(dir string) (manifest, error) {
 	}
 	if !validName(m.Name) {
 		return m, fmt.Errorf("invalid app name %q", m.Name)
+	}
+	if m.MemoryMB < 0 || m.DiskMB < 0 {
+		return m, fmt.Errorf("memory_mb and disk_mb must be 0 or more")
 	}
 	for i, entry := range m.Schedule {
 		if !strings.HasPrefix(entry.Path, "/") {

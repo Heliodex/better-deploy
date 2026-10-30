@@ -43,7 +43,7 @@ func TestAppConfigGetAndPatch(t *testing.T) {
 		t.Errorf("GET config = %+v", got)
 	}
 
-	patch := `{"host":"new.localhost","health":"/ready","env":{"A":"2","SECRET":null,"NEW":"3"},"memory_mb":256,"schedule":[]}`
+	patch := `{"host":"new.localhost","health":"/ready","env":{"A":"2","SECRET":null,"NEW":"3"},"memory_mb":256,"disk_mb":512,"schedule":[]}`
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(patch))
 	req.Header.Set("Authorization", "Bearer secret")
@@ -54,14 +54,14 @@ func TestAppConfigGetAndPatch(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Host != "new.localhost" || got.Health != "/ready" || got.MemoryMB != 256 || !got.RestartRequired {
+	if got.Host != "new.localhost" || got.Health != "/ready" || got.MemoryMB != 256 || got.DiskMB != 512 || !got.RestartRequired {
 		t.Errorf("PATCH config = %+v", got)
 	}
 
 	a.mu.Lock()
 	live := a.cfg
 	a.mu.Unlock()
-	if live.Host != "new.localhost" || live.Health != "/ready" || live.MemoryMB != 256 {
+	if live.Host != "new.localhost" || live.Health != "/ready" || live.MemoryMB != 256 || live.DiskMB != 512 {
 		t.Errorf("live config = %+v", live)
 	}
 	if live.Env["A"] != "2" || live.Env["NEW"] != "3" {
@@ -78,7 +78,7 @@ func TestAppConfigGetAndPatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if saved.Host != "new.localhost" || saved.Health != "/ready" || saved.MemoryMB != 256 || saved.Build != "make app" {
+	if saved.Host != "new.localhost" || saved.Health != "/ready" || saved.MemoryMB != 256 || saved.DiskMB != 512 || saved.Build != "make app" {
 		t.Errorf("saved config = %+v", saved)
 	}
 }

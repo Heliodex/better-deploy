@@ -9,7 +9,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -177,25 +176,18 @@ func (s *supervisor) handleRestart(w http.ResponseWriter, _ *http.Request, a *ap
 		return
 	}
 	a.mu.Lock()
-	name, dir := a.name, a.dir
+	name := a.name
 	a.mu.Unlock()
 	s.stop(a)
-	a.mu.Lock()
-	a.retired = false
-	a.delay = time.Second
-	a.mu.Unlock()
-	cwasm := filepath.Join(dir, "main.cwasm")
-	if _, err := os.Stat(cwasm); err != nil {
-		writeError(w, http.StatusInternalServerError, "app has no precompiled component")
-		return
-	}
-	if err := s.launch(a, cwasm); err != nil {
+	if err := s.startStopped(a); err != nil {
 		log.Printf("restart %s: %v", name, err)
-		writeError(w, http.StatusBadGateway, "app did not restart: "+err.Error())
+		status := http.StatusBadGateway
+		if errors.Is(err, errNoComponent) {
+			status = http.StatusInternalServerError
+		}
+		writeError(w, status, "app did not restart: "+err.Error())
 		return
 	}
-	s.startSchedule(a)
-	a.sampleResources(time.Now())
 	writeJSON(w, http.StatusOK, s.info(a))
 }
 
@@ -265,9 +257,56 @@ func (s *supervisor) handleBackupRestore(w http.ResponseWriter, r *http.Request,
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
+	s.deployMu.Lock()
+	defer s.deployMu.Unlock()
+	a, ok := s.requireApp(w, r, name)
+	if !ok {
+		return
+	}
+	if s.backups == nil {
+		http.Error(w, "backups unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Legacy snapshots have no data archive; restore their database online without stopping the app.
+	temp, hasData, err := s.backups.stageData(name, file)
+	if err != nil {
+		writeBackupError(w, err)
+		return
+	}
+	if temp != "" {
+		defer os.RemoveAll(temp)
+	}
+	if !hasData {
+		if err := s.backups.restore(r.Context(), name, file); err != nil {
+			writeBackupError(w, err)
+			return
+		}
+		s.writeBackups(w, name, "")
+		return
+	}
+
+	// Replacing /data needs a running guest stopped; restart it after both halves are in place.
+	a.mu.Lock()
+	running := a.cmd != nil && !a.exited
+	a.mu.Unlock()
+	if running {
+		s.stop(a)
+	}
 	if err := s.backups.restore(r.Context(), name, file); err != nil {
 		writeBackupError(w, err)
 		return
+	}
+	if err := s.backups.installData(name, temp); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if running {
+		if err := s.startStopped(a); err != nil {
+			log.Printf("restore %s: restart: %v", name, err)
+			writeError(w, http.StatusBadGateway, "data restored but app did not restart: "+err.Error())
+			return
+		}
 	}
 	s.writeBackups(w, name, "")
 }

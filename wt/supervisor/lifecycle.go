@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -13,6 +15,8 @@ type deleteAppResponse struct {
 	Name   string `json:"name"`
 	Purged bool   `json:"purged"`
 }
+
+var errNoComponent = errors.New("app has no precompiled component")
 
 // unregister removes an app from the live maps and notifies the panel. Its process and files are left to the caller.
 func (s *supervisor) unregister(a *app) {
@@ -39,6 +43,28 @@ func (s *supervisor) handleStop(w http.ResponseWriter, r *http.Request, name str
 	writeJSON(w, http.StatusOK, s.info(a))
 }
 
+// startStopped launches an app from its existing main.cwasm and starts its schedule.
+func (s *supervisor) startStopped(a *app) error {
+	a.mu.Lock()
+	dir := a.dir
+	a.mu.Unlock()
+	cwasm := filepath.Join(dir, "main.cwasm")
+	if _, err := os.Stat(cwasm); err != nil {
+		return fmt.Errorf("%w: %v", errNoComponent, err)
+	}
+	s.stopSchedule(a)
+	a.mu.Lock()
+	a.retired = false
+	a.delay = time.Second
+	a.mu.Unlock()
+	if err := s.launch(a, cwasm); err != nil {
+		return err
+	}
+	s.startSchedule(a)
+	a.sampleResources(time.Now())
+	return nil
+}
+
 // handleStart relaunches a stopped app from its existing main.cwasm.
 func (s *supervisor) handleStart(w http.ResponseWriter, r *http.Request, name string) {
 	s.deployMu.Lock()
@@ -50,31 +76,21 @@ func (s *supervisor) handleStart(w http.ResponseWriter, r *http.Request, name st
 
 	a.mu.Lock()
 	running := a.cmd != nil && !a.exited
-	dir := a.dir
 	a.mu.Unlock()
 	if running {
 		writeError(w, http.StatusConflict, "app is already running")
 		return
 	}
 	s.cancelRestart(a)
-	s.stopSchedule(a)
-
-	cwasm := filepath.Join(dir, "main.cwasm")
-	if _, err := os.Stat(cwasm); err != nil {
-		writeError(w, http.StatusInternalServerError, "app has no precompiled component")
-		return
-	}
-	a.mu.Lock()
-	a.retired = false
-	a.delay = time.Second
-	a.mu.Unlock()
-	if err := s.launch(a, cwasm); err != nil {
+	if err := s.startStopped(a); err != nil {
 		log.Printf("start %s: %v", name, err)
-		writeError(w, http.StatusBadGateway, "app did not start: "+err.Error())
+		status := http.StatusBadGateway
+		if errors.Is(err, errNoComponent) {
+			status = http.StatusInternalServerError
+		}
+		writeError(w, status, "app did not start: "+err.Error())
 		return
 	}
-	s.startSchedule(a)
-	a.sampleResources(time.Now())
 	writeJSON(w, http.StatusOK, s.info(a))
 }
 
@@ -93,6 +109,7 @@ func (s *supervisor) purgeAppState(name string) error {
 		filepath.Join(s.cfg.stateDir, ".logs", name),
 		filepath.Join(s.cfg.stateDir, ".storage", name),
 		filepath.Join(s.cfg.stateDir, ".backups", name),
+		filepath.Join(s.cfg.stateDir, ".deployments", name),
 	} {
 		if err := os.RemoveAll(dir); err != nil {
 			return err

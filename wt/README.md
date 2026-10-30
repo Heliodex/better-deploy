@@ -65,7 +65,7 @@ The supervisor scans `WT_APPS_DIR` at boot, starts every app found there, and se
 
 ## Admin panel
 
-The supervisor serves a small admin panel at `/admin/` on its own address (for example `http://127.0.0.1:8080/admin/` locally, or the deploy host in production). It lists apps with status and ticking uptime, streams each app's log live over server-sent events, restarts apps, uploads new bundles, configures and restores database backups, and browses each app's database tables and recent writes. Updates stream over server-sent events, so the dashboard reflects deploys and restarts without refreshing. Every endpoint except `/healthz` requires the deploy bearer token, which the panel asks for once and keeps in the browser (a `wt_token` cookie carries it on the event streams, where headers cannot go). The supervisor refuses to start on a non-loopback address without `WT_TOKEN`, so a loopback-only listener is the only unauthenticated mode. App logs persist under `/var/lib/wt/.logs` (or `WT_STATE_DIR`), outside each app's `/data` preopen, and every line is stamped with the time the supervisor received it so timestamps do not depend on how an app logs. The supervisor also logs each proxied request at info level into a separate per-app supervisor log, as `METHOD status duration path`; the panel recognises the shape and lays it out as structured columns with each line badged by origin.
+The supervisor serves a small admin panel at `/admin/` on its own address (for example `http://127.0.0.1:8080/admin/` locally, or the deploy host in production). It lists apps with status, uptime and disk usage, streams each app's log live over server-sent events, restarts apps, uploads new bundles, configures and restores database and `/data` backups, browses each app's database tables and recent writes, and shows the retained deployment history with a rollback action. Updates stream over server-sent events, so the dashboard reflects deploys and restarts without refreshing. Every endpoint except `/healthz` requires the deploy bearer token, which the panel asks for once and keeps in the browser (a `wt_token` cookie carries it on the event streams, where headers cannot go). The supervisor refuses to start on a non-loopback address without `WT_TOKEN`, so a loopback-only listener is the only unauthenticated mode. App logs persist under `/var/lib/wt/.logs` (or `WT_STATE_DIR`), outside each app's `/data` preopen, and every line is stamped with the time the supervisor received it so timestamps do not depend on how an app logs. The supervisor also logs each proxied request at info level into a separate per-app supervisor log, as `METHOD status duration path`; the panel recognises the shape and lays it out as structured columns with each line badged by origin.
 
 ## Resource usage
 
@@ -138,16 +138,22 @@ The admin token also guards the lifecycle and config endpoints:
 ```text
 GET    /apps/<name>/config      runtime config, with env keys but not values
 PATCH  /apps/<name>/config      partial config update
+GET    /apps/<name>/deployments list retained deployment bundles
+POST   /apps/<name>/rollback/<id> install a retained code bundle
 POST   /apps/<name>/stop        stop the process, keeping the app and its host
 POST   /apps/<name>/start       relaunch a stopped app
 DELETE /apps/<name>             remove code and process; keep state
-DELETE /apps/<name>?purge=1     also remove the database, backups, logs and /data
+DELETE /apps/<name>?purge=1     also remove the database, backups, logs, history and /data
 POST   /apps/<name>?dry_run=1   validate an uploaded bundle without installing it
 ```
 
-`PATCH` accepts any of `host`, `health`, `env`, `memory_mb` and `schedule`. Env changes are a merge; a `null` value removes a key. `GET` returns `env_keys` rather than values, so secrets are never echoed back. Host and schedule changes take effect immediately; env and memory changes are saved to `app.json` and applied on the next start or restart, which the response reports as `restart_required`. Host changes update routing at once, and are rejected with `409` if another app already owns the host.
+`PATCH` accepts any of `host`, `health`, `env`, `memory_mb`, `disk_mb` and `schedule`. Env changes are a merge; a `null` value removes a key. `GET` returns `env_keys` rather than values, so secrets are never echoed back. Host and schedule changes take effect immediately; env and memory changes are saved to `app.json` and applied on the next start or restart, which the response reports as `restart_required`. Host changes update routing at once, and are rejected with `409` if another app already owns the host.
 
-`DELETE` is deliberately conservative: it removes the app directory and stops the process, but leaves the database, backups, logs, resource history and `/data` intact unless `purge=1` is set.
+`disk_mb` is a soft per-app quota over `/data` plus the app's SQLite database files. Logs, backups and deployment bundles are not counted. The app snapshot reports `diskBytes`, `diskLimitBytes` and `overQuota`; the supervisor does not stop an app for exceeding the quota. `0` or an omitted value means unlimited.
+
+Every successful deploy or rollback retains a bundle under `WT_STATE_DIR/.deployments/<app>`: `app.json`, `main.cwasm`, and a `meta.json` with its digest and size. The newest ten are kept. A rollback installs the retained code and config but leaves the live database and `/data` untouched, so schema changes between the two versions still matter.
+
+`DELETE` is deliberately conservative: it removes the app directory and stops the process, but leaves the database, backups, logs, resource history, deployment history and `/data` intact unless `purge=1` is set.
 
 ```sh
 curl -X PATCH -H "Authorization: Bearer $WT_TOKEN" \
@@ -178,7 +184,7 @@ wasmtime serve -Scli -Sp3 -S inherit-network -W component-model-async=y \
   main.cwasm
 ```
 
-`app.json` carries `name`, `host`, `health`, `env`, `memory_mb`, `schedule` and the local `build` command. `memory_mb`, when set, becomes wasmtime's `-W max-memory-size`. The health path must answer with a 2xx status before a new version is considered ready. The runtime-only image has no compiler, so `main.wasm` cannot run there: `main.cwasm` is required. If it is missing or incompatible, the deploy fails and the old version keeps serving.
+`app.json` carries `name`, `host`, `health`, `env`, `memory_mb`, `disk_mb`, `schedule` and the local `build` command. `memory_mb`, when set, becomes wasmtime's `-W max-memory-size`. The health path must answer with a 2xx status before a new version is considered ready. The runtime-only image has no compiler, so `main.wasm` cannot run there: `main.cwasm` is required. If it is missing or incompatible, the deploy fails and the old version keeps serving.
 
 ## Scheduled work
 
@@ -250,11 +256,11 @@ The supervisor grants outbound network with `-S inherit-network` so apps can rea
 
 ## Database backups
 
-The supervisor snapshots each app's SQLite database with SQLite's online backup API, so a snapshot is consistent even while the app is reading and writing, and the app keeps serving throughout. Snapshots are ordinary SQLite files at `WT_STATE_DIR/.backups/<app>/storage-<timestamp>.db`, outside both the storage directory and the app's `/data` preopen. Each app's policy lives in `config.json` and its snapshot ancestry in `tree.json` beside them.
+The supervisor snapshots each app's SQLite database with SQLite's online backup API, so a snapshot is consistent even while the app is reading and writing, and the app keeps serving throughout. Snapshots are ordinary SQLite files at `WT_STATE_DIR/.backups/<app>/storage-<timestamp>.db`, outside both the storage directory and the app's `/data` preopen. Each snapshot also has a `storage-<timestamp>.data.tar.gz` archive of the app's `/data` directory; the archive is written while the app runs, so it is best-effort rather than transactional. Each app's policy lives in `config.json` and its snapshot ancestry in `tree.json` beside them.
 
 Automatic backups are on by default: every app with a database is snapshotted every 24 hours, and 7 snapshots are kept. The supervisor checks once a minute for policies that are due; an app that has not used storage yet has no database and is skipped until its first write. Changing the policy takes effect on the next check, and reducing `keep` prunes older snapshots immediately. Pruning removes abandoned leaves first and keeps the branch the live database follows for as long as possible. Snapshots and their tree survive deploys, restarts and pod rolls with the rest of the state volume.
 
-A new snapshot is rejected when its file is byte-identical to the current snapshot, so an unchanged database does not add a node. Snapshot hashes are kept in the tree, and older snapshots get one when first compared. For automatic backups the check time still advances, so an unchanged database is retried after the next interval rather than every minute. Any committed SQLite write, including one that stores the same value again, can change the file and is therefore accepted as a new snapshot.
+A new snapshot is rejected when its database and data archive are byte-identical to the current snapshot, so an unchanged app does not add a node. Snapshots made before `/data` archives existed have no data file; restoring one leaves the current `/data` in place. Snapshots that include `/data` stop a running app only for the restore, replace both the database and `/data`, then start it again. Snapshot hashes are kept in the tree, and older snapshots get one when first compared. For automatic backups the check time still advances, so an unchanged database is retried after the next interval rather than every minute. Any committed SQLite write, including one that stores the same value again, can change the file and is therefore accepted as a new snapshot.
 
 The admin panel's app detail shows snapshots as a tree. Each snapshot descends from the snapshot the live database followed when it was taken, so a chain of daily backups reads down the tree. Reverting moves the current node, and the next snapshot then forms a new branch from the restored snapshot instead of continuing the old one. Selecting a node shows its time, size, kind, parent and child count, and offers **Back up current state** and **Revert to this snapshot**. Reverting is a two-click action because it replaces all data written since that snapshot. Snapshots made before the tree existed are chained in creation order when the index is first built. The same operations are available over the authenticated API:
 
@@ -265,7 +271,7 @@ PUT  /apps/<name>/backups/config                   {"enabled": true, "every": "2
 POST /apps/<name>/backups/<file>/restore           replace the live database
 ```
 
-`every` is a Go duration between `1m` and `720h`, and `keep` is between 1 and 100. A manual snapshot works even when automatic backups are disabled. A restore validates the snapshot with SQLite's `quick_check` first, then copies it through the online backup API; connections stay open, but any writes made after the snapshot are lost. Responses include each snapshot's `parent`, its `kind` (`auto`, `manual`, or empty for one from before the tree index) and the `current` snapshot the live database follows. A `POST` that finds the database unchanged returns `created` empty.
+`every` is a Go duration between `1m` and `720h`, and `keep` is between 1 and 100. A manual snapshot works even when automatic backups are disabled. A restore validates the snapshot with SQLite's `quick_check` first, then copies it through the online backup API; connections stay open, but any writes made after the snapshot are lost. Restoring a snapshot with a data archive stops a running app, restores the database and `/data`, and starts it again; a database-only legacy snapshot restores online and leaves `/data` alone. Responses include each snapshot's `parent`, `kind` (`auto`, `manual`, or empty for one from before the tree index), `dataSize`, `hasData` and the `current` snapshot the live database follows. A `POST` that finds the app unchanged returns `created` empty.
 
 ## Database viewer
 
@@ -306,10 +312,11 @@ The `net/http` adapter in `packages/wasihttp` is adapted from [spin-go-sdk v3](h
 
 - One `wasmtime serve` process per app. A crashed app restarts with exponential backoff (2s up to 30s), reusing its port and proxy route.
 - `memory_mb` is a per-app linear-memory cap; CPU stays a container-level concern.
+- `disk_mb` is a soft quota over `/data` and database files only. It reports `overQuota` but does not block writes; logs, backups and deployment bundles are outside it.
 - TLS is optional and basic (certificate files); use the Orchard ingress for real certificates and wildcard hosts.
 - Storage is a per-app SQLite SQL service, not a standard WASI import. The SQLite file is private to the supervisor; apps get a preopen at `/data` as well.
 - Outbound network is granted to every app (`-S inherit-network`), including the loopback storage service.
-- The deploy POST waits for the new version; there are no deploy records or long-polling yet. Startup is fast enough that this is usually not noticeable.
+- The deploy POST waits for the new version and retains its last ten bundles; there is no asynchronous deploy job or long-polling yet. Startup is fast enough that this is usually not noticeable.
 - `.cwasm` is native code. Only load artifacts produced by your own deploy pipeline; the deploy endpoint is the trust boundary. The CLI and supervisor must agree on the wasmtime version and target triple; the runtime-only image is musl and accepts only `x86_64-unknown-linux-musl` artifacts.
 - The container runs as root and has no per-app CPU limits.
 - `Pdeathsig` (Linux) stops app processes if the supervisor dies; adjust for other platforms.

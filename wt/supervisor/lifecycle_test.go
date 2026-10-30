@@ -17,6 +17,9 @@ func spawnTestApp(t *testing.T, s *supervisor, name string) *app {
 	if err := os.WriteFile(filepath.Join(dir, "main.cwasm"), []byte("cwasm"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(`{"name":"`+name+`","host":"`+name+`.localhost"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	port, err := freePort()
 	if err != nil {
 		t.Fatal(err)
@@ -115,6 +118,7 @@ func TestDeleteAppPurgesState(t *testing.T) {
 		filepath.Join(s.cfg.stateDir, ".logs", "demo"),
 		filepath.Join(s.cfg.stateDir, ".storage", "demo"),
 		filepath.Join(s.cfg.stateDir, ".backups", "demo"),
+		filepath.Join(s.cfg.stateDir, ".deployments", "demo"),
 	} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
@@ -143,6 +147,7 @@ func TestDeleteAppPurgesState(t *testing.T) {
 		filepath.Join(s.cfg.stateDir, ".logs", "demo"),
 		filepath.Join(s.cfg.stateDir, ".storage", "demo"),
 		filepath.Join(s.cfg.stateDir, ".backups", "demo"),
+		filepath.Join(s.cfg.stateDir, ".deployments", "demo"),
 		resource,
 	} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {

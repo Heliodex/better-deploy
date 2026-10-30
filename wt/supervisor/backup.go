@@ -1,6 +1,8 @@
 package main
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -8,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -22,6 +25,7 @@ const (
 	backupTreeName   = "tree.json"
 	backupFilePrefix = "storage-"
 	backupFileSuffix = ".db"
+	backupDataSuffix = ".data.tar.gz"
 	backupTempSuffix = ".tmp"
 
 	backupKindManual    = "manual"
@@ -87,6 +91,8 @@ func (b backupSettings) validate() error {
 type backupInfo struct {
 	Name      string    `json:"name"`
 	Size      int64     `json:"size"`
+	DataSize  int64     `json:"dataSize,omitempty"`
+	HasData   bool      `json:"hasData,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	Parent    string    `json:"parent"`
 	Kind      string    `json:"kind"`
@@ -126,15 +132,15 @@ type backupsResponse struct {
 
 // backupManager owns per-app snapshot policies and files. Snapshots live outside the storage directory so an app can never read or delete them through its SQL service.
 type backupManager struct {
-	dir     string
-	storage *storageServer
+	dir, dataDir string
+	storage      *storageServer
 
 	// mu serialises snapshots, restores and settings changes. A restore must not race a snapshot of the same database, and the manager's work is small enough that one lock is simpler than per-app ones.
 	mu sync.Mutex
 }
 
-func newBackupManager(dir string, storage *storageServer) *backupManager {
-	return &backupManager{dir: dir, storage: storage}
+func newBackupManager(dir string, storage *storageServer, dataDir string) *backupManager {
+	return &backupManager{dir: dir, dataDir: dataDir, storage: storage}
 }
 
 func (m *backupManager) appDir(app string) string {
@@ -147,6 +153,12 @@ func (m *backupManager) configPath(app string) string {
 
 func (m *backupManager) treePath(app string) string {
 	return filepath.Join(m.appDir(app), backupTreeName)
+}
+
+// dataPath is the /data archive kept beside a database snapshot.
+func (m *backupManager) dataPath(app, name string) string {
+	base := strings.TrimSuffix(name, backupFileSuffix)
+	return filepath.Join(m.appDir(app), base+backupDataSuffix)
 }
 
 // settings reads an app's policy, falling back to the defaults when it has never been configured.
@@ -210,7 +222,12 @@ func (m *backupManager) filesLocked(app string) ([]backupInfo, error) {
 		if err != nil {
 			return nil, err
 		}
-		infos = append(infos, backupInfo{Name: entry.Name(), Size: info.Size(), CreatedAt: created})
+		backup := backupInfo{Name: entry.Name(), Size: info.Size(), CreatedAt: created}
+		if data, err := os.Stat(m.dataPath(app, entry.Name())); err == nil && data.Mode().IsRegular() {
+			backup.DataSize = data.Size()
+			backup.HasData = true
+		}
+		infos = append(infos, backup)
 	}
 	sort.Slice(infos, func(i, j int) bool { return infos[i].CreatedAt.After(infos[j].CreatedAt) })
 	return infos, nil
@@ -274,18 +291,109 @@ func (m *backupManager) overview(app string) (backupsResponse, error) {
 	}, nil
 }
 
-// backupHash fingerprints a snapshot file so an unchanged database is not recorded twice.
-func backupHash(path string) (string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
+// snapshotHash fingerprints a snapshot's database and data archive so an unchanged snapshot is not recorded twice. Missing files are part of the hash so legacy database-only snapshots differ from new ones.
+func snapshotHash(paths ...string) (string, error) {
 	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return "", err
+	for _, path := range paths {
+		file, err := os.Open(path)
+		if os.IsNotExist(err) {
+			_, _ = hash.Write([]byte("missing\x00"))
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		_, copyErr := io.Copy(hash, file)
+		closeErr := file.Close()
+		if copyErr != nil {
+			return "", copyErr
+		}
+		if closeErr != nil {
+			return "", closeErr
+		}
+		_, _ = hash.Write([]byte{0})
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+// archiveData writes a tar.gz of the app's /data directory. A missing directory becomes an empty archive.
+func archiveData(src, dst string) error {
+	file, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	gz := gzip.NewWriter(file)
+	tw := tar.NewWriter(gz)
+	writeErr := filepath.WalkDir(src, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) && path == src {
+				return nil
+			}
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !entry.IsDir() && !info.Mode().IsRegular() {
+			log.Printf("backup: skipping non-regular %s", rel)
+			return nil
+		}
+		header, err := tar.FileInfoHeader(info, "")
+		if err != nil {
+			return err
+		}
+		header.Name = filepath.ToSlash(rel)
+		if entry.IsDir() {
+			header.Name += "/"
+		}
+		if err := tw.WriteHeader(header); err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		in, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		_, copyErr := io.CopyN(tw, in, info.Size())
+		closeErr := in.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		return closeErr
+	})
+	if writeErr != nil {
+		_ = tw.Close()
+		_ = gz.Close()
+		_ = file.Close()
+		_ = os.Remove(dst)
+		return writeErr
+	}
+	if err := tw.Close(); err != nil {
+		_ = gz.Close()
+		_ = file.Close()
+		_ = os.Remove(dst)
+		return err
+	}
+	if err := gz.Close(); err != nil {
+		_ = file.Close()
+		_ = os.Remove(dst)
+		return err
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(dst)
+		return err
+	}
+	return nil
 }
 
 func exists(dir, name string) bool {
@@ -302,6 +410,61 @@ func validBackupName(name string) (string, error) {
 		return "", errInvalidBackupName
 	}
 	return name, nil
+}
+
+func (m *backupManager) removeSnapshot(app, name string) error {
+	if err := os.Remove(filepath.Join(m.appDir(app), name)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.Remove(m.dataPath(app, name)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+// stageData extracts a snapshot's /data archive into a temporary directory. It returns false when the snapshot predates data archives.
+func (m *backupManager) stageData(app, name string) (string, bool, error) {
+	name, err := validBackupName(name)
+	if err != nil {
+		return "", false, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	database := filepath.Join(m.appDir(app), name)
+	if info, err := os.Stat(database); err != nil || !info.Mode().IsRegular() {
+		return "", false, errBackupNotFound
+	}
+	if err := checkBackupDatabase(database); err != nil {
+		return "", false, fmt.Errorf("backup is not a valid database: %w", err)
+	}
+	archive := m.dataPath(app, name)
+	if info, err := os.Stat(archive); err != nil {
+		if os.IsNotExist(err) {
+			return "", false, nil
+		}
+		return "", false, err
+	} else if !info.Mode().IsRegular() {
+		return "", false, errBackupNotFound
+	}
+	if err := os.MkdirAll(m.dataDir, 0o755); err != nil {
+		return "", true, err
+	}
+	temp, err := os.MkdirTemp(m.dataDir, "."+app+".restore-")
+	if err != nil {
+		return "", true, err
+	}
+	if err := extractTarGzLimited(archive, temp, maxBackupExtractBytes, maxBackupTarFiles); err != nil {
+		_ = os.RemoveAll(temp)
+		return "", true, err
+	}
+	return temp, true, nil
+}
+
+// installData replaces an app's /data directory with a staged snapshot.
+func (m *backupManager) installData(app, temp string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return replaceDir(temp, filepath.Join(m.dataDir, app))
 }
 
 // restore replaces the live database with a snapshot using SQLite's online backup API, so the file is never copied while a writer has it open.
@@ -380,7 +543,7 @@ func (m *backupManager) parentSnapshotHash(app, parent string, tree *backupTree)
 	if node.Hash != "" {
 		return node.Hash
 	}
-	hash, err := backupHash(filepath.Join(m.appDir(app), parent))
+	hash, err := snapshotHash(filepath.Join(m.appDir(app), parent), m.dataPath(app, parent))
 	if err != nil {
 		log.Printf("backup %s: hash current: %v", app, err)
 		return ""
@@ -413,13 +576,21 @@ func (m *backupManager) createLocked(ctx context.Context, app, kind string) (bac
 	now := time.Now().UTC()
 	name, now := m.backupName(app, now)
 	path := filepath.Join(m.appDir(app), name)
+	dataPath := m.dataPath(app, name)
 	temp := path + backupTempSuffix
+	dataTemp := dataPath + backupTempSuffix
 	_ = os.Remove(temp)
+	_ = os.Remove(dataTemp)
 	if err := m.storage.backupTo(ctx, app, temp); err != nil {
 		_ = os.Remove(temp)
 		return backupInfo{}, err
 	}
-	candidateHash, err := backupHash(temp)
+	if err := archiveData(filepath.Join(m.dataDir, app), dataTemp); err != nil {
+		_ = os.Remove(temp)
+		_ = os.Remove(dataTemp)
+		return backupInfo{}, fmt.Errorf("archive data: %w", err)
+	}
+	candidateHash, err := snapshotHash(temp, dataTemp)
 	if err != nil {
 		log.Printf("backup %s: hash candidate: %v", app, err)
 	}
@@ -431,6 +602,7 @@ func (m *backupManager) createLocked(ctx context.Context, app, kind string) (bac
 	}
 	if candidateHash != "" && candidateHash == parentHash {
 		_ = os.Remove(temp)
+		_ = os.Remove(dataTemp)
 		tree.Checked = now
 		if err := m.saveTreeLocked(app, tree); err != nil {
 			log.Printf("backup %s: save tree: %v", app, err)
@@ -440,9 +612,19 @@ func (m *backupManager) createLocked(ctx context.Context, app, kind string) (bac
 
 	if err := os.Rename(temp, path); err != nil {
 		_ = os.Remove(temp)
+		_ = os.Remove(dataTemp)
 		return backupInfo{}, fmt.Errorf("install backup: %w", err)
 	}
+	if err := os.Rename(dataTemp, dataPath); err != nil {
+		_ = os.Remove(path)
+		_ = os.Remove(dataTemp)
+		return backupInfo{}, fmt.Errorf("install data backup: %w", err)
+	}
 	info, err := os.Stat(path)
+	if err != nil {
+		return backupInfo{}, err
+	}
+	dataInfo, err := os.Stat(dataPath)
 	if err != nil {
 		return backupInfo{}, err
 	}
@@ -457,7 +639,7 @@ func (m *backupManager) createLocked(ctx context.Context, app, kind string) (bac
 	if err := m.pruneLocked(app, settings.Keep); err != nil {
 		log.Printf("backup %s: prune: %v", app, err)
 	}
-	return backupInfo{Name: name, Size: info.Size(), CreatedAt: now, Parent: parent, Kind: kind}, nil
+	return backupInfo{Name: name, Size: info.Size(), DataSize: dataInfo.Size(), HasData: true, CreatedAt: now, Parent: parent, Kind: kind}, nil
 }
 
 // create takes a snapshot now even when automatic backups are disabled.

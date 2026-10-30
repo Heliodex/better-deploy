@@ -66,8 +66,8 @@ func extractTarDir(target, name string) error {
 }
 
 // extractTarReg writes one regular file, keeping the archive inside the size limit.
-func extractTarReg(tr *tar.Reader, header *tar.Header, target, name string, total *int64) error {
-	if header.Size < 0 || *total+header.Size > maxExtractBytes {
+func extractTarReg(tr *tar.Reader, header *tar.Header, target, name string, total *int64, maxBytes int64) error {
+	if header.Size < 0 || *total+header.Size > maxBytes {
 		return fmt.Errorf("archive is too large")
 	}
 	*total += header.Size
@@ -93,7 +93,7 @@ func extractTarReg(tr *tar.Reader, header *tar.Header, target, name string, tota
 	return nil
 }
 
-func extractTarGz(src, dst string) error {
+func extractTarGzLimited(src, dst string, maxBytes int64, maxFiles int) error {
 	file, err := os.Open(src)
 	if err != nil {
 		return fmt.Errorf("open archive: %w", err)
@@ -127,7 +127,7 @@ func extractTarGz(src, dst string) error {
 			continue
 		}
 		files++
-		if files > maxTarFiles {
+		if files > maxFiles {
 			return fmt.Errorf("archive has too many entries")
 		}
 
@@ -137,7 +137,7 @@ func extractTarGz(src, dst string) error {
 				return err
 			}
 		case tar.TypeReg:
-			if err := extractTarReg(tr, header, target, name, &total); err != nil {
+			if err := extractTarReg(tr, header, target, name, &total, maxBytes); err != nil {
 				return err
 			}
 		case tar.TypeSymlink, tar.TypeLink:
@@ -145,6 +145,10 @@ func extractTarGz(src, dst string) error {
 		}
 	}
 	return nil
+}
+
+func extractTarGz(src, dst string) error {
+	return extractTarGzLimited(src, dst, maxExtractBytes, maxTarFiles)
 }
 
 // receiveBundle parses an uploaded bundle into a temporary directory and returns its app config.
@@ -235,6 +239,44 @@ type deployValidationResponse struct {
 	Config appConfigResponse `json:"config"`
 }
 
+// installBundle starts a version from dir, swaps it into the app directory and drains the old process.
+func (s *supervisor) installBundle(w http.ResponseWriter, name string, cfg appConfig, dir, action string) *app {
+	s.mu.RLock()
+	old := s.apps[name]
+	s.mu.RUnlock()
+
+	port, err := freePort()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "allocate port")
+		return nil
+	}
+	next, err := s.spawn(name, dir, cfg, port)
+	if err != nil {
+		log.Printf("%s %s: %v", action, name, err)
+		writeError(w, http.StatusBadGateway, "new version did not start: "+err.Error())
+		return nil
+	}
+
+	finalDir := filepath.Join(s.cfg.appsDir, name)
+	if err := replaceDir(dir, finalDir); err != nil {
+		s.stop(next)
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return nil
+	}
+	next.dir = finalDir
+
+	s.register(next)
+	if old != nil {
+		if !drainApp(old, drainTimeout) {
+			log.Printf("%s %s: old version still handling requests after %s", action, name, drainTimeout)
+		}
+		s.stop(old)
+	}
+
+	log.Printf("%s %s at %s (127.0.0.1:%d)", action, name, cfg.Host, port)
+	return next
+}
+
 func (s *supervisor) deploy(w http.ResponseWriter, r *http.Request, name string) {
 	s.deployMu.Lock()
 	defer s.deployMu.Unlock()
@@ -257,38 +299,10 @@ func (s *supervisor) deploy(w http.ResponseWriter, r *http.Request, name string)
 		}
 	}
 
-	s.mu.RLock()
-	old := s.apps[name]
-	s.mu.RUnlock()
-
-	port, err := freePort()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "allocate port")
+	next := s.installBundle(w, name, cfg, tmpDir, "deployed")
+	if next == nil {
 		return
 	}
-	next, err := s.spawn(name, tmpDir, cfg, port)
-	if err != nil {
-		log.Printf("deploy %s: %v", name, err)
-		writeError(w, http.StatusBadGateway, "new version did not start: "+err.Error())
-		return
-	}
-
-	finalDir := filepath.Join(s.cfg.appsDir, name)
-	if err := replaceDir(tmpDir, finalDir); err != nil {
-		s.stop(next)
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	next.dir = finalDir
-
-	s.register(next)
-	if old != nil {
-		if !drainApp(old, drainTimeout) {
-			log.Printf("deploy %s: old version still handling requests after %s", name, drainTimeout)
-		}
-		s.stop(old)
-	}
-
-	log.Printf("deployed %s at %s (127.0.0.1:%d)", name, cfg.Host, port)
+	s.recordDeployment(name, next.dir)
 	writeJSON(w, http.StatusOK, s.info(next))
 }

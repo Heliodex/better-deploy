@@ -20,7 +20,7 @@ func testBackupManager(t *testing.T) (*storageServer, *backupManager) {
 		t.Fatal(err)
 	}
 	t.Cleanup(storage.close)
-	return storage, newBackupManager(t.TempDir(), storage)
+	return storage, newBackupManager(t.TempDir(), storage, t.TempDir())
 }
 
 // storageCount returns the number of rows in the test table.
@@ -507,5 +507,66 @@ func TestBackupManagerUsesBackupDirOutsideStorage(t *testing.T) {
 	storage, backups := testBackupManager(t)
 	if filepath.Dir(backups.dir) == storage.dir {
 		t.Errorf("backups dir %q sits inside storage dir %q", backups.dir, storage.dir)
+	}
+}
+
+func TestBackupIncludesData(t *testing.T) {
+	storage, backups := testBackupManager(t)
+	token := storage.tokenFor("notes")
+	createItems(t, storage, token)
+
+	dataFile := filepath.Join(backups.dataDir, "notes", "file.txt")
+	if err := os.MkdirAll(filepath.Dir(dataFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dataFile, []byte("one"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := backups.create(context.Background(), "notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.HasData || info.DataSize == 0 {
+		t.Errorf("snapshot data = %+v, want a data archive", info)
+	}
+	infos, err := backups.list("notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 1 || !infos[0].HasData {
+		t.Errorf("list = %+v, want data fields", infos)
+	}
+
+	if err := os.WriteFile(dataFile, []byte("two"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := backups.create(context.Background(), "notes"); err != nil {
+		t.Fatalf("changed data should create a snapshot: %v", err)
+	}
+
+	temp, hasData, err := backups.stageData("notes", info.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasData {
+		t.Fatal("snapshot has no data archive")
+	}
+	defer os.RemoveAll(temp)
+	if err := backups.installData("notes", temp); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "one" {
+		t.Errorf("restored data = %q, want %q", data, "one")
+	}
+	if err := backups.saveSettings("notes", backupSettings{Enabled: true, Every: "24h", Keep: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(backups.dataPath("notes", info.Name)); !os.IsNotExist(err) {
+		t.Errorf("pruned snapshot data archive still exists: %v", err)
 	}
 }

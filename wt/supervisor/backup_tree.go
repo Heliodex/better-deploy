@@ -4,7 +4,6 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 )
 
@@ -264,7 +263,7 @@ func (m *backupManager) pruneLocked(app string, keep int) error {
 	for len(tree.Nodes) > keep {
 		protected := backupPathNames(tree)
 		if leaf := backupOldestLeaf(tree, protected); leaf != "" {
-			if err := os.Remove(filepath.Join(m.appDir(app), leaf)); err != nil && !os.IsNotExist(err) {
+			if err := m.removeSnapshot(app, leaf); err != nil {
 				return err
 			}
 			delete(tree.Nodes, leaf)
@@ -277,7 +276,7 @@ func (m *backupManager) pruneLocked(app string, keep int) error {
 			break
 		}
 		child := backupPathChild(tree, root, protected)
-		if err := os.Remove(filepath.Join(m.appDir(app), root)); err != nil && !os.IsNotExist(err) {
+		if err := m.removeSnapshot(app, root); err != nil {
 			return err
 		}
 		delete(tree.Nodes, root)
