@@ -95,6 +95,7 @@ type app struct {
 	starting        bool
 
 	slots          chan struct{}
+	wasmEpoch      bool
 	healthOK       bool
 	healthFailures int
 	lastHealthy    time.Time

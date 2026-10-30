@@ -9,6 +9,10 @@ import (
 
 func init() {
 	wasihttp.Handle(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("spin") == "1" {
+			for {
+			}
+		}
 		w.Header().Set("content-type", "text/plain; charset=utf-8")
 		fmt.Fprintf(w, "hello from wt\nmethod=%s\npath=%s\n", r.Method, r.URL.Path)
 	})

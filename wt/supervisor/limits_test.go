@@ -124,6 +124,20 @@ func TestAppArgsNetwork(t *testing.T) {
 	if args := strings.Join(s.appArgs(a, "main.cwasm"), " "); strings.Contains(args, "inherit-network") {
 		t.Errorf("isolated args = %q", args)
 	}
+
+	a.cfg.requestTimeout = 30 * time.Second
+	a.wasmEpoch = true
+	args := strings.Join(s.appArgs(a, "main.cwasm"), " ")
+	for _, want := range []string{"epoch-interruption=y", "timeout=30s"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("timeout args = %q, missing %q", args, want)
+		}
+	}
+	a.wasmEpoch = false
+	args = strings.Join(s.appArgs(a, "main.cwasm"), " ")
+	if strings.Contains(args, "timeout=") || strings.Contains(args, "epoch-interruption") {
+		t.Errorf("artifact without epoch got epoch args = %q", args)
+	}
 }
 
 func BenchmarkProxyLatency(b *testing.B) {

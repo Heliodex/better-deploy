@@ -20,14 +20,17 @@ import (
 )
 
 type manifest struct {
-	Name     string            `json:"name"`
-	Host     string            `json:"host"`
-	Health   string            `json:"health"`
-	Env      map[string]string `json:"env"`
-	Build    string            `json:"build"`
-	MemoryMB int               `json:"memory_mb,omitempty"`
-	DiskMB   int               `json:"disk_mb,omitempty"`
-	Schedule []schedule        `json:"schedule,omitempty"`
+	Name           string            `json:"name"`
+	Host           string            `json:"host"`
+	Health         string            `json:"health"`
+	Env            map[string]string `json:"env"`
+	Build          string            `json:"build"`
+	MemoryMB       int               `json:"memory_mb,omitempty"`
+	DiskMB         int               `json:"disk_mb,omitempty"`
+	MaxConcurrent  int               `json:"max_concurrency,omitempty"`
+	RequestTimeout string            `json:"request_timeout,omitempty"`
+	Network        string            `json:"network,omitempty"`
+	Schedule       []schedule        `json:"schedule,omitempty"`
 }
 
 // schedule is carried through the bundle so the supervisor can call the app on a timer.
@@ -44,6 +47,8 @@ type artifact struct {
 	Wasmtime   string    `json:"wasmtime,omitempty"`
 	Target     string    `json:"target,omitempty"`
 	CompiledAt time.Time `json:"compiled_at,omitempty"`
+	// Epoch records epoch-interruption instrumentation, which per-request wasmtime timeouts require.
+	Epoch bool `json:"epoch_interruption,omitempty"`
 }
 
 const (
@@ -168,7 +173,7 @@ func wasmtimeVersion(bin string) (string, error) {
 }
 
 // writeArtifact records the compiler version and target beside the bundle so the supervisor can detect a stale cwasm.
-func writeArtifact(cfg *deployConfig) error {
+func writeArtifact(cfg *deployConfig, epoch bool) error {
 	path := filepath.Join(cfg.dir, artifactName)
 	if cfg.skipCompile {
 		if _, err := os.Stat(path); err == nil {
@@ -181,7 +186,7 @@ func writeArtifact(cfg *deployConfig) error {
 		fmt.Fprintf(os.Stderr, "warning: %v; not writing %s\n", err, artifactName)
 		return nil
 	}
-	data, err := json.Marshal(artifact{Wasmtime: version, Target: cfg.target, CompiledAt: time.Now().UTC()})
+	data, err := json.Marshal(artifact{Wasmtime: version, Target: cfg.target, CompiledAt: time.Now().UTC(), Epoch: epoch})
 	if err != nil {
 		return err
 	}
@@ -197,16 +202,16 @@ func runCompile(cfg *deployConfig) error {
 		if _, err := os.Stat(filepath.Join(cfg.dir, "main.cwasm")); err != nil {
 			return fmt.Errorf("--skip-compile but no main.cwasm: %w", err)
 		}
-		return writeArtifact(cfg)
+		return writeArtifact(cfg, false)
 	}
 	cwasm := filepath.Join(cfg.dir, "main.cwasm")
-	cmd := exec.Command(cfg.wasmtime, "compile", "--target", cfg.target, "-W", "component-model-async=y", wasm, "-o", cwasm)
+	cmd := exec.Command(cfg.wasmtime, "compile", "--target", cfg.target, "-W", "component-model-async=y", "-W", "epoch-interruption=y", wasm, "-o", cwasm)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("wasmtime compile: %w", err)
 	}
-	return writeArtifact(cfg)
+	return writeArtifact(cfg, true)
 }
 
 func writeTarFile(tw *tar.Writer, name string, data []byte) error {

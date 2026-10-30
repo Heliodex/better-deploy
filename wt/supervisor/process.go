@@ -16,6 +16,7 @@ import (
 func (s *supervisor) appArgs(a *app, source string) []string {
 	a.mu.Lock()
 	cfg := a.cfg
+	epoch := a.wasmEpoch
 	a.mu.Unlock()
 	args := []string{
 		"serve",
@@ -28,6 +29,12 @@ func (s *supervisor) appArgs(a *app, source string) []string {
 	}
 	if cfg.Network != "none" {
 		args = append(args, "-S", "inherit-network")
+	}
+	if epoch {
+		args = append(args, "-W", "epoch-interruption=y")
+		if cfg.requestTimeout > 0 {
+			args = append(args, "-W", "timeout="+cfg.requestTimeout.String())
+		}
 	}
 	stateDir := filepath.Join(s.cfg.stateDir, a.name)
 	args = append(args, "--dir", stateDir+"::/data")
@@ -169,14 +176,19 @@ func (s *supervisor) restart(a *app) {
 		return
 	}
 	dir := a.dir
+	requireEpoch := a.cfg.requestTimeout > 0
 	a.mu.Unlock()
 
 	cwasm := filepath.Join(dir, "main.cwasm")
-	if err := s.ensureArtifact(dir); err != nil {
+	epoch, err := s.ensureArtifact(dir, requireEpoch)
+	if err != nil {
 		log.Printf("app %s: restart: %v", a.name, err)
 		s.scheduleRetry(a)
 		return
 	}
+	a.mu.Lock()
+	a.wasmEpoch = epoch
+	a.mu.Unlock()
 	if err := s.launch(a, cwasm); err != nil {
 		log.Printf("app %s: restart: %v", a.name, err)
 		s.kill(a)
@@ -290,7 +302,8 @@ func (s *supervisor) spawn(name, dir string, cfg appConfig, port int) (*app, err
 	}
 
 	cwasm := filepath.Join(dir, "main.cwasm")
-	if err := s.ensureArtifact(dir); err != nil {
+	epoch, err := s.ensureArtifact(dir, cfg.requestTimeout > 0)
+	if err != nil {
 		return nil, err
 	}
 	logs, err := newAppLog(filepath.Join(s.cfg.stateDir, ".logs", name))
@@ -298,14 +311,15 @@ func (s *supervisor) spawn(name, dir string, cfg appConfig, port int) (*app, err
 		return nil, fmt.Errorf("app logs: %w", err)
 	}
 	a := &app{
-		name:    name,
-		dir:     dir,
-		port:    port,
-		cfg:     cfg,
-		logs:    logs,
-		done:    make(chan struct{}),
-		started: time.Now().UTC(),
-		delay:   time.Second,
+		name:      name,
+		dir:       dir,
+		port:      port,
+		cfg:       cfg,
+		logs:      logs,
+		done:      make(chan struct{}),
+		started:   time.Now().UTC(),
+		delay:     time.Second,
+		wasmEpoch: epoch,
 	}
 	s.loadResourceHistory(a)
 	if err := s.launch(a, cwasm); err != nil {

@@ -80,6 +80,17 @@ body=$(curl -fsS -H "Host: hello.localhost" "http://127.0.0.1:$port/")
 echo "$body" | grep -q "hello from wt"
 echo "$body" | grep -q "path=/"
 
+echo "e2e: checking the per-request guest timeout"
+code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -H "Host: hello.localhost" "http://127.0.0.1:$port/?spin=1")
+case "$code" in
+5*) ;;
+*)
+	echo "spinning request returned $code, want 5xx" >&2
+	exit 1
+	;;
+esac
+curl -fsS -H "Host: hello.localhost" "http://127.0.0.1:$port/" | grep -q "hello from wt"
+
 echo "e2e: snapshotting /data"
 mkdir -p "$state/hello"
 printf keep >"$state/hello/data.txt"

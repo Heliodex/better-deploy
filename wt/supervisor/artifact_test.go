@@ -74,8 +74,12 @@ func TestEnsureArtifactRebuildsStaleArtifact(t *testing.T) {
 	compiler := writeCompiler(t, "wasmtime-cli 51.0.0", "rebuilt", false)
 	dir := writeBundleDir(t, "wasm", "old", `{"wasmtime":"wasmtime-cli 50.0.0","target":"x86_64-test"}`)
 
-	if err := artifactSupervisor(compiler).ensureArtifact(dir); err != nil {
+	epoch, err := artifactSupervisor(compiler).ensureArtifact(dir, false)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if !epoch {
+		t.Error("rebuild did not report epoch support")
 	}
 	cwasm, err := os.ReadFile(filepath.Join(dir, "main.cwasm"))
 	if err != nil {
@@ -88,17 +92,21 @@ func TestEnsureArtifactRebuildsStaleArtifact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if artifact.Wasmtime != "wasmtime-cli 51.0.0" || artifact.Target != "x86_64-test" || artifact.CompiledAt.IsZero() {
+	if artifact.Wasmtime != "wasmtime-cli 51.0.0" || artifact.Target != "x86_64-test" || artifact.CompiledAt.IsZero() || !artifact.Epoch {
 		t.Errorf("artifact = %+v", artifact)
 	}
 }
 
 func TestEnsureArtifactKeepsMatchingArtifact(t *testing.T) {
 	compiler := writeCompiler(t, "wasmtime-cli 51.0.0", "rebuilt", false)
-	dir := writeBundleDir(t, "wasm", "current", `{"wasmtime":"wasmtime-cli 51.0.0","target":"x86_64-test"}`)
+	dir := writeBundleDir(t, "wasm", "current", `{"wasmtime":"wasmtime-cli 51.0.0","target":"x86_64-test","epoch_interruption":true}`)
 
-	if err := artifactSupervisor(compiler).ensureArtifact(dir); err != nil {
+	epoch, err := artifactSupervisor(compiler).ensureArtifact(dir, true)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if !epoch {
+		t.Error("matching epoch artifact was not reported")
 	}
 	cwasm, err := os.ReadFile(filepath.Join(dir, "main.cwasm"))
 	if err != nil {
@@ -113,8 +121,12 @@ func TestEnsureArtifactKeepsCwasmWithoutCompiler(t *testing.T) {
 	compiler := writeCompiler(t, "wasmtime-cli 51.0.0", "", true)
 	dir := writeBundleDir(t, "wasm", "old", `{"wasmtime":"wasmtime-cli 50.0.0","target":"x86_64-test"}`)
 
-	if err := artifactSupervisor(compiler).ensureArtifact(dir); err != nil {
+	epoch, err := artifactSupervisor(compiler).ensureArtifact(dir, true)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if epoch {
+		t.Error("failed rebuild claimed epoch support")
 	}
 	cwasm, err := os.ReadFile(filepath.Join(dir, "main.cwasm"))
 	if err != nil {
@@ -129,12 +141,12 @@ func TestEnsureArtifactLegacyBundle(t *testing.T) {
 	// Bundles uploaded before main.wasm was kept still start from their cwasm.
 	compiler := writeCompiler(t, "wasmtime-cli 51.0.0", "rebuilt", false)
 	dir := writeBundleDir(t, "", "legacy", "")
-	if err := artifactSupervisor(compiler).ensureArtifact(dir); err != nil {
-		t.Fatal(err)
+	if epoch, err := artifactSupervisor(compiler).ensureArtifact(dir, true); err != nil || epoch {
+		t.Errorf("legacy bundle = %v, %v; want no epoch and no error", epoch, err)
 	}
 
 	// A directory with neither artifact is not a component.
-	if err := artifactSupervisor(compiler).ensureArtifact(t.TempDir()); !errors.Is(err, errNoComponent) {
+	if _, err := artifactSupervisor(compiler).ensureArtifact(t.TempDir(), false); !errors.Is(err, errNoComponent) {
 		t.Errorf("empty directory error = %v, want errNoComponent", err)
 	}
 }
@@ -167,5 +179,33 @@ func TestReadArtifactRejectsInvalidJSON(t *testing.T) {
 	}
 	if _, err := readArtifact(dir); err == nil || !strings.Contains(err.Error(), artifactName) {
 		t.Errorf("readArtifact error = %v", err)
+	}
+}
+
+func TestEnsureArtifactRebuildsForEpoch(t *testing.T) {
+	compiler := writeCompiler(t, "wasmtime-cli 51.0.0", "rebuilt", false)
+	// Matching runtime and target, but without the instrumentation a per-request timeout needs.
+	dir := writeBundleDir(t, "wasm", "old", `{"wasmtime":"wasmtime-cli 51.0.0","target":"x86_64-test"}`)
+
+	epoch, err := artifactSupervisor(compiler).ensureArtifact(dir, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !epoch {
+		t.Error("epoch rebuild was not reported")
+	}
+	cwasm, err := os.ReadFile(filepath.Join(dir, "main.cwasm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(cwasm) != "rebuilt" {
+		t.Errorf("main.cwasm = %q, want rebuilt", cwasm)
+	}
+	artifact, err := readArtifact(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !artifact.Epoch {
+		t.Errorf("artifact = %+v, want epoch support recorded", artifact)
 	}
 }

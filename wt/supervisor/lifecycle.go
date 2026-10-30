@@ -46,15 +46,18 @@ func (s *supervisor) handleStop(w http.ResponseWriter, r *http.Request, name str
 func (s *supervisor) startStopped(a *app) error {
 	a.mu.Lock()
 	dir := a.dir
+	requireEpoch := a.cfg.requestTimeout > 0
 	a.mu.Unlock()
 	cwasm := filepath.Join(dir, "main.cwasm")
-	if err := s.ensureArtifact(dir); err != nil {
+	epoch, err := s.ensureArtifact(dir, requireEpoch)
+	if err != nil {
 		return err
 	}
 	s.stopSchedule(a)
 	a.mu.Lock()
 	a.retired = false
 	a.delay = time.Second
+	a.wasmEpoch = epoch
 	a.mu.Unlock()
 	if err := s.launch(a, cwasm); err != nil {
 		return err

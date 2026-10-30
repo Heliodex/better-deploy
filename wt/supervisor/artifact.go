@@ -18,6 +18,8 @@ type artifactInfo struct {
 	Wasmtime   string    `json:"wasmtime,omitempty"`
 	Target     string    `json:"target,omitempty"`
 	CompiledAt time.Time `json:"compiled_at,omitempty"`
+	// Epoch marks a cwasm compiled with epoch interruption, which the host must enable and per-request timeouts require.
+	Epoch bool `json:"epoch_interruption,omitempty"`
 }
 
 func readArtifact(dir string) (artifactInfo, error) {
@@ -79,6 +81,7 @@ func (s *supervisor) compileArtifact(dir, wasm, cwasm string) error {
 	cmd := exec.Command(s.cfg.wasmtimeCompiler, "compile",
 		"--target", s.cfg.wasmtimeTarget,
 		"-W", "component-model-async=y",
+		"-W", "epoch-interruption=y",
 		wasm, "-o", temp)
 	cmd.Dir = dir
 	cmd.Env = minimalEnv()
@@ -95,20 +98,26 @@ func (s *supervisor) compileArtifact(dir, wasm, cwasm string) error {
 
 // ensureArtifact makes sure dir holds a main.cwasm built for the configured runtime.
 // Bundles keep main.wasm and artifact.json so an upgraded wasmtime can rebuild the artifact instead of failing to load it.
-func (s *supervisor) ensureArtifact(dir string) error {
+// requireEpoch asks for instrumentation that supports a per-request wasmtime timeout; the returned bool reports whether the artifact has it.
+func (s *supervisor) ensureArtifact(dir string, requireEpoch bool) (bool, error) {
 	cwasm := filepath.Join(dir, "main.cwasm")
 	wasm := filepath.Join(dir, "main.wasm")
 	if _, err := os.Stat(wasm); err != nil {
 		if _, statErr := os.Stat(cwasm); statErr == nil {
-			return nil
+			if requireEpoch {
+				log.Printf("app artifact %s: request_timeout needs epoch interruption, but the bundle has no main.wasm to rebuild from", filepath.Base(dir))
+			}
+			return false, nil
 		}
-		return fmt.Errorf("%w: no main.wasm or main.cwasm", errNoComponent)
+		return false, fmt.Errorf("%w: no main.wasm or main.cwasm", errNoComponent)
 	}
 
-	current := artifactInfo{Wasmtime: s.wasmtimeVersion(), Target: s.cfg.wasmtimeTarget}
+	current := artifactInfo{Wasmtime: s.wasmtimeVersion(), Target: s.cfg.wasmtimeTarget, Epoch: true}
 	if _, err := os.Stat(cwasm); err == nil {
 		if recorded, err := readArtifact(dir); err == nil && artifactMatches(recorded, current) {
-			return nil
+			if !requireEpoch || recorded.Epoch {
+				return recorded.Epoch, nil
+			}
 		}
 	}
 
@@ -116,15 +125,19 @@ func (s *supervisor) ensureArtifact(dir string) error {
 	if err := s.compileArtifact(dir, wasm, cwasm); err != nil {
 		// A runtime-only wasmtime cannot compile. Keep a precompiled artifact so upgrades still work when nothing changed.
 		if _, statErr := os.Stat(cwasm); statErr == nil {
-			log.Printf("app artifact %s: keeping existing main.cwasm: %v", filepath.Base(dir), err)
-			return nil
+			if requireEpoch {
+				log.Printf("app artifact %s: request_timeout needs epoch interruption, but rebuilding failed: %v", filepath.Base(dir), err)
+			} else {
+				log.Printf("app artifact %s: keeping existing main.cwasm: %v", filepath.Base(dir), err)
+			}
+			return false, nil
 		}
-		return fmt.Errorf("compile main.wasm: %w", err)
+		return false, fmt.Errorf("compile main.wasm: %w", err)
 	}
 
 	current.CompiledAt = time.Now().UTC()
 	if err := writeArtifact(dir, current); err != nil {
 		log.Printf("app artifact %s: write %s: %v", filepath.Base(dir), artifactName, err)
 	}
-	return nil
+	return true, nil
 }

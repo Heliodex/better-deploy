@@ -3,5 +3,6 @@
 	"health": "/",
 	"host": "hello.localhost",
 	"memory_mb": 128,
-	"name": "hello"
+	"name": "hello",
+	"request_timeout": "2s"
 }
