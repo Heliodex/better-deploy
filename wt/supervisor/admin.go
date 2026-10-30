@@ -338,12 +338,7 @@ type snapshotMessage struct {
 func (s *supervisor) snapshot() []appInfo {
 	// Sampling here keeps REST and SSE snapshots current; the method throttles itself.
 	s.sampleAll()
-	s.mu.RLock()
-	apps := make([]*app, 0, len(s.apps))
-	for _, a := range s.apps {
-		apps = append(apps, a)
-	}
-	s.mu.RUnlock()
+	apps := s.allApps()
 	sort.Slice(apps, func(i, j int) bool { return apps[i].name < apps[j].name })
 
 	out := make([]appInfo, 0, len(apps))

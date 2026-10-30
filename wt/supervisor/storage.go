@@ -138,11 +138,11 @@ func (s *storageServer) tokenFor(app string) string {
 
 func (s *storageServer) appFor(r *http.Request) (string, bool) {
 	const prefix = "Bearer "
-	header := r.Header.Get("Authorization")
-	if !strings.HasPrefix(header, prefix) {
+	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), prefix)
+	if !ok {
 		return "", false
 	}
-	token := strings.TrimSpace(strings.TrimPrefix(header, prefix))
+	token = strings.TrimSpace(token)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	app, ok := s.tokens[token]

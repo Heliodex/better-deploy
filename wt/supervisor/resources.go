@@ -146,12 +146,7 @@ func (s *supervisor) handleResources(w http.ResponseWriter, _ *http.Request, a *
 
 // sampleAll refreshes resource usage for every app.
 func (s *supervisor) sampleAll() {
-	s.mu.RLock()
-	apps := make([]*app, 0, len(s.apps))
-	for _, a := range s.apps {
-		apps = append(apps, a)
-	}
-	s.mu.RUnlock()
+	apps := s.allApps()
 	now := time.Now()
 	for _, a := range apps {
 		a.sampleResources(now)
@@ -160,13 +155,7 @@ func (s *supervisor) sampleAll() {
 
 // recordAll appends one history point per app; the monitor calls it after sampling.
 func (s *supervisor) recordAll() {
-	s.mu.RLock()
-	apps := make([]*app, 0, len(s.apps))
-	for _, a := range s.apps {
-		apps = append(apps, a)
-	}
-	s.mu.RUnlock()
-	for _, a := range apps {
+	for _, a := range s.allApps() {
 		a.recordHistory()
 	}
 }
@@ -215,13 +204,7 @@ func (s *supervisor) persistResources() {
 		log.Printf("resources: persist: %v", err)
 		return
 	}
-	s.mu.RLock()
-	apps := make([]*app, 0, len(s.apps))
-	for _, a := range s.apps {
-		apps = append(apps, a)
-	}
-	s.mu.RUnlock()
-	for _, a := range apps {
+	for _, a := range s.allApps() {
 		data, err := json.Marshal(resourceHistoryResponse{Samples: a.resourceHistory()})
 		if err != nil {
 			continue

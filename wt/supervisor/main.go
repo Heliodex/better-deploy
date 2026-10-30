@@ -1016,6 +1016,17 @@ func (s *supervisor) lookup(name string) *app {
 	return s.apps[name]
 }
 
+// allApps returns a snapshot of the registered apps in an unspecified order.
+func (s *supervisor) allApps() []*app {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	apps := make([]*app, 0, len(s.apps))
+	for _, a := range s.apps {
+		apps = append(apps, a)
+	}
+	return apps
+}
+
 // statusWriter captures the status code a proxied response is written with. Unwrap
 // hands the underlying writer's optional interfaces (Flusher, Hijacker) through.
 type statusWriter struct {
@@ -1087,12 +1098,7 @@ func (s *supervisor) handler() http.Handler {
 }
 
 func (s *supervisor) stopAll() {
-	s.mu.RLock()
-	apps := make([]*app, 0, len(s.apps))
-	for _, a := range s.apps {
-		apps = append(apps, a)
-	}
-	s.mu.RUnlock()
+	apps := s.allApps()
 
 	var wg sync.WaitGroup
 	for _, a := range apps {

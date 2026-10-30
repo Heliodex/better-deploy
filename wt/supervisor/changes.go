@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"time"
@@ -362,9 +363,7 @@ func (s *storageServer) recentChanges(app string, limit int) ([]storageChange, e
 	if len(changes) > limit {
 		changes = changes[len(changes)-limit:]
 	}
-	for i, j := 0, len(changes)-1; i < j; i, j = i+1, j-1 {
-		changes[i], changes[j] = changes[j], changes[i]
-	}
+	slices.Reverse(changes)
 	return changes, nil
 }
 
