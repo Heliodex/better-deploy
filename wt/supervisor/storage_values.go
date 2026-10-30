@@ -11,6 +11,31 @@ import (
 	"time"
 )
 
+// decodeStorageBlob decodes the {"$b64": "..."} form used for byte parameters.
+func decodeStorageBlob(raw jsontext.Value) ([]byte, error) {
+	var object map[string]string
+	if err := json.Unmarshal(raw, &object); err != nil {
+		return nil, fmt.Errorf("object parameters must be {\"$b64\": \"...\"}")
+	}
+	encoded, ok := object["$b64"]
+	if !ok {
+		return nil, fmt.Errorf("object parameters must be {\"$b64\": \"...\"}")
+	}
+	value, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("invalid base64: %w", err)
+	}
+	return value, nil
+}
+
+// decodeStorageNumber parses a JSON number, keeping integers exact unless the text carries a fraction or exponent.
+func decodeStorageNumber(text string) (any, error) {
+	if strings.ContainsAny(text, ".eE") {
+		return strconv.ParseFloat(text, 64)
+	}
+	return strconv.ParseInt(text, 10, 64)
+}
+
 func decodeStorageValue(raw jsontext.Value) (any, error) {
 	text := strings.TrimSpace(string(raw))
 	if text == "" {
@@ -30,32 +55,9 @@ func decodeStorageValue(raw jsontext.Value) (any, error) {
 		}
 		return value, nil
 	case '{':
-		var object map[string]string
-		if err := json.Unmarshal(raw, &object); err != nil {
-			return nil, fmt.Errorf("object parameters must be {\"$b64\": \"...\"}")
-		}
-		encoded, ok := object["$b64"]
-		if !ok {
-			return nil, fmt.Errorf("object parameters must be {\"$b64\": \"...\"}")
-		}
-		value, err := base64.StdEncoding.DecodeString(encoded)
-		if err != nil {
-			return nil, fmt.Errorf("invalid base64: %w", err)
-		}
-		return value, nil
+		return decodeStorageBlob(raw)
 	default:
-		if strings.ContainsAny(text, ".eE") {
-			value, err := strconv.ParseFloat(text, 64)
-			if err != nil {
-				return nil, err
-			}
-			return value, nil
-		}
-		value, err := strconv.ParseInt(text, 10, 64)
-		if err != nil {
-			return nil, err
-		}
-		return value, nil
+		return decodeStorageNumber(text)
 	}
 }
 
