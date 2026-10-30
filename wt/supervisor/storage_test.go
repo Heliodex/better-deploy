@@ -284,3 +284,89 @@ func TestStorageSQLAppIsolation(t *testing.T) {
 		t.Errorf("other app saw the table: %v", result.Rows)
 	}
 }
+
+func TestStorageSchemaAndMigrate(t *testing.T) {
+	s, err := newStorageServer(t.TempDir(), "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.close()
+	token := s.tokenFor("notes")
+
+	migrate := func(version int, statements ...map[string]any) storageMigrationResponse {
+		t.Helper()
+		resp := storageSQL(t, s, token, "/v1/migrate", map[string]any{"version": version, "statements": statements})
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("migrate %d: %d %s", version, resp.StatusCode, readBody(t, resp))
+		}
+		defer resp.Body.Close()
+		var result storageMigrationResponse
+		if err := json.UnmarshalRead(resp.Body, &result); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+
+	result := migrate(1, map[string]any{"sql": `create table notes (id text primary key, body text not null)`})
+	if !result.Applied || result.Version != 1 {
+		t.Errorf("first migration = %+v", result)
+	}
+
+	resp := storageDo(t, http.MethodGet, s.url()+"/v1/schema", token, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("schema: %d %s", resp.StatusCode, readBody(t, resp))
+	}
+	var schema storageSchema
+	if err := json.UnmarshalRead(resp.Body, &schema); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if schema.Version != 1 || len(schema.Tables) != 1 || schema.Tables[0].Name != "notes" || len(schema.Tables[0].Columns) != 2 {
+		t.Fatalf("schema = %+v", schema)
+	}
+	if schema.Tables[0].Columns[0].PrimaryKey != 1 || !schema.Tables[0].Columns[1].NotNull {
+		t.Errorf("columns = %+v", schema.Tables[0].Columns)
+	}
+
+	// Applying an old version is a no-op, so an older process can start against a newer database.
+	result = migrate(1, map[string]any{"sql": `this statement must not run`})
+	if result.Applied || result.Version != 1 {
+		t.Errorf("repeat migration = %+v, want a no-op", result)
+	}
+
+	result = migrate(2, map[string]any{"sql": `alter table notes add column created_at text not null default ''`})
+	if !result.Applied || result.Version != 2 {
+		t.Errorf("second migration = %+v", result)
+	}
+
+	// A failing statement rolls back the whole migration, including the version bump.
+	resp = storageSQL(t, s, token, "/v1/migrate", map[string]any{
+		"version":    3,
+		"statements": []map[string]any{{"sql": `alter table notes add column extra text`}, {"sql": `insert into missing values (1)`}},
+	})
+	if resp.StatusCode == http.StatusOK {
+		t.Error("failed migration reported success")
+	}
+	resp.Body.Close()
+	resp = storageDo(t, http.MethodGet, s.url()+"/v1/schema", token, "")
+	if err := json.UnmarshalRead(resp.Body, &schema); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if schema.Version != 2 {
+		t.Errorf("version after failed migration = %d, want 2", schema.Version)
+	}
+
+	resp = storageSQL(t, s, token, "/v1/migrate", map[string]any{"version": 0})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("version 0 = %d, want 400", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// Raw SQL still cannot use pragma; migrations are the only way to change user_version.
+	resp = storageSQL(t, s, token, "/v1/exec", map[string]any{"sql": `pragma user_version = 9`})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("pragma through exec = %d, want 400", resp.StatusCode)
+	}
+	resp.Body.Close()
+}

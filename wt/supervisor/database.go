@@ -20,6 +20,7 @@ var errDatabaseTableNotFound = errors.New("table not found")
 type databaseOverviewResponse struct {
 	Database bool     `json:"database"`
 	Tables   []string `json:"tables"`
+	Version  int      `json:"version"`
 }
 
 // databaseRowsResponse is one page of a table, with values encoded like the app-facing SQL service.
@@ -159,7 +160,12 @@ func (s *supervisor) handleDatabase(w http.ResponseWriter, r *http.Request, name
 		writeStorageError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, databaseOverviewResponse{Database: true, Tables: tables})
+	version, err := s.storage.schemaVersion(r.Context(), name)
+	if err != nil {
+		writeStorageError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, databaseOverviewResponse{Database: true, Tables: tables, Version: version})
 }
 
 func (s *supervisor) handleDatabaseRows(w http.ResponseWriter, r *http.Request, name string) {

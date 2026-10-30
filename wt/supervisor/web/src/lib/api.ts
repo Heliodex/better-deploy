@@ -228,6 +228,7 @@ const deploymentsSchema = array(deploymentInfoSchema)
 const databaseOverviewSchema = object({
 	database: boolean(),
 	tables: array(string()),
+	version: pipe(number(), minValue(0)),
 })
 
 export type DatabaseOverview = InferOutput<typeof databaseOverviewSchema>

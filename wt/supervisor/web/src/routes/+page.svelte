@@ -103,6 +103,7 @@ let savingBackups = $state(false)
 let restoringBackup = $state<string | null>(null)
 let confirmRestore = $state<string | null>(null)
 let databaseExists = $state(false)
+let databaseVersion = $state(0)
 let databaseTables = $state<string[]>([])
 let databaseTable = $state<string | null>(null)
 let databaseRows = $state<DatabaseRows | null>(null)
@@ -348,6 +349,7 @@ async function revertBackup(name: string): Promise<void> {
 
 function resetDatabase(): void {
 	databaseExists = false
+	databaseVersion = 0
 	databaseTables = []
 	databaseTable = null
 	databaseRows = null
@@ -417,6 +419,7 @@ async function loadDatabase(key: string, name: string): Promise<void> {
 		const overview = await fetchDatabase(key, name)
 		if (selected !== name) return
 		databaseExists = overview.database
+		databaseVersion = overview.version
 		databaseTables = overview.tables
 		databaseLoadedFor = name
 		databaseOffset = 0
@@ -1008,6 +1011,7 @@ onMount((): (() => void) => {
 							rowsLoading={databaseRowsLoading}
 							table={databaseTable}
 							tables={databaseTables}
+							version={databaseVersion}
 						/>
 					{:else}
 						<DeploymentsTab

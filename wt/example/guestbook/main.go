@@ -115,7 +115,7 @@ func seed(ctx context.Context) error {
 }
 
 func migrate(ctx context.Context) error {
-	_, err := store.Batch(ctx,
+	err := store.Migrate(ctx, 1,
 		storage.Statement{SQL: `create table if not exists messages (
 			id text primary key,
 			name text not null,

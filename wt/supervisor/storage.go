@@ -603,6 +603,12 @@ func (s *storageServer) handle(w http.ResponseWriter, r *http.Request) {
 		s.handleSQL(w, r, func(w http.ResponseWriter, r *http.Request) {
 			s.batch(w, r, app)
 		})
+	case "/v1/schema":
+		s.readSchema(w, r, app)
+	case "/v1/migrate":
+		s.handleSQL(w, r, func(w http.ResponseWriter, r *http.Request) {
+			s.runMigration(w, r, app)
+		})
 	default:
 		http.NotFound(w, r)
 	}

@@ -32,12 +32,11 @@ var (
 )
 
 func migrate(ctx context.Context) error {
-	_, err := store.Exec(ctx, `create table if not exists notes (
+	return store.Migrate(ctx, 1, storage.Statement{SQL: `create table if not exists notes (
 		id text primary key,
 		body text not null,
 		created_at text not null
-	)`)
-	return err
+	)`})
 }
 
 func loadNotes(ctx context.Context) ([]note, error) {

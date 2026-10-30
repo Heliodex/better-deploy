@@ -233,6 +233,17 @@ POST /v1/batch   {"statements": [{"sql": "...", "params": [...]}, ...]}
 
 `query` returns `{"columns": [...], "rows": [[...]], "truncated": false}`. `exec` returns `{"rows_affected": n, "last_insert_id": n}`. `batch` runs every write statement in one transaction and returns one result per statement; use `query` for reads (it also runs `INSERT ... RETURNING`). Values are JSON scalars; blobs are `{"$b64": "..."}`. Parameters are bound, not interpolated. A few SQLite features are blocked (`ATTACH`, `VACUUM INTO`, `PRAGMA`, `load_extension`, `readfile`, `writefile`, transaction-control statements) and `SQLITE_LIMIT_ATTACHED` is zero, so a component cannot read another app's database or write files through SQL. Queries time out after five seconds and are capped at 10,000 rows, 1 MiB per value and 8 MiB per response.
 
+Schema changes go through a versioned migration instead of raw `PRAGMA`:
+
+```text
+GET  /v1/schema
+POST /v1/migrate  {"version": 2, "statements": [{"sql": "...", "params": [...]}, ...]}
+```
+
+`schema` returns SQLite's `user_version` and every user table with its columns, types, defaults and primary-key positions. `migrate` runs its statements and sets `user_version` in one transaction; a failing statement rolls back both. Applying a version at or below the current one is a no-op, so an older blue or green process can start against a database a newer deploy already migrated. In Go, `store.Migrate(ctx, version, statements...)` and `store.Schema(ctx)` wrap these endpoints. The examples use `Migrate` for their initial schema.
+
+Migrations must be expand/contract: add columns and tables in one release, move writes over, and remove the old shape only after every deploy that reads it is gone. A code rollback is code-only, so it also has to be able to read the newer schema; for a destructive change, restore a snapshot from before the migration as well (`rollback?backup=<file>`).
+
 The shared `packages/storage` package is the client; it takes an `*http.Client`, and the apps pass `wasihttp.NewClient()` for outbound `wasi:http`:
 
 ```go

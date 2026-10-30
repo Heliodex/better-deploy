@@ -67,3 +67,34 @@ type response struct {
 type batchResponse struct {
 	Results []response `json:"results"`
 }
+
+// Schema describes the database's migration version and its tables.
+type Schema struct {
+	Version int     `json:"version"`
+	Tables  []Table `json:"tables"`
+}
+
+// Table is one table in a Schema.
+type Table struct {
+	Name    string   `json:"name"`
+	Columns []Column `json:"columns"`
+}
+
+// Column is one column in a Table.
+type Column struct {
+	Name       string  `json:"name"`
+	Type       string  `json:"type"`
+	NotNull    bool    `json:"notNull"`
+	Default    *string `json:"default,omitempty"`
+	PrimaryKey int     `json:"primaryKey,omitempty"`
+}
+
+type migrationRequest struct {
+	Version    int              `json:"version"`
+	Statements []batchStatement `json:"statements,omitempty"`
+}
+
+type migrationResponse struct {
+	Version int  `json:"version"`
+	Applied bool `json:"applied"`
+}

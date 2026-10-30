@@ -158,3 +158,48 @@ func TestClientQueryRowNoRows(t *testing.T) {
 		t.Fatalf("error = %v, want ErrNoRows", err)
 	}
 }
+
+func TestClientSchemaAndMigrate(t *testing.T) {
+	var migration migrationRequest
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/schema":
+			if r.Method != http.MethodGet {
+				t.Errorf("schema method = %s", r.Method)
+			}
+			_, _ = io.WriteString(w, `{"version":2,"tables":[{"name":"notes","columns":[{"name":"id","type":"text","notNull":false,"primaryKey":1},{"name":"body","type":"text","notNull":true}]}]}`)
+		case "/v1/migrate":
+			if r.Method != http.MethodPost {
+				t.Errorf("migrate method = %s", r.Method)
+			}
+			if err := json.UnmarshalRead(r.Body, &migration); err != nil {
+				t.Errorf("body: %v", err)
+			}
+			_, _ = io.WriteString(w, `{"version":3,"applied":true}`)
+		default:
+			t.Errorf("path = %q", r.URL.Path)
+		}
+	})
+
+	schema, err := client.Schema(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if schema.Version != 2 || len(schema.Tables) != 1 || schema.Tables[0].Name != "notes" || len(schema.Tables[0].Columns) != 2 {
+		t.Errorf("schema = %+v", schema)
+	}
+	if schema.Tables[0].Columns[1].Name != "body" || !schema.Tables[0].Columns[1].NotNull || schema.Tables[0].Columns[0].PrimaryKey != 1 {
+		t.Errorf("columns = %+v", schema.Tables[0].Columns)
+	}
+
+	err = client.Migrate(context.Background(), 3,
+		Statement{SQL: `create table things (id text primary key)`},
+		Statement{SQL: `insert into things (id) values (?)`, Args: []any{"a"}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if migration.Version != 3 || len(migration.Statements) != 2 || migration.Statements[1].SQL != `insert into things (id) values (?)` {
+		t.Errorf("migration request = %+v", migration)
+	}
+}

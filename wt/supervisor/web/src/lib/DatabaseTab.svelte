@@ -19,6 +19,7 @@ interface Props {
 	rowsLoading: boolean
 	table: string | null
 	tables: string[]
+	version: number
 }
 
 let {
@@ -38,6 +39,7 @@ let {
 	rowsLoading,
 	table,
 	tables,
+	version,
 }: Props = $props()
 </script>
 
@@ -54,6 +56,9 @@ let {
 				{tables.length}
 				{tables.length === 1 ? "table" : "tables"}
 			</span>
+			{#if exists}
+				<span class="text-xs text-neutral-500">schema v{version}</span>
+			{/if}
 		</div>
 		<button class="btn" disabled={loading} onclick={onreload} type="button">
 			{loading ? "Refreshing…" : "Refresh"}

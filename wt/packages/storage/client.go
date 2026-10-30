@@ -53,6 +53,28 @@ func (c *Client) post(ctx context.Context, path string, body, out any) error {
 	return nil
 }
 
+func (c *Client) get(ctx context.Context, path string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		message, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return fmt.Errorf("storage: %s: %s", resp.Status, strings.TrimSpace(string(message)))
+	}
+	if err := json.UnmarshalRead(io.LimitReader(resp.Body, maxResponseBytes), out); err != nil {
+		return fmt.Errorf("storage: decode response: %w", err)
+	}
+	return nil
+}
+
 // Query runs one statement and returns all rows up to the server's row limit.
 func (c *Client) Query(ctx context.Context, query string, args ...any) (*Rows, error) {
 	var resp response
@@ -93,6 +115,25 @@ func (c *Client) Exec(ctx context.Context, query string, args ...any) (Result, e
 		return Result{}, err
 	}
 	return Result{RowsAffected: resp.RowsAffected, LastInsertID: resp.LastInsertID}, nil
+}
+
+// Schema returns the database's user_version and table definitions.
+func (c *Client) Schema(ctx context.Context) (Schema, error) {
+	var schema Schema
+	if err := c.get(ctx, "/v1/schema", &schema); err != nil {
+		return Schema{}, err
+	}
+	return schema, nil
+}
+
+// Migrate applies statements and records version in one transaction. Applying a version at or below the current one is a no-op, so older code can start against a newer database while migrations stay expand/contract.
+func (c *Client) Migrate(ctx context.Context, version int, statements ...Statement) error {
+	req := migrationRequest{Version: version, Statements: make([]batchStatement, len(statements))}
+	for i, statement := range statements {
+		req.Statements[i] = batchStatement{SQL: statement.SQL, Params: encodeParams(statement.Args)}
+	}
+	var resp migrationResponse
+	return c.post(ctx, "/v1/migrate", req, &resp)
 }
 
 // Batch runs statements in one transaction. A failing statement rolls the whole batch back.
