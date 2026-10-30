@@ -13,6 +13,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: wt/supervisor/go.mod
+          cache-dependency-path: |
+            wt/supervisor/go.sum
+            wt/deploy/go.sum
+            wt/example/go.sum
+            wt/packages/go.sum
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - name: Build embedded admin panel
+        working-directory: wt/supervisor
+        run: go generate ./...
+
+      - name: Install wasmtime
+        run: |
+          curl -fsSL https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.0/wasmtime-v50.0.0-x86_64-linux.tar.xz | tar -xJ
+          echo "$PWD/wasmtime-v50.0.0-x86_64-linux" >> "$GITHUB_PATH"
+
+      - name: Run end-to-end test
+        run: WT_WASMTIME="$(command -v wasmtime)" bash wt/e2e.sh
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 20

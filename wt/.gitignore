@@ -1,5 +1,6 @@
 example/*/main.wasm
 example/*/main.cwasm
+example/*/artifact.json
 example/*/web/node_modules/
 packages/binding/
 packages/tmp/

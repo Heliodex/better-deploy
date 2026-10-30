@@ -47,6 +47,16 @@ cd wt/deploy && go build -o /tmp/wt-deploy .
 
 For the local loop, `wt/supervisor/dev.sh` rebuilds the admin panel and binary and restarts the supervisor, reusing the running instance's app and state directories so deployed apps, data and logs survive. `./dev.sh --skip-generate` skips the panel build for a Go-only change.
 
+## Test
+
+CI runs unit tests for the supervisor, deploy tool and shared packages, vets the wasm guests, checks both Svelte frontends, and has a separate end-to-end job. `wt/e2e.sh` downloads nothing itself: point it at a real wasmtime with the compile and serve subcommands. It builds the hello component, starts a supervisor on `127.0.0.1:18080`, deploys the bundle, proxies a request, takes and restores a `/data` snapshot, and rolls back the retained deployment:
+
+```sh
+WT_WASMTIME=/path/to/wasmtime ./wt/e2e.sh
+```
+
+Set `WT_E2E_TARGET` when the runtime uses a different target triple; the default is `x86_64-unknown-linux-gnu` to match the released wasmtime binary CI downloads. The script keeps its work directory on failure and prints the supervisor log.
+
 ## Run the supervisor
 
 ```sh
