@@ -935,14 +935,13 @@ func (s *supervisor) loadApps() error {
 	return nil
 }
 
-func (s *supervisor) deploy(w http.ResponseWriter, r *http.Request, name string) {
-	s.deployMu.Lock()
-	defer s.deployMu.Unlock()
-
+// receiveBundle parses an uploaded bundle into a temporary directory and returns its app config.
+func (s *supervisor) receiveBundle(w http.ResponseWriter, r *http.Request, name string) (dir string, cfg appConfig, cleanup func(), ok bool) {
+	cleanup = func() {}
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
 	if err := r.ParseMultipartForm(16 << 20); err != nil {
 		writeError(w, http.StatusBadRequest, "parse multipart: "+err.Error())
-		return
+		return "", appConfig{}, cleanup, false
 	}
 	if r.MultipartForm != nil {
 		defer r.MultipartForm.RemoveAll()
@@ -951,51 +950,66 @@ func (s *supervisor) deploy(w http.ResponseWriter, r *http.Request, name string)
 	file, _, err := r.FormFile("artifact")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "missing artifact field")
-		return
+		return "", appConfig{}, cleanup, false
 	}
 	defer file.Close()
 
 	archive, err := os.CreateTemp(s.cfg.appsDir, ".upload-*.tar.gz")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "create temp file")
-		return
+		return "", appConfig{}, cleanup, false
 	}
 	archiveName := archive.Name()
-	defer os.Remove(archiveName)
+	cleanup = func() { _ = os.Remove(archiveName) }
 	if _, err := io.Copy(archive, io.LimitReader(file, maxUploadBytes)); err != nil {
-		archive.Close()
+		_ = archive.Close()
 		writeError(w, http.StatusBadRequest, "read artifact: "+err.Error())
-		return
+		return "", appConfig{}, cleanup, false
 	}
 	if err := archive.Close(); err != nil {
 		writeError(w, http.StatusInternalServerError, "close temp file")
-		return
+		return "", appConfig{}, cleanup, false
 	}
 
-	tmpDir, err := os.MkdirTemp(s.cfg.appsDir, "."+name+".upload-")
+	dir, err = os.MkdirTemp(s.cfg.appsDir, "."+name+".upload-")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "create upload directory")
-		return
+		return "", appConfig{}, cleanup, false
 	}
-	defer os.RemoveAll(tmpDir)
+	cleanup = func() {
+		_ = os.Remove(archiveName)
+		_ = os.RemoveAll(dir)
+	}
 
-	if err := extractTarGz(archiveName, tmpDir); err != nil {
+	if err := extractTarGz(archiveName, dir); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
-		return
+		return "", appConfig{}, cleanup, false
 	}
-	if _, err := os.Stat(filepath.Join(tmpDir, "main.cwasm")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "main.cwasm")); err != nil {
 		writeError(w, http.StatusBadRequest, "archive must contain main.cwasm")
-		return
+		return "", appConfig{}, cleanup, false
 	}
 
-	cfg, err := readAppConfig(tmpDir, name, s.cfg.domain)
+	cfg, err = readAppConfig(dir, name, s.cfg.domain)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
-		return
+		return "", appConfig{}, cleanup, false
 	}
 	cfg.Name = name
 	if s.hostTaken(cfg.Host, name) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("host %q is already used by another app", cfg.Host))
+		return "", appConfig{}, cleanup, false
+	}
+	return dir, cfg, cleanup, true
+}
+
+func (s *supervisor) deploy(w http.ResponseWriter, r *http.Request, name string) {
+	s.deployMu.Lock()
+	defer s.deployMu.Unlock()
+
+	tmpDir, cfg, cleanup, ok := s.receiveBundle(w, r, name)
+	defer cleanup()
+	if !ok {
 		return
 	}
 
