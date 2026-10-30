@@ -32,6 +32,7 @@ const (
 	maxTarFiles     = 10_000
 	readyTimeout    = 15 * time.Second
 	stopTimeout     = 5 * time.Second
+	drainTimeout    = 10 * time.Second
 )
 
 type config struct {
@@ -72,6 +73,7 @@ type app struct {
 	timer     *time.Timer
 	logs      *appLog
 	stats     appStats
+	requests  sync.WaitGroup // in-flight proxied requests, drained before a replaced version stops
 
 	mu              sync.Mutex
 	scheduleCancel  context.CancelFunc

@@ -350,3 +350,57 @@ func TestHandleRestartRestartsSchedule(t *testing.T) {
 		t.Error("handleRestart did not restart the schedule")
 	}
 }
+
+func TestDrainApp(t *testing.T) {
+	a := &app{name: "demo"}
+	a.requests.Add(1)
+	if drainApp(a, 20*time.Millisecond) {
+		t.Error("drain finished while a request was active")
+	}
+	a.requests.Done()
+	if !drainApp(a, time.Second) {
+		t.Error("drain did not finish after the request ended")
+	}
+}
+
+func TestHandleProxyTracksInFlightRequests(t *testing.T) {
+	received := make(chan struct{})
+	release := make(chan struct{})
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(received)
+		<-release
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer backend.Close()
+
+	parsed, err := url.Parse(backend.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(parsed.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := testSupervisor()
+	a := &app{name: "demo", port: port, cfg: appConfig{Host: "demo.localhost"}}
+	a.proxy = s.newProxy(a)
+	s.hosts["demo.localhost"] = a
+
+	done := make(chan struct{})
+	go func() {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Host = "demo.localhost"
+		s.handleProxy(httptest.NewRecorder(), req)
+		close(done)
+	}()
+	<-received
+	if drainApp(a, 20*time.Millisecond) {
+		t.Error("drain finished while a proxied request was in flight")
+	}
+	close(release)
+	<-done
+	if !drainApp(a, time.Second) {
+		t.Error("drain did not finish after the proxied request completed")
+	}
+}

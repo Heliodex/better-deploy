@@ -71,11 +71,15 @@ func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.RLock()
 	a := s.hosts[host]
+	if a != nil {
+		a.requests.Add(1)
+	}
 	s.mu.RUnlock()
 	if a == nil {
 		http.Error(w, "no app for this host", http.StatusNotFound)
 		return
 	}
+	defer a.requests.Done()
 	started := time.Now()
 	wrapped := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 	a.proxy.ServeHTTP(wrapped, r)

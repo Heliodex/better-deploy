@@ -215,6 +215,21 @@ func (s *supervisor) receiveBundle(w http.ResponseWriter, r *http.Request, name 
 	return dir, cfg, cleanup, true
 }
 
+// drainApp waits for in-flight proxied requests to finish before an old version is stopped.
+func drainApp(a *app, timeout time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		a.requests.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
 func (s *supervisor) deploy(w http.ResponseWriter, r *http.Request, name string) {
 	s.deployMu.Lock()
 	defer s.deployMu.Unlock()
@@ -251,6 +266,9 @@ func (s *supervisor) deploy(w http.ResponseWriter, r *http.Request, name string)
 
 	s.register(next)
 	if old != nil {
+		if !drainApp(old, drainTimeout) {
+			log.Printf("deploy %s: old version still handling requests after %s", name, drainTimeout)
+		}
 		s.stop(old)
 	}
 
