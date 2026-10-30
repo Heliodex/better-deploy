@@ -30,18 +30,9 @@ import {
 	subscribe,
 	subscribeLogs,
 } from "../lib/api"
-import BackupTree from "../lib/BackupTree.svelte"
-import { backupKindLabel } from "../lib/backup-tree"
+import BackupsTab from "../lib/BackupsTab.svelte"
 import { palette } from "../lib/chart"
-import {
-	formatChangeParams,
-	formatDatabaseValue,
-	formatRowValue,
-	formatSize,
-	formatTime,
-	rowOpClass,
-	uptime,
-} from "../lib/format"
+import { formatChangeParams, formatDatabaseValue, formatRowValue, formatTime, rowOpClass, uptime } from "../lib/format"
 import { accessStatusClass, levelClasses, levelMessageClasses, logTimeParts, parseAccessLine } from "../lib/log-format"
 import OverviewTab from "../lib/OverviewTab.svelte"
 
@@ -731,14 +722,6 @@ const legendApps = $derived(
 	}),
 )
 
-const selectedBackupInfo = $derived(backupList.find(backup => backup.name === selectedBackup) ?? null)
-
-const selectedBackupParent = $derived(
-	selectedBackupInfo?.parent ? (backupList.find(backup => backup.name === selectedBackupInfo.parent) ?? null) : null,
-)
-
-const selectedBackupChildren = $derived(backupList.filter(backup => backup.parent === selectedBackup).length)
-
 let detailSpan = $state(300)
 let overviewSpan = $state(300)
 
@@ -1013,189 +996,26 @@ onMount((): (() => void) => {
 							bind:span={detailSpan}
 						/>
 					{:else if tab === "backups"}
-						<div
-							aria-labelledby="app-tab-backups"
-							class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4"
-							id="app-panel-backups"
-							role="tabpanel"
-						>
-							<div class="flex items-center justify-between gap-2">
-								<h3
-									class="text-xs font-semibold tracking-wide text-neutral-400 uppercase"
-									id="backups-title"
-								>
-									Backups
-								</h3>
-								<span class="text-xs text-neutral-500">
-									{backupList.length}
-									{backupList.length === 1 ? "snapshot" : "snapshots"}
-								</span>
-							</div>
-
-							<form class="flex flex-wrap items-end gap-3" onsubmit={saveBackupConfig}>
-								<label class="flex items-center gap-2 pb-1.5 text-sm">
-									<input
-										aria-label="Automatic backups"
-										class="accent-primary-500"
-										type="checkbox"
-										bind:checked={backupSettings.enabled}
-									>
-									Automatic backups
-								</label>
-								<label class="flex flex-col gap-1">
-									<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Every</span>
-									<input
-										aria-label="Backup interval"
-										class="field w-24"
-										placeholder="24h"
-										bind:value={backupSettings.every}
-									>
-								</label>
-								<label class="flex flex-col gap-1">
-									<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Keep</span>
-									<input
-										aria-label="Backups to keep"
-										class="field w-20"
-										max={100}
-										min={1}
-										type="number"
-										bind:value={backupSettings.keep}
-									>
-								</label>
-								<button class="btn" disabled={savingBackups} type="submit">
-									{savingBackups ? "Saving…" : "Save"}
-								</button>
-							</form>
-
-							<p class="text-xs text-neutral-500">
-								Snapshots use SQLite's online backup, so the app keeps serving while one is taken.
-							</p>
-
-							{#if backupsError}
-								<p
-									class="border border-red-500/80 bg-red-500/10 px-2 py-1 text-sm text-red-400"
-									role="alert"
-								>
-									{backupsError}
-								</p>
-							{/if}
-
-							{#if backupList.length === 0}
-								<div class="flex flex-col items-start gap-2">
-									<p class="text-sm text-neutral-500">
-										{backupsLoading
-											? "Loading backups…"
-											: backupDatabase
-												? "No backups yet."
-												: "No database yet. One is created the first time the app uses storage."}
-									</p>
-									{#if backupDatabase}
-										<button
-											class="btn btn-primary"
-											disabled={backingUp}
-											onclick={backupNow}
-											title="Snapshot the live database"
-											type="button"
-										>
-											{backingUp ? "Backing up…" : "Back up current state"}
-										</button>
-									{/if}
-								</div>
-							{:else}
-								<BackupTree
-									backups={backupList}
-									current={backupCurrent}
-									onselect={selectBackup}
-									selected={selectedBackup}
-								/>
-
-								{#if selectedBackupInfo}
-									<div class="flex flex-col gap-2 border-t border-line-soft pt-2">
-										<div class="flex flex-wrap items-center gap-2">
-											<h4 class="text-sm font-semibold">
-												{formatTime(selectedBackupInfo.createdAt)}
-											</h4>
-											<span
-												class="border border-line px-1 text-[10px] tracking-wide text-neutral-400 uppercase"
-											>
-												{backupKindLabel(selectedBackupInfo.kind)}
-											</span>
-											{#if selectedBackup === backupCurrent}
-												<span
-													class="border border-primary-500/40 bg-primary-500/10 px-1 text-[10px] tracking-wide text-primary-300 uppercase"
-												>
-													Current
-												</span>
-											{/if}
-										</div>
-
-										<dl class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-3">
-											<div>
-												<dt class="text-neutral-500">Size</dt>
-												<dd class="tabular-nums">{formatSize(selectedBackupInfo.size)}</dd>
-											</div>
-											<div>
-												<dt class="text-neutral-500">After</dt>
-												<dd>
-													{selectedBackupParent
-														? formatTime(selectedBackupParent.createdAt)
-														: "Start of tree"}
-												</dd>
-											</div>
-											<div>
-												<dt class="text-neutral-500">Children</dt>
-												<dd class="tabular-nums">{selectedBackupChildren}</dd>
-											</div>
-										</dl>
-
-										<p class="text-xs text-neutral-500">
-											{#if selectedBackup === backupCurrent}
-												The live database follows this snapshot, so a new backup continues this
-												branch.
-											{:else}
-												Reverting replaces the live database, and the next backup becomes a new
-												branch from this snapshot.
-											{/if}
-										</p>
-
-										<div class="flex flex-wrap items-center gap-2">
-											<button
-												class="btn btn-primary"
-												disabled={backingUp}
-												onclick={backupNow}
-												title="Snapshot the live database; the snapshot continues from the current node"
-												type="button"
-											>
-												{backingUp ? "Backing up…" : "Back up current state"}
-											</button>
-											{#if selectedBackupInfo.name !== backupCurrent}
-												<button
-													class={confirmRestore === selectedBackupInfo.name
-														? "btn btn-danger"
-														: "btn"}
-													disabled={restoringBackup !== null}
-													onclick={(): Promise<void> => revertBackup(selectedBackupInfo.name)}
-													type="button"
-												>
-													{restoringBackup === selectedBackupInfo.name
-														? "Reverting…"
-														: confirmRestore === selectedBackupInfo.name
-															? "Click again to confirm"
-															: "Revert to this snapshot"}
-												</button>
-											{/if}
-										</div>
-									</div>
-								{/if}
-							{/if}
-							{#if actionMessage}
-								<p
-									class="border border-primary-500/40 bg-primary-500/10 px-2 py-1 text-sm text-primary-300"
-								>
-									{actionMessage}
-								</p>
-							{/if}
-						</div>
+						<BackupsTab
+							{actionMessage}
+							{backingUp}
+							backups={backupList}
+							confirming={confirmRestore}
+							current={backupCurrent}
+							database={backupDatabase}
+							{error}
+							loading={backupsLoading}
+							onbackup={backupNow}
+							onrevert={revertBackup}
+							onsave={saveBackupConfig}
+							onselect={selectBackup}
+							restoring={restoringBackup}
+							saving={savingBackups}
+							selected={selectedBackup}
+							bind:enabled={backupSettings.enabled}
+							bind:every={backupSettings.every}
+							bind:keep={backupSettings.keep}
+						/>
 					{:else}
 						<div
 							aria-labelledby="app-tab-database"
