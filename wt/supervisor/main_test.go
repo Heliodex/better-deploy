@@ -404,3 +404,41 @@ func TestHandleProxyTracksInFlightRequests(t *testing.T) {
 		t.Error("drain did not finish after the proxied request completed")
 	}
 }
+
+func TestHandlerLetsAppHostsOwnAdminPaths(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("app " + r.URL.Path))
+	}))
+	defer backend.Close()
+
+	parsed, err := url.Parse(backend.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(parsed.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := testSupervisor()
+	a := &app{name: "demo", port: port, cfg: appConfig{Host: "demo.localhost"}}
+	a.proxy = s.newProxy(a)
+	s.hosts["demo.localhost"] = a
+	handler := s.handler()
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "http://demo.localhost/admin/", nil)
+	req.Host = "demo.localhost"
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || rec.Body.String() != "app /admin/" {
+		t.Errorf("app host admin path = %d %q, want 200 \"app /admin/\"", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "http://admin.localhost/healthz", nil)
+	req.Host = "admin.localhost"
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || rec.Body.String() != "ok\n" {
+		t.Errorf("non-app healthz = %d %q, want 200 \"ok\\n\"", rec.Code, rec.Body.String())
+	}
+}

@@ -64,11 +64,17 @@ func formatAccessLog(method string, status int, duration time.Duration, uri stri
 	return fmt.Sprintf("%s %d %s %s", method, status, formatProxyDuration(duration), uri)
 }
 
-func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
+// requestHost is the lower-case request host without a port, as used for app routing.
+func requestHost(r *http.Request) string {
 	host := strings.ToLower(r.Host)
 	if h, _, err := net.SplitHostPort(host); err == nil {
-		host = h
+		return h
 	}
+	return host
+}
+
+func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
+	host := requestHost(r)
 	s.mu.RLock()
 	a := s.hosts[host]
 	if a != nil {
@@ -88,6 +94,13 @@ func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// isAppHost reports whether host belongs to an app, which owns every path on its host.
+func (s *supervisor) isAppHost(host string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.hosts[host] != nil
+}
+
 func (s *supervisor) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -102,7 +115,13 @@ func (s *supervisor) handler() http.Handler {
 	})
 	mux.Handle("/admin/", http.StripPrefix("/admin", adminStatic()))
 	mux.HandleFunc("/", s.handleProxy)
-	return mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.isAppHost(requestHost(r)) {
+			s.handleProxy(w, r)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
 }
 
 // statusWriter captures the status code a proxied response is written with. Unwrap hands the underlying writer's optional interfaces (Flusher, Hijacker) through.

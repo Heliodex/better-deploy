@@ -61,7 +61,7 @@ WT_TOKEN=dev \
 
 The supervisor speaks plain HTTP by default; set `WT_TLS_CERT` and `WT_TLS_KEY` (or `--tls-cert`/`--tls-key`) to terminate TLS itself. Behind the Orchard ingress, leave TLS to the ingress and keep the supervisor on HTTP. The proxy preserves the original `Host` and sets `X-Forwarded-Host` and `X-Forwarded-Proto` for the app.
 
-The supervisor scans `WT_APPS_DIR` at boot, starts every app found there, and serves `GET /apps`, `GET /apps/<name>` and `POST /apps/<name>` (deploy, bearer token). `/healthz` is the supervisor's own health check.
+The supervisor scans `WT_APPS_DIR` at boot, starts every app found there, and serves `GET /apps`, `GET /apps/<name>` and `POST /apps/<name>` (deploy, bearer token). `/healthz` is the supervisor's own health check. These supervisor paths, including `/admin/` and `/events`, only exist on hosts that are not app hosts: an app owns every path on its own host, so requests to those names are proxied to the app rather than swallowed by the supervisor.
 
 ## Admin panel
 
