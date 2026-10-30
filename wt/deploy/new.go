@@ -60,7 +60,7 @@ func exampleModule(dir string) (string, error) {
 		return "", fmt.Errorf("read example go.mod: %w", err)
 	}
 	module := ""
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		name, ok := strings.CutPrefix(line, "module ")
 		if !ok {
 			continue

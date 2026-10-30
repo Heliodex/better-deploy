@@ -114,7 +114,7 @@ func TestAppLogRotation(t *testing.T) {
 		t.Fatal(err)
 	}
 	line := strings.Repeat("x", 100) + "\n"
-	for i := 0; i < maxLogBytes/100+100; i++ {
+	for i := range maxLogBytes/100 + 100 {
 		if _, err := fmt.Fprintf(logs, "line %d %s", i, line); err != nil {
 			t.Fatal(err)
 		}

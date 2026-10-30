@@ -632,8 +632,8 @@ func (s *supervisor) authorized(r *http.Request) bool {
 	}
 	const prefix = "Bearer "
 	header := r.Header.Get("Authorization")
-	if strings.HasPrefix(header, prefix) {
-		got := strings.TrimSpace(strings.TrimPrefix(header, prefix))
+	if token, ok := strings.CutPrefix(header, prefix); ok {
+		got := strings.TrimSpace(token)
 		if subtle.ConstantTimeCompare([]byte(got), []byte(s.cfg.token)) == 1 {
 			return true
 		}

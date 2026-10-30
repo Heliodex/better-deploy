@@ -269,7 +269,7 @@ func (l *appLog) tail(n int) ([]logEntry, error) {
 			if err != nil {
 				return nil, err
 			}
-			for _, line := range strings.Split(string(data), "\n") {
+			for line := range strings.SplitSeq(string(data), "\n") {
 				if line == "" {
 					continue
 				}
@@ -538,7 +538,7 @@ func (s *supervisor) handleLogStream(w http.ResponseWriter, r *http.Request, a *
 	}
 }
 
-func (s *supervisor) handleRestart(w http.ResponseWriter, r *http.Request, a *app) {
+func (s *supervisor) handleRestart(w http.ResponseWriter, _ *http.Request, a *app) {
 	s.deployMu.Lock()
 	defer s.deployMu.Unlock()
 	a.mu.Lock()

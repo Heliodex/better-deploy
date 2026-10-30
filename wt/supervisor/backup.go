@@ -104,7 +104,7 @@ type backupNode struct {
 type backupTree struct {
 	Current string `json:"current,omitempty"`
 	// Checked is the last time a snapshot was made or found unchanged. It keeps the scheduler from retrying an unchanged database every minute.
-	Checked time.Time             `json:"checked,omitempty"`
+	Checked time.Time             `json:"checked"`
 	Nodes   map[string]backupNode `json:"nodes"`
 }
 
