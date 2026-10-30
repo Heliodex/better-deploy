@@ -11,12 +11,14 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"mime/multipart"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -186,27 +188,15 @@ func bundle(dir string, m manifest) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	entries := []struct {
-		name string
-		data []byte
-	}{
-		{"app.json", append(appJSON, '\n')},
+	if err := writeTarFile(tw, "app.json", append(appJSON, '\n')); err != nil {
+		return nil, err
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "main.cwasm"))
 	if err != nil {
 		return nil, fmt.Errorf("read main.cwasm: %w (did the compile run?)", err)
 	}
-	entries = append(entries, struct {
-		name string
-		data []byte
-	}{"main.cwasm", data})
-	for _, entry := range entries {
-		if err := tw.WriteHeader(&tar.Header{Name: entry.name, Mode: 0o644, Size: int64(len(entry.data))}); err != nil {
-			return nil, fmt.Errorf("write %s: %w", entry.name, err)
-		}
-		if _, err := tw.Write(entry.data); err != nil {
-			return nil, fmt.Errorf("write %s: %w", entry.name, err)
-		}
+	if err := writeTarFile(tw, "main.cwasm", data); err != nil {
+		return nil, err
 	}
 	if err := tw.Close(); err != nil {
 		return nil, err
@@ -215,6 +205,16 @@ func bundle(dir string, m manifest) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+func writeTarFile(tw *tar.Writer, name string, data []byte) error {
+	if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(data))}); err != nil {
+		return fmt.Errorf("write %s: %w", name, err)
+	}
+	if _, err := tw.Write(data); err != nil {
+		return fmt.Errorf("write %s: %w", name, err)
+	}
+	return nil
 }
 
 func baseURL(host string) string {
@@ -550,16 +550,7 @@ func runDev(args []string) error {
 		skipBuild:   cfg.skipBuild,
 		skipCompile: cfg.skipCompile,
 	}
-	if dcfg.appHost != "" {
-		m.Host = dcfg.appHost
-	}
-	if err := runBuild(dcfg, m); err != nil {
-		return err
-	}
-	if err := runCompile(dcfg); err != nil {
-		return err
-	}
-	data, err := bundle(cfg.dir, m)
+	m, data, err := buildBundle(dcfg)
 	if err != nil {
 		return err
 	}
@@ -595,10 +586,7 @@ func devEnv(appsDir, stateDir, addr, wasmtime, target string) []string {
 		}
 		out = append(out, entry)
 	}
-	for _, key := range []string{
-		"WT_APPS_DIR", "WT_STATE_DIR", "WT_LISTEN", "WT_WASMTIME",
-		"WT_WASMTIME_TARGET", "WT_TOKEN", "WT_TLS_CERT", "WT_TLS_KEY",
-	} {
+	for _, key := range slices.Sorted(maps.Keys(values)) {
 		out = append(out, key+"="+values[key])
 	}
 	return out
