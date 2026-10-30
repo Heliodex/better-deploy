@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -15,6 +16,24 @@ import (
 	"testing"
 	"time"
 )
+
+// TestMain doubles as a fake wasmtime: tests launch the test binary itself, and it serves health checks instead of running tests.
+func TestMain(m *testing.M) {
+	for i, arg := range os.Args {
+		if arg != "--addr" || i+1 >= len(os.Args) {
+			continue
+		}
+		err := http.ListenAndServe(os.Args[i+1], http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+	os.Exit(m.Run())
+}
 
 func writeTarGz(t *testing.T, entries map[string]string) string {
 	t.Helper()
@@ -289,5 +308,45 @@ func TestWaitReadyRequiresSuccessStatus(t *testing.T) {
 	}
 	if got := calls.Load(); got < 2 {
 		t.Errorf("waitReady accepted the 500 after %d call(s)", got)
+	}
+}
+
+func TestHandleRestartRestartsSchedule(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "main.cwasm"), []byte("cwasm"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	port, err := freePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := testSupervisor()
+	s.cfg.wasmtime = os.Args[0]
+	s.cfg.stateDir = t.TempDir()
+	a, err := s.spawn("demo", dir, appConfig{
+		Health: "/",
+		Host:   "demo.localhost",
+		Name:   "demo",
+		Schedule: []scheduleConfig{
+			{Path: "/tick", Every: "1s"},
+		},
+	}, port)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.stop(a)
+	s.register(a)
+	if a.scheduleCancel == nil {
+		t.Fatal("spawn should start the schedule")
+	}
+
+	rec := httptest.NewRecorder()
+	s.handleRestart(rec, httptest.NewRequest(http.MethodPost, "/apps/demo/restart", nil), a)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("restart status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if a.scheduleCancel == nil {
+		t.Error("handleRestart did not restart the schedule")
 	}
 }

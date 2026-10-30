@@ -190,6 +190,7 @@ func (s *supervisor) handleRestart(w http.ResponseWriter, _ *http.Request, a *ap
 		writeError(w, http.StatusBadGateway, "app did not restart: "+err.Error())
 		return
 	}
+	s.startSchedule(a)
 	a.sampleResources(time.Now())
 	writeJSON(w, http.StatusOK, s.info(a))
 }
