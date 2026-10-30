@@ -1,5 +1,6 @@
 <script lang="ts">
 import { onMount } from "svelte"
+import AllAppsOverview from "../lib/AllAppsOverview.svelte"
 import {
 	type AppInfo,
 	type BackupInfo,
@@ -1589,71 +1590,7 @@ onMount((): (() => void) => {
 						</p>
 					</div>
 				{:else}
-					<div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
-						<section
-							aria-labelledby="overview-title"
-							class="flex flex-col gap-2 border border-line-soft bg-surface p-2"
-						>
-							<div class="flex items-center justify-between gap-2">
-								<h2
-									class="text-xs font-semibold tracking-wide text-neutral-400 uppercase"
-									id="overview-title"
-								>
-									All apps
-								</h2>
-								<select
-									aria-label="All apps timespan"
-									class="field px-1 py-0 text-xs"
-									bind:value={overviewSpan}
-								>
-									{#each spans as option (option.seconds)}
-										<option value={option.seconds}>{option.label}</option>
-									{/each}
-								</select>
-							</div>
-							<div class="flex flex-col gap-4">
-								<StackedResourceChart
-									format={formatCPU}
-									label="CPU"
-									series={overviewSeries}
-									span={overviewSpan}
-									unit={1}
-									value={(sample: ResourceSample) => sample.cpuPercent}
-								/>
-								<StackedResourceChart
-									format={formatMemory}
-									label="Memory"
-									series={overviewSeries}
-									span={overviewSpan}
-									unit={1024 * 1024}
-									value={(sample: ResourceSample) => sample.memoryBytes}
-								/>
-							</div>
-							<ul class="flex flex-col gap-1">
-								<li
-									aria-hidden="true"
-									class="flex items-center gap-2 text-[10px] tracking-wide text-neutral-600 uppercase"
-								>
-									<span class="size-2 shrink-0"></span>
-									<span class="flex-1"></span>
-									<span class="w-14 shrink-0 text-right">cpu</span>
-									<span class="w-16 shrink-0 text-right">memory</span>
-								</li>
-								{#each legendApps as item (item.name)}
-									<li class="flex items-center gap-2 text-xs">
-										<span aria-hidden="true" class="size-2 shrink-0 {item.color.dot}"></span>
-										<span class="flex-1 truncate text-neutral-300">{item.name}</span>
-										<span class="w-14 shrink-0 text-right text-neutral-400 tabular-nums"
-											>{formatCPU(item.cpu)}</span
-										>
-										<span class="w-16 shrink-0 text-right text-neutral-400 tabular-nums"
-											>{formatMemory(item.memory)}</span
-										>
-									</li>
-								{/each}
-							</ul>
-						</section>
-					</div>
+					<AllAppsOverview legend={legendApps} series={overviewSeries} bind:span={overviewSpan} />
 				{/if}
 			</main>
 
