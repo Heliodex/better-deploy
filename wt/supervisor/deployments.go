@@ -143,10 +143,8 @@ func (m *deploymentManager) storeBlob(app, source string) (string, int64, error)
 	if existing, err := os.Stat(blob); err == nil && existing.Size() == info.Size() {
 		return digest, info.Size(), nil
 	}
-	if err := os.Link(source, blob); err == nil {
-		return digest, info.Size(), nil
-	}
 
+	// Copy rather than hardlink the source: a later in-place write to the live app must not mutate retained history.
 	temp, err := os.CreateTemp(m.blobDir(app), ".blob-")
 	if err != nil {
 		return "", 0, err
@@ -565,20 +563,23 @@ func (s *supervisor) handleRollback(w http.ResponseWriter, r *http.Request, name
 		writeError(w, http.StatusConflict, fmt.Sprintf("host %q is already used by another app", cfg.Host))
 		return
 	}
-	next := s.installBundle(w, name, cfg, dir, "rolled back")
-	if next == nil {
-		return
-	}
-	s.recordDeployment(name, next.dir)
-	// ?backup=<snapshot> also restores that snapshot's database and /data, so code and data come back together.
+	// ?backup=<snapshot> swaps code, database and /data as one operation, with compensation on failure.
 	if backup := r.URL.Query().Get("backup"); backup != "" {
 		if s.backups == nil {
 			writeError(w, http.StatusServiceUnavailable, "backups unavailable")
 			return
 		}
-		if !s.restoreBackupLocked(w, r.Context(), name, backup) {
+		next := s.rollbackAtomic(w, r.Context(), name, dir, cfg, backup)
+		if next == nil {
 			return
 		}
+		writeJSON(w, http.StatusOK, s.info(next))
+		return
 	}
+	next := s.installBundle(w, name, cfg, dir, "rolled back")
+	if next == nil {
+		return
+	}
+	s.recordDeployment(name, next.dir)
 	writeJSON(w, http.StatusOK, s.info(next))
 }

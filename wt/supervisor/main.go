@@ -663,6 +663,9 @@ func main() {
 		apps:        map[string]*app{},
 		hosts:       map[string]*app{},
 	}
+	if err := recoverRollbacks(cfg.stateDir, s.backups); err != nil {
+		log.Fatalf("rollback recovery: %v", err)
+	}
 	if err := s.loadApps(); err != nil {
 		log.Fatalf("load apps: %v", err)
 	}

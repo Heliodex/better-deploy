@@ -443,10 +443,20 @@ func (m *backupManager) removeSnapshot(app, name string) error {
 }
 
 // stageData extracts a snapshot's /data archive into a temporary directory. It returns false when the snapshot predates data archives.
+// stageData extracts a snapshot's /data archive. Database snapshots keep their online-backup path in restore.
 func (m *backupManager) stageData(app, name string) (string, bool, error) {
-	name, err := validBackupName(name)
+	dataDir, hasData, dbFile, err := m.stageSnapshot(app, name, false)
+	if dbFile != "" {
+		_ = os.Remove(dbFile)
+	}
+	return dataDir, hasData, err
+}
+
+// stageSnapshot extracts /data and, when withDB is set, copies the snapshot database to a temporary file. Both are staged under dataDir so the caller can swap them into place.
+func (m *backupManager) stageSnapshot(app, name string, withDB bool) (dataDir string, hasData bool, dbFile string, err error) {
+	name, err = validBackupName(name)
 	if err != nil {
-		return "", false, err
+		return "", false, "", err
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -454,36 +464,75 @@ func (m *backupManager) stageData(app, name string) (string, bool, error) {
 	hasDatabase := false
 	if info, err := os.Stat(database); err == nil && info.Mode().IsRegular() {
 		if err := checkBackupDatabase(database); err != nil {
-			return "", false, fmt.Errorf("backup is not a valid database: %w", err)
+			return "", false, "", fmt.Errorf("backup is not a valid database: %w", err)
 		}
 		hasDatabase = true
 	} else if err != nil && !os.IsNotExist(err) {
-		return "", false, err
+		return "", false, "", err
 	}
 	archive := m.dataPath(app, name)
-	if info, err := os.Stat(archive); err != nil {
-		if os.IsNotExist(err) {
-			if !hasDatabase {
-				return "", false, errBackupNotFound
-			}
-			return "", false, nil
-		}
-		return "", false, err
-	} else if !info.Mode().IsRegular() {
-		return "", false, errBackupNotFound
+	hasData = false
+	if info, err := os.Stat(archive); err == nil && info.Mode().IsRegular() {
+		hasData = true
+	} else if err != nil && !os.IsNotExist(err) {
+		return "", false, "", err
+	}
+	if !hasDatabase && !hasData {
+		return "", false, "", errBackupNotFound
 	}
 	if err := os.MkdirAll(m.dataDir, 0o755); err != nil {
-		return "", true, err
+		return "", hasData, "", err
 	}
-	temp, err := os.MkdirTemp(m.dataDir, "."+app+".restore-")
+	if hasData {
+		dataDir, err = os.MkdirTemp(m.dataDir, "."+app+".restore-")
+		if err != nil {
+			return "", true, "", err
+		}
+		if err := extractTarGzLimited(archive, dataDir, maxBackupExtractBytes, maxBackupTarFiles); err != nil {
+			_ = os.RemoveAll(dataDir)
+			return "", true, "", err
+		}
+	}
+	if withDB && hasDatabase {
+		temp, err := os.CreateTemp(m.dataDir, "."+app+".db-*")
+		if err != nil {
+			_ = os.RemoveAll(dataDir)
+			return "", hasData, "", err
+		}
+		dbFile = temp.Name()
+		if err := temp.Close(); err != nil {
+			_ = os.Remove(dbFile)
+			_ = os.RemoveAll(dataDir)
+			return "", hasData, "", err
+		}
+		if err := copyFile(database, dbFile); err != nil {
+			_ = os.Remove(dbFile)
+			_ = os.RemoveAll(dataDir)
+			return "", hasData, "", err
+		}
+	}
+	return dataDir, hasData, dbFile, nil
+}
+
+// markCurrent makes a snapshot the branch future automatic snapshots continue from.
+func (m *backupManager) markCurrent(app, name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.markCurrentLocked(app, name)
+}
+
+// markCurrentLocked is markCurrent for callers already holding the backup lock.
+func (m *backupManager) markCurrentLocked(app, name string) error {
+	state, err := m.stateLocked(app)
 	if err != nil {
-		return "", true, err
+		return err
 	}
-	if err := extractTarGzLimited(archive, temp, maxBackupExtractBytes, maxBackupTarFiles); err != nil {
-		_ = os.RemoveAll(temp)
-		return "", true, err
+	tree := state.Tree
+	if _, ok := tree.Nodes[name]; !ok {
+		tree.Nodes[name] = backupNode{Parent: tree.Current, Kind: backupKindLegacy}
 	}
-	return temp, true, nil
+	tree.Current = name
+	return m.saveTreeLocked(app, tree)
 }
 
 // installData replaces an app's /data directory with a staged snapshot.

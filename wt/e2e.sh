@@ -104,10 +104,11 @@ printf changed >"$state/hello/data.txt"
 api -X POST "http://127.0.0.1:$port/apps/hello/backups/$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "$snapshot")/restore" >/dev/null
 grep -q keep "$state/hello/data.txt"
 
-echo "e2e: rolling back the retained deployment"
+echo "e2e: rolling back code and data together"
+printf changed-again >"$state/hello/data.txt"
 deployments=$(api "http://127.0.0.1:$port/apps/hello/deployments")
 deployment=$(printf '%s' "$deployments" | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["id"])')
-api -X POST "http://127.0.0.1:$port/apps/hello/rollback/$deployment" >/dev/null
+api -X POST "http://127.0.0.1:$port/apps/hello/rollback/$deployment?backup=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "$snapshot")" >/dev/null
 curl -fsS -H "Host: hello.localhost" "http://127.0.0.1:$port/" | grep -q "hello from wt"
 grep -q keep "$state/hello/data.txt"
 
