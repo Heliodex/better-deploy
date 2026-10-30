@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -49,8 +48,8 @@ func (s *supervisor) startStopped(a *app) error {
 	dir := a.dir
 	a.mu.Unlock()
 	cwasm := filepath.Join(dir, "main.cwasm")
-	if _, err := os.Stat(cwasm); err != nil {
-		return fmt.Errorf("%w: %v", errNoComponent, err)
+	if err := s.ensureArtifact(dir); err != nil {
+		return err
 	}
 	s.stopSchedule(a)
 	a.mu.Lock()

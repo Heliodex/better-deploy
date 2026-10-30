@@ -37,6 +37,15 @@ type schedule struct {
 	Every  string `json:"every"`
 }
 
+const artifactName = "artifact.json"
+
+// artifact records how main.cwasm was produced so the supervisor can rebuild it after a wasmtime upgrade.
+type artifact struct {
+	Wasmtime   string    `json:"wasmtime,omitempty"`
+	Target     string    `json:"target,omitempty"`
+	CompiledAt time.Time `json:"compiled_at,omitempty"`
+}
+
 const (
 	minScheduleInterval = time.Second
 	maxScheduleInterval = 24 * time.Hour
@@ -150,6 +159,35 @@ func runBuild(cfg *deployConfig, m manifest) error {
 	return nil
 }
 
+func wasmtimeVersion(bin string) (string, error) {
+	out, err := exec.Command(bin, "--version").Output()
+	if err != nil {
+		return "", fmt.Errorf("wasmtime --version: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// writeArtifact records the compiler version and target beside the bundle so the supervisor can detect a stale cwasm.
+func writeArtifact(cfg *deployConfig) error {
+	path := filepath.Join(cfg.dir, artifactName)
+	if cfg.skipCompile {
+		if _, err := os.Stat(path); err == nil {
+			return nil
+		}
+	}
+	version, err := wasmtimeVersion(cfg.wasmtime)
+	if err != nil {
+		// Without a version the supervisor can still rebuild main.wasm on a runtime that has a compiler.
+		fmt.Fprintf(os.Stderr, "warning: %v; not writing %s\n", err, artifactName)
+		return nil
+	}
+	data, err := json.Marshal(artifact{Wasmtime: version, Target: cfg.target, CompiledAt: time.Now().UTC()})
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(data, '\n'), 0o644)
+}
+
 func runCompile(cfg *deployConfig) error {
 	wasm := filepath.Join(cfg.dir, "main.wasm")
 	if _, err := os.Stat(wasm); err != nil {
@@ -159,7 +197,7 @@ func runCompile(cfg *deployConfig) error {
 		if _, err := os.Stat(filepath.Join(cfg.dir, "main.cwasm")); err != nil {
 			return fmt.Errorf("--skip-compile but no main.cwasm: %w", err)
 		}
-		return nil
+		return writeArtifact(cfg)
 	}
 	cwasm := filepath.Join(cfg.dir, "main.cwasm")
 	cmd := exec.Command(cfg.wasmtime, "compile", "--target", cfg.target, "-W", "component-model-async=y", wasm, "-o", cwasm)
@@ -168,7 +206,7 @@ func runCompile(cfg *deployConfig) error {
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("wasmtime compile: %w", err)
 	}
-	return nil
+	return writeArtifact(cfg)
 }
 
 func writeTarFile(tw *tar.Writer, name string, data []byte) error {
@@ -199,6 +237,19 @@ func bundle(dir string, m manifest) ([]byte, error) {
 	}
 	if err := writeTarFile(tw, "main.cwasm", data); err != nil {
 		return nil, err
+	}
+	// main.wasm lets a supervisor with a compiler rebuild the artifact after a runtime upgrade.
+	for _, name := range []string{"main.wasm", artifactName} {
+		extra, err := os.ReadFile(filepath.Join(dir, name))
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", name, err)
+		}
+		if err := writeTarFile(tw, name, extra); err != nil {
+			return nil, err
+		}
 	}
 	if err := tw.Close(); err != nil {
 		return nil, err

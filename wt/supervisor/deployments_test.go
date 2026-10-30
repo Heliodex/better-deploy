@@ -23,6 +23,14 @@ func writeDeploymentSource(t *testing.T, host string) string {
 func TestDeploymentHistoryRecordListAndPrune(t *testing.T) {
 	manager := newDeploymentManager(t.TempDir())
 	source := writeDeploymentSource(t, "demo.localhost")
+	for name, body := range map[string]string{
+		"main.wasm":     "wasm",
+		"artifact.json": `{"wasmtime":"wasmtime-cli 50.0.0","target":"x86_64-test"}`,
+	} {
+		if err := os.WriteFile(filepath.Join(source, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	var recorded deploymentInfo
 	for range deploymentKeep + 2 {
 		info, err := manager.record("demo", source)
@@ -51,10 +59,13 @@ func TestDeploymentHistoryRecordListAndPrune(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"app.json", "main.cwasm", deploymentMetaName} {
+	for _, name := range []string{"app.json", "main.cwasm", "main.wasm", "artifact.json", deploymentMetaName} {
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
 			t.Errorf("%s: %v", name, err)
 		}
+	}
+	if !recorded.Rebuildable || recorded.Runtime != "wasmtime-cli 50.0.0" || recorded.Target != "x86_64-test" {
+		t.Errorf("recorded = %+v, want a rebuildable bundle with its artifact metadata", recorded)
 	}
 	if _, err := manager.bundle("demo", "nope"); err == nil {
 		t.Error("invalid deployment id was accepted")

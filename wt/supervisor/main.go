@@ -1,6 +1,6 @@
 // Command wt-supervisor runs WASI HTTP components with wasmtime and routes requests by host.
 //
-// Each app lives in its own directory under WT_APPS_DIR with an app.json and a precompiled main.cwasm. The supervisor starts one `wasmtime serve` process per app on a loopback port, proxies by Host, and deploys new bundles blue/green.
+// Each app lives in its own directory under WT_APPS_DIR with an app.json and a precompiled main.cwasm, plus main.wasm and artifact.json so an upgraded runtime can rebuild it. The supervisor starts one `wasmtime serve` process per app on a loopback port, proxies by Host, and deploys new bundles blue/green.
 package main
 
 import (
@@ -40,7 +40,8 @@ const (
 
 type config struct {
 	appsDir, stateDir, listen, storageListen, domain string
-	wasmtime, wasmtimeTarget, token, tlsCert, tlsKey string
+	wasmtime, wasmtimeCompiler, wasmtimeTarget       string
+	token, tlsCert, tlsKey                           string
 }
 
 type appConfig struct {
@@ -99,6 +100,9 @@ type supervisor struct {
 
 	deployMu sync.Mutex
 	stopping atomic.Bool
+
+	versionOnce sync.Once
+	version     string
 }
 
 func env(key, fallback string) string {
@@ -110,16 +114,17 @@ func env(key, fallback string) string {
 
 func configFromEnv() config {
 	return config{
-		appsDir:        env("WT_APPS_DIR", "./apps"),
-		stateDir:       env("WT_STATE_DIR", "./state"),
-		listen:         env("WT_LISTEN", "127.0.0.1:8080"),
-		storageListen:  env("WT_STORAGE_LISTEN", "127.0.0.1:0"),
-		domain:         env("WT_APPS_DOMAIN", "localhost"),
-		wasmtime:       env("WT_WASMTIME", "wasmtime"),
-		wasmtimeTarget: env("WT_WASMTIME_TARGET", "x86_64-unknown-linux-musl"),
-		token:          os.Getenv("WT_TOKEN"),
-		tlsCert:        os.Getenv("WT_TLS_CERT"),
-		tlsKey:         os.Getenv("WT_TLS_KEY"),
+		appsDir:          env("WT_APPS_DIR", "./apps"),
+		stateDir:         env("WT_STATE_DIR", "./state"),
+		listen:           env("WT_LISTEN", "127.0.0.1:8080"),
+		storageListen:    env("WT_STORAGE_LISTEN", "127.0.0.1:0"),
+		domain:           env("WT_APPS_DOMAIN", "localhost"),
+		wasmtime:         env("WT_WASMTIME", "wasmtime"),
+		wasmtimeCompiler: env("WT_WASMTIME_COMPILER", env("WT_WASMTIME", "wasmtime")),
+		wasmtimeTarget:   env("WT_WASMTIME_TARGET", "x86_64-unknown-linux-musl"),
+		token:            os.Getenv("WT_TOKEN"),
+		tlsCert:          os.Getenv("WT_TLS_CERT"),
+		tlsKey:           os.Getenv("WT_TLS_KEY"),
 	}
 }
 
@@ -564,6 +569,7 @@ func main() {
 	flag.StringVar(&cfg.stateDir, "state", cfg.stateDir, "per-app state directory")
 	flag.StringVar(&cfg.domain, "domain", cfg.domain, "default app host suffix")
 	flag.StringVar(&cfg.wasmtime, "wasmtime", cfg.wasmtime, "wasmtime binary")
+	flag.StringVar(&cfg.wasmtimeCompiler, "wasmtime-compiler", cfg.wasmtimeCompiler, "wasmtime binary with the compile subcommand, used to rebuild stale artifacts")
 	flag.StringVar(&cfg.wasmtimeTarget, "wasmtime-target", cfg.wasmtimeTarget, "wasmtime target triple (must match the compiler)")
 	flag.StringVar(&cfg.token, "token", cfg.token, "deploy bearer token (required off loopback)")
 	flag.StringVar(&cfg.tlsCert, "tls-cert", cfg.tlsCert, "TLS certificate (with --tls-key)")

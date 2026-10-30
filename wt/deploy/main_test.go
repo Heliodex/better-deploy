@@ -14,9 +14,10 @@ import (
 func TestBundle(t *testing.T) {
 	dir := t.TempDir()
 	for name, body := range map[string]string{
-		"app.json":   `{"name":"hello"}`,
-		"main.cwasm": "cwasm",
-		"main.wasm":  "wasm",
+		"app.json":      `{"name":"hello"}`,
+		"main.cwasm":    "cwasm",
+		"main.wasm":     "wasm",
+		"artifact.json": `{"wasmtime":"wasmtime-cli 50.0.0","target":"x86_64-unknown-linux-musl"}`,
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
@@ -49,20 +50,24 @@ func TestBundle(t *testing.T) {
 		}
 		entries[header.Name] = string(body)
 	}
-	if len(entries) != 2 {
-		t.Errorf("entries = %v, want only app.json and main.cwasm", entries)
+	if len(entries) != 4 {
+		t.Errorf("entries = %v, want app.json, main.cwasm, main.wasm and artifact.json", entries)
 	}
-	if !strings.Contains(entries["app.json"], `"name": "hello"`) || entries["main.cwasm"] != "cwasm" {
+	if !strings.Contains(entries["app.json"], `"name": "hello"`) || entries["main.cwasm"] != "cwasm" || entries["main.wasm"] != "wasm" {
 		t.Errorf("entries = %v", entries)
+	}
+	if !strings.Contains(entries["artifact.json"], "wasmtime-cli 50.0.0") {
+		t.Errorf("artifact.json = %q", entries["artifact.json"])
 	}
 }
 
 func TestRunBundle(t *testing.T) {
 	dir := t.TempDir()
 	for name, body := range map[string]string{
-		"app.json":   `{"name":"hello"}`,
-		"main.wasm":  "wasm",
-		"main.cwasm": "cwasm",
+		"app.json":      `{"name":"hello"}`,
+		"main.wasm":     "wasm",
+		"main.cwasm":    "cwasm",
+		"artifact.json": `{"wasmtime":"wasmtime-cli 50.0.0","target":"x86_64-unknown-linux-musl"}`,
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
@@ -93,8 +98,13 @@ func TestRunBundle(t *testing.T) {
 		}
 		names[header.Name] = true
 	}
-	if !names["app.json"] || !names["main.cwasm"] || len(names) != 2 {
-		t.Errorf("bundle entries = %v", names)
+	for _, name := range []string{"app.json", "main.cwasm", "main.wasm", "artifact.json"} {
+		if !names[name] {
+			t.Errorf("bundle entries = %v, missing %s", names, name)
+		}
+	}
+	if len(names) != 4 {
+		t.Errorf("bundle entries = %v, want 4", names)
 	}
 }
 

@@ -169,7 +169,7 @@ func (s *supervisor) restart(a *app) {
 	a.mu.Unlock()
 
 	cwasm := filepath.Join(dir, "main.cwasm")
-	if _, err := os.Stat(cwasm); err != nil {
+	if err := s.ensureArtifact(dir); err != nil {
 		log.Printf("app %s: restart: %v", a.name, err)
 		s.scheduleRetry(a)
 		return
@@ -261,8 +261,8 @@ func (s *supervisor) spawn(name, dir string, cfg appConfig, port int) (*app, err
 	}
 
 	cwasm := filepath.Join(dir, "main.cwasm")
-	if _, err := os.Stat(cwasm); err != nil {
-		return nil, fmt.Errorf("read main.cwasm: %w", err)
+	if err := s.ensureArtifact(dir); err != nil {
+		return nil, err
 	}
 	logs, err := newAppLog(filepath.Join(s.cfg.stateDir, ".logs", name))
 	if err != nil {

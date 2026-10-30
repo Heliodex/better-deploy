@@ -25,10 +25,13 @@ var errDeploymentNotFound = errors.New("deployment not found")
 
 // deploymentInfo describes one retained bundle.
 type deploymentInfo struct {
-	ID         string    `json:"id"`
-	DeployedAt time.Time `json:"deployedAt"`
-	Digest     string    `json:"digest"`
-	Size       int64     `json:"size"`
+	ID          string    `json:"id"`
+	DeployedAt  time.Time `json:"deployedAt"`
+	Digest      string    `json:"digest"`
+	Size        int64     `json:"size"`
+	Runtime     string    `json:"runtime,omitempty"`
+	Target      string    `json:"target,omitempty"`
+	Rebuildable bool      `json:"rebuildable"`
 }
 
 // deploymentManager keeps a bounded history of app bundles under the state directory.
@@ -100,12 +103,15 @@ func (m *deploymentManager) bundle(app, id string) (string, error) {
 		return "", err
 	}
 	dir := filepath.Join(m.appDir(app), id)
-	for _, name := range []string{"app.json", "main.cwasm"} {
-		if info, err := os.Stat(filepath.Join(dir, name)); err != nil || !info.Mode().IsRegular() {
-			return "", errDeploymentNotFound
+	if info, err := os.Stat(filepath.Join(dir, "app.json")); err != nil || !info.Mode().IsRegular() {
+		return "", errDeploymentNotFound
+	}
+	for _, name := range []string{"main.cwasm", "main.wasm"} {
+		if info, err := os.Stat(filepath.Join(dir, name)); err == nil && info.Mode().IsRegular() {
+			return dir, nil
 		}
 	}
-	return dir, nil
+	return "", errDeploymentNotFound
 }
 
 func (m *deploymentManager) prune(app string) error {
@@ -140,10 +146,24 @@ func copyFile(src, dst string) error {
 	return closeErr
 }
 
+// copyOptional copies a file when it exists, leaving legacy bundles without main.wasm or artifact.json valid.
+func copyOptional(src, dst, name string) error {
+	if err := copyFile(filepath.Join(src, name), filepath.Join(dst, name)); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("copy %s: %w", name, err)
+	}
+	return nil
+}
+
 func copyBundle(src, dst string) error {
-	for _, name := range []string{"app.json", "main.cwasm"} {
-		if err := copyFile(filepath.Join(src, name), filepath.Join(dst, name)); err != nil {
-			return fmt.Errorf("copy %s: %w", name, err)
+	if err := copyFile(filepath.Join(src, "app.json"), filepath.Join(dst, "app.json")); err != nil {
+		return fmt.Errorf("copy app.json: %w", err)
+	}
+	for _, name := range []string{"main.cwasm", "main.wasm", artifactName} {
+		if err := copyOptional(src, dst, name); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -179,22 +199,39 @@ func (m *deploymentManager) record(app, source string) (deploymentInfo, error) {
 	}
 	defer os.RemoveAll(temp)
 
+	artifact, _ := readArtifact(source)
 	cwasm := filepath.Join(source, "main.cwasm")
 	info, err := os.Stat(cwasm)
+	rebuildable := false
+	if _, err := os.Stat(filepath.Join(source, "main.wasm")); err == nil {
+		rebuildable = true
+		if info == nil {
+			info, err = os.Stat(filepath.Join(source, "main.wasm"))
+		}
+	}
 	if err != nil {
 		return deploymentInfo{}, fmt.Errorf("read main.cwasm: %w", err)
 	}
 	digest, err := fileDigest(cwasm)
+	if os.IsNotExist(err) {
+		digest, err = fileDigest(filepath.Join(source, "main.wasm"))
+	}
 	if err != nil {
 		return deploymentInfo{}, err
 	}
-	if err := copyFile(cwasm, filepath.Join(temp, "main.cwasm")); err != nil {
+	if err := copyBundle(source, temp); err != nil {
 		return deploymentInfo{}, err
 	}
-	if err := copyFile(filepath.Join(source, "app.json"), filepath.Join(temp, "app.json")); err != nil {
-		return deploymentInfo{}, err
+	recorded := deploymentInfo{
+		ID:          id,
+		DeployedAt:  now,
+		Digest:      digest,
+		Size:        info.Size(),
+		Runtime:     artifact.Wasmtime,
+		Target:      artifact.Target,
+		Rebuildable: rebuildable,
 	}
-	meta, err := json.Marshal(deploymentInfo{ID: id, DeployedAt: now, Digest: digest, Size: info.Size()})
+	meta, err := json.Marshal(recorded)
 	if err != nil {
 		return deploymentInfo{}, err
 	}
@@ -207,7 +244,7 @@ func (m *deploymentManager) record(app, source string) (deploymentInfo, error) {
 	if err := m.prune(app); err != nil {
 		log.Printf("deploy history %s: prune: %v", app, err)
 	}
-	return deploymentInfo{ID: id, DeployedAt: now, Digest: digest, Size: info.Size()}, nil
+	return recorded, nil
 }
 
 func (s *supervisor) recordDeployment(name, dir string) {

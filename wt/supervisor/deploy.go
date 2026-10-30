@@ -202,8 +202,10 @@ func (s *supervisor) receiveBundle(w http.ResponseWriter, r *http.Request, name 
 		return "", appConfig{}, cleanup, false
 	}
 	if _, err := os.Stat(filepath.Join(dir, "main.cwasm")); err != nil {
-		writeError(w, http.StatusBadRequest, "archive must contain main.cwasm")
-		return "", appConfig{}, cleanup, false
+		if _, wasmErr := os.Stat(filepath.Join(dir, "main.wasm")); wasmErr != nil {
+			writeError(w, http.StatusBadRequest, "archive must contain main.cwasm or main.wasm")
+			return "", appConfig{}, cleanup, false
+		}
 	}
 
 	cfg, err = readAppConfig(dir, name, s.cfg.domain)
