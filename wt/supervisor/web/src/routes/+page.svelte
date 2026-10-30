@@ -23,7 +23,6 @@ import {
 	getToken,
 	type LogEntry,
 	type LogLevel,
-	logLevels,
 	type ResourceSample,
 	restartApp,
 	restoreBackup,
@@ -40,6 +39,7 @@ import DatabaseTab from "../lib/DatabaseTab.svelte"
 import DeploymentsTab from "../lib/DeploymentsTab.svelte"
 import { formatTime, uptime } from "../lib/format"
 import LogsPane from "../lib/LogsPane.svelte"
+import { levelIndex } from "../lib/log-format"
 import OverviewTab from "../lib/OverviewTab.svelte"
 import { type Tab, tabs } from "../lib/tabs"
 
@@ -67,6 +67,7 @@ let tablistEl = $state<HTMLDivElement | null>(null)
 let detail = $state<AppInfo | null>(null)
 let logs = $state<LogEntry[]>([])
 let logsOpen = $state(true)
+let logQuery = $state("")
 let tail = $state(200)
 let error = $state("")
 let loading = $state(true)
@@ -190,6 +191,7 @@ function select(name: string | null): void {
 	selected = name
 	detail = null
 	logs = []
+	logQuery = ""
 	resourceHistory = []
 	error = ""
 	actionMessage = ""
@@ -753,8 +755,15 @@ async function upload(event: SubmitEvent): Promise<void> {
 	}
 }
 
-/** Lines at or above the selected severity, in the same order as the stream. */
-const filteredLogs = $derived(logs.filter(entry => logLevels.indexOf(entry.level) >= logLevels.indexOf(minLevel)))
+/** Lines at or above the selected severity and matching the text filter, in stream order. */
+const filteredLogs = $derived.by(() => {
+	const needle = logQuery.trim().toLowerCase()
+	return logs.filter(
+		entry =>
+			levelIndex(entry.level) >= levelIndex(minLevel)
+			&& (needle === "" || entry.message.toLowerCase().includes(needle)),
+	)
+})
 
 /** One stacked series per known app, so the overview charts share colours and depth. */
 const overviewSeries = $derived(
@@ -1039,6 +1048,7 @@ onMount((): (() => void) => {
 					{tail}
 					total={logs.length}
 					bind:pane={logPane}
+					bind:query={logQuery}
 				/>
 			{/if}
 		</div>
