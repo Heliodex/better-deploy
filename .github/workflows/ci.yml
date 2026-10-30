@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: wt/supervisor/go.mod
+          cache-dependency-path: |
+            wt/supervisor/go.sum
+            wt/deploy/go.sum
+            wt/example/go.sum
+            wt/packages/go.sum
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - name: Generate WASI bindings
+        working-directory: wt/packages
+        run: ./generate.sh
+
+      - name: Build embedded admin panel
+        working-directory: wt/supervisor
+        run: go generate ./...
+
+      - name: Test supervisor
+        working-directory: wt/supervisor
+        run: go test -race ./...
+
+      - name: Test deploy tool
+        working-directory: wt/deploy
+        run: go test ./...
+
+      - name: Test shared packages
+        working-directory: wt/packages
+        run: go test ./app/... ./storage/...
+
+      - name: Vet host packages
+        run: |
+          (cd wt/supervisor && go vet ./...)
+          (cd wt/deploy && go vet ./...)
+
+      - name: Vet component packages
+        env:
+          GOOS: wasip1
+          GOARCH: wasm
+        run: |
+          (cd wt/packages && go vet ./app/... ./storage/... ./wasihttp/...)
+          (cd wt/example && go vet ./...)
+
+      - name: Check admin frontend
+        working-directory: wt/supervisor/web
+        run: bun run svelte:check
+
+      - name: Check guestbook frontend
+        working-directory: wt/example/guestbook/web
+        run: |
+          bun install --frozen-lockfile
+          bun run svelte:check
+          bun run build
+
+      - name: Check scaffold frontend
+        working-directory: wt/deploy/testdata/template/web
+        run: |
+          bun install --frozen-lockfile
+          bun run svelte:check
+          bun run build
