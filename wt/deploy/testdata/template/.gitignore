@@ -1,4 +1,4 @@
-static/
+/static/
 web/build/
 web/.svelte-kit/
 web/node_modules/
