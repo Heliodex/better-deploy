@@ -176,20 +176,8 @@ func parseScheduleInterval(entry scheduleConfig) (time.Duration, error) {
 	return every, nil
 }
 
-func readAppConfig(dir, name, domain string) (appConfig, error) {
-	cfg := appConfig{Name: name, Env: map[string]string{}}
-
-	data, err := os.ReadFile(filepath.Join(dir, "app.json"))
-	switch {
-	case err == nil:
-		if err := json.Unmarshal(data, &cfg); err != nil {
-			return cfg, fmt.Errorf("app.json: %w", err)
-		}
-	case os.IsNotExist(err):
-	default:
-		return cfg, fmt.Errorf("read app.json: %w", err)
-	}
-
+// normalizeAppConfig fills in defaults and validates an app's runtime config.
+func normalizeAppConfig(cfg appConfig, name, domain string) (appConfig, error) {
 	if strings.TrimSpace(cfg.Name) == "" {
 		cfg.Name = name
 	}
@@ -209,6 +197,14 @@ func readAppConfig(dir, name, domain string) (appConfig, error) {
 	if cfg.Env == nil {
 		cfg.Env = map[string]string{}
 	}
+	for key := range cfg.Env {
+		if key == "" || strings.ContainsAny(key, "=\x00") {
+			return cfg, fmt.Errorf("invalid env key %q", key)
+		}
+	}
+	if cfg.MemoryMB < 0 {
+		return cfg, fmt.Errorf("memory_mb must be 0 or more")
+	}
 	for i := range cfg.Schedule {
 		entry := &cfg.Schedule[i]
 		if !strings.HasPrefix(entry.Path, "/") {
@@ -219,6 +215,22 @@ func readAppConfig(dir, name, domain string) (appConfig, error) {
 		}
 	}
 	return cfg, nil
+}
+
+func readAppConfig(dir, name, domain string) (appConfig, error) {
+	cfg := appConfig{Name: name, Env: map[string]string{}}
+
+	data, err := os.ReadFile(filepath.Join(dir, "app.json"))
+	switch {
+	case err == nil:
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			return cfg, fmt.Errorf("app.json: %w", err)
+		}
+	case os.IsNotExist(err):
+	default:
+		return cfg, fmt.Errorf("read app.json: %w", err)
+	}
+	return normalizeAppConfig(cfg, name, domain)
 }
 
 func freePort() (int, error) {
@@ -341,8 +353,9 @@ func requireMethod(w http.ResponseWriter, r *http.Request, method string) bool {
 }
 
 func (s *supervisor) info(a *app) appInfo {
-	info := appInfo{Name: a.name, Host: a.cfg.Host, Port: a.port}
+	info := appInfo{Name: a.name, Port: a.port}
 	a.mu.Lock()
+	info.Host = a.cfg.Host
 	info.StartedAt = a.started
 	if a.cmd != nil && a.cmd.Process != nil && !a.exited {
 		info.Status = "running"
@@ -437,10 +450,24 @@ func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			s.deploy(w, r, name)
+		case http.MethodDelete:
+			s.handleDelete(w, r, name)
 		default:
-			w.Header().Set("Allow", "GET, POST")
+			w.Header().Set("Allow", "GET, POST, DELETE")
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
+	case "config":
+		s.handleAppConfig(w, r, name)
+	case "stop":
+		if !requireMethod(w, r, http.MethodPost) {
+			return
+		}
+		s.handleStop(w, r, name)
+	case "start":
+		if !requireMethod(w, r, http.MethodPost) {
+			return
+		}
+		s.handleStart(w, r, name)
 	case "logs/stream":
 		if !requireMethod(w, r, http.MethodGet) {
 			return

@@ -32,6 +32,7 @@ type appLog struct {
 	supervisorSize int64
 	pending        []byte
 	subs           map[chan logEntry]struct{}
+	closed         bool
 }
 
 func (l *appLog) subscribe() chan logEntry {
@@ -124,11 +125,32 @@ func newAppLog(dir string) (*appLog, error) {
 	return out, nil
 }
 
+// close stops writes and releases the app's log files. It is used when an app is deleted.
+func (l *appLog) close() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.closed {
+		return
+	}
+	l.closed = true
+	if l.file != nil {
+		_ = l.file.Close()
+		l.file = nil
+	}
+	if l.supervisorFile != nil {
+		_ = l.supervisorFile.Close()
+		l.supervisorFile = nil
+	}
+}
+
 // logSupervisor records a supervisor-side line for the app, such as a proxied request.
 // It streams and persists alongside the app's own output, marked so the two read apart.
 func (l *appLog) logSupervisor(message string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.closed {
+		return
+	}
 	stamp := time.Now().UTC().Format(logTimeFormat)
 	data := []byte(stamp + " INFO " + message + "\n")
 	if l.supervisorSize+int64(len(data)) > maxLogBytes {
@@ -166,6 +188,9 @@ func splitLevelPrefix(line string) (string, string) {
 
 // writeLine stamps one complete line of the app's own output and appends it, rotating past maxLogBytes.
 func (l *appLog) writeLine(line string) error {
+	if l.closed {
+		return nil
+	}
 	line = guestStderr.ReplaceAllString(line, "")
 	level, message := splitLevelPrefix(line)
 	stamp := time.Now().UTC().Format(logTimeFormat)
@@ -201,6 +226,9 @@ type logEntry struct {
 func (l *appLog) Write(p []byte) (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.closed {
+		return len(p), nil
+	}
 	l.pending = append(l.pending, p...)
 	for {
 		index := bytes.IndexByte(l.pending, '\n')

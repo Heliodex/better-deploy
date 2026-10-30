@@ -56,16 +56,30 @@ func (s *supervisor) runSchedule(ctx context.Context, a *app, entry scheduleConf
 	}
 }
 
+// stopSchedule cancels the app's scheduled calls, if any.
+func (s *supervisor) stopSchedule(a *app) {
+	a.mu.Lock()
+	cancel := a.scheduleCancel
+	a.scheduleCancel = nil
+	a.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
 // startSchedule launches one goroutine per scheduled endpoint. It runs once the app is serving, and is cancelled when the app stops or is replaced.
 func (s *supervisor) startSchedule(a *app) {
-	if len(a.cfg.Schedule) == 0 {
+	a.mu.Lock()
+	entries := append([]scheduleConfig(nil), a.cfg.Schedule...)
+	a.mu.Unlock()
+	if len(entries) == 0 {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	a.mu.Lock()
 	a.scheduleCancel = cancel
 	a.mu.Unlock()
-	for _, entry := range a.cfg.Schedule {
+	for _, entry := range entries {
 		go s.runSchedule(ctx, a, entry)
 	}
 }

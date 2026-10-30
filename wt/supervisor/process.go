@@ -14,6 +14,9 @@ import (
 )
 
 func (s *supervisor) appArgs(a *app, source string) []string {
+	a.mu.Lock()
+	cfg := a.cfg
+	a.mu.Unlock()
 	args := []string{
 		"serve",
 		"-Scli",
@@ -26,11 +29,11 @@ func (s *supervisor) appArgs(a *app, source string) []string {
 	}
 	stateDir := filepath.Join(s.cfg.stateDir, a.name)
 	args = append(args, "--dir", stateDir+"::/data")
-	for _, key := range sortedKeys(a.cfg.Env) {
-		args = append(args, "--env", key+"="+a.cfg.Env[key])
+	for _, key := range sortedKeys(cfg.Env) {
+		args = append(args, "--env", key+"="+cfg.Env[key])
 	}
-	if a.cfg.MemoryMB > 0 {
-		args = append(args, "-W", fmt.Sprintf("max-memory-size=%d", a.cfg.MemoryMB<<20))
+	if cfg.MemoryMB > 0 {
+		args = append(args, "-W", fmt.Sprintf("max-memory-size=%d", cfg.MemoryMB<<20))
 	}
 	if s.storage != nil {
 		args = append(args,
@@ -43,7 +46,10 @@ func (s *supervisor) appArgs(a *app, source string) []string {
 
 func (s *supervisor) waitReady(a *app, done <-chan struct{}) error {
 	client := &http.Client{Timeout: 500 * time.Millisecond}
-	target := fmt.Sprintf("http://127.0.0.1:%d%s", a.port, a.cfg.Health)
+	a.mu.Lock()
+	health := a.cfg.Health
+	a.mu.Unlock()
+	target := fmt.Sprintf("http://127.0.0.1:%d%s", a.port, health)
 	deadline := time.Now().Add(readyTimeout)
 	lastFailure := ""
 
@@ -103,12 +109,8 @@ func (s *supervisor) stop(a *app) {
 		a.timer.Stop()
 		a.timer = nil
 	}
-	cancel := a.scheduleCancel
-	a.scheduleCancel = nil
 	a.mu.Unlock()
-	if cancel != nil {
-		cancel()
-	}
+	s.stopSchedule(a)
 	s.kill(a)
 }
 
@@ -156,6 +158,8 @@ func (s *supervisor) scheduleRetry(a *app) {
 }
 
 func (s *supervisor) restart(a *app) {
+	s.deployMu.Lock()
+	defer s.deployMu.Unlock()
 	a.mu.Lock()
 	if a.retired || s.stopping.Load() || a.cmd != nil {
 		a.mu.Unlock()
@@ -243,7 +247,10 @@ func (s *supervisor) launch(a *app, source string) error {
 		return withLaunchLog(source, recent, err)
 	}
 	a.proxy = s.newProxy(a)
-	log.Printf("app %s started on 127.0.0.1:%d (%s)", a.name, a.port, a.cfg.Host)
+	a.mu.Lock()
+	host := a.cfg.Host
+	a.mu.Unlock()
+	log.Printf("app %s started on 127.0.0.1:%d (%s)", a.name, a.port, host)
 	s.broadcast()
 	return nil
 }

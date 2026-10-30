@@ -64,7 +64,11 @@ func TestHandleAppMethods(t *testing.T) {
 	cases := []struct {
 		method, target, allow string
 	}{
-		{http.MethodDelete, "/apps/nope", "GET, POST"},
+		{http.MethodPatch, "/apps/nope", "GET, POST, DELETE"},
+		{http.MethodDelete, "/apps/nope", ""},
+		{http.MethodPut, "/apps/nope/config", "GET, PATCH"},
+		{http.MethodGet, "/apps/nope/stop", http.MethodPost},
+		{http.MethodGet, "/apps/nope/start", http.MethodPost},
 		{http.MethodPost, "/apps/nope/logs", http.MethodGet},
 		{http.MethodPost, "/apps/nope/resources", http.MethodGet},
 		{http.MethodGet, "/apps/nope/restart", http.MethodPost},

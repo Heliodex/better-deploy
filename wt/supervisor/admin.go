@@ -172,6 +172,10 @@ func (s *supervisor) requireApp(w http.ResponseWriter, r *http.Request, name str
 func (s *supervisor) handleRestart(w http.ResponseWriter, _ *http.Request, a *app) {
 	s.deployMu.Lock()
 	defer s.deployMu.Unlock()
+	if s.lookup(a.name) != a {
+		http.Error(w, "app not found", http.StatusNotFound)
+		return
+	}
 	a.mu.Lock()
 	name, dir := a.name, a.dir
 	a.mu.Unlock()

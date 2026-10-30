@@ -116,6 +116,22 @@ func (s *storageServer) close() {
 	}
 }
 
+// drop closes an app's database and forgets its token, so its files can be removed.
+func (s *storageServer) drop(app string) {
+	s.mu.Lock()
+	db := s.dbs[app]
+	delete(s.dbs, app)
+	for token, name := range s.tokens {
+		if name == app {
+			delete(s.tokens, token)
+		}
+	}
+	s.mu.Unlock()
+	if db != nil {
+		_ = db.Close()
+	}
+}
+
 // tokenFor returns the app's stable token for this supervisor run.
 func (s *storageServer) tokenFor(app string) string {
 	s.mu.Lock()
