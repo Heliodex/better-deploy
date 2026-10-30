@@ -110,18 +110,17 @@ function changeLines(event: Event): void {
 					: "No lines at this level."}
 		</p>
 	{:else}
-		<div class="min-h-0 flex-1 overflow-auto bg-black p-2 text-xs" onscroll={handleScroll} bind:this={pane}>
+		<div class="min-h-0 flex-1 overflow-auto bg-black p-1 text-xs" onscroll={handleScroll} bind:this={pane}>
 			<table class="w-full table-fixed border-collapse">
 				<colgroup>
-					<col class="w-20">
 					<col class="w-16">
-					<col class="w-16">
+					<col class="w-14">
 					<col>
 				</colgroup>
 				<tbody>
 					{#if topHeight > 0}
 						<tr aria-hidden="true" style:height={`${topHeight}px`}>
-							<td colspan="4" style:height={`${topHeight}px`}></td>
+							<td colspan="3" style:height={`${topHeight}px`}></td>
 						</tr>
 					{/if}
 					{#each visible as entry, index (start + index)}
@@ -132,7 +131,7 @@ function changeLines(event: Event): void {
 							title={entry.message}
 							style:height={`${ROW_HEIGHT}px`}
 						>
-							<td class="pr-3 align-middle whitespace-nowrap text-neutral-500 tabular-nums">
+							<td class="pr-1 align-middle whitespace-nowrap text-neutral-500 tabular-nums">
 								<time class="log-time" datetime={entry.time}>
 									<span class="log-time-segment">{timeParts[0] ?? ""}</span>
 									{#if timeParts.length > 1}
@@ -145,7 +144,7 @@ function changeLines(event: Event): void {
 									{/if}
 								</time>
 							</td>
-							<td class="pr-3 align-middle whitespace-nowrap">
+							<td class="pr-1 align-middle whitespace-nowrap">
 								{#if entry.source === "supervisor"}
 									<span
 										class="inline-block border border-violet-500/60 px-1 text-[10px] tracking-wide text-violet-300 uppercase"
@@ -162,11 +161,6 @@ function changeLines(event: Event): void {
 									</span>
 								{/if}
 							</td>
-							<td class="pr-3 align-middle whitespace-nowrap {levelClasses[entry.level]}">
-								{#if !access}
-									{entry.level.toUpperCase()}
-								{/if}
-							</td>
 							<td class="overflow-hidden align-middle {levelMessageClasses[entry.level]}">
 								{#if access}
 									<span class="flex min-w-0 items-baseline gap-x-2">
@@ -178,14 +172,19 @@ function changeLines(event: Event): void {
 										<span class="min-w-0 flex-1 truncate">{access.path}</span>
 									</span>
 								{:else}
-									<span class="block truncate">{entry.message}</span>
+									<span class="flex min-w-0 items-baseline gap-x-2">
+										<span class="w-14 shrink-0 {levelClasses[entry.level]}"
+											>{entry.level.toUpperCase()}</span
+										>
+										<span class="min-w-0 flex-1 truncate">{entry.message}</span>
+									</span>
 								{/if}
 							</td>
 						</tr>
 					{/each}
 					{#if bottomHeight > 0}
 						<tr aria-hidden="true" style:height={`${bottomHeight}px`}>
-							<td colspan="4" style:height={`${bottomHeight}px`}></td>
+							<td colspan="3" style:height={`${bottomHeight}px`}></td>
 						</tr>
 					{/if}
 				</tbody>
