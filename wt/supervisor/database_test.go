@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json/v2"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -161,5 +164,80 @@ func TestDatabaseRowsValidation(t *testing.T) {
 		if rec.Code != tc.status {
 			t.Errorf("%s = %d %s, want %d", tc.target, rec.Code, rec.Body.String(), tc.status)
 		}
+	}
+}
+
+func TestDatabaseExportImportAndMaintenance(t *testing.T) {
+	s, storage := testDatabaseSupervisor(t)
+	token := storage.tokenFor("notes")
+	createItems(t, storage, token)
+
+	rec := databaseGET(t, s, "/apps/notes/database/export")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("export = %d %s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.Len() == 0 || !strings.Contains(rec.Header().Get("Content-Disposition"), "notes.db") {
+		t.Fatalf("export = %d bytes, disposition %q", rec.Body.Len(), rec.Header().Get("Content-Disposition"))
+	}
+	exported := rec.Body.Bytes()
+
+	insertItem(t, storage, token, "two")
+	if got := storageCount(t, storage, token); got != 2 {
+		t.Fatalf("count before import = %d, want 2", got)
+	}
+
+	var formBody bytes.Buffer
+	form := multipart.NewWriter(&formBody)
+	part, err := form.CreateFormFile("database", "notes.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write(exported); err != nil {
+		t.Fatal(err)
+	}
+	if err := form.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/apps/notes/database/import", &formBody)
+	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set("Content-Type", form.FormDataContentType())
+	rec = httptest.NewRecorder()
+	s.handleApp(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("import = %d %s", rec.Code, rec.Body.String())
+	}
+	if got := storageCount(t, storage, token); got != 1 {
+		t.Errorf("count after import = %d, want 1", got)
+	}
+
+	doMaintenance := func(op string) (*httptest.ResponseRecorder, databaseMaintenanceResponse) {
+		t.Helper()
+		body := strings.NewReader(`{"op":"` + op + `"}`)
+		req := httptest.NewRequest(http.MethodPost, "/apps/notes/database/maintenance", body)
+		req.Header.Set("Authorization", "Bearer secret")
+		rec := httptest.NewRecorder()
+		s.handleApp(rec, req)
+		var result databaseMaintenanceResponse
+		if rec.Code == http.StatusOK {
+			if err := json.UnmarshalRead(rec.Body, &result); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return rec, result
+	}
+
+	rec, result := doMaintenance("integrity_check")
+	if rec.Code != http.StatusOK || result.Result != "ok" {
+		t.Errorf("integrity_check = %d %+v", rec.Code, result)
+	}
+	for _, op := range []string{"vacuum", "optimize", "checkpoint"} {
+		rec, result = doMaintenance(op)
+		if rec.Code != http.StatusOK || result.Op != op {
+			t.Errorf("%s = %d %+v: %s", op, rec.Code, result, rec.Body.String())
+		}
+	}
+	rec, _ = doMaintenance("shred")
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("unknown maintenance op = %d, want 400", rec.Code)
 	}
 }

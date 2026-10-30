@@ -8,11 +8,17 @@ interface Props {
 	changesLoading: boolean
 	error: string
 	exists: boolean
+	importing: boolean
 	limit: number
 	loading: boolean
+	maintaining: boolean
+	message: string
+	name: string
 	offset: number
 	onchangelimit(event: Event): void
 	onpage(direction: -1 | 1): void
+	onimport(file: File): Promise<void>
+	onmaintenance(op: string): Promise<void>
 	onreload(): void
 	onselecttable(event: Event): void
 	rows: DatabaseRows | null
@@ -28,10 +34,16 @@ let {
 	changesLoading,
 	error,
 	exists,
+	importing,
 	limit,
 	loading,
+	maintaining,
+	message,
+	name,
 	offset,
 	onchangelimit,
+	onimport,
+	onmaintenance,
 	onpage,
 	onreload,
 	onselecttable,
@@ -41,6 +53,16 @@ let {
 	tables,
 	version,
 }: Props = $props()
+
+let maintenanceOp = $state("optimize")
+
+async function importFile(event: Event): Promise<void> {
+	const input = event.currentTarget as HTMLInputElement
+	const file = input.files?.[0]
+	if (!file) return
+	await onimport(file)
+	input.value = ""
+}
 </script>
 
 <div
@@ -60,14 +82,56 @@ let {
 				<span class="text-xs text-neutral-500">schema v{version}</span>
 			{/if}
 		</div>
-		<button class="btn" disabled={loading} onclick={onreload} type="button">
-			{loading ? "Refreshing…" : "Refresh"}
-		</button>
+		<div class="flex flex-wrap items-center gap-2">
+			{#if exists}
+				<a
+					class="btn"
+					download={`${name}.db`}
+					href={`/apps/${encodeURIComponent(name)}/database/export`}
+				>
+					Export
+				</a>
+				<select aria-label="Maintenance operation" class="field" bind:value={maintenanceOp}>
+					<option value="optimize">Optimize</option>
+					<option value="vacuum">Vacuum</option>
+					<option value="checkpoint">Checkpoint</option>
+					<option value="integrity_check">Integrity check</option>
+				</select>
+				<button
+					class="btn"
+					disabled={maintaining}
+					onclick={(): Promise<void> => onmaintenance(maintenanceOp)}
+					type="button"
+				>
+					{maintaining ? "Running…" : "Run"}
+				</button>
+			{/if}
+			<label class="btn cursor-pointer">
+				{importing ? "Importing…" : "Import"}
+				<input
+					accept=".db,application/vnd.sqlite3"
+					aria-label="Import database"
+					class="sr-only"
+					disabled={importing}
+					onchange={(event): void => void importFile(event)}
+					type="file"
+				/>
+			</label>
+			<button class="btn" disabled={loading} onclick={onreload} type="button">
+				{loading ? "Refreshing…" : "Refresh"}
+			</button>
+		</div>
 	</div>
 
 	{#if error}
 		<p class="border border-red-500/80 bg-red-500/10 px-2 py-1 text-sm text-red-400" role="alert">
 			{error}
+		</p>
+	{/if}
+
+	{#if message}
+		<p class="border border-primary-500/40 bg-primary-500/10 px-2 py-1 text-sm text-primary-300">
+			{message}
 		</p>
 	{/if}
 

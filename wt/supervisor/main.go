@@ -544,6 +544,12 @@ func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
 		s.handleDatabaseRows(w, r, name)
 	case "database/changes":
 		s.handleDatabaseChanges(w, r, name)
+	case "database/export":
+		s.handleDatabaseExport(w, r, name)
+	case "database/import":
+		s.handleDatabaseImport(w, r, name)
+	case "database/maintenance":
+		s.handleDatabaseMaintenance(w, r, name)
 	case "restart":
 		if !requireMethod(w, r, http.MethodPost) {
 			return

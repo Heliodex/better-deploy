@@ -233,6 +233,17 @@ const databaseOverviewSchema = object({
 
 export type DatabaseOverview = InferOutput<typeof databaseOverviewSchema>
 
+const databaseImportSchema = object({
+	imported: boolean(),
+})
+
+const databaseMaintenanceSchema = object({
+	op: pipe(string(), minLength(1)),
+	result: optional(string()),
+})
+
+export type DatabaseMaintenance = InferOutput<typeof databaseMaintenanceSchema>
+
 const databaseRowsSchema = object({
 	columns: array(string()),
 	limit: pipe(number(), integer(), minValue(1)),
@@ -363,6 +374,23 @@ export const rollbackDeployment = (token: string, name: string, id: string): Pro
 
 export const fetchDatabase = (token: string, name: string): Promise<DatabaseOverview> =>
 	request(`/apps/${encodeURIComponent(name)}/database`, { token }, databaseOverviewSchema)
+
+export const importDatabase = (token: string, name: string, file: File): Promise<boolean> => {
+	const body = new FormData()
+	body.append("database", file)
+	return request(
+		`/apps/${encodeURIComponent(name)}/database/import`,
+		{ body, method: "POST", token },
+		databaseImportSchema,
+	).then(result => result.imported)
+}
+
+export const maintainDatabase = (token: string, name: string, op: string): Promise<DatabaseMaintenance> =>
+	request(
+		`/apps/${encodeURIComponent(name)}/database/maintenance`,
+		{ json: { op }, method: "POST", token },
+		databaseMaintenanceSchema,
+	)
 
 export function fetchDatabaseRows(
 	token: string,

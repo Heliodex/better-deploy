@@ -5,7 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -198,4 +201,133 @@ func (s *supervisor) handleDatabaseRows(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+type databaseImportResponse struct {
+	Imported bool `json:"imported"`
+}
+
+type databaseMaintenanceRequest struct {
+	Op string `json:"op"`
+}
+
+type databaseMaintenanceResponse struct {
+	Op     string `json:"op"`
+	Result string `json:"result,omitempty"`
+}
+
+// handleDatabaseExport streams a consistent SQLite copy of the live database.
+func (s *supervisor) handleDatabaseExport(w http.ResponseWriter, r *http.Request, name string) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	if !s.requireStorage(w, r, name) {
+		return
+	}
+	if !s.storage.hasDatabase(name) {
+		writeError(w, http.StatusBadRequest, errNoStorageDatabase.Error())
+		return
+	}
+	temp, err := os.CreateTemp(s.cfg.stateDir, ".database-export-*.db")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "create export file")
+		return
+	}
+	path := temp.Name()
+	_ = temp.Close()
+	defer os.Remove(path)
+
+	ctx, cancel := context.WithTimeout(r.Context(), storageMaintenanceTimeout)
+	defer cancel()
+	if err := s.storage.backupTo(ctx, name, path); err != nil {
+		writeStorageError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/vnd.sqlite3")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name+".db"))
+	http.ServeFile(w, r, path)
+}
+
+// handleDatabaseImport replaces the live database with an uploaded SQLite file after an integrity check.
+func (s *supervisor) handleDatabaseImport(w http.ResponseWriter, r *http.Request, name string) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if !s.requireStorage(w, r, name) {
+		return
+	}
+	s.deployMu.Lock()
+	defer s.deployMu.Unlock()
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxBackupExtractBytes)
+	if err := r.ParseMultipartForm(16 << 20); err != nil {
+		writeError(w, http.StatusBadRequest, "parse database upload: "+err.Error())
+		return
+	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
+	}
+	file, _, err := r.FormFile("database")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "missing database field")
+		return
+	}
+	defer file.Close()
+
+	temp, err := os.CreateTemp(s.cfg.stateDir, ".database-import-*.db")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "create import file")
+		return
+	}
+	path := temp.Name()
+	defer os.Remove(path)
+	if _, err := io.Copy(temp, io.LimitReader(file, maxBackupExtractBytes)); err != nil {
+		_ = temp.Close()
+		writeError(w, http.StatusBadRequest, "read database: "+err.Error())
+		return
+	}
+	if err := temp.Close(); err != nil {
+		writeError(w, http.StatusInternalServerError, "close import file")
+		return
+	}
+	if err := checkBackupDatabase(path); err != nil {
+		writeError(w, http.StatusBadRequest, "not a valid SQLite database: "+err.Error())
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), storageMaintenanceTimeout)
+	defer cancel()
+	if err := s.storage.restoreFrom(ctx, name, path); err != nil {
+		writeStorageError(w, err)
+		return
+	}
+	log.Printf("database %s: imported %s", name, path)
+	writeJSON(w, http.StatusOK, databaseImportResponse{Imported: true})
+}
+
+// handleDatabaseMaintenance runs vacuum, optimize, checkpoint or integrity_check on the live database.
+func (s *supervisor) handleDatabaseMaintenance(w http.ResponseWriter, r *http.Request, name string) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if !s.requireStorage(w, r, name) {
+		return
+	}
+	if !s.storage.hasDatabase(name) {
+		writeError(w, http.StatusBadRequest, errNoStorageDatabase.Error())
+		return
+	}
+	var req databaseMaintenanceRequest
+	if !readStorageJSON(w, r, &req) {
+		return
+	}
+	op := strings.ToLower(strings.TrimSpace(req.Op))
+	ctx, cancel := context.WithTimeout(r.Context(), storageMaintenanceTimeout)
+	defer cancel()
+	result, err := s.storage.maintenance(ctx, name, op)
+	if err != nil {
+		writeStorageError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, databaseMaintenanceResponse{Op: op, Result: result})
 }

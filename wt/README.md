@@ -299,12 +299,17 @@ POST /apps/<name>/backups/import                   store an exported snapshot ar
 The admin panel's Database tab lists an app's user tables and pages through their rows. It is read-only: the table name is checked against `sqlite_master` and quoted before use, so the viewer cannot run arbitrary SQL or reach another app's database. SQLite's internal `sqlite_*` tables are hidden. Values are encoded like the app-facing storage API, and blobs are shown as their size rather than their base64 contents.
 
 ```text
-GET /apps/<name>/database
-GET /apps/<name>/database/rows?table=<table>&limit=50&offset=0
-GET /apps/<name>/database/changes?limit=200
+GET  /apps/<name>/database
+GET  /apps/<name>/database/rows?table=<table>&limit=50&offset=0
+GET  /apps/<name>/database/changes?limit=200
+GET  /apps/<name>/database/export                    download a consistent SQLite copy
+POST /apps/<name>/database/import                     replace it with an uploaded SQLite file
+POST /apps/<name>/database/maintenance                {"op": "vacuum" | "optimize" | "checkpoint" | "integrity_check"}
 ```
 
-Rows default to 50 per page and accept `limit` up to 500. The rows response includes the columns, the page of rows, the table's total row count, and whether more rows remain.
+Rows default to 50 per page and accept `limit` up to 500. The rows response includes the columns, the page of rows, the table's total row count, and whether more rows remain. The overview also reports the schema version from `user_version`.
+
+`export` uses SQLite's online backup API, so the download is consistent while the app keeps serving. `import` validates an upload with `quick_check` and restores it through the online backup API; take a snapshot first if the current data matters. The maintenance operations are the three things apps cannot ask for through raw SQL: `vacuum` compacts the file, `optimize` updates query-planner statistics, `checkpoint` truncates the WAL, and `integrity_check` reports `ok` or the first corruption lines. They are authenticated admin operations and time out after sixty seconds.
 
 Every successful write sent through `/v1/exec`, `/v1/batch` or `/v1/transaction` is appended to the app's change log at `WT_STATE_DIR/.storage/<app>/changes.log`, and the Database tab shows the newest entries below the table. Each entry records its UTC time, SQL, bound parameters and rows affected. SQLite's pre-update hook also captures the affected rows, with old values for updates and deletes and new values for inserts and updates. The UI shows the operation, table, row id and per-column values, using `old → new` for updates.
 

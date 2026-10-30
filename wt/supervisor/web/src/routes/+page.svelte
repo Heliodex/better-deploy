@@ -20,11 +20,13 @@ import {
 	fetchDeployments,
 	fetchResourceHistory,
 	importBackup,
+	importDatabase,
 	forgetToken,
 	getToken,
 	type LogEntry,
 	type LogLevel,
 	type ResourceSample,
+	maintainDatabase,
 	restartApp,
 	restoreBackup,
 	rollbackDeployment,
@@ -103,6 +105,9 @@ let savingBackups = $state(false)
 let restoringBackup = $state<string | null>(null)
 let confirmRestore = $state<string | null>(null)
 let databaseExists = $state(false)
+let databaseMessage = $state("")
+let databaseImporting = $state(false)
+let databaseMaintaining = $state(false)
 let databaseVersion = $state(0)
 let databaseTables = $state<string[]>([])
 let databaseTable = $state<string | null>(null)
@@ -349,6 +354,9 @@ async function revertBackup(name: string): Promise<void> {
 
 function resetDatabase(): void {
 	databaseExists = false
+	databaseMessage = ""
+	databaseImporting = false
+	databaseMaintaining = false
 	databaseVersion = 0
 	databaseTables = []
 	databaseTable = null
@@ -408,6 +416,37 @@ async function rollbackToDeployment(id: string): Promise<void> {
 		if (selected === target) deploymentsError = err instanceof Error ? err.message : "Could not roll back."
 	} finally {
 		if (selected === target) rollingBack = null
+	}
+}
+
+async function importDatabaseFile(file: File): Promise<void> {
+	if (!token || !selected) return
+	databaseImporting = true
+	databaseError = ""
+	databaseMessage = ""
+	try {
+		await importDatabase(token, selected, file)
+		await loadDatabase(token, selected)
+		databaseMessage = "Database imported."
+	} catch (err) {
+		databaseError = err instanceof Error ? err.message : "Could not import the database."
+	} finally {
+		databaseImporting = false
+	}
+}
+
+async function runDatabaseMaintenance(op: string): Promise<void> {
+	if (!token || !selected) return
+	databaseMaintaining = true
+	databaseError = ""
+	databaseMessage = ""
+	try {
+		const result = await maintainDatabase(token, selected, op)
+		databaseMessage = result.result ? `${result.op}: ${result.result}` : `${result.op} finished.`
+	} catch (err) {
+		databaseError = err instanceof Error ? err.message : "Could not run database maintenance."
+	} finally {
+		databaseMaintaining = false
 	}
 }
 
@@ -998,12 +1037,18 @@ onMount((): (() => void) => {
 							{changes}
 							{changesError}
 							{changesLoading}
-							{error}
+							error={databaseError || error}
 							exists={databaseExists}
+							importing={databaseImporting}
 							limit={databaseLimit}
 							loading={databaseLoading}
+							maintaining={databaseMaintaining}
+							message={databaseMessage}
+							name={selected}
 							offset={databaseOffset}
 							onchangelimit={changeDatabaseLimit}
+							onimport={importDatabaseFile}
+							onmaintenance={runDatabaseMaintenance}
 							onpage={databasePage}
 							onreload={reloadDatabase}
 							onselecttable={selectDatabaseTable}
