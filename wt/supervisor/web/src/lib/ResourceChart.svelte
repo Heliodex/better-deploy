@@ -37,7 +37,7 @@ let scale = $derived(tickScale(peak / unit, 1))
 let ticks = $derived(scale.ticks.map(tick => tick * unit))
 let maxValue = $derived(Math.max(scale.max * unit, 1))
 
-const yFor = (value: number): number => height - padding - (value / maxValue) * (height - padding * 2)
+const yFor = (amount: number): number => height - padding - (amount / maxValue) * (height - padding * 2)
 
 let points = $derived.by(() => {
 	const first = visible.at(0)
