@@ -57,6 +57,17 @@ WT_WASMTIME=/path/to/wasmtime ./wt/e2e.sh
 
 Set `WT_E2E_TARGET` when the runtime uses a different target triple; the default is `x86_64-unknown-linux-gnu` to match the released wasmtime binary CI downloads. The script keeps its work directory on failure and prints the supervisor log.
 
+The supervisor has fuzz targets for tar extraction, the SQL guard and parameter decoding:
+
+```sh
+cd wt/supervisor
+go test -run '^$' -fuzz FuzzExtractTarGz -fuzztime 30s
+go test -run '^$' -fuzz FuzzValidateStorageSQL -fuzztime 30s
+go test -run '^$' -fuzz FuzzDecodeStorageValue -fuzztime 30s
+```
+
+`BenchmarkProxyLatency` measures the reverse proxy against a loopback backend, and `BenchmarkStorage*`/`BenchmarkSQLite*` cover the storage query path.
+
 ## Run the supervisor
 
 ```sh
@@ -223,7 +234,7 @@ podman run -d --name wt-demo -p 127.0.0.1:8080:8080 \
   -e WT_TOKEN=dev -v "$PWD/wt-state:/var/lib/wt" wt-demo
 ```
 
-The image is built entirely by `wt/Containerfile`: a Rust stage compiles wasmtime from the v50.0.0 source with `--no-default-features` and only the serve/run, component-model-async, pooling, GC/threads and WASI HTTP features, then strips it. There is no Cranelift or Winch in the serving image because it only deserializes `.cwasm` files. The musl build is static and the final stage is `scratch`, so the image is about **33 MB** (down from 168 MB with the full release on Debian).
+The image is built entirely by `wt/Containerfile`: a Rust stage compiles wasmtime from the v50.0.0 source with `--no-default-features` and only the serve/run, component-model-async, pooling, GC/threads and WASI HTTP features, then strips it. The build images are pinned (`golang:1.27.1-alpine`, `rust:1.97-slim`, `oven/bun:1.4.4-alpine`) and CI also runs `govulncheck` and a production-only `bun audit`. There is no Cranelift or Winch in the serving image because it only deserializes `.cwasm` files. The musl build is static and the final stage is `scratch`, so the image is about **33 MB** (down from 168 MB with the full release on Debian).
 
 The C API tarball is a shared library for embedding, not a server, and still contains the compiler, so it does not replace this runtime-only CLI. The image runs as root for the prototype; the volume at `/var/lib/wt` holds apps and state.
 

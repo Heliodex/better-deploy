@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func backendApp(t *testing.T, s *supervisor, handler http.Handler, cfg appConfig) *app {
+func backendApp(t testing.TB, s *supervisor, handler http.Handler, cfg appConfig) *app {
 	t.Helper()
 	backend := httptest.NewServer(handler)
 	t.Cleanup(backend.Close)
@@ -123,5 +123,23 @@ func TestAppArgsNetwork(t *testing.T) {
 	a.cfg.Network = "none"
 	if args := strings.Join(s.appArgs(a, "main.cwasm"), " "); strings.Contains(args, "inherit-network") {
 		t.Errorf("isolated args = %q", args)
+	}
+}
+
+func BenchmarkProxyLatency(b *testing.B) {
+	s := testSupervisor()
+	backendApp(b, s, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	}), appConfig{})
+	proxy := s.apps["demo"].proxy
+	req := httptest.NewRequest(http.MethodGet, "http://demo.localhost/", nil)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		rec := httptest.NewRecorder()
+		proxy.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			b.Fatalf("status = %d", rec.Code)
+		}
 	}
 }

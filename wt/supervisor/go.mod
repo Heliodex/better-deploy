@@ -1,6 +1,7 @@
 module better-deploy/wt-supervisor
 
 go 1.27.1
+toolchain go1.27.3
 
 require modernc.org/sqlite v1.61.0
 

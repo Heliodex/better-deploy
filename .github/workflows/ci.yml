@@ -13,6 +13,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  deps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: wt/supervisor/go.mod
+          cache-dependency-path: |
+            wt/supervisor/go.sum
+            wt/deploy/go.sum
+
+      - name: Check Go vulnerabilities
+        run: |
+          (cd wt/supervisor && go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...)
+          (cd wt/deploy && go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...)
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - name: Audit admin and guestbook dependencies
+        run: |
+          (cd wt/supervisor/web && bun audit --production --audit-level=moderate)
+          (cd wt/example/guestbook/web && bun audit --production --audit-level=moderate)
+
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 30
