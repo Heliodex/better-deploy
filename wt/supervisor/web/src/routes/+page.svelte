@@ -32,6 +32,18 @@ import {
 import BackupTree from "../lib/BackupTree.svelte"
 import { backupKindLabel } from "../lib/backup-tree"
 import { palette, spans } from "../lib/chart"
+import {
+	formatChangeParams,
+	formatCPU,
+	formatDatabaseValue,
+	formatMemory,
+	formatRowValue,
+	formatSize,
+	formatTime,
+	rowOpClass,
+	uptime,
+} from "../lib/format"
+import { accessStatusClass, levelClasses, levelMessageClasses, logTimeParts, parseAccessLine } from "../lib/log-format"
 import ResourceChart from "../lib/ResourceChart.svelte"
 import StackedResourceChart from "../lib/StackedResourceChart.svelte"
 
@@ -108,97 +120,6 @@ let changes = $state<StorageChange[]>([])
 let changesLoading = $state(false)
 let changesError = $state("")
 
-function uptime(startedAt: string): string {
-	const seconds = Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1000))
-	if (seconds < 60) return `${seconds}s`
-	const minutes = Math.floor(seconds / 60)
-	if (minutes < 60) return `${minutes}m`
-	const hours = Math.floor(minutes / 60)
-	if (hours < 48) return `${hours}h ${minutes % 60}m`
-	return `${Math.floor(hours / 24)}d ${hours % 24}h`
-}
-
-function formatTime(value: string): string {
-	const date = new Date(value)
-	return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
-}
-
-function formatCPU(percent: number): string {
-	// One decimal below 10%, none at or above it; whole values keep no trailing ".0".
-	const value = percent < 10 ? Number(percent.toFixed(1)) : Math.round(percent)
-	return `${value}%`
-}
-
-function formatMemory(bytes: number): string {
-	if (bytes <= 0) return "–"
-	const megabytes = bytes / (1024 * 1024)
-	return megabytes < 10 ? `${megabytes.toFixed(1)} MB` : `${Math.round(megabytes)} MB`
-}
-
-function formatSize(bytes: number): string {
-	if (bytes < 1024) return `${bytes} B`
-	const kilobytes = bytes / 1024
-	if (kilobytes < 1024) return `${Math.round(kilobytes)} KB`
-	return `${(kilobytes / 1024).toFixed(1)} MB`
-}
-
-const isBlobValue = (value: unknown): value is { $b64: string } =>
-	typeof value === "object" && value !== null && "$b64" in value && typeof value.$b64 === "string"
-
-function formatDatabaseValue(value: unknown): string {
-	if (value === null) return "–"
-	if (typeof value === "string") return value
-	if (typeof value === "number" || typeof value === "boolean") return String(value)
-	if (isBlobValue(value)) {
-		const bytes = Math.floor((value.$b64.length * 3) / 4)
-		return `blob (${formatSize(bytes)})`
-	}
-	return JSON.stringify(value) ?? String(value)
-}
-
-const formatChangeParams = (params: unknown[]): string => JSON.stringify(params) ?? "[]"
-
-const formatRowValue = (values: unknown[] | undefined, index: number): string =>
-	values && index < values.length ? formatDatabaseValue(values[index]) : "–"
-
-function rowOpClass(op: string): string {
-	switch (op) {
-		case "insert":
-			return "text-primary-300"
-		case "update":
-			return "text-amber-300"
-		case "delete":
-			return "text-red-300"
-		default:
-			return "text-neutral-400"
-	}
-}
-
-/** One supervisor access line, parsed from its `METHOD status duration path` shape. */
-interface AccessLine {
-	duration: string
-	method: string
-	path: string
-	status: number
-}
-
-const accessLinePattern = /^([A-Za-z]+) (\d{3}) (\S+) (.+)$/
-
-function parseAccessLine(message: string): AccessLine | null {
-	const match = accessLinePattern.exec(message)
-	if (!match) return null
-	const [, method, status, duration, path] = match
-	if (!method || !status || !duration || !path) return null
-	return { duration, method, path, status: Number(status) }
-}
-
-function accessStatusClass(status: number): string {
-	if (status < 300) return "text-primary-300"
-	if (status < 400) return "text-sky-300"
-	if (status < 500) return "text-amber-300"
-	return "text-red-300"
-}
-
 /** Merge history by timestamp so a late fetch cannot clobber samples that arrived over SSE. */
 function mergeHistory(existing: ResourceSample[], incoming: ResourceSample[]): ResourceSample[] {
 	const byTime = new Map<string, ResourceSample>()
@@ -251,23 +172,6 @@ function ensureOverviewHistories(key: string): void {
 	// Drop histories for apps that no longer exist, so their colours free up.
 	for (const name of Object.keys(overviewHistories))
 		if (!apps.some(app => app.name === name)) delete overviewHistories[name]
-}
-
-const logTimeFormat = new Intl.DateTimeFormat(undefined, {
-	hour: "2-digit",
-	hour12: false,
-	minute: "2-digit",
-	second: "2-digit",
-})
-
-// Part-by-part so the panel can give each segment the same width even though Lexend's digits are proportional.
-function logTimeParts(value: string): string[] {
-	if (value === "") return ["—"]
-	const date = new Date(value)
-	if (Number.isNaN(date.getTime())) return [value]
-	const parts = logTimeFormat.formatToParts(date)
-	const pick = (type: string): string => parts.find(part => part.type === type)?.value ?? ""
-	return [pick("hour"), pick("minute"), pick("second")]
 }
 
 function readSelection(): string | null {
@@ -840,24 +744,6 @@ const selectedBackupChildren = $derived(backupList.filter(backup => backup.paren
 let detailSpan = $state(300)
 let overviewSpan = $state(300)
 
-const levelClasses: { [_: string]: string } = {
-	debug: "text-neutral-500",
-	error: "text-red-400",
-	fatal: "font-semibold text-red-500",
-	info: "text-sky-400",
-	trace: "text-neutral-600",
-	warn: "text-amber-400",
-}
-
-const levelMessageClasses: { [_: string]: string } = {
-	debug: "text-neutral-300",
-	error: "text-red-200",
-	fatal: "text-red-200",
-	info: "text-sky-300",
-	trace: "text-neutral-400",
-	warn: "text-amber-200",
-}
-
 function setMinLevel(event: Event): void {
 	const { value } = event.currentTarget as HTMLSelectElement
 	const level = logLevels.find(candidate => candidate === value)
@@ -989,7 +875,7 @@ onMount((): (() => void) => {
 										></span>
 										<span class="flex-1 truncate">{app.name}</span>
 										<span class="text-xs text-neutral-500 tabular-nums"
-											>{uptime(app.startedAt)}</span
+											>{uptime(app.startedAt, now)}</span
 										>
 									</button>
 								</li>
