@@ -758,20 +758,17 @@ func extractTarGz(src, dst string) error {
 			return fmt.Errorf("archive entry %q escapes the app directory", header.Name)
 		}
 
+		files++
+		if files > maxTarFiles {
+			return fmt.Errorf("archive has too many entries")
+		}
+
 		switch header.Typeflag {
 		case tar.TypeDir:
-			files++
-			if files > maxTarFiles {
-				return fmt.Errorf("archive has too many entries")
-			}
 			if err := os.MkdirAll(target, 0o755); err != nil {
 				return fmt.Errorf("create directory %s: %w", name, err)
 			}
 		case tar.TypeReg:
-			files++
-			if files > maxTarFiles {
-				return fmt.Errorf("archive has too many entries")
-			}
 			if header.Size < 0 || total+header.Size > maxExtractBytes {
 				return fmt.Errorf("archive is too large")
 			}
