@@ -198,9 +198,7 @@ func (l *appLog) writeLine(line string) error {
 // logLevels are the prefixes an app may put at the start of a line, most verbose first.
 var logLevels = []string{"TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"}
 
-// logEntry is one log line with the time the supervisor received it, its level, and
-// which side wrote it: the app process or the supervisor. Lines written before
-// sources existed have no marker and read as app output.
+// logEntry is one log line with the time the supervisor received it, its level, and which side wrote it: the app process or the supervisor. Lines written before sources existed have no marker and read as app output.
 type logEntry struct {
 	Time    string `json:"time"`
 	Level   string `json:"level"`

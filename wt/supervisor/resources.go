@@ -62,8 +62,7 @@ func (s *appStats) appendHistory(now time.Time, cpu float64, memory int64) {
 	}
 }
 
-// recordHistory appends the current figures with the sample timestamp, so the panel
-// can deduplicate history fetched from the API against snapshots arriving over SSE.
+// recordHistory appends the current figures with the sample timestamp, so the panel can deduplicate history fetched from the API against snapshots arriving over SSE.
 func (a *app) recordHistory() {
 	a.stats.mu.Lock()
 	defer a.stats.mu.Unlock()
@@ -141,8 +140,7 @@ func (s *supervisor) persistResources() {
 	}
 }
 
-// loadResourceHistory reads a persisted history back into a fresh app, trimming to
-// the chart window. A missing or corrupt file means empty history.
+// loadResourceHistory reads a persisted history back into a fresh app, trimming to the chart window. A missing or corrupt file means empty history.
 func (s *supervisor) loadResourceHistory(a *app) {
 	data, err := os.ReadFile(s.resourceHistoryPath(a.name))
 	if err != nil {
@@ -181,8 +179,7 @@ func cpuPercent(previous, current uint64, elapsed time.Duration) float64 {
 	return float64(current-previous) / clockTicks / elapsed.Seconds() * 100
 }
 
-// parseProcStat returns utime+stime from a /proc/<pid>/stat line. The command name
-// can contain spaces and parentheses, so fields are counted after the last ')'.
+// parseProcStat returns utime+stime from a /proc/<pid>/stat line. The command name can contain spaces and parentheses, so fields are counted after the last ')'.
 func parseProcStat(data []byte) (uint64, error) {
 	close := bytes.LastIndexByte(data, ')')
 	if close < 0 || close+2 >= len(data) {
@@ -238,8 +235,7 @@ func readProcessStats(pid int) (uint64, int64, error) {
 	return ticks, memory, nil
 }
 
-// sampleResources refreshes the app's CPU and memory figures from procfs. Calling it
-// more than twice per sample interval reuses the previous sample so CPU deltas stay meaningful.
+// sampleResources refreshes the app's CPU and memory figures from procfs. Calling it more than twice per sample interval reuses the previous sample so CPU deltas stay meaningful.
 func (a *app) sampleResources(now time.Time) {
 	a.mu.Lock()
 	pid := 0
@@ -297,8 +293,7 @@ func (s *supervisor) sampleAll() {
 	}
 }
 
-// monitorResources samples every app in the background so the charts have history
-// before a panel opens, and pushes a fresh snapshot while one is subscribed.
+// monitorResources samples every app in the background so the charts have history before a panel opens, and pushes a fresh snapshot while one is subscribed.
 func (s *supervisor) monitorResources(every time.Duration) {
 	s.sampleAll()
 	s.recordAll()

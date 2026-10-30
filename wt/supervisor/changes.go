@@ -229,11 +229,10 @@ func unregisterRowHook(conn *sql.Conn) error {
 func (s *storageServer) withWriteConn(ctx context.Context, app string, fn func(*sql.Conn, *rowChangeCollector) error) error {
 	return s.withConn(ctx, app, func(conn *sql.Conn) error {
 		collector := &rowChangeCollector{}
-		registered := false
+		registered := true
 		if err := registerRowHook(conn, collector); err != nil {
 			log.Printf("storage %s: pre-update hook: %v", app, err)
-		} else {
-			registered = true
+			registered = false
 		}
 		if registered {
 			defer func() {

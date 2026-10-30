@@ -61,21 +61,21 @@ var wasiHandle = func(request *wasi.Request) wit.Result[*wasi.Response, wasi.Err
 					err,
 				))),
 			)
-		} else {
-			defer httpReq.Body.Close()
+			return
+		}
+		defer httpReq.Body.Close()
 
-			// run the user's handler
-			handlerFn(httpRes, httpReq)
+		// run the user's handler
+		handlerFn(httpRes, httpReq)
 
-			// If the user's handler never sent a response, send a default one here.
-			if err := httpRes.send(); err != nil {
-				httpRes.channel <- handleErr(
-					wasi.MakeErrorCodeInternalError(wit.Some(fmt.Sprintf(
-						"failed to produce a response: %v\n",
-						err,
-					))),
-				)
-			}
+		// If the user's handler never sent a response, send a default one here.
+		if err := httpRes.send(); err != nil {
+			httpRes.channel <- handleErr(
+				wasi.MakeErrorCodeInternalError(wit.Some(fmt.Sprintf(
+					"failed to produce a response: %v\n",
+					err,
+				))),
+			)
 		}
 	}()
 

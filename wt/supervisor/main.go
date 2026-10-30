@@ -661,8 +661,7 @@ func formatProxyDuration(d time.Duration) string {
 	return fmt.Sprintf("%.2fs", d.Seconds())
 }
 
-// formatAccessLog renders a supervisor access line as METHOD status duration path,
-// so the panel can recognise and structure it.
+// formatAccessLog renders a supervisor access line as METHOD status duration path, so the panel can recognise and structure it.
 func formatAccessLog(method string, status int, duration time.Duration, uri string) string {
 	return fmt.Sprintf("%s %d %s %s", method, status, formatProxyDuration(duration), uri)
 }
@@ -734,8 +733,7 @@ func (s *supervisor) scheduleRestart(a *app, delay time.Duration) {
 	})
 }
 
-// statusWriter captures the status code a proxied response is written with. Unwrap
-// hands the underlying writer's optional interfaces (Flusher, Hijacker) through.
+// statusWriter captures the status code a proxied response is written with. Unwrap hands the underlying writer's optional interfaces (Flusher, Hijacker) through.
 type statusWriter struct {
 	http.ResponseWriter
 	status int
