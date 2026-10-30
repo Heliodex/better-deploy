@@ -81,6 +81,15 @@ type detailData struct {
 	TagURL func(string) string
 }
 
+type linkInput struct {
+	URL, Title, Description string
+	Tags                    []string
+}
+
+type rowScanner interface {
+	Scan(...any) error
+}
+
 var (
 	store    *storage.Client
 	storeErr error
@@ -402,11 +411,6 @@ func scanLink(scanner rowScanner) (link, error) {
 	return item, nil
 }
 
-type linkInput struct {
-	URL, Title, Description string
-	Tags                    []string
-}
-
 func loadLink(ctx context.Context, id string) (link, error) {
 	return scanLink(store.QueryRow(ctx, `select `+linkColumns+` from links l where l.id = ?`, id))
 }
@@ -449,10 +453,6 @@ func loadTags(ctx context.Context, q string) ([]tagCount, error) {
 		tags = append(tags, item)
 	}
 	return tags, rows.Err()
-}
-
-type rowScanner interface {
-	Scan(...any) error
 }
 
 func loadIndex(ctx context.Context, q, tag string, page int) (indexData, error) {
