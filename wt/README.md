@@ -174,7 +174,7 @@ curl -X PATCH -H "Authorization: Bearer $WT_TOKEN" \
 # myapp at http://127.0.0.1:8080/
 ```
 
-`wt new` scaffolds a notes app with the guestbook stack: a static SvelteKit frontend with Valibot request and response validation, a Go JSON API, the Valibot to JSON Schema to `go-jsonschema` contract pipeline, and per-app SQLite storage. New apps live under `wt/example/` so the shared module and the relative `../../packages` paths keep working. `wt dev` builds the app and serves it locally on loopback, with the SQLite database persisting in `/tmp/wt-dev/<name>` between runs.
+`wt new` scaffolds a notes app with the guestbook stack: a static SvelteKit frontend with Valibot request and response validation, a Go JSON API, the Valibot to JSON Schema to `go-jsonschema` contract pipeline, and per-app SQLite storage. New apps live under `wt/example/` so the shared module and the relative `../../packages` paths keep working. `wt dev` builds the app and serves it locally on loopback, with the SQLite database persisting in `/tmp/wt-dev/<name>` between runs. It watches source files and rebuilds and redeploys after a change, ignoring `static/`, `build`, `dist`, `target`, `node_modules`, `.svelte-kit` and the generated `main.wasm`/`main.cwasm` so a build does not retrigger itself. Pass `--watch=false` to deploy once.
 
 ## What each app runs
 

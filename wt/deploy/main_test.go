@@ -132,6 +132,9 @@ func TestResolveDevConfig(t *testing.T) {
 	if cfg.appHost != "127.0.0.1" {
 		t.Errorf("appHost = %q, want 127.0.0.1", cfg.appHost)
 	}
+	if !cfg.watch {
+		t.Error("watch should default to true")
+	}
 
 	cfg, err = resolveDevConfig([]string{})
 	if err != nil {
@@ -153,6 +156,15 @@ func TestResolveDevConfig(t *testing.T) {
 	t.Setenv("WT_DEV_PORT", "bogus")
 	if _, err := resolveDevConfig([]string{}); err == nil {
 		t.Error("expected error for invalid WT_DEV_PORT")
+	}
+
+	t.Setenv("WT_DEV_PORT", "")
+	cfg, err = resolveDevConfig([]string{"--watch=false"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.watch {
+		t.Error("--watch=false did not disable watching")
 	}
 }
 

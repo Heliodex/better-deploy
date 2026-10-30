@@ -20,7 +20,7 @@ import (
 type devConfig struct {
 	dir, wasmtime, target, supervisor, appHost string
 	port                                       int
-	skipBuild, skipCompile                     bool
+	skipBuild, skipCompile, watch              bool
 }
 
 func resolveDevConfig(args []string) (*devConfig, error) {
@@ -33,6 +33,7 @@ func resolveDevConfig(args []string) (*devConfig, error) {
 	appHost := flags.String("app-host", "127.0.0.1", "override the app host so http://127.0.0.1:port/ routes to the app")
 	skipBuild := flags.Bool("skip-build", false, "skip running app.json's build command")
 	skipCompile := flags.Bool("skip-compile", false, "reuse an existing main.cwasm")
+	watch := flags.Bool("watch", true, "rebuild and redeploy when source files change")
 	if err := flags.Parse(args); err != nil {
 		return nil, err
 	}
@@ -59,6 +60,7 @@ func resolveDevConfig(args []string) (*devConfig, error) {
 		appHost:     *appHost,
 		skipBuild:   *skipBuild,
 		skipCompile: *skipCompile,
+		watch:       *watch,
 	}, nil
 }
 
@@ -257,6 +259,13 @@ func runDev(args []string) error {
 		return err
 	}
 	fmt.Printf("dev: %s at http://%s/ (Ctrl-C to stop)\n", m.Name, addr)
+
+	done := make(chan struct{})
+	if cfg.watch {
+		defer close(done)
+		go watchDev(dcfg, done)
+		fmt.Fprintln(os.Stderr, "dev: watching for changes")
+	}
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
