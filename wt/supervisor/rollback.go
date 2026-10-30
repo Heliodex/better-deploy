@@ -234,13 +234,11 @@ func (s *supervisor) rollbackAtomic(w http.ResponseWriter, ctx context.Context, 
 	defer s.backups.mu.Unlock()
 
 	if running {
+		if !drainApp(old, drainTimeout) {
+			log.Printf("rollback %s: old version still handling requests after %s", name, drainTimeout)
+		}
 		s.stop(old)
 	}
-	if stagedDB != "" {
-		s.storage.drop(name)
-		removeSQLiteSidecars(liveDB)
-	}
-
 	appMoved, err := moveAside(liveApp, journal.AppBackup)
 	if err == nil {
 		err = os.Rename(stagedApp, liveApp)
@@ -266,21 +264,27 @@ func (s *supervisor) rollbackAtomic(w http.ResponseWriter, ctx context.Context, 
 	}
 
 	if stagedDB != "" {
-		if err := os.MkdirAll(filepath.Dir(liveDB), 0o755); err != nil {
-			_ = restoreAside(liveData, journal.DataBackup, dataMoved)
-			_ = restoreAside(liveApp, journal.AppBackup, appMoved)
-			s.failRollback(w, journalPath, journal, old, running, fmt.Errorf("create storage directory: %w", err))
-			return nil
-		}
-		_, err = moveAside(liveDB, journal.DBBackup)
-		if err == nil {
-			err = os.Rename(stagedDB, liveDB)
-		}
-		if err != nil {
+		// Block database viewers (and any other storage user) from opening the file while it is swapped.
+		s.storage.opMu.Lock()
+		s.storage.drop(name)
+		removeSQLiteSidecars(liveDB)
+		swapErr := func() error {
+			if err := os.MkdirAll(filepath.Dir(liveDB), 0o755); err != nil {
+				return fmt.Errorf("create storage directory: %w", err)
+			}
+			if _, err := moveAside(liveDB, journal.DBBackup); err != nil {
+				return err
+			}
+			return os.Rename(stagedDB, liveDB)
+		}()
+		if swapErr != nil {
 			_ = restoreDB(liveDB, journal.DBBackup)
+		}
+		s.storage.opMu.Unlock()
+		if swapErr != nil {
 			_ = restoreAside(liveData, journal.DataBackup, dataMoved)
 			_ = restoreAside(liveApp, journal.AppBackup, appMoved)
-			s.failRollback(w, journalPath, journal, old, running, fmt.Errorf("install database: %w", err))
+			s.failRollback(w, journalPath, journal, old, running, fmt.Errorf("install database: %w", swapErr))
 			return nil
 		}
 	}
@@ -326,7 +330,13 @@ func (s *supervisor) rollbackAtomic(w http.ResponseWriter, ctx context.Context, 
 
 // failRollback restores the previous halves and process, then reports the original error.
 func (s *supervisor) failRollback(w http.ResponseWriter, journalPath string, journal rollbackJournal, old *app, running bool, cause error) {
+	if s.storage != nil {
+		s.storage.opMu.Lock()
+	}
 	restoreErr := restoreDB(journal.DB, journal.DBBackup)
+	if s.storage != nil {
+		s.storage.opMu.Unlock()
+	}
 	if restoreErr == nil {
 		restoreErr = restoreAside(journal.DataDir, journal.DataBackup, existsPath(journal.DataBackup))
 	}
