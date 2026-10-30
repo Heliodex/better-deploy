@@ -711,6 +711,51 @@ func storageValueSize(value any) int {
 	}
 }
 
+// readStorageRows scans and encodes a query result, stopping at maxRows or the result size limit.
+func readStorageRows(rows *sql.Rows, maxRows int) (columns []string, encoded [][]any, truncated bool, err error) {
+	columns, err = rows.Columns()
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if len(columns) > maxStorageColumns {
+		return nil, nil, false, fmt.Errorf("query returns too many columns")
+	}
+
+	values := make([]any, len(columns))
+	dest := make([]any, len(columns))
+	for i := range values {
+		dest[i] = &values[i]
+	}
+	total := 0
+	for rows.Next() {
+		if len(encoded) >= maxRows {
+			truncated = true
+			break
+		}
+		if err := rows.Scan(dest...); err != nil {
+			return nil, nil, false, err
+		}
+		size := 0
+		for _, value := range values {
+			size += storageValueSize(value)
+		}
+		if total+size > maxStorageResult {
+			truncated = true
+			break
+		}
+		total += size
+		row := make([]any, len(values))
+		for i, value := range values {
+			row[i] = encodeStorageValue(value)
+		}
+		encoded = append(encoded, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, false, err
+	}
+	return columns, encoded, truncated, nil
+}
+
 func (s *storageServer) query(w http.ResponseWriter, r *http.Request, app string) {
 	var req storageRequest
 	if !readStorageJSON(w, r, &req) {
@@ -741,45 +786,8 @@ func (s *storageServer) query(w http.ResponseWriter, r *http.Request, app string
 		}
 		defer rows.Close()
 
-		columns, err := rows.Columns()
-		if err != nil {
-			return err
-		}
-		if len(columns) > maxStorageColumns {
-			return fmt.Errorf("query returns too many columns")
-		}
-		result.Columns = columns
-
-		values := make([]any, len(columns))
-		dest := make([]any, len(columns))
-		for i := range values {
-			dest[i] = &values[i]
-		}
-		total := 0
-		for rows.Next() {
-			if len(result.Rows) >= maxRows {
-				result.Truncated = true
-				break
-			}
-			if err := rows.Scan(dest...); err != nil {
-				return err
-			}
-			size := 0
-			for _, value := range values {
-				size += storageValueSize(value)
-			}
-			if total+size > maxStorageResult {
-				result.Truncated = true
-				break
-			}
-			total += size
-			row := make([]any, len(values))
-			for i, value := range values {
-				row[i] = encodeStorageValue(value)
-			}
-			result.Rows = append(result.Rows, row)
-		}
-		return rows.Err()
+		result.Columns, result.Rows, result.Truncated, err = readStorageRows(rows, maxRows)
+		return err
 	})
 	if err != nil {
 		writeStorageError(w, err)

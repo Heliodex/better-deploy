@@ -91,40 +91,13 @@ func (s *storageServer) databaseRows(ctx context.Context, app, table string, lim
 		}
 		defer rows.Close()
 
-		columns, err := rows.Columns()
+		columns, encoded, truncated, err := readStorageRows(rows, limit)
 		if err != nil {
 			return err
 		}
 		result.Columns = columns
-
-		values := make([]any, len(columns))
-		dest := make([]any, len(columns))
-		for i := range values {
-			dest[i] = &values[i]
-		}
-		totalSize := 0
-		for rows.Next() {
-			if err := rows.Scan(dest...); err != nil {
-				return err
-			}
-			size := 0
-			for _, value := range values {
-				size += storageValueSize(value)
-			}
-			if totalSize+size > maxStorageResult {
-				result.Truncated = true
-				break
-			}
-			totalSize += size
-			row := make([]any, len(values))
-			for i, value := range values {
-				row[i] = encodeStorageValue(value)
-			}
-			result.Rows = append(result.Rows, row)
-		}
-		if err := rows.Err(); err != nil {
-			return err
-		}
+		result.Rows = encoded
+		result.Truncated = truncated
 		if offset+len(result.Rows) < result.Total {
 			result.Truncated = true
 		}
