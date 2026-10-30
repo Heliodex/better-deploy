@@ -117,7 +117,7 @@ curl -H 'Host: hello.localhost' http://127.0.0.1:8080/hello
 # path=/hello
 ```
 
-`wt-deploy` reads `app.json`, runs its `build` command, precompiles `main.wasm` with `wasmtime compile`, and uploads `app.json` and `main.cwasm` as a gzipped tarball. `--app-host` overrides the host written into the uploaded `app.json`, which is useful when the supervisor sits behind a real ingress domain. The supervisor starts the new version on a new loopback port while the old one serves, waits for its health path, swaps the host route and stops the old process.
+`wt-deploy` reads `app.json`, runs its `build` command, precompiles `main.wasm` with `wasmtime compile`, and uploads `app.json` and `main.cwasm` as a gzipped tarball. `--app-host` overrides the host written into the uploaded `app.json`, which is useful when the supervisor sits behind a real ingress domain. The supervisor starts the new version on a new loopback port while the old one serves, waits for a 2xx health response, swaps the host route, drains in-flight requests for up to ten seconds and then stops the old process.
 
 The notes example uses the per-app storage service:
 
@@ -154,7 +154,7 @@ wasmtime serve -Scli -Sp3 -S inherit-network -W component-model-async=y \
   main.cwasm
 ```
 
-`app.json` carries `name`, `host`, `health`, `env`, `memory_mb`, `schedule` and the local `build` command. `memory_mb`, when set, becomes wasmtime's `-W max-memory-size`. The runtime-only image has no compiler, so `main.wasm` cannot run there: `main.cwasm` is required. If it is missing or incompatible, the deploy fails and the old version keeps serving.
+`app.json` carries `name`, `host`, `health`, `env`, `memory_mb`, `schedule` and the local `build` command. `memory_mb`, when set, becomes wasmtime's `-W max-memory-size`. The health path must answer with a 2xx status before a new version is considered ready. The runtime-only image has no compiler, so `main.wasm` cannot run there: `main.cwasm` is required. If it is missing or incompatible, the deploy fails and the old version keeps serving.
 
 ## Scheduled work
 
@@ -166,7 +166,7 @@ A component under `wasmtime serve` only runs while it is handling a request: ins
 ]
 ```
 
-The supervisor starts one goroutine per entry once the app is serving and cancels it when the app stops or is replaced. Calls are sequential, so a slow endpoint delays the next tick rather than piling requests up; failures and non-2xx responses are written to the app's log. `method` defaults to `POST`, `path` must start with `/`, and `every` is a Go duration between `1s` and `24h`. Limits are checked by both `wt-deploy` and the supervisor.
+The supervisor starts one goroutine per entry once the app is serving, restarts it after a manual restart, and cancels it when the app stops or is replaced. Calls are sequential, so a slow endpoint delays the next tick rather than piling requests up; failures and non-2xx responses are written to the app's log. `method` defaults to `POST`, `path` must start with `/`, and `every` is a Go duration between `1s` and `24h`. Limits are checked by both `wt-deploy` and the supervisor.
 
 ## Container
 
