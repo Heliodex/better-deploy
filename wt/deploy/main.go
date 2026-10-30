@@ -179,6 +179,16 @@ func runCompile(cfg *deployConfig) error {
 	return nil
 }
 
+func writeTarFile(tw *tar.Writer, name string, data []byte) error {
+	if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(data))}); err != nil {
+		return fmt.Errorf("write %s: %w", name, err)
+	}
+	if _, err := tw.Write(data); err != nil {
+		return fmt.Errorf("write %s: %w", name, err)
+	}
+	return nil
+}
+
 func bundle(dir string, m manifest) ([]byte, error) {
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
@@ -205,16 +215,6 @@ func bundle(dir string, m manifest) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
-}
-
-func writeTarFile(tw *tar.Writer, name string, data []byte) error {
-	if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(data))}); err != nil {
-		return fmt.Errorf("write %s: %w", name, err)
-	}
-	if _, err := tw.Write(data); err != nil {
-		return fmt.Errorf("write %s: %w", name, err)
-	}
-	return nil
 }
 
 func baseURL(host string) string {
@@ -265,18 +265,6 @@ func upload(cfg *deployConfig, m manifest, bundle []byte) error {
 	return nil
 }
 
-func deploy(args []string) error {
-	cfg, err := resolveConfig(args)
-	if err != nil {
-		return err
-	}
-	m, data, err := buildBundle(cfg)
-	if err != nil {
-		return err
-	}
-	return upload(cfg, m, data)
-}
-
 // buildBundle runs the app build, precompiles the component and packs the upload artifact.
 func buildBundle(cfg *deployConfig) (manifest, []byte, error) {
 	m, err := readManifest(cfg.dir)
@@ -303,6 +291,18 @@ func buildBundle(cfg *deployConfig) (manifest, []byte, error) {
 		return m, nil, err
 	}
 	return m, data, nil
+}
+
+func deploy(args []string) error {
+	cfg, err := resolveConfig(args)
+	if err != nil {
+		return err
+	}
+	m, data, err := buildBundle(cfg)
+	if err != nil {
+		return err
+	}
+	return upload(cfg, m, data)
 }
 
 func resolveBundleConfig(args []string) (*deployConfig, error) {
@@ -493,6 +493,32 @@ func waitHealthy(url string, timeout time.Duration) error {
 	}
 }
 
+// devEnv overrides the supervisor settings for local development, keeping the rest of the environment.
+func devEnv(appsDir, stateDir, addr, wasmtime, target string) []string {
+	values := map[string]string{
+		"WT_APPS_DIR":        appsDir,
+		"WT_STATE_DIR":       stateDir,
+		"WT_LISTEN":          addr,
+		"WT_WASMTIME":        wasmtime,
+		"WT_WASMTIME_TARGET": target,
+		"WT_TOKEN":           "dev",
+		"WT_TLS_CERT":        "",
+		"WT_TLS_KEY":         "",
+	}
+	out := make([]string, 0, len(os.Environ())+len(values))
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if _, skip := values[key]; skip {
+			continue
+		}
+		out = append(out, entry)
+	}
+	for _, key := range slices.Sorted(maps.Keys(values)) {
+		out = append(out, key+"="+values[key])
+	}
+	return out
+}
+
 func runDev(args []string) error {
 	cfg, err := resolveDevConfig(args)
 	if err != nil {
@@ -564,32 +590,6 @@ func runDev(args []string) error {
 	<-stop
 	fmt.Fprintln(os.Stderr, "\ndev: stopping")
 	return nil
-}
-
-// devEnv overrides the supervisor settings for local development, keeping the rest of the environment.
-func devEnv(appsDir, stateDir, addr, wasmtime, target string) []string {
-	values := map[string]string{
-		"WT_APPS_DIR":        appsDir,
-		"WT_STATE_DIR":       stateDir,
-		"WT_LISTEN":          addr,
-		"WT_WASMTIME":        wasmtime,
-		"WT_WASMTIME_TARGET": target,
-		"WT_TOKEN":           "dev",
-		"WT_TLS_CERT":        "",
-		"WT_TLS_KEY":         "",
-	}
-	out := make([]string, 0, len(os.Environ())+len(values))
-	for _, entry := range os.Environ() {
-		key, _, _ := strings.Cut(entry, "=")
-		if _, skip := values[key]; skip {
-			continue
-		}
-		out = append(out, entry)
-	}
-	for _, key := range slices.Sorted(maps.Keys(values)) {
-		out = append(out, key+"="+values[key])
-	}
-	return out
 }
 
 func main() {
