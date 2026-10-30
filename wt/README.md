@@ -85,6 +85,8 @@ WARN  storage slow: 1.2s
 ERROR could not save the note
 ```
 
+The panel keeps log rows on one line and virtualises them, so long messages are truncated with the full text in the tooltip; clicking a row opens a detail strip with the whole message and its timestamp. Filtering by minimum level and text happens in the browser over the loaded tail.
+
 `wt.packages/app` writes that shape for Go apps:
 
 ```go

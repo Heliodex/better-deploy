@@ -1,5 +1,6 @@
 <script lang="ts">
 import { type LogEntry, type LogLevel, logLevels } from "./api"
+import { formatTime } from "./format"
 import { accessStatusClass, levelClasses, levelMessageClasses, logTimeParts, parseAccessLine } from "./log-format"
 
 interface Props {
@@ -30,6 +31,7 @@ const ROW_HEIGHT = 24
 const OVERSCAN = 12
 
 let scrollTop = $state(0)
+let selected = $state<LogEntry | null>(null)
 let viewportHeight = $state(0)
 let start = $derived(
 	Math.min(Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN), Math.max(0, entries.length - 1)),
@@ -72,6 +74,16 @@ function changeLines(event: Event): void {
 	const lines = Number(value)
 	if (Number.isFinite(lines)) onreload(lines)
 }
+
+function selectRow(entry: LogEntry): void {
+	selected = selected === entry ? null : entry
+}
+
+function rowKey(event: KeyboardEvent, entry: LogEntry): void {
+	if (event.key !== "Enter" && event.key !== " ") return
+	event.preventDefault()
+	selectRow(entry)
+}
 </script>
 
 <section
@@ -100,6 +112,7 @@ function changeLines(event: Event): void {
 			<option value={500}>500 lines</option>
 			<option value={2000}>2000 lines</option>
 		</select>
+		<span class="text-[10px] text-neutral-500">Click a line to expand</span>
 	</header>
 	{#if entries.length === 0}
 		<p class="p-3 text-sm text-neutral-500">
@@ -127,8 +140,19 @@ function changeLines(event: Event): void {
 						{const timeParts = logTimeParts(entry.time)}
 						{const access = entry.source === "supervisor" ? parseAccessLine(entry.message) : null}
 						<tr
-							class={entry.source === "supervisor" ? "h-6 bg-violet-500/5" : "h-6"}
-							title={entry.message}
+							aria-label={`${entry.level} ${entry.message}`}
+							class={[
+								"h-6 cursor-pointer",
+								entry.source === "supervisor" ? "bg-violet-500/5" : "",
+								selected === entry ? "bg-neutral-700/70" : "hover:bg-neutral-800/60",
+							]}
+							onclick={(): void => selectRow(entry)}
+							onkeydown={(event): void => rowKey(event, entry)}
+							role="button"
+							tabindex="0"
+							title={`${entry.message}
+
+Click to expand`}
 							style:height={`${ROW_HEIGHT}px`}
 						>
 							<td class="pr-1 align-middle whitespace-nowrap text-neutral-500 tabular-nums">
@@ -190,6 +214,22 @@ function changeLines(event: Event): void {
 				</tbody>
 			</table>
 		</div>
+		{#if selected}
+			<div class="shrink-0 border-t border-line-soft bg-neutral-900/60 px-3 py-2 text-xs">
+				<div class="flex flex-wrap items-center gap-2">
+					<time class="text-neutral-500 tabular-nums" datetime={selected.time}>{formatTime(selected.time)}</time>
+					<span class="border border-neutral-700 px-1 text-[10px] tracking-wide text-neutral-400 uppercase">
+						{selected.source === "supervisor" ? "proxy" : "app"}
+					</span>
+					<span class="text-[10px] tracking-wide uppercase {levelClasses[selected.level]}">
+						{selected.level}
+					</span>
+					<span class="flex-1"></span>
+					<button class="btn" onclick={(): null => (selected = null)} type="button">Close</button>
+				</div>
+				<pre class="mt-1 max-h-32 overflow-auto whitespace-pre-wrap wrap-break-word text-neutral-200">{selected.message}</pre>
+			</div>
+		{/if}
 	{/if}
 </section>
 
