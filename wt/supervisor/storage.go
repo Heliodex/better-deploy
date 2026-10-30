@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
@@ -12,12 +11,10 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -353,200 +350,6 @@ func writeStorageError(w http.ResponseWriter, err error) {
 	}
 }
 
-// readStorageQuotedWord returns the contents of a double-quoted or backtick-quoted identifier. SQLite allows function names such as load_extension to be quoted, so these contents must be checked too.
-func readStorageQuotedWord(query string, i int, quote byte) (string, int) {
-	var word strings.Builder
-	i++
-	for i < len(query) {
-		if query[i] != quote {
-			word.WriteByte(query[i])
-			i++
-			continue
-		}
-		if i+1 < len(query) && query[i+1] == quote {
-			word.WriteByte(quote)
-			i += 2
-			continue
-		}
-		return word.String(), i + 1
-	}
-	return word.String(), i
-}
-
-func readStorageBracketWord(query string, i int) (string, int) {
-	i++
-	start := i
-	for i < len(query) && query[i] != ']' {
-		i++
-	}
-	word := query[start:i]
-	if i < len(query) {
-		i++
-	}
-	return word, i
-}
-
-func skipStorageString(query string, i int) int {
-	i++
-	for i < len(query) {
-		if query[i] != '\'' {
-			i++
-			continue
-		}
-		if i+1 < len(query) && query[i+1] == '\'' {
-			i += 2
-			continue
-		}
-		return i + 1
-	}
-	return i
-}
-
-func skipStorageLineComment(query string, i int) int {
-	i += 2
-	for i < len(query) && query[i] != '\n' {
-		i++
-	}
-	return i
-}
-
-func skipStorageBlockComment(query string, i int) int {
-	i += 2
-	for i+1 < len(query) {
-		if query[i] == '*' && query[i+1] == '/' {
-			return i + 2
-		}
-		i++
-	}
-	return len(query)
-}
-
-func isStorageWordByte(c byte) bool {
-	return c == '_' || (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-}
-
-func storageSQLWords(query string) []string {
-	words := []string{}
-	for i := 0; i < len(query); {
-		switch c := query[i]; {
-		case c == '\'':
-			i = skipStorageString(query, i)
-		case c == '"' || c == '`':
-			word, next := readStorageQuotedWord(query, i, c)
-			if word != "" {
-				words = append(words, strings.ToLower(word))
-			}
-			i = next
-		case c == '[':
-			word, next := readStorageBracketWord(query, i)
-			if word != "" {
-				words = append(words, strings.ToLower(word))
-			}
-			i = next
-		case c == '-' && i+1 < len(query) && query[i+1] == '-':
-			i = skipStorageLineComment(query, i)
-		case c == '/' && i+1 < len(query) && query[i+1] == '*':
-			i = skipStorageBlockComment(query, i)
-		case isStorageWordByte(c):
-			start := i
-			for i < len(query) && isStorageWordByte(query[i]) {
-				i++
-			}
-			words = append(words, strings.ToLower(query[start:i]))
-		default:
-			i++
-		}
-	}
-	return words
-}
-
-// validateStorageSQL rejects the few SQLite features that can reach outside the app's database file. ATTACH and VACUUM INTO are also blocked by SQLITE_LIMIT_ATTACHED; the word check keeps the error understandable and covers older SQLite builds.
-func validateStorageSQL(query string) error {
-	if strings.TrimSpace(query) == "" {
-		return fmt.Errorf("sql must not be empty")
-	}
-	if len(query) > maxStorageSQL {
-		return fmt.Errorf("sql is too long (max %d bytes)", maxStorageSQL)
-	}
-	words := storageSQLWords(query)
-	if len(words) > 0 {
-		switch words[0] {
-		case "begin", "commit", "rollback", "end", "savepoint", "release":
-			return fmt.Errorf("transaction control statements are not allowed; use /v1/batch")
-		}
-	}
-	for _, word := range words {
-		switch word {
-		case "attach", "detach", "vacuum", "pragma", "load_extension", "readfile", "writefile", "writable_schema":
-			return fmt.Errorf("sql uses %q, which is not allowed", word)
-		}
-	}
-	return nil
-}
-
-func decodeStorageValue(raw jsontext.Value) (any, error) {
-	text := strings.TrimSpace(string(raw))
-	if text == "" {
-		return nil, fmt.Errorf("empty value")
-	}
-	switch text[0] {
-	case 'n':
-		return nil, nil
-	case 't':
-		return true, nil
-	case 'f':
-		return false, nil
-	case '"':
-		var value string
-		if err := json.Unmarshal(raw, &value); err != nil {
-			return nil, err
-		}
-		return value, nil
-	case '{':
-		var object map[string]string
-		if err := json.Unmarshal(raw, &object); err != nil {
-			return nil, fmt.Errorf("object parameters must be {\"$b64\": \"...\"}")
-		}
-		encoded, ok := object["$b64"]
-		if !ok {
-			return nil, fmt.Errorf("object parameters must be {\"$b64\": \"...\"}")
-		}
-		value, err := base64.StdEncoding.DecodeString(encoded)
-		if err != nil {
-			return nil, fmt.Errorf("invalid base64: %w", err)
-		}
-		return value, nil
-	default:
-		if strings.ContainsAny(text, ".eE") {
-			value, err := strconv.ParseFloat(text, 64)
-			if err != nil {
-				return nil, err
-			}
-			return value, nil
-		}
-		value, err := strconv.ParseInt(text, 10, 64)
-		if err != nil {
-			return nil, err
-		}
-		return value, nil
-	}
-}
-
-func decodeStorageParams(raw []jsontext.Value) ([]any, error) {
-	if len(raw) > maxStorageParams {
-		return nil, fmt.Errorf("too many parameters (max %d)", maxStorageParams)
-	}
-	params := make([]any, len(raw))
-	for i, value := range raw {
-		decoded, err := decodeStorageValue(value)
-		if err != nil {
-			return nil, fmt.Errorf("parameter %d: %w", i+1, err)
-		}
-		params[i] = decoded
-	}
-	return params, nil
-}
-
 func (s *storageServer) exec(w http.ResponseWriter, r *http.Request, app string) {
 	var req storageRequest
 	if !readStorageJSON(w, r, &req) {
@@ -676,39 +479,6 @@ func (s *storageServer) batch(w http.ResponseWriter, r *http.Request, app string
 	}
 	s.logChanges(app, changes)
 	writeJSON(w, http.StatusOK, storageBatchResponse{Results: results})
-}
-
-func encodeStorageValue(value any) any {
-	switch value := value.(type) {
-	case []byte:
-		return map[string]string{"$b64": base64.StdEncoding.EncodeToString(value)}
-	case time.Time:
-		return value.Format(time.RFC3339Nano)
-	case float64:
-		if math.IsNaN(value) || math.IsInf(value, 0) {
-			return nil
-		}
-		return value
-	default:
-		return value
-	}
-}
-
-func storageValueSize(value any) int {
-	switch value := value.(type) {
-	case string:
-		return len(value)
-	case []byte:
-		return base64.StdEncoding.EncodedLen(len(value))
-	case int64, float64:
-		return 8
-	case time.Time:
-		return 32
-	case nil:
-		return 4
-	default:
-		return 8
-	}
 }
 
 // readStorageRows scans and encodes a query result, stopping at maxRows or the result size limit.
