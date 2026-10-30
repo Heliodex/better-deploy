@@ -131,6 +131,30 @@ curl -H 'Host: notes.localhost' http://127.0.0.1:8080/notes
 # data lives in /tmp/wt/state/.storage/notes/storage.db
 ```
 
+## Lifecycle and configuration
+
+The admin token also guards the lifecycle and config endpoints:
+
+```text
+GET    /apps/<name>/config      runtime config, with env keys but not values
+PATCH  /apps/<name>/config      partial config update
+POST   /apps/<name>/stop        stop the process, keeping the app and its host
+POST   /apps/<name>/start       relaunch a stopped app
+DELETE /apps/<name>             remove code and process; keep state
+DELETE /apps/<name>?purge=1     also remove the database, backups, logs and /data
+POST   /apps/<name>?dry_run=1   validate an uploaded bundle without installing it
+```
+
+`PATCH` accepts any of `host`, `health`, `env`, `memory_mb` and `schedule`. Env changes are a merge; a `null` value removes a key. `GET` returns `env_keys` rather than values, so secrets are never echoed back. Host and schedule changes take effect immediately; env and memory changes are saved to `app.json` and applied on the next start or restart, which the response reports as `restart_required`. Host changes update routing at once, and are rejected with `409` if another app already owns the host.
+
+`DELETE` is deliberately conservative: it removes the app directory and stops the process, but leaves the database, backups, logs, resource history and `/data` intact unless `purge=1` is set.
+
+```sh
+curl -X PATCH -H "Authorization: Bearer $WT_TOKEN" \
+  -d '{"memory_mb":256,"env":{"NEW_KEY":"value","OLD_KEY":null}}' \
+  http://127.0.0.1:8080/apps/notes/config
+```
+
 ## Scaffold a new app
 
 ```sh
