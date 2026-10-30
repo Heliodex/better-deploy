@@ -178,6 +178,19 @@ func (m *backupManager) saveSettings(app string, settings backupSettings) error 
 	return m.saveSettingsLocked(app, settings)
 }
 
+// writeFileAtomic replaces path through a temp file, so a crash leaves the previous contents intact.
+func writeFileAtomic(path string, data []byte) error {
+	temp := path + backupTempSuffix
+	if err := os.WriteFile(temp, data, 0o644); err != nil {
+		return err
+	}
+	if err := os.Rename(temp, path); err != nil {
+		_ = os.Remove(temp)
+		return err
+	}
+	return nil
+}
+
 func (m *backupManager) saveSettingsLocked(app string, settings backupSettings) error {
 	if err := os.MkdirAll(m.appDir(app), 0o755); err != nil {
 		return fmt.Errorf("backup dir: %w", err)
@@ -186,13 +199,8 @@ func (m *backupManager) saveSettingsLocked(app string, settings backupSettings) 
 	if err != nil {
 		return err
 	}
-	temp := m.configPath(app) + backupTempSuffix
-	if err := os.WriteFile(temp, append(data, '\n'), 0o644); err != nil {
+	if err := writeFileAtomic(m.configPath(app), append(data, '\n')); err != nil {
 		return fmt.Errorf("write backup config: %w", err)
-	}
-	if err := os.Rename(temp, m.configPath(app)); err != nil {
-		_ = os.Remove(temp)
-		return fmt.Errorf("install backup config: %w", err)
 	}
 	return m.pruneLocked(app, settings.Keep)
 }
@@ -404,13 +412,8 @@ func (m *backupManager) saveTreeLocked(app string, tree backupTree) error {
 	if err != nil {
 		return err
 	}
-	temp := m.treePath(app) + backupTempSuffix
-	if err := os.WriteFile(temp, append(data, '\n'), 0o644); err != nil {
+	if err := writeFileAtomic(m.treePath(app), append(data, '\n')); err != nil {
 		return fmt.Errorf("write backup tree: %w", err)
-	}
-	if err := os.Rename(temp, m.treePath(app)); err != nil {
-		_ = os.Remove(temp)
-		return fmt.Errorf("install backup tree: %w", err)
 	}
 	return nil
 }
