@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -258,5 +259,35 @@ func TestFormatAccessLog(t *testing.T) {
 		if got := formatAccessLog(tc.method, tc.status, tc.elapsed, tc.uri); got != tc.want {
 			t.Errorf("formatAccessLog(%s, %d, %s, %s) = %q, want %q", tc.method, tc.status, tc.elapsed, tc.uri, got, tc.want)
 		}
+	}
+}
+
+func TestWaitReadyRequiresSuccessStatus(t *testing.T) {
+	var calls atomic.Int64
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) == 1 {
+			http.Error(w, "still migrating", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer backend.Close()
+
+	parsed, err := url.Parse(backend.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(parsed.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := &supervisor{}
+	a := &app{port: port, cfg: appConfig{Health: "/"}}
+	if err := s.waitReady(a, make(chan struct{})); err != nil {
+		t.Fatal(err)
+	}
+	if got := calls.Load(); got < 2 {
+		t.Errorf("waitReady accepted the 500 after %d call(s)", got)
 	}
 }

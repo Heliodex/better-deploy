@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -44,6 +45,7 @@ func (s *supervisor) waitReady(a *app, done <-chan struct{}) error {
 	client := &http.Client{Timeout: 500 * time.Millisecond}
 	target := fmt.Sprintf("http://127.0.0.1:%d%s", a.port, a.cfg.Health)
 	deadline := time.Now().Add(readyTimeout)
+	lastFailure := ""
 
 	for {
 		select {
@@ -53,10 +55,19 @@ func (s *supervisor) waitReady(a *app, done <-chan struct{}) error {
 		}
 		resp, err := client.Get(target)
 		if err == nil {
-			resp.Body.Close()
-			return nil
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+			_ = resp.Body.Close()
+			if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+				return nil
+			}
+			lastFailure = fmt.Sprintf("status %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		} else {
+			lastFailure = err.Error()
 		}
 		if time.Now().After(deadline) {
+			if lastFailure != "" {
+				return fmt.Errorf("no healthy response on %s within %s (last: %s)", target, readyTimeout, lastFailure)
+			}
 			return fmt.Errorf("no response on %s within %s", target, readyTimeout)
 		}
 		time.Sleep(50 * time.Millisecond)
