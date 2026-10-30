@@ -332,6 +332,8 @@ func (s *supervisor) rollbackAtomic(w http.ResponseWriter, ctx context.Context, 
 func (s *supervisor) failRollback(w http.ResponseWriter, journalPath string, journal rollbackJournal, old *app, running bool, cause error) {
 	if s.storage != nil {
 		s.storage.opMu.Lock()
+		s.storage.drop(journal.Name)
+		removeSQLiteSidecars(journal.DB)
 	}
 	restoreErr := restoreDB(journal.DB, journal.DBBackup)
 	if s.storage != nil {
