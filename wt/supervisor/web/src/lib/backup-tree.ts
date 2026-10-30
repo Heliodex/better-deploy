@@ -69,9 +69,7 @@ const backupKindLabels: { [_: string]: string } = {
 	manual: "Manual",
 }
 
-export function backupKindLabel(kind: BackupKind): string {
-	return backupKindLabels[kind] ?? "Backup"
-}
+export const backupKindLabel = (kind: BackupKind): string => backupKindLabels[kind] ?? "Backup"
 
 /** Short label for a graph node; the full date is in the tooltip and the details below the tree. */
 export function backupNodeLabel(backup: BackupInfo): string {

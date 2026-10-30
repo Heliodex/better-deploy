@@ -4,8 +4,7 @@ export interface PaletteEntry {
 	stroke: string
 }
 
-// One entry per app, cycled when there are more apps than colours. Full literal
-// class names so Tailwind emits them.
+// One entry per app, cycled when there are more apps than colours. Full literal class names so Tailwind emits them.
 export const palette: PaletteEntry[] = [
 	{ dot: "bg-emerald-400", fill: "fill-emerald-500/25", stroke: "stroke-emerald-400" },
 	{ dot: "bg-sky-400", fill: "fill-sky-500/25", stroke: "stroke-sky-400" },

@@ -142,9 +142,8 @@ function formatSize(bytes: number): string {
 	return `${(kilobytes / 1024).toFixed(1)} MB`
 }
 
-function isBlobValue(value: unknown): value is { $b64: string } {
-	return typeof value === "object" && value !== null && "$b64" in value && typeof value.$b64 === "string"
-}
+const isBlobValue = (value: unknown): value is { $b64: string } =>
+	typeof value === "object" && value !== null && "$b64" in value && typeof value.$b64 === "string"
 
 function formatDatabaseValue(value: unknown): string {
 	if (value === null) return "–"
@@ -157,13 +156,10 @@ function formatDatabaseValue(value: unknown): string {
 	return JSON.stringify(value) ?? String(value)
 }
 
-function formatChangeParams(params: unknown[]): string {
-	return JSON.stringify(params) ?? "[]"
-}
+const formatChangeParams = (params: unknown[]): string => JSON.stringify(params) ?? "[]"
 
-function formatRowValue(values: unknown[] | undefined, index: number): string {
-	return values && index < values.length ? formatDatabaseValue(values[index]) : "–"
-}
+const formatRowValue = (values: unknown[] | undefined, index: number): string =>
+	values && index < values.length ? formatDatabaseValue(values[index]) : "–"
 
 function rowOpClass(op: string): string {
 	switch (op) {
@@ -1486,7 +1482,7 @@ onMount((): (() => void) => {
 									</label>
 									<span class="pb-1.5 text-xs text-neutral-500 tabular-nums">
 										{#if databaseRows && databaseRows.rows.length > 0}
-											{databaseRows.offset + 1}–{databaseRows.offset + databaseRows.rows.length}
+											{databaseRows.offset + 1}-{databaseRows.offset + databaseRows.rows.length}
 											of {databaseRows.total}
 										{:else if databaseRows}
 											0 of {databaseRows.total}

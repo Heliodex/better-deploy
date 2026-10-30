@@ -66,9 +66,7 @@ const errorResponseSchema = object({
 const tokenKey = "wt-admin-token"
 const cookieName = "wt_token"
 
-export function getToken(): string | null {
-	return localStorage.getItem(tokenKey)
-}
+export const getToken = (): string | null => localStorage.getItem(tokenKey)
 
 export function setToken(token: string): void {
 	localStorage.setItem(tokenKey, token)
@@ -123,9 +121,7 @@ async function request<T>(path: string, options: RequestOptions, schema: Generic
 	return parseJSON(response, schema)
 }
 
-export function fetchApps(token: string): Promise<AppInfo[]> {
-	return request("/apps", { token }, appsResponseSchema)
-}
+export const fetchApps = (token: string): Promise<AppInfo[]> => request("/apps", { token }, appsResponseSchema)
 
 export function subscribe(onSnapshot: (apps: AppInfo[]) => void, onStatus: (live: boolean) => void): () => void {
 	const source = new EventSource("/events")
@@ -154,9 +150,8 @@ export function subscribe(onSnapshot: (apps: AppInfo[]) => void, onStatus: (live
 	return (): void => source.close()
 }
 
-export function fetchApp(token: string, name: string): Promise<AppInfo> {
-	return request(`/apps/${encodeURIComponent(name)}`, { token }, appInfoSchema)
-}
+export const fetchApp = (token: string, name: string): Promise<AppInfo> =>
+	request(`/apps/${encodeURIComponent(name)}`, { token }, appInfoSchema)
 
 const resourceSampleSchema = object({
 	at: pipe(string(), minLength(1)),
@@ -297,9 +292,8 @@ export function subscribeLogs(
 	return (): void => source.close()
 }
 
-export function restartApp(token: string, name: string): Promise<AppInfo> {
-	return request(`/apps/${encodeURIComponent(name)}/restart`, { method: "POST", token }, appInfoSchema)
-}
+export const restartApp = (token: string, name: string): Promise<AppInfo> =>
+	request(`/apps/${encodeURIComponent(name)}/restart`, { method: "POST", token }, appInfoSchema)
 
 export function deployBundle(token: string, name: string, file: File): Promise<AppInfo> {
 	const body = new FormData()
@@ -307,33 +301,28 @@ export function deployBundle(token: string, name: string, file: File): Promise<A
 	return request(`/apps/${encodeURIComponent(name)}`, { body, method: "POST", token }, appInfoSchema)
 }
 
-export function fetchBackups(token: string, name: string): Promise<BackupsResult> {
-	return request(`/apps/${encodeURIComponent(name)}/backups`, { token }, backupsResponseSchema)
-}
+export const fetchBackups = (token: string, name: string): Promise<BackupsResult> =>
+	request(`/apps/${encodeURIComponent(name)}/backups`, { token }, backupsResponseSchema)
 
-export function createBackup(token: string, name: string): Promise<BackupsResult> {
-	return request(`/apps/${encodeURIComponent(name)}/backups`, { method: "POST", token }, backupsResponseSchema)
-}
+export const createBackup = (token: string, name: string): Promise<BackupsResult> =>
+	request(`/apps/${encodeURIComponent(name)}/backups`, { method: "POST", token }, backupsResponseSchema)
 
-export function saveBackupSettings(token: string, name: string, settings: BackupSettings): Promise<BackupsResult> {
-	return request(
+export const saveBackupSettings = (token: string, name: string, settings: BackupSettings): Promise<BackupsResult> =>
+	request(
 		`/apps/${encodeURIComponent(name)}/backups/config`,
 		{ json: settings, method: "PUT", token },
 		backupsResponseSchema,
 	)
-}
 
-export function restoreBackup(token: string, name: string, backup: string): Promise<BackupsResult> {
-	return request(
+export const restoreBackup = (token: string, name: string, backup: string): Promise<BackupsResult> =>
+	request(
 		`/apps/${encodeURIComponent(name)}/backups/${encodeURIComponent(backup)}/restore`,
 		{ method: "POST", token },
 		backupsResponseSchema,
 	)
-}
 
-export function fetchDatabase(token: string, name: string): Promise<DatabaseOverview> {
-	return request(`/apps/${encodeURIComponent(name)}/database`, { token }, databaseOverviewSchema)
-}
+export const fetchDatabase = (token: string, name: string): Promise<DatabaseOverview> =>
+	request(`/apps/${encodeURIComponent(name)}/database`, { token }, databaseOverviewSchema)
 
 export function fetchDatabaseRows(
 	token: string,

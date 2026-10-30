@@ -84,9 +84,7 @@ let scale = $derived(tickScale(peakTotal / unit, 1))
 let ticks = $derived(scale.ticks.map(tick => tick * unit))
 let maxValue = $derived(Math.max(scale.max * unit, 1))
 
-function yFor(stackedValue: number): number {
-	return height - padding - (stackedValue / maxValue) * (height - padding * 2)
-}
+const yFor = (stackedValue: number): number => height - padding - (stackedValue / maxValue) * (height - padding * 2)
 
 let layers = $derived(
 	ordered.map((entry, index) => {
