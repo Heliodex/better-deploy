@@ -75,9 +75,16 @@ let {
 						>
 							<span
 								aria-hidden="true"
-								class={app.status === "running"
-									? "size-1.5 shrink-0 bg-primary-500"
-									: "size-1.5 shrink-0 border border-neutral-500"}
+								class={[
+									"size-1.5 shrink-0",
+									app.status === "running"
+										? "bg-primary-500"
+										: app.status === "unhealthy"
+											? "bg-red-500"
+											: app.status === "restarting"
+												? "bg-amber-500"
+												: "border border-neutral-500",
+								]}
 							></span>
 							<span class="flex-1 truncate">{app.name}</span>
 							<span class="text-xs text-neutral-500 tabular-nums">{uptime(app.startedAt, now)}</span>

@@ -86,6 +86,12 @@ type app struct {
 	cmd             *exec.Cmd
 	done            chan struct{}
 	exited, retired bool
+	starting        bool
+
+	healthOK       bool
+	healthFailures int
+	lastHealthy    time.Time
+	lastError      string
 }
 
 type supervisor struct {
@@ -372,11 +378,11 @@ func (s *supervisor) info(a *app) appInfo {
 	info.Host = a.cfg.Host
 	info.StartedAt = a.started
 	info.DiskLimitBytes = int64(a.cfg.DiskMB) << 20
+	info.Status = a.statusLocked()
+	info.LastHealthy = a.lastHealthy
+	info.LastError = a.lastError
 	if a.cmd != nil && a.cmd.Process != nil && !a.exited {
-		info.Status = "running"
 		info.PID = a.cmd.Process.Pid
-	} else {
-		info.Status = "stopped"
 	}
 	a.mu.Unlock()
 	info.DiskBytes = s.diskBytes(a)
@@ -426,6 +432,8 @@ type appInfo struct {
 	DiskLimitBytes int64     `json:"diskLimitBytes,omitempty"`
 	OverQuota      bool      `json:"overQuota,omitempty"`
 	SampledAt      time.Time `json:"sampledAt"`
+	LastHealthy    time.Time `json:"lastHealthy,omitempty"`
+	LastError      string    `json:"lastError,omitempty"`
 }
 
 func (s *supervisor) stopAll() {
@@ -619,6 +627,7 @@ func main() {
 	defer stopBackups()
 	go s.backups.loop(backupCtx)
 	go s.monitorResources(resourceSampleInterval)
+	go s.monitorHealth()
 
 	server := &http.Server{
 		Addr:              cfg.listen,

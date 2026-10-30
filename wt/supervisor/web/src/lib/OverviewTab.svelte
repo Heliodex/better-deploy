@@ -52,6 +52,13 @@ let { actionMessage, deploying, detail, error, history, onupload, span = $bindab
 			</div>
 		</dl>
 
+		{#if detail.lastError}
+			<div class="flex flex-col gap-1 border border-red-500/40 bg-red-500/10 p-2">
+				<span class="text-xs tracking-wide text-red-400 uppercase">Last error</span>
+				<span class="text-sm wrap-break-word text-red-300">{detail.lastError}</span>
+			</div>
+		{/if}
+
 		<section aria-labelledby="resources-title" class="flex flex-col gap-2 border border-line-soft bg-surface p-2">
 			<div class="flex items-center justify-between gap-2">
 				<h3 class="text-xs font-semibold tracking-wide text-neutral-400 uppercase" id="resources-title">

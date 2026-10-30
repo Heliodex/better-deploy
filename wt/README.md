@@ -61,7 +61,9 @@ WT_TOKEN=dev \
 
 `WT_WASMTIME_COMPILER` (or `--wasmtime-compiler`) selects the binary used to rebuild a stale `main.cwasm`; it defaults to `WT_WASMTIME`. A runtime-only wasmtime build cannot compile, so leave the default there and redeploy from a machine with the matching wasmtime instead.
 
-The supervisor speaks plain HTTP by default; set `WT_TLS_CERT` and `WT_TLS_KEY` (or `--tls-cert`/`--tls-key`) to terminate TLS itself. Behind the Orchard ingress, leave TLS to the ingress and keep the supervisor on HTTP. The proxy preserves the original `Host` and sets `X-Forwarded-Host` and `X-Forwarded-Proto` for the app.
+The supervisor speaks plain HTTP by default; set `WT_TLS_CERT` and `WT_TLS_KEY` (or `--tls-cert`/`--tls-key`) to terminate TLS itself. Behind the Orchard ingress, leave TLS to the ingress and keep the supervisor on HTTP. The proxy preserves the original `Host` and sets `X-Forwarded-Host` and `X-Forwarded-Proto` for the app. It connects within five seconds and waits at most thirty seconds for response headers, so a hung app returns `502` instead of holding the client connection open.
+
+Every ten seconds the supervisor probes each running app's health path (three-second timeout) and reports `running`, `unhealthy`, `restarting` or `stopped`. Two consecutive failures mark it `unhealthy` and record `lastError`; a later success clears it and updates `lastHealthy`. Health state appears in `GET /apps`, the SSE snapshot and the admin panel, and does not stop or restart the process by itself.
 
 The supervisor scans `WT_APPS_DIR` at boot, starts every app found there, and serves `GET /apps`, `GET /apps/<name>` and `POST /apps/<name>` (deploy, bearer token). `/healthz` is the supervisor's own health check. These supervisor paths, including `/admin/` and `/events`, only exist on hosts that are not app hosts: an app owns every path on its own host, so requests to those names are proxied to the app rather than swallowed by the supervisor.
 

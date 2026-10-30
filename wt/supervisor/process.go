@@ -105,6 +105,7 @@ func (s *supervisor) stop(a *app) {
 	}
 	a.mu.Lock()
 	a.retired = true
+	a.healthOK = false
 	if a.timer != nil {
 		a.timer.Stop()
 		a.timer = nil
@@ -183,6 +184,15 @@ func (s *supervisor) restart(a *app) {
 }
 
 func (s *supervisor) launch(a *app, source string) error {
+	a.mu.Lock()
+	a.starting = true
+	a.mu.Unlock()
+	defer func() {
+		a.mu.Lock()
+		a.starting = false
+		a.mu.Unlock()
+	}()
+
 	logging := log.New(os.Stderr, "["+a.name+"] ", 0).Writer()
 	recent := newLogRing()
 	writers := []io.Writer{logging, recent}
@@ -221,6 +231,10 @@ func (s *supervisor) launch(a *app, source string) error {
 		}
 		a.cmd = nil
 		a.exited = true
+		a.healthOK = false
+		if err != nil {
+			a.lastError = err.Error()
+		}
 		ran := time.Since(a.started)
 		if ran > 30*time.Second {
 			a.delay = time.Second
@@ -244,11 +258,19 @@ func (s *supervisor) launch(a *app, source string) error {
 	}()
 
 	if err := s.waitReady(a, done); err != nil {
-		return withLaunchLog(source, recent, err)
+		err = withLaunchLog(source, recent, err)
+		a.mu.Lock()
+		a.lastError = err.Error()
+		a.mu.Unlock()
+		return err
 	}
 	a.proxy = s.newProxy(a)
 	a.mu.Lock()
 	host := a.cfg.Host
+	a.healthOK = true
+	a.healthFailures = 0
+	a.lastHealthy = time.Now().UTC()
+	a.lastError = ""
 	a.mu.Unlock()
 	log.Printf("app %s started on 127.0.0.1:%d (%s)", a.name, a.port, host)
 	s.broadcast()

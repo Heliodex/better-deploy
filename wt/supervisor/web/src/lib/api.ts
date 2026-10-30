@@ -23,6 +23,8 @@ const appInfoSchema = object({
 	diskBytes: optional(pipe(number(), minValue(0))),
 	diskLimitBytes: optional(pipe(number(), minValue(0))),
 	host: pipe(string(), minLength(1)),
+	lastError: optional(string()),
+	lastHealthy: optional(string()),
 	memoryBytes: pipe(number(), minValue(0)),
 	name: pipe(string(), minLength(1)),
 	overQuota: optional(boolean()),
@@ -30,7 +32,7 @@ const appInfoSchema = object({
 	port: pipe(number(), integer(), minValue(0)),
 	sampledAt: pipe(string(), minLength(1)),
 	startedAt: pipe(string(), minLength(1)),
-	status: picklist(["running", "stopped"]),
+	status: picklist(["running", "stopped", "unhealthy", "restarting"]),
 })
 
 export type AppInfo = InferOutput<typeof appInfoSchema>

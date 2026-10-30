@@ -12,9 +12,28 @@ import (
 	"time"
 )
 
+var (
+	proxyDialTimeout           = 5 * time.Second
+	proxyResponseHeaderTimeout = 30 * time.Second
+)
+
+const (
+	proxyIdleConnTimeout = 90 * time.Second
+	proxyMaxIdlePerHost  = 16
+	proxyExpectContinue  = time.Second
+)
+
 func (s *supervisor) newProxy(a *app) *httputil.ReverseProxy {
 	target := &url.URL{Scheme: "http", Host: fmt.Sprintf("127.0.0.1:%d", a.port)}
 	proxy := &httputil.ReverseProxy{
+		// A hung app must not hold client connections forever: header and dial deadlines bound the wait before the response starts.
+		Transport: &http.Transport{
+			DialContext:           (&net.Dialer{Timeout: proxyDialTimeout, KeepAlive: 30 * time.Second}).DialContext,
+			ResponseHeaderTimeout: proxyResponseHeaderTimeout,
+			IdleConnTimeout:       proxyIdleConnTimeout,
+			MaxIdleConnsPerHost:   proxyMaxIdlePerHost,
+			ExpectContinueTimeout: proxyExpectContinue,
+		},
 		Rewrite: func(r *httputil.ProxyRequest) {
 			host := r.In.Host
 			proto := r.In.Header.Get("X-Forwarded-Proto")
