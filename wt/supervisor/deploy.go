@@ -230,6 +230,11 @@ func drainApp(a *app, timeout time.Duration) bool {
 	}
 }
 
+type deployValidationResponse struct {
+	Valid  bool              `json:"valid"`
+	Config appConfigResponse `json:"config"`
+}
+
 func (s *supervisor) deploy(w http.ResponseWriter, r *http.Request, name string) {
 	s.deployMu.Lock()
 	defer s.deployMu.Unlock()
@@ -238,6 +243,18 @@ func (s *supervisor) deploy(w http.ResponseWriter, r *http.Request, name string)
 	defer cleanup()
 	if !ok {
 		return
+	}
+
+	if value := r.URL.Query().Get("dry_run"); value != "" {
+		dryRun, err := strconv.ParseBool(value)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "dry_run must be a boolean")
+			return
+		}
+		if dryRun {
+			writeJSON(w, http.StatusOK, deployValidationResponse{Valid: true, Config: configResponse(cfg)})
+			return
+		}
 	}
 
 	s.mu.RLock()
