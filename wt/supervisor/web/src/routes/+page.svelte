@@ -32,12 +32,10 @@ import {
 } from "../lib/api"
 import BackupTree from "../lib/BackupTree.svelte"
 import { backupKindLabel } from "../lib/backup-tree"
-import { palette, spans } from "../lib/chart"
+import { palette } from "../lib/chart"
 import {
 	formatChangeParams,
-	formatCPU,
 	formatDatabaseValue,
-	formatMemory,
 	formatRowValue,
 	formatSize,
 	formatTime,
@@ -45,8 +43,7 @@ import {
 	uptime,
 } from "../lib/format"
 import { accessStatusClass, levelClasses, levelMessageClasses, logTimeParts, parseAccessLine } from "../lib/log-format"
-import ResourceChart from "../lib/ResourceChart.svelte"
-import StackedResourceChart from "../lib/StackedResourceChart.svelte"
+import OverviewTab from "../lib/OverviewTab.svelte"
 
 const MIN_SIDEBAR = 200
 const MAX_SIDEBAR = 520
@@ -1006,111 +1003,15 @@ onMount((): (() => void) => {
 					</header>
 
 					{#if tab === "overview"}
-						<div
-							aria-labelledby="app-tab-overview"
-							class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4"
-							id="app-panel-overview"
-							role="tabpanel"
-						>
-							{#if detail}
-								<dl class="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-4">
-									<div class="flex flex-col">
-										<dt class="text-xs tracking-wide text-neutral-500 uppercase">Host</dt>
-										<dd class="text-sm wrap-break-word">{detail.host}</dd>
-									</div>
-									<div class="flex flex-col">
-										<dt class="text-xs tracking-wide text-neutral-500 uppercase">Status</dt>
-										<dd class="text-sm">{detail.status}</dd>
-									</div>
-									<div class="flex flex-col">
-										<dt class="text-xs tracking-wide text-neutral-500 uppercase">Started</dt>
-										<dd class="text-sm">{formatTime(detail.startedAt)}</dd>
-									</div>
-									<div class="flex flex-col">
-										<dt class="text-xs tracking-wide text-neutral-500 uppercase">PID</dt>
-										<dd class="text-sm tabular-nums">{detail.pid ?? "–"}</dd>
-									</div>
-								</dl>
-
-								<section
-									aria-labelledby="resources-title"
-									class="flex flex-col gap-2 border border-line-soft bg-surface p-2"
-								>
-									<div class="flex items-center justify-between gap-2">
-										<h3
-											class="text-xs font-semibold tracking-wide text-neutral-400 uppercase"
-											id="resources-title"
-										>
-											Resources
-										</h3>
-										<select
-											aria-label="Resources timespan"
-											class="field px-1 py-0 text-xs"
-											bind:value={detailSpan}
-										>
-											{#each spans as option (option.seconds)}
-												<option value={option.seconds}>{option.label}</option>
-											{/each}
-										</select>
-									</div>
-									<div class="flex flex-col gap-4">
-										<ResourceChart
-											color="primary"
-											format={formatCPU}
-											label="CPU"
-											samples={resourceHistory}
-											span={detailSpan}
-											unit={1}
-											value={(sample: ResourceSample) => sample.cpuPercent}
-										/>
-										<ResourceChart
-											color="sky"
-											format={formatMemory}
-											label="Memory"
-											samples={resourceHistory}
-											span={detailSpan}
-											unit={1024 * 1024}
-											value={(sample: ResourceSample) => sample.memoryBytes}
-										/>
-									</div>
-								</section>
-							{/if}
-
-							{#if actionMessage}
-								<p
-									class="border border-primary-500/40 bg-primary-500/10 px-2 py-1 text-sm text-primary-300"
-								>
-									{actionMessage}
-								</p>
-							{/if}
-
-							<form
-								class="flex flex-wrap items-center gap-2 border-t border-line-soft pt-4"
-								onsubmit={upload}
-							>
-								<label class="text-xs tracking-wide text-neutral-400 uppercase" for="bundle">
-									Deploy bundle
-								</label>
-								<input
-									accept=".tar.gz, application/gzip"
-									class="field file:mr-2 file:cursor-pointer file:border-0 file:bg-neutral-800 file:px-2 file:py-0.5 file:text-sm file:text-neutral-200 file:transition-colors hover:file:bg-neutral-700"
-									id="bundle"
-									type="file"
-								>
-								<button class="btn btn-primary" disabled={deploying} type="submit">
-									{deploying ? "Deploying…" : "Deploy"}
-								</button>
-							</form>
-
-							{#if error}
-								<p
-									class="border border-red-500/80 bg-red-500/10 px-2 py-1 text-sm text-red-400"
-									role="alert"
-								>
-									{error}
-								</p>
-							{/if}
-						</div>
+						<OverviewTab
+							{actionMessage}
+							{deploying}
+							{detail}
+							{error}
+							history={resourceHistory}
+							onupload={upload}
+							bind:span={detailSpan}
+						/>
 					{:else if tab === "backups"}
 						<div
 							aria-labelledby="app-tab-backups"
