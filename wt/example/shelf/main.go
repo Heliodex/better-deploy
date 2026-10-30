@@ -238,7 +238,7 @@ func loadIndex(ctx context.Context, q, tag string, page int) (indexData, error) 
 	}
 	offset := (page - 1) * pageSize
 
-	listArgs := append(append([]any{}, args...), pageSize, offset)
+	listArgs := slices.Concat(args, []any{pageSize, offset})
 	rows, err := store.Query(ctx, `select `+linkColumns+` from links l `+linkFilter+`
 		order by l.created_at desc, l.id desc
 		limit ? offset ?`, listArgs...)
@@ -470,9 +470,7 @@ func loadDays(ctx context.Context, id string) ([]dayCount, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	for i, j := 0, len(days)-1; i < j; i, j = i+1, j-1 {
-		days[i], days[j] = days[j], days[i]
-	}
+	slices.Reverse(days)
 	var maxCount int64
 	for _, day := range days {
 		if day.Count > maxCount {
@@ -603,17 +601,7 @@ func splitTags(raw string) []string {
 }
 
 func tagPageURL(q, tag string) string {
-	values := url.Values{}
-	if q != "" {
-		values.Set("q", q)
-	}
-	if tag != "" {
-		values.Set("tag", tag)
-	}
-	if len(values) == 0 {
-		return "/"
-	}
-	return "/?" + values.Encode()
+	return pageURL(q, tag, 0)
 }
 
 func pageURL(q, tag string, page int) string {

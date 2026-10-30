@@ -38,12 +38,10 @@ func (self *responseWriter) Header() http.Header {
 
 func (self *responseWriter) send() error {
 	channel := self.channel
-
 	if channel == nil {
 		return nil
-	} else {
-		self.channel = nil
 	}
+	self.channel = nil
 
 	fields, err := toWasiHeaders(self.headers)
 	if err != nil {

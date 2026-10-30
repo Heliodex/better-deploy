@@ -53,9 +53,7 @@ func newHttpRequest(ir *wasi.Request) (*http.Request, error) {
 	}
 
 	var url string
-	if pathWithQuery := ir.GetPathWithQuery(); pathWithQuery.IsNone() {
-		url = ""
-	} else {
+	if pathWithQuery := ir.GetPathWithQuery(); pathWithQuery.IsSome() {
 		url = pathWithQuery.Some()
 	}
 
