@@ -1,7 +1,7 @@
 <script lang="ts">
 import type { AppInfo, ResourceSample } from "./api"
 import { spans } from "./chart"
-import { formatCPU, formatMemory, formatTime } from "./format"
+import { formatCPU, formatMemory, formatSize, formatTime } from "./format"
 import ResourceChart from "./ResourceChart.svelte"
 
 interface Props {
@@ -40,6 +40,15 @@ let { actionMessage, deploying, detail, error, history, onupload, span = $bindab
 			<div class="flex flex-col">
 				<dt class="text-xs tracking-wide text-neutral-500 uppercase">PID</dt>
 				<dd class="text-sm tabular-nums">{detail.pid ?? "–"}</dd>
+			</div>
+			<div class="flex flex-col">
+				<dt class="text-xs tracking-wide text-neutral-500 uppercase">Disk</dt>
+				<dd class={detail.overQuota ? "text-sm text-red-400" : "text-sm"}>
+					{formatSize(detail.diskBytes ?? 0)}
+					{#if detail.diskLimitBytes}
+						<span class="text-neutral-500">/ {formatSize(detail.diskLimitBytes)}</span>
+					{/if}
+				</dd>
 			</div>
 		</dl>
 

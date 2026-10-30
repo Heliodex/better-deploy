@@ -9,6 +9,7 @@ import {
 	type BackupsResult,
 	createBackup,
 	type DatabaseRows,
+	type DeploymentInfo,
 	deployBundle,
 	fetchApp,
 	fetchApps,
@@ -16,6 +17,7 @@ import {
 	fetchChanges,
 	fetchDatabase,
 	fetchDatabaseRows,
+	fetchDeployments,
 	fetchResourceHistory,
 	forgetToken,
 	getToken,
@@ -25,6 +27,7 @@ import {
 	type ResourceSample,
 	restartApp,
 	restoreBackup,
+	rollbackDeployment,
 	type StorageChange,
 	saveBackupSettings,
 	setToken,
@@ -34,6 +37,7 @@ import {
 import BackupsTab from "../lib/BackupsTab.svelte"
 import { palette } from "../lib/chart"
 import DatabaseTab from "../lib/DatabaseTab.svelte"
+import DeploymentsTab from "../lib/DeploymentsTab.svelte"
 import { formatTime, uptime } from "../lib/format"
 import LogsPane from "../lib/LogsPane.svelte"
 import OverviewTab from "../lib/OverviewTab.svelte"
@@ -108,6 +112,11 @@ let databaseOffset = $state(0)
 let changes = $state<StorageChange[]>([])
 let changesLoading = $state(false)
 let changesError = $state("")
+let deploymentList = $state<DeploymentInfo[]>([])
+let deploymentsLoading = $state(false)
+let deploymentsError = $state("")
+let deploymentsLoadedFor = $state<string | null>(null)
+let rollingBack = $state<string | null>(null)
 
 /** Merge history by timestamp so a late fetch cannot clobber samples that arrived over SSE. */
 function mergeHistory(existing: ResourceSample[], incoming: ResourceSample[]): ResourceSample[] {
@@ -197,6 +206,7 @@ function select(name: string | null): void {
 	restoringBackup = null
 	confirmRestore = null
 	resetDatabase()
+	resetDeployments()
 	closeLogs()
 	const url = name ? `?app=${encodeURIComponent(name)}` : window.location.pathname
 	window.history.replaceState(null, "", url)
@@ -206,6 +216,7 @@ function select(name: string | null): void {
 		void loadResourceHistory(token, name)
 		void loadBackups(token, name)
 		if (tab === "database") void loadDatabase(token, name)
+		if (tab === "deployments") void loadDeployments(token, name)
 		openLogs(name)
 	} else ensureOverviewHistories(token)
 }
@@ -332,6 +343,49 @@ function resetDatabase(): void {
 function openTab(next: Tab): void {
 	tab = next
 	if (next === "database" && token && selected && databaseLoadedFor !== selected) void loadDatabase(token, selected)
+	if (next === "deployments" && token && selected && deploymentsLoadedFor !== selected)
+		void loadDeployments(token, selected)
+}
+
+function resetDeployments(): void {
+	deploymentList = []
+	deploymentsLoading = false
+	deploymentsError = ""
+	deploymentsLoadedFor = null
+	rollingBack = null
+}
+
+async function loadDeployments(key: string, name: string): Promise<void> {
+	deploymentsLoading = true
+	deploymentsError = ""
+	try {
+		const list = await fetchDeployments(key, name)
+		if (selected !== name) return
+		deploymentList = list
+		deploymentsLoadedFor = name
+	} catch (err) {
+		if (selected === name) deploymentsError = err instanceof Error ? err.message : "Could not load deployments."
+	} finally {
+		if (selected === name) deploymentsLoading = false
+	}
+}
+
+async function rollbackToDeployment(id: string): Promise<void> {
+	if (!token || !selected) return
+	const target = selected
+	rollingBack = id
+	deploymentsError = ""
+	try {
+		detail = await rollbackDeployment(token, target, id)
+		if (selected !== target) return
+		actionMessage = `${target} rolled back.`
+		deploymentsLoadedFor = null
+		await loadDeployments(token, target)
+	} catch (err) {
+		if (selected === target) deploymentsError = err instanceof Error ? err.message : "Could not roll back."
+	} finally {
+		if (selected === target) rollingBack = null
+	}
 }
 
 async function loadDatabase(key: string, name: string): Promise<void> {
@@ -479,6 +533,7 @@ async function refresh(key: string): Promise<void> {
 			detail = await fetchApp(key, selected)
 			void loadBackups(key, selected)
 			if (tab === "database") void loadDatabase(key, selected)
+			if (tab === "deployments") void loadDeployments(key, selected)
 		} else ensureOverviewHistories(key)
 	} catch (err) {
 		error = err instanceof Error ? err.message : "Could not reach the supervisor."
@@ -690,6 +745,7 @@ async function upload(event: SubmitEvent): Promise<void> {
 		detail = await deployBundle(token, selected, file)
 		apps = await fetchApps(token)
 		actionMessage = `${selected} deployed.`
+		deploymentsLoadedFor = null
 	} catch (err) {
 		error = err instanceof Error ? err.message : "Could not deploy the bundle."
 	} finally {
@@ -903,7 +959,7 @@ onMount((): (() => void) => {
 							bind:every={backupSettings.every}
 							bind:keep={backupSettings.keep}
 						/>
-					{:else}
+					{:else if tab === "database"}
 						<DatabaseTab
 							{changes}
 							{changesError}
@@ -921,6 +977,15 @@ onMount((): (() => void) => {
 							rowsLoading={databaseRowsLoading}
 							table={databaseTable}
 							tables={databaseTables}
+						/>
+					{:else}
+						<DeploymentsTab
+							{actionMessage}
+							deployments={deploymentList}
+							error={deploymentsError}
+							loading={deploymentsLoading}
+							onrollback={rollbackToDeployment}
+							{rollingBack}
 						/>
 					{/if}
 				{:else if error}

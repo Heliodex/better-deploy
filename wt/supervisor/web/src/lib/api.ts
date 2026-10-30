@@ -20,9 +20,12 @@ import {
 
 const appInfoSchema = object({
 	cpuPercent: pipe(number(), minValue(0)),
+	diskBytes: optional(pipe(number(), minValue(0))),
+	diskLimitBytes: optional(pipe(number(), minValue(0))),
 	host: pipe(string(), minLength(1)),
 	memoryBytes: pipe(number(), minValue(0)),
 	name: pipe(string(), minLength(1)),
+	overQuota: optional(boolean()),
 	pid: optional(pipe(number(), integer())),
 	port: pipe(number(), integer(), minValue(0)),
 	sampledAt: pipe(string(), minLength(1)),
@@ -184,6 +187,8 @@ export type BackupKind = (typeof backupKinds)[number]
 
 const backupInfoSchema = object({
 	createdAt: pipe(string(), minLength(1)),
+	dataSize: optional(pipe(number(), minValue(0))),
+	hasData: optional(boolean()),
 	kind: picklist(backupKinds),
 	name: pipe(string(), minLength(1)),
 	parent: string(),
@@ -201,6 +206,17 @@ const backupsResponseSchema = object({
 })
 
 export type BackupsResult = InferOutput<typeof backupsResponseSchema>
+
+const deploymentInfoSchema = object({
+	deployedAt: pipe(string(), minLength(1)),
+	digest: pipe(string(), minLength(1)),
+	id: pipe(string(), minLength(1)),
+	size: pipe(number(), minValue(0)),
+})
+
+export type DeploymentInfo = InferOutput<typeof deploymentInfoSchema>
+
+const deploymentsSchema = array(deploymentInfoSchema)
 
 const databaseOverviewSchema = object({
 	database: boolean(),
@@ -319,6 +335,16 @@ export const restoreBackup = (token: string, name: string, backup: string): Prom
 		`/apps/${encodeURIComponent(name)}/backups/${encodeURIComponent(backup)}/restore`,
 		{ method: "POST", token },
 		backupsResponseSchema,
+	)
+
+export const fetchDeployments = (token: string, name: string): Promise<DeploymentInfo[]> =>
+	request(`/apps/${encodeURIComponent(name)}/deployments`, { token }, deploymentsSchema)
+
+export const rollbackDeployment = (token: string, name: string, id: string): Promise<AppInfo> =>
+	request(
+		`/apps/${encodeURIComponent(name)}/rollback/${encodeURIComponent(id)}`,
+		{ method: "POST", token },
+		appInfoSchema,
 	)
 
 export const fetchDatabase = (token: string, name: string): Promise<DatabaseOverview> =>

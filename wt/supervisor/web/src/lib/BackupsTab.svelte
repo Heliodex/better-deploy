@@ -137,7 +137,7 @@ const children = $derived(backups.filter(backup => backup.parent === selected).l
 					{/if}
 				</div>
 
-				<dl class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-3">
+				<dl class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-4">
 					<div>
 						<dt class="text-neutral-500">Size</dt>
 						<dd class="tabular-nums">{formatSize(selectedInfo.size)}</dd>
