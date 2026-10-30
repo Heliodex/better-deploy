@@ -10,6 +10,7 @@ import (
 
 // Assert that `responseWriter` implements the required interface
 var _ http.ResponseWriter = &responseWriter{}
+var _ http.Flusher = &responseWriter{}
 
 type responseWriter struct {
 	// channel to which the response will be sent
@@ -37,16 +38,17 @@ func (w *responseWriter) Header() http.Header {
 }
 
 func (w *responseWriter) send() error {
-	channel := w.channel
-	if channel == nil {
+	if w.channel == nil {
 		return nil
 	}
-	w.channel = nil
 
 	fields, err := toWasiHeaders(w.headers)
 	if err != nil {
 		return err
 	}
+
+	channel := w.channel
+	w.channel = nil
 
 	tx, rx := wasi.MakeStreamU8()
 	w.stream = tx
@@ -96,6 +98,11 @@ func (w *responseWriter) Write(buf []byte) (int, error) {
 
 func (w *responseWriter) WriteHeader(statusCode int) {
 	w.statusCode = statusCode
+}
+
+// Flush starts the response before the handler writes a body.
+func (w *responseWriter) Flush() {
+	_ = w.send()
 }
 
 func (w *responseWriter) close() {

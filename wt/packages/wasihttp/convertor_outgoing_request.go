@@ -73,9 +73,13 @@ func newOutgoingHttpRequest(req *http.Request) (*wasi.Request, error) {
 		wit.None[*wasi.RequestOptions](), // TODO: support options
 	)
 	send.Drop()
+	authority := req.Host
+	if authority == "" {
+		authority = req.URL.Host
+	}
 	request.SetMethod(toWasiMethod(req.Method))
-	request.SetAuthority(wit.Some(req.Host))
-	request.SetPathWithQuery(wit.Some(req.URL.Path))
+	request.SetAuthority(wit.Some(authority))
+	request.SetPathWithQuery(wit.Some(req.URL.RequestURI()))
 
 	switch req.URL.Scheme {
 	case "http":

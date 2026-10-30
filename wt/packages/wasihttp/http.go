@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"runtime/debug"
 	"strings"
 
 	wit "go.bytecodealliance.org/pkg/wit/types"
@@ -51,6 +52,19 @@ var wasiHandle = func(request *wasi.Request) wit.Result[*wasi.Response, wasi.Err
 
 	go func() {
 		defer httpRes.close()
+		defer func() {
+			recovered := recover()
+			if recovered == nil {
+				return
+			}
+			fmt.Fprintf(os.Stderr, "http handler panic: %v\n%s", recovered, debug.Stack())
+			if httpRes.channel != nil {
+				httpRes.channel <- handleErr(
+					wasi.MakeErrorCodeInternalError(wit.Some(fmt.Sprintf("panic: %v", recovered))),
+				)
+				httpRes.channel = nil
+			}
+		}()
 
 		// convert the incoming request to go's net/http type
 		httpReq, err := newHttpRequest(request)

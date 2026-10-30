@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 
 	client "wt.packages/binding/imports/wasi_http_0_3_0_client"
 	wasi "wt.packages/binding/imports/wasi_http_0_3_0_types"
@@ -26,7 +27,7 @@ func Send(req *http.Request) (*http.Response, error) {
 	}
 
 	response := result.Ok()
-	status := response.GetStatusCode()
+	statusCode := int(response.GetStatusCode())
 
 	headerResource := response.GetHeaders()
 	headers := headerResource.CopyAll()
@@ -35,13 +36,28 @@ func Send(req *http.Request) (*http.Response, error) {
 	rx, trailers := wasi.ResponseConsumeBody(response, unitFuture())
 	body := newReader(rx, trailers)
 
+	statusLine := fmt.Sprintf("%d", statusCode)
+	if statusText := http.StatusText(statusCode); statusText != "" {
+		statusLine += " " + statusText
+	}
 	resp := &http.Response{
-		StatusCode: int(status),
-		Body:       body,
-		Header:     http.Header{},
+		Status:        statusLine,
+		StatusCode:    statusCode,
+		Proto:         "HTTP/1.1",
+		ProtoMajor:    1,
+		ProtoMinor:    1,
+		Body:          body,
+		Header:        http.Header{},
+		Request:       req,
+		ContentLength: -1,
 	}
 
 	toHttpHeader(headers, &resp.Header)
+	if value := resp.Header.Get("Content-Length"); value != "" {
+		if length, err := strconv.ParseInt(value, 10, 64); err == nil {
+			resp.ContentLength = length
+		}
+	}
 
 	return resp, nil
 }
