@@ -2,7 +2,7 @@
 #
 # The wt runtime image: a runtime-only wasmtime and the supervisor. Apps are uploaded later; the image contains no applications.
 
-FROM golang:1.27.1-alpine AS supervisor
+FROM golang:1.27.3-alpine AS supervisor
 WORKDIR /src
 RUN mkdir -p /out
 COPY --from=docker.io/oven/bun:1.4.4-alpine /usr/local/bin/bun /usr/local/bin/bun
