@@ -32,33 +32,33 @@ func newHttpResponseWriter() *responseWriter {
 	}
 }
 
-func (self *responseWriter) Header() http.Header {
-	return self.headers
+func (w *responseWriter) Header() http.Header {
+	return w.headers
 }
 
-func (self *responseWriter) send() error {
-	channel := self.channel
+func (w *responseWriter) send() error {
+	channel := w.channel
 	if channel == nil {
 		return nil
 	}
-	self.channel = nil
+	w.channel = nil
 
-	fields, err := toWasiHeaders(self.headers)
+	fields, err := toWasiHeaders(w.headers)
 	if err != nil {
 		return err
 	}
 
 	tx, rx := wasi.MakeStreamU8()
-	self.stream = tx
+	w.stream = tx
 
 	response, send := wasi.ResponseNew(
 		fields,
 		wit.Some(rx),
 		trailersFuture(), // TODO: support trailers
 	)
-	self.streamResult = send
+	w.streamResult = send
 
-	response.SetStatusCode(uint16(self.statusCode))
+	response.SetStatusCode(uint16(w.statusCode))
 
 	channel <- wit.Ok[*wasi.Response, wasi.ErrorCode](response)
 
@@ -79,30 +79,30 @@ func (r *responseWriter) takeError() error {
 	return nil
 }
 
-func (self *responseWriter) Write(buf []byte) (int, error) {
-	err := self.send()
+func (w *responseWriter) Write(buf []byte) (int, error) {
+	err := w.send()
 	if err != nil {
 		return 0, err
 	}
 
-	count := self.stream.Write(buf)
+	count := w.stream.Write(buf)
 
-	if count == 0 && self.stream.ReaderDropped() {
-		return 0, self.takeError()
+	if count == 0 && w.stream.ReaderDropped() {
+		return 0, w.takeError()
 	}
 
 	return int(count), nil
 }
 
-func (self *responseWriter) WriteHeader(statusCode int) {
-	self.statusCode = statusCode
+func (w *responseWriter) WriteHeader(statusCode int) {
+	w.statusCode = statusCode
 }
 
-func (self *responseWriter) close() {
-	if self.stream != nil {
-		self.stream.Drop()
+func (w *responseWriter) close() {
+	if w.stream != nil {
+		w.stream.Drop()
 	}
-	if self.streamResult != nil {
-		self.streamResult.Drop()
+	if w.streamResult != nil {
+		w.streamResult.Drop()
 	}
 }

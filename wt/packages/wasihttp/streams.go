@@ -17,10 +17,10 @@ type bodyReader struct {
 	trailers *wit.FutureReader[wit.Result[wit.Option[*wasi.Fields], wasi.ErrorCode]]
 }
 
-func (self *bodyReader) takeError() error {
-	if self.trailers != nil {
-		trailers := self.trailers.Read()
-		self.trailers = nil
+func (r *bodyReader) takeError() error {
+	if r.trailers != nil {
+		trailers := r.trailers.Read()
+		r.trailers = nil
 		if trailers.IsErr() {
 			return fmt.Errorf("failed to read from HTTP body stream: %s", errorString(trailers.Err()))
 		}
@@ -28,25 +28,25 @@ func (self *bodyReader) takeError() error {
 	return io.EOF
 }
 
-func (self *bodyReader) Read(p []byte) (n int, err error) {
-	if self.stream.WriterDropped() {
-		return 0, self.takeError()
+func (r *bodyReader) Read(p []byte) (n int, err error) {
+	if r.stream.WriterDropped() {
+		return 0, r.takeError()
 	}
 
-	count := self.stream.Read(p)
-	if count == 0 && self.stream.WriterDropped() {
-		return 0, self.takeError()
+	count := r.stream.Read(p)
+	if count == 0 && r.stream.WriterDropped() {
+		return 0, r.takeError()
 	}
 
 	return int(count), nil
 }
 
-func (self *bodyReader) Close() error {
-	if self.stream != nil {
-		self.stream.Drop()
+func (r *bodyReader) Close() error {
+	if r.stream != nil {
+		r.stream.Drop()
 	}
-	if self.trailers != nil {
-		self.trailers.Drop()
+	if r.trailers != nil {
+		r.trailers.Drop()
 	}
 	return nil
 }
