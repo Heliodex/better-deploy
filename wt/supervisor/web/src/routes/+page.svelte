@@ -1,6 +1,7 @@
 <script lang="ts">
 import { onMount } from "svelte"
 import AllAppsOverview from "../lib/AllAppsOverview.svelte"
+import AppSidebar from "../lib/AppSidebar.svelte"
 import {
 	type AppInfo,
 	type BackupInfo,
@@ -36,6 +37,7 @@ import DatabaseTab from "../lib/DatabaseTab.svelte"
 import { formatTime, uptime } from "../lib/format"
 import LogsPane from "../lib/LogsPane.svelte"
 import OverviewTab from "../lib/OverviewTab.svelte"
+import { type Tab, tabs } from "../lib/tabs"
 
 const MIN_SIDEBAR = 200
 const MAX_SIDEBAR = 520
@@ -51,9 +53,6 @@ const MAX_LOG_LINES = 5000
 const FOLLOW_THRESHOLD = 24
 /** Thirty minutes at the supervisor's one-second sampling interval. */
 const MAX_HISTORY_POINTS = 1800
-
-const tabs = ["overview", "backups", "database"] as const
-type Tab = (typeof tabs)[number]
 
 let token = $state<string | null>(null)
 let tokenInput = $state("")
@@ -809,132 +808,20 @@ onMount((): (() => void) => {
 			class="workspace"
 			style="--sidebar-width: {sidebarWidth}px; --logs-height: {selected && logsOpen ? logsHeight : 0}px"
 		>
-			<aside aria-label="Apps" class="flex min-h-0 shrink-0 flex-col bg-surface">
-				<div class="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
-					<span class="text-sm font-semibold tracking-tight">wt admin</span>
-					<span class="flex-1"></span>
-					<span class="flex items-center gap-1.5 text-xs text-neutral-400">
-						<span
-							aria-hidden="true"
-							class={live ? "size-1.5 bg-primary-500" : "size-1.5 border border-neutral-500"}
-						></span>
-						{live ? "live" : "connecting…"}
-					</span>
-				</div>
-				<header class="flex shrink-0 items-center justify-between gap-2 border-b border-line-soft px-3 py-2">
-					<h2 class="text-xs font-semibold tracking-wide text-neutral-400 uppercase">Apps</h2>
-					<button class="btn" disabled={loading} onclick={refreshList} type="button">
-						{loading ? "Refreshing…" : "Refresh"}
-					</button>
-				</header>
-				<div class="flex min-h-0 flex-1 flex-col overflow-y-auto">
-					{#if apps.length === 0}
-						<p class="p-3 text-sm text-neutral-500">
-							{loading ? "Loading apps…" : "No apps deployed."}
-						</p>
-					{:else}
-						<ul class="flex flex-col py-1">
-							{#each apps as app (app.name)}
-								<li>
-									<button
-										aria-current={selected === app.name}
-										class={[
-											"flex w-full items-center gap-2 border-b border-l-2 border-line-soft px-3 py-1.5 text-left text-sm transition-colors",
-											selected === app.name
-												? "cursor-default border-l-primary-500 bg-neutral-800/40"
-												: "border-l-transparent hover:bg-neutral-800/40",
-										]}
-										disabled={selected === app.name}
-										onclick={(): void => select(app.name)}
-										type="button"
-									>
-										<span
-											aria-hidden="true"
-											class={app.status === "running"
-												? "size-1.5 shrink-0 bg-primary-500"
-												: "size-1.5 shrink-0 border border-neutral-500"}
-										></span>
-										<span class="flex-1 truncate">{app.name}</span>
-										<span class="text-xs text-neutral-500 tabular-nums"
-											>{uptime(app.startedAt, now)}</span
-										>
-									</button>
-								</li>
-							{/each}
-						</ul>
-					{/if}
-				</div>
-				{#if selected}
-					<div
-						aria-label="{selected} sections"
-						aria-orientation="vertical"
-						class="flex shrink-0 flex-col border-t border-line"
-						role="tablist"
-						bind:this={tablistEl}
-					>
-						<h2 class="px-3 py-2 text-xs font-semibold tracking-wide text-neutral-400 uppercase">
-							Sections
-						</h2>
-						<button
-							aria-controls="app-panel-overview"
-							aria-selected={tab === "overview"}
-							class={[
-								"flex w-full items-center border-b border-l-2 border-line-soft px-3 py-1.5 text-left text-sm transition-colors last:border-b-0",
-								tab === "overview"
-									? "cursor-default border-l-primary-500 bg-neutral-800/40 text-primary-300"
-									: "border-l-transparent text-neutral-400 hover:bg-neutral-800/40 hover:text-neutral-200",
-							]}
-							id="app-tab-overview"
-							onclick={() => openTab("overview")}
-							onkeydown={onTabKeydown}
-							role="tab"
-							tabindex={tab === "overview" ? 0 : -1}
-							type="button"
-						>
-							Overview
-						</button>
-						<button
-							aria-controls="app-panel-backups"
-							aria-selected={tab === "backups"}
-							class={[
-								"flex w-full items-center border-b border-l-2 border-line-soft px-3 py-1.5 text-left text-sm transition-colors last:border-b-0",
-								tab === "backups"
-									? "cursor-default border-l-primary-500 bg-neutral-800/40 text-primary-300"
-									: "border-l-transparent text-neutral-400 hover:bg-neutral-800/40 hover:text-neutral-200",
-							]}
-							id="app-tab-backups"
-							onclick={() => openTab("backups")}
-							onkeydown={onTabKeydown}
-							role="tab"
-							tabindex={tab === "backups" ? 0 : -1}
-							type="button"
-						>
-							Backups
-						</button>
-						<button
-							aria-controls="app-panel-database"
-							aria-selected={tab === "database"}
-							class={[
-								"flex w-full items-center border-b border-l-2 border-line-soft px-3 py-1.5 text-left text-sm transition-colors last:border-b-0",
-								tab === "database"
-									? "cursor-default border-l-primary-500 bg-neutral-800/40 text-primary-300"
-									: "border-l-transparent text-neutral-400 hover:bg-neutral-800/40 hover:text-neutral-200",
-							]}
-							id="app-tab-database"
-							onclick={() => openTab("database")}
-							onkeydown={onTabKeydown}
-							role="tab"
-							tabindex={tab === "database" ? 0 : -1}
-							type="button"
-						>
-							Database
-						</button>
-					</div>
-				{/if}
-				<footer class="shrink-0 border-t border-line px-3 py-2">
-					<button class="btn w-full" onclick={forget} type="button">Forget token</button>
-				</footer>
-			</aside>
+			<AppSidebar
+				{apps}
+				{live}
+				{loading}
+				{now}
+				onforget={forget}
+				onrefresh={refreshList}
+				onselect={select}
+				ontabkeydown={onTabKeydown}
+				opentab={openTab}
+				{selected}
+				{tab}
+				bind:tablist={tablistEl}
+			/>
 
 			<!-- A focusable separator is a window splitter, adjustable by pointer and by arrow keys. -->
 			<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -1107,7 +994,7 @@ onMount((): (() => void) => {
 	overflow: hidden;
 }
 
-.workspace > aside {
+:global(.workspace > aside) {
 	grid-area: sidebar;
 	width: var(--sidebar-width);
 }
@@ -1212,7 +1099,7 @@ onMount((): (() => void) => {
 		flex-direction: column;
 	}
 
-	.workspace > aside {
+	:global(.workspace > aside) {
 		width: auto;
 		border-bottom: 1px solid var(--color-line);
 	}
