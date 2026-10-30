@@ -211,23 +211,42 @@ func (m *backupManager) filesLocked(app string) ([]backupInfo, error) {
 	}
 	infos := make([]backupInfo, 0, len(entries))
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasPrefix(entry.Name(), backupFilePrefix) || !strings.HasSuffix(entry.Name(), backupFileSuffix) {
+		if entry.IsDir() {
 			continue
 		}
-		created, ok := backupTime(entry.Name())
-		if !ok {
-			continue
+		name := entry.Name()
+		switch {
+		case strings.HasPrefix(name, backupFilePrefix) && strings.HasSuffix(name, backupFileSuffix):
+			created, ok := backupTime(name)
+			if !ok {
+				continue
+			}
+			info, err := entry.Info()
+			if err != nil {
+				return nil, err
+			}
+			backup := backupInfo{Name: name, Size: info.Size(), CreatedAt: created}
+			if data, err := os.Stat(m.dataPath(app, name)); err == nil && data.Mode().IsRegular() {
+				backup.DataSize = data.Size()
+				backup.HasData = true
+			}
+			infos = append(infos, backup)
+		case strings.HasPrefix(name, backupFilePrefix) && strings.HasSuffix(name, backupDataSuffix):
+			// A data-only snapshot has no database file; the archive itself is the snapshot.
+			name = strings.TrimSuffix(name, backupDataSuffix) + backupFileSuffix
+			if exists(m.appDir(app), name) {
+				continue
+			}
+			created, ok := backupTime(name)
+			if !ok {
+				continue
+			}
+			info, err := entry.Info()
+			if err != nil {
+				return nil, err
+			}
+			infos = append(infos, backupInfo{Name: name, DataSize: info.Size(), HasData: true, CreatedAt: created})
 		}
-		info, err := entry.Info()
-		if err != nil {
-			return nil, err
-		}
-		backup := backupInfo{Name: entry.Name(), Size: info.Size(), CreatedAt: created}
-		if data, err := os.Stat(m.dataPath(app, entry.Name())); err == nil && data.Mode().IsRegular() {
-			backup.DataSize = data.Size()
-			backup.HasData = true
-		}
-		infos = append(infos, backup)
 	}
 	sort.Slice(infos, func(i, j int) bool { return infos[i].CreatedAt.After(infos[j].CreatedAt) })
 	return infos, nil
@@ -431,15 +450,21 @@ func (m *backupManager) stageData(app, name string) (string, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	database := filepath.Join(m.appDir(app), name)
-	if info, err := os.Stat(database); err != nil || !info.Mode().IsRegular() {
-		return "", false, errBackupNotFound
-	}
-	if err := checkBackupDatabase(database); err != nil {
-		return "", false, fmt.Errorf("backup is not a valid database: %w", err)
+	hasDatabase := false
+	if info, err := os.Stat(database); err == nil && info.Mode().IsRegular() {
+		if err := checkBackupDatabase(database); err != nil {
+			return "", false, fmt.Errorf("backup is not a valid database: %w", err)
+		}
+		hasDatabase = true
+	} else if err != nil && !os.IsNotExist(err) {
+		return "", false, err
 	}
 	archive := m.dataPath(app, name)
 	if info, err := os.Stat(archive); err != nil {
 		if os.IsNotExist(err) {
+			if !hasDatabase {
+				return "", false, errBackupNotFound
+			}
 			return "", false, nil
 		}
 		return "", false, err
@@ -476,14 +501,21 @@ func (m *backupManager) restore(ctx context.Context, app, name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	path := filepath.Join(m.appDir(app), name)
-	if info, err := os.Stat(path); err != nil || !info.Mode().IsRegular() {
+	hasDatabase := false
+	if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
+		if err := checkBackupDatabase(path); err != nil {
+			return fmt.Errorf("backup is not a valid database: %w", err)
+		}
+		hasDatabase = true
+	} else if err != nil && !os.IsNotExist(err) {
+		return err
+	} else if _, err := os.Stat(m.dataPath(app, name)); err != nil {
 		return errBackupNotFound
 	}
-	if err := checkBackupDatabase(path); err != nil {
-		return fmt.Errorf("backup is not a valid database: %w", err)
-	}
-	if err := m.storage.restoreFrom(ctx, app, path); err != nil {
-		return err
+	if hasDatabase {
+		if err := m.storage.restoreFrom(ctx, app, path); err != nil {
+			return err
+		}
 	}
 	state, err := m.stateLocked(app)
 	if err != nil {
@@ -554,9 +586,6 @@ func (m *backupManager) parentSnapshotHash(app, parent string, tree *backupTree)
 }
 
 func (m *backupManager) createLocked(ctx context.Context, app, kind string) (backupInfo, error) {
-	if !m.storage.hasDatabase(app) {
-		return backupInfo{}, errNoStorageDatabase
-	}
 	settings, err := m.settings(app)
 	if err != nil {
 		return backupInfo{}, err
@@ -581,9 +610,12 @@ func (m *backupManager) createLocked(ctx context.Context, app, kind string) (bac
 	dataTemp := dataPath + backupTempSuffix
 	_ = os.Remove(temp)
 	_ = os.Remove(dataTemp)
-	if err := m.storage.backupTo(ctx, app, temp); err != nil {
-		_ = os.Remove(temp)
-		return backupInfo{}, err
+	hasDatabase := m.storage.hasDatabase(app)
+	if hasDatabase {
+		if err := m.storage.backupTo(ctx, app, temp); err != nil {
+			_ = os.Remove(temp)
+			return backupInfo{}, err
+		}
 	}
 	if err := archiveData(filepath.Join(m.dataDir, app), dataTemp); err != nil {
 		_ = os.Remove(temp)
@@ -610,19 +642,25 @@ func (m *backupManager) createLocked(ctx context.Context, app, kind string) (bac
 		return backupInfo{}, errBackupUnchanged
 	}
 
-	if err := os.Rename(temp, path); err != nil {
-		_ = os.Remove(temp)
-		_ = os.Remove(dataTemp)
-		return backupInfo{}, fmt.Errorf("install backup: %w", err)
+	if hasDatabase {
+		if err := os.Rename(temp, path); err != nil {
+			_ = os.Remove(temp)
+			_ = os.Remove(dataTemp)
+			return backupInfo{}, fmt.Errorf("install backup: %w", err)
+		}
 	}
 	if err := os.Rename(dataTemp, dataPath); err != nil {
 		_ = os.Remove(path)
 		_ = os.Remove(dataTemp)
 		return backupInfo{}, fmt.Errorf("install data backup: %w", err)
 	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return backupInfo{}, err
+	var size int64
+	if hasDatabase {
+		info, err := os.Stat(path)
+		if err != nil {
+			return backupInfo{}, err
+		}
+		size = info.Size()
 	}
 	dataInfo, err := os.Stat(dataPath)
 	if err != nil {
@@ -639,7 +677,7 @@ func (m *backupManager) createLocked(ctx context.Context, app, kind string) (bac
 	if err := m.pruneLocked(app, settings.Keep); err != nil {
 		log.Printf("backup %s: prune: %v", app, err)
 	}
-	return backupInfo{Name: name, Size: info.Size(), DataSize: dataInfo.Size(), HasData: true, CreatedAt: now, Parent: parent, Kind: kind}, nil
+	return backupInfo{Name: name, Size: size, DataSize: dataInfo.Size(), HasData: true, CreatedAt: now, Parent: parent, Kind: kind}, nil
 }
 
 // create takes a snapshot now even when automatic backups are disabled.
@@ -681,25 +719,21 @@ func (m *backupManager) backupIfDue(ctx context.Context, app string, now time.Ti
 	return err
 }
 
-// runDue snapshots every app whose policy is enabled and whose newest snapshot is older than its interval. Apps without a database are skipped; one appears after the app's first storage use.
+// runDue snapshots every app whose policy is enabled and whose newest snapshot is older than its interval. An app without a database still gets a data-only snapshot of /data.
 func (m *backupManager) runDue(ctx context.Context, now time.Time) {
-	entries, err := os.ReadDir(m.storage.dir)
+	entries, err := os.ReadDir(m.dataDir)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			log.Printf("backup: scan storage: %v", err)
+			log.Printf("backup: scan apps: %v", err)
 		}
 		return
 	}
 	for _, entry := range entries {
-		if !entry.IsDir() || !validName(entry.Name()) {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") || !validName(entry.Name()) {
 			continue
 		}
-		app := entry.Name()
-		if !m.storage.hasDatabase(app) {
-			continue
-		}
-		if err := m.backupIfDue(ctx, app, now); err != nil {
-			log.Printf("backup %s: %v", app, err)
+		if err := m.backupIfDue(ctx, entry.Name(), now); err != nil {
+			log.Printf("backup %s: %v", entry.Name(), err)
 		}
 	}
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"encoding/json/v2"
 	"errors"
@@ -253,60 +254,69 @@ func (s *supervisor) handleBackups(w http.ResponseWriter, r *http.Request, name 
 	}
 }
 
+// restoreBackupLocked restores one snapshot while the caller holds deployMu. It writes its own error response and reports success.
+func (s *supervisor) restoreBackupLocked(w http.ResponseWriter, ctx context.Context, name, file string) bool {
+	// Legacy snapshots have no data archive; restore their database online without stopping the app.
+	temp, hasData, err := s.backups.stageData(name, file)
+	if err != nil {
+		writeBackupError(w, err)
+		return false
+	}
+	if temp != "" {
+		defer os.RemoveAll(temp)
+	}
+	if !hasData {
+		if err := s.backups.restore(ctx, name, file); err != nil {
+			writeBackupError(w, err)
+			return false
+		}
+		return true
+	}
+
+	// Replacing /data needs a running guest stopped; restart it after both halves are in place.
+	a := s.lookup(name)
+	running := false
+	if a != nil {
+		a.mu.Lock()
+		running = a.cmd != nil && !a.exited
+		a.mu.Unlock()
+		if running {
+			s.stop(a)
+		}
+	}
+	if err := s.backups.restore(ctx, name, file); err != nil {
+		writeBackupError(w, err)
+		return false
+	}
+	if err := s.backups.installData(name, temp); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return false
+	}
+	if running {
+		if err := s.startStopped(a); err != nil {
+			log.Printf("restore %s: restart: %v", name, err)
+			writeError(w, http.StatusBadGateway, "data restored but app did not restart: "+err.Error())
+			return false
+		}
+	}
+	return true
+}
+
 func (s *supervisor) handleBackupRestore(w http.ResponseWriter, r *http.Request, name, file string) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	s.deployMu.Lock()
 	defer s.deployMu.Unlock()
-	a, ok := s.requireApp(w, r, name)
-	if !ok {
+	if _, ok := s.requireApp(w, r, name); !ok {
 		return
 	}
 	if s.backups == nil {
 		http.Error(w, "backups unavailable", http.StatusServiceUnavailable)
 		return
 	}
-
-	// Legacy snapshots have no data archive; restore their database online without stopping the app.
-	temp, hasData, err := s.backups.stageData(name, file)
-	if err != nil {
-		writeBackupError(w, err)
+	if !s.restoreBackupLocked(w, r.Context(), name, file) {
 		return
-	}
-	if temp != "" {
-		defer os.RemoveAll(temp)
-	}
-	if !hasData {
-		if err := s.backups.restore(r.Context(), name, file); err != nil {
-			writeBackupError(w, err)
-			return
-		}
-		s.writeBackups(w, name, "")
-		return
-	}
-
-	// Replacing /data needs a running guest stopped; restart it after both halves are in place.
-	a.mu.Lock()
-	running := a.cmd != nil && !a.exited
-	a.mu.Unlock()
-	if running {
-		s.stop(a)
-	}
-	if err := s.backups.restore(r.Context(), name, file); err != nil {
-		writeBackupError(w, err)
-		return
-	}
-	if err := s.backups.installData(name, temp); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if running {
-		if err := s.startStopped(a); err != nil {
-			log.Printf("restore %s: restart: %v", name, err)
-			writeError(w, http.StatusBadGateway, "data restored but app did not restart: "+err.Error())
-			return
-		}
 	}
 	s.writeBackups(w, name, "")
 }

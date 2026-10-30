@@ -533,5 +533,15 @@ func (s *supervisor) handleRollback(w http.ResponseWriter, r *http.Request, name
 		return
 	}
 	s.recordDeployment(name, next.dir)
+	// ?backup=<snapshot> also restores that snapshot's database and /data, so code and data come back together.
+	if backup := r.URL.Query().Get("backup"); backup != "" {
+		if s.backups == nil {
+			writeError(w, http.StatusServiceUnavailable, "backups unavailable")
+			return
+		}
+		if !s.restoreBackupLocked(w, r.Context(), name, backup) {
+			return
+		}
+	}
 	writeJSON(w, http.StatusOK, s.info(next))
 }

@@ -439,17 +439,21 @@ func TestHandleBackupRoutes(t *testing.T) {
 		t.Errorf("initial overview = %+v", result)
 	}
 
-	rec, _ = do(http.MethodPost, "/apps/notes/backups", "")
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("backup without database = %d, want 400", rec.Code)
+	rec, result = do(http.MethodPost, "/apps/notes/backups", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("data-only backup = %d %s", rec.Code, rec.Body.String())
 	}
+	if len(result.Backups) != 1 || result.Database || !result.Backups[0].HasData || result.Backups[0].Size != 0 {
+		t.Fatalf("data-only backup = %+v", result)
+	}
+	dataOnly := result.Backups[0]
 
 	createItems(t, storage, token)
 	rec, result = do(http.MethodPost, "/apps/notes/backups", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("create = %d %s", rec.Code, rec.Body.String())
 	}
-	if len(result.Backups) != 1 || !result.Database || result.Current != result.Backups[0].Name {
+	if len(result.Backups) != 2 || !result.Database || result.Current != result.Backups[0].Name {
 		t.Fatalf("after create = %+v", result)
 	}
 	first := result.Backups[0]
@@ -457,15 +461,15 @@ func TestHandleBackupRoutes(t *testing.T) {
 	if result.Created != backup {
 		t.Errorf("created = %q, want %q", result.Created, backup)
 	}
-	if first.Parent != "" || first.Kind != backupKindManual {
-		t.Errorf("first backup = %+v, want a manual root", first)
+	if first.Parent != dataOnly.Name || first.Kind != backupKindManual {
+		t.Errorf("first database backup = %+v, want a manual child of the data-only snapshot", first)
 	}
 
 	rec, result = do(http.MethodPost, "/apps/notes/backups", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("unchanged create = %d %s", rec.Code, rec.Body.String())
 	}
-	if result.Created != "" || len(result.Backups) != 1 || result.Current != backup {
+	if result.Created != "" || len(result.Backups) != 2 || result.Current != backup {
 		t.Errorf("unchanged create = %+v, want no new snapshot", result)
 	}
 
@@ -568,5 +572,142 @@ func TestBackupIncludesData(t *testing.T) {
 	}
 	if _, err := os.Stat(backups.dataPath("notes", info.Name)); !os.IsNotExist(err) {
 		t.Errorf("pruned snapshot data archive still exists: %v", err)
+	}
+}
+
+func TestBackupDataOnlySnapshot(t *testing.T) {
+	_, backups := testBackupManager(t)
+	dataDir := filepath.Join(backups.dataDir, "plain")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "notes.txt"), []byte("one"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := backups.create(context.Background(), "plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first.HasData || first.DataSize == 0 || first.Size != 0 {
+		t.Errorf("snapshot = %+v, want a data-only snapshot", first)
+	}
+	if _, err := os.Stat(filepath.Join(backups.appDir("plain"), first.Name)); !os.IsNotExist(err) {
+		t.Errorf("data-only snapshot should not have a database file: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dataDir, "notes.txt"), []byte("two"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := backups.create(context.Background(), "plain"); err != nil {
+		t.Fatal(err)
+	}
+
+	temp, hasData, err := backups.stageData("plain", first.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasData {
+		t.Fatal("data-only snapshot should stage a data archive")
+	}
+	defer os.RemoveAll(temp)
+	body, err := os.ReadFile(filepath.Join(temp, "notes.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "one" {
+		t.Errorf("staged data = %q, want one", body)
+	}
+
+	if err := backups.restore(context.Background(), "plain", first.Name); err != nil {
+		t.Fatal(err)
+	}
+	if err := backups.installData("plain", temp); err != nil {
+		t.Fatal(err)
+	}
+	body, err = os.ReadFile(filepath.Join(dataDir, "notes.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "one" {
+		t.Errorf("restored data = %q, want one", body)
+	}
+}
+
+func TestBackupSchedulerIncludesDataOnlyApps(t *testing.T) {
+	_, backups := testBackupManager(t)
+	dataDir := filepath.Join(backups.dataDir, "plain")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "state.txt"), []byte("value"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	backups.runDue(context.Background(), time.Now())
+	infos, err := backups.list("plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 1 {
+		t.Fatalf("automatic snapshots = %d, want 1 for an app without a database", len(infos))
+	}
+	if infos[0].Kind != backupKindAutomatic || !infos[0].HasData {
+		t.Errorf("snapshot = %+v, want an automatic data snapshot", infos[0])
+	}
+}
+
+func TestRollbackWithBackupRestoresData(t *testing.T) {
+	s := newLifecycleSupervisor(t)
+	storage, err := newStorageServer(t.TempDir(), "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(storage.close)
+	s.storage = storage
+	s.backups = newBackupManager(t.TempDir(), storage, s.cfg.stateDir)
+	s.deployments = newDeploymentManager(t.TempDir())
+
+	a := spawnTestApp(t, s, "demo")
+	dataFile := filepath.Join(s.cfg.stateDir, "demo", "data.txt")
+	if err := os.MkdirAll(filepath.Dir(dataFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dataFile, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := s.backups.create(context.Background(), "demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Size != 0 {
+		t.Fatalf("snapshot = %+v, want a data-only snapshot", snapshot)
+	}
+	deployment, err := s.deployments.record("demo", a.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dataFile, []byte("changed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/apps/demo/rollback/"+deployment.ID+"?backup="+snapshot.Name, nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	s.handleRollback(rec, req, "demo", deployment.ID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("rollback with backup = %d: %s", rec.Code, rec.Body.String())
+	}
+	t.Cleanup(func() {
+		if next := s.lookup("demo"); next != nil {
+			s.stop(next)
+		}
+	})
+	body, err := os.ReadFile(dataFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "keep" {
+		t.Errorf("restored data = %q, want keep", body)
 	}
 }

@@ -86,7 +86,8 @@ const children = $derived(backups.filter(backup => backup.parent === selected).l
 	</form>
 
 	<p class="text-xs text-neutral-500">
-		Snapshots use SQLite's online backup, so the app keeps serving while one is taken.
+		Every snapshot includes <code>/data</code> and, when the app has one, its SQLite database. The database uses
+		SQLite's online backup, so the app keeps serving while one is taken.
 	</p>
 
 	{#if error}
@@ -99,22 +100,20 @@ const children = $derived(backups.filter(backup => backup.parent === selected).l
 		<div class="flex flex-col items-start gap-2">
 			<p class="text-sm text-neutral-500">
 				{loading
-					? "Loading backups…"
+					? "Loading snapshots…"
 					: database
-						? "No backups yet."
-						: "No database yet. One is created the first time the app uses storage."}
+						? "No snapshots yet."
+						: "No database yet. A snapshot will contain /data only."}
 			</p>
-			{#if database}
-				<button
-					class="btn btn-primary"
-					disabled={backingUp}
-					onclick={onbackup}
-					title="Snapshot the live database"
-					type="button"
-				>
-					{backingUp ? "Backing up…" : "Back up current state"}
-				</button>
-			{/if}
+			<button
+				class="btn btn-primary"
+				disabled={backingUp}
+				onclick={onbackup}
+				title="Snapshot the live database and /data"
+				type="button"
+			>
+				{backingUp ? "Backing up…" : "Back up current state"}
+			</button>
 		</div>
 	{:else}
 		<BackupTree {backups} {current} {onselect} {selected} />
@@ -139,8 +138,16 @@ const children = $derived(backups.filter(backup => backup.parent === selected).l
 
 				<dl class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-4">
 					<div>
-						<dt class="text-neutral-500">Size</dt>
-						<dd class="tabular-nums">{formatSize(selectedInfo.size)}</dd>
+						<dt class="text-neutral-500">Database</dt>
+						<dd class="tabular-nums">
+							{selectedInfo.size ? formatSize(selectedInfo.size) : "–"}
+						</dd>
+					</div>
+					<div>
+						<dt class="text-neutral-500">Data</dt>
+						<dd class="tabular-nums">
+							{selectedInfo.hasData ? formatSize(selectedInfo.dataSize ?? 0) : "–"}
+						</dd>
 					</div>
 					<div>
 						<dt class="text-neutral-500">After</dt>
@@ -156,10 +163,10 @@ const children = $derived(backups.filter(backup => backup.parent === selected).l
 
 				<p class="text-xs text-neutral-500">
 					{#if selected === current}
-						The live database follows this snapshot, so a new backup continues this branch.
+						This snapshot is current, so a new backup continues this branch.
 					{:else}
-						Reverting replaces the live database, and the next backup becomes a new branch from this
-						snapshot.
+						Reverting replaces the data this snapshot captured, and the next backup becomes a new branch
+						from it.
 					{/if}
 				</p>
 
@@ -168,7 +175,7 @@ const children = $derived(backups.filter(backup => backup.parent === selected).l
 						class="btn btn-primary"
 						disabled={backingUp}
 						onclick={onbackup}
-						title="Snapshot the live database; the snapshot continues from the current node"
+						title="Snapshot the live database and /data; the snapshot continues from the current node"
 						type="button"
 					>
 						{backingUp ? "Backing up…" : "Back up current state"}
