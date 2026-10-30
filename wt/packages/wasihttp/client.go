@@ -74,7 +74,7 @@ func Get(url string) (*http.Response, error) {
 }
 
 // Post issues a POST request to the specified URL using wasi:http with the given content type and body.
-func Post(url string, contentType string, body io.Reader) (*http.Response, error) {
+func Post(url, contentType string, body io.Reader) (*http.Response, error) {
 	req, err := http.NewRequest(http.MethodPost, url, body)
 	if err != nil {
 		return nil, err

@@ -37,8 +37,7 @@ type Statement struct {
 
 // Result describes the effect of an Exec or a batch statement.
 type Result struct {
-	RowsAffected int64
-	LastInsertID int64
+	RowsAffected, LastInsertID int64
 }
 
 // Rows is the result of a Query.

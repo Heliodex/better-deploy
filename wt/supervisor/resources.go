@@ -40,15 +40,14 @@ type resourceSample struct {
 
 // appStats caches the last resource sample for one app process and keeps a short history for the charts.
 type appStats struct {
-	mu          sync.Mutex
-	pid         int
-	lastTicks   uint64
-	lastSample  time.Time
-	sampledAt   time.Time
-	cpuPercent  float64
-	memoryBytes int64
-	lastAppend  time.Time
-	history     []resourceSample
+	mu                    sync.Mutex
+	pid                   int
+	lastTicks             uint64
+	lastSample, sampledAt time.Time
+	cpuPercent            float64
+	memoryBytes           int64
+	lastAppend            time.Time
+	history               []resourceSample
 }
 
 // appendHistory records a point when the chart interval has passed. The caller holds stats.mu.

@@ -34,21 +34,13 @@ const linkFilter = `where (? = '' or instr(lower(l.title), lower(?)) > 0 or inst
 	and (? = '' or exists (select 1 from tags t where t.link_id = l.id and t.tag = ?))`
 
 type link struct {
-	ID            string
-	URL           string
-	Title         string
-	Description   string
-	Host          string
-	CreatedAt     string
-	LastClickedAt string
-	Clicks        int64
-	Tags          []string
+	ID, URL, Title, Description, Host, CreatedAt, LastClickedAt string
+	Clicks                                                      int64
+	Tags                                                        []string
 }
 
 type appStats struct {
-	Links  int64
-	Clicks int64
-	Tags   int64
+	Links, Clicks, Tags int64
 }
 
 type tagCount struct {
@@ -68,22 +60,17 @@ type dayCount struct {
 }
 
 type indexData struct {
-	Title    string
-	Stats    appStats
-	Links    []link
-	Tags     []tagCount
-	Q        string
-	Tag      string
-	Page     int
-	Pages    int
-	Total    int64
-	Added    bool
-	Deleted  bool
-	Error    string
-	TagURL   func(string) string
-	ClearURL string
-	PrevURL  string
-	NextURL  string
+	Title                      string
+	Stats                      appStats
+	Links                      []link
+	Tags                       []tagCount
+	Q, Tag                     string
+	Page, Pages                int
+	Total                      int64
+	Added, Deleted             bool
+	Error                      string
+	TagURL                     func(string) string
+	ClearURL, PrevURL, NextURL string
 }
 
 type detailData struct {

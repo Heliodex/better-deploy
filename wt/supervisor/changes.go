@@ -53,9 +53,8 @@ type rowChange struct {
 
 // rowChangeCollector receives pre-update rows for one write operation.
 type rowChangeCollector struct {
-	rows    []rowChange
-	omitted int
-	bytes   int
+	rows           []rowChange
+	omitted, bytes int
 }
 
 func preUpdateValues(data sqlite.SQLitePreUpdateData, new bool) ([]any, error) {

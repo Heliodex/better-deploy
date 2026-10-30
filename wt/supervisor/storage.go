@@ -46,10 +46,9 @@ type storageServer struct {
 	listener     net.Listener
 	server       *http.Server
 
-	mu       sync.Mutex
-	changeMu sync.Mutex
-	tokens   map[string]string // token -> app name
-	dbs      map[string]*sql.DB
+	mu, changeMu sync.Mutex
+	tokens       map[string]string // token -> app name
+	dbs          map[string]*sql.DB
 }
 
 type storageRequest struct {
