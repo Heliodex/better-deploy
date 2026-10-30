@@ -102,6 +102,14 @@ func removeIfExists(path string) {
 	_ = os.RemoveAll(path)
 }
 
+func existsPath(path string) bool {
+	if path == "" {
+		return false
+	}
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 // pendingRollback reports an unfinished journal, so a compensation failure is resolved by a restart before another attempt.
 func pendingRollback(stateDir, name string) bool {
 	entries, err := os.ReadDir(filepath.Join(stateDir, rollbackJournalDir))
@@ -174,160 +182,6 @@ func recoverRollbacks(stateDir string, backups *backupManager) error {
 	return nil
 }
 
-// rollbackAtomic installs staged code and a snapshot together. The app is stopped for the swap, then the new version starts; any failure restores the previous code, data, database and process.
-func (s *supervisor) rollbackAtomic(w http.ResponseWriter, ctx context.Context, name, stagedApp string, cfg appConfig, snapshot string) *app {
-	if s.backups == nil || s.storage == nil {
-		writeError(w, http.StatusServiceUnavailable, "coordinated rollback needs storage and backups")
-		return nil
-	}
-	if pendingRollback(s.cfg.stateDir, name) {
-		writeError(w, http.StatusConflict, "an earlier rollback is pending recovery; restart the supervisor")
-		return nil
-	}
-
-	dataDir, hasData, stagedDB, err := s.backups.stageSnapshot(name, snapshot, true)
-	if err != nil {
-		writeBackupError(w, err)
-		return nil
-	}
-	defer removeIfExists(dataDir)
-	defer removeIfExists(stagedDB)
-	if !hasData && stagedDB == "" {
-		writeError(w, http.StatusBadRequest, "snapshot has no database or data archive")
-		return nil
-	}
-
-	old := s.lookup(name)
-	if old == nil {
-		writeError(w, http.StatusNotFound, "app not found")
-		return nil
-	}
-	old.mu.Lock()
-	running := old.cmd != nil && !old.exited
-	old.mu.Unlock()
-
-	liveApp := filepath.Join(s.cfg.appsDir, name)
-	liveData := filepath.Join(s.cfg.stateDir, name)
-	liveDB := s.storage.databasePath(name)
-	suffix := fmt.Sprintf(".rollback-%d", time.Now().UnixNano())
-	journal := rollbackJournal{
-		Name:       name,
-		Snapshot:   snapshot,
-		AppDir:     liveApp,
-		AppBackup:  liveApp + suffix,
-		DataDir:    liveData,
-		DataBackup: liveData + suffix,
-		DB:         liveDB,
-		DBBackup:   liveDB + suffix,
-		StagedApp:  stagedApp,
-		StagedData: dataDir,
-		StagedDB:   stagedDB,
-	}
-	journalPath, err := writeRollbackJournal(s.cfg.stateDir, journal)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "write rollback journal: "+err.Error())
-		return nil
-	}
-
-	// No snapshot may start between the swap and the new app's first request.
-	s.backups.mu.Lock()
-	defer s.backups.mu.Unlock()
-
-	if running {
-		if !drainApp(old, drainTimeout) {
-			log.Printf("rollback %s: old version still handling requests after %s", name, drainTimeout)
-		}
-		s.stop(old)
-	}
-	appMoved, err := moveAside(liveApp, journal.AppBackup)
-	if err == nil {
-		err = os.Rename(stagedApp, liveApp)
-	}
-	if err != nil {
-		_ = restoreAside(liveApp, journal.AppBackup, appMoved)
-		s.failRollback(w, journalPath, journal, old, running, fmt.Errorf("install code: %w", err))
-		return nil
-	}
-
-	dataMoved := false
-	if hasData {
-		dataMoved, err = moveAside(liveData, journal.DataBackup)
-		if err == nil {
-			err = os.Rename(dataDir, liveData)
-		}
-		if err != nil {
-			_ = restoreAside(liveData, journal.DataBackup, dataMoved)
-			_ = restoreAside(liveApp, journal.AppBackup, appMoved)
-			s.failRollback(w, journalPath, journal, old, running, fmt.Errorf("install data: %w", err))
-			return nil
-		}
-	}
-
-	if stagedDB != "" {
-		// Block database viewers (and any other storage user) from opening the file while it is swapped.
-		s.storage.opMu.Lock()
-		s.storage.drop(name)
-		removeSQLiteSidecars(liveDB)
-		swapErr := func() error {
-			if err := os.MkdirAll(filepath.Dir(liveDB), 0o755); err != nil {
-				return fmt.Errorf("create storage directory: %w", err)
-			}
-			if _, err := moveAside(liveDB, journal.DBBackup); err != nil {
-				return err
-			}
-			return os.Rename(stagedDB, liveDB)
-		}()
-		if swapErr != nil {
-			_ = restoreDB(liveDB, journal.DBBackup)
-		}
-		s.storage.opMu.Unlock()
-		if swapErr != nil {
-			_ = restoreAside(liveData, journal.DataBackup, dataMoved)
-			_ = restoreAside(liveApp, journal.AppBackup, appMoved)
-			s.failRollback(w, journalPath, journal, old, running, fmt.Errorf("install database: %w", swapErr))
-			return nil
-		}
-	}
-
-	port, err := freePort()
-	if err != nil {
-		_ = restoreDB(liveDB, journal.DBBackup)
-		_ = restoreAside(liveData, journal.DataBackup, dataMoved)
-		_ = restoreAside(liveApp, journal.AppBackup, appMoved)
-		s.failRollback(w, journalPath, journal, old, running, fmt.Errorf("allocate port: %w", err))
-		return nil
-	}
-	next, err := s.spawn(name, liveApp, cfg, port)
-	if err != nil {
-		_ = restoreDB(liveDB, journal.DBBackup)
-		_ = restoreAside(liveData, journal.DataBackup, dataMoved)
-		_ = restoreAside(liveApp, journal.AppBackup, appMoved)
-		s.failRollback(w, journalPath, journal, old, running, fmt.Errorf("new version did not start: %w", err))
-		return nil
-	}
-
-	next.dir = liveApp
-	s.register(next)
-	if running {
-		s.stop(old)
-	}
-	s.recordDeployment(name, next.dir)
-	if err := s.backups.markCurrentLocked(name, snapshot); err != nil {
-		log.Printf("rollback %s: mark snapshot current: %v", name, err)
-	}
-
-	journal.Committed = true
-	if err := saveRollbackJournal(journalPath, journal); err != nil {
-		log.Printf("rollback %s: commit journal: %v", name, err)
-	}
-	removeIfExists(journal.AppBackup)
-	removeIfExists(journal.DataBackup)
-	removeIfExists(journal.DBBackup)
-	_ = os.Remove(journalPath)
-	log.Printf("%s %s at %s with snapshot %s", "rolled back", name, cfg.Host, snapshot)
-	return next
-}
-
 // failRollback restores the previous halves and process, then reports the original error.
 func (s *supervisor) failRollback(w http.ResponseWriter, journalPath string, journal rollbackJournal, old *app, running bool, cause error) {
 	if s.storage != nil {
@@ -364,10 +218,223 @@ func (s *supervisor) failRollback(w http.ResponseWriter, journalPath string, jou
 	writeError(w, http.StatusBadGateway, cause.Error())
 }
 
-func existsPath(path string) bool {
-	if path == "" {
+// rollbackPlan carries the staged paths and journal through the code, data and database swaps.
+type rollbackPlan struct {
+	s           *supervisor
+	journal     rollbackJournal
+	journalPath string
+	old         *app
+	running     bool
+	dataDir     string
+	hasData     bool
+	stagedDB    string
+	appMoved    bool
+	dataMoved   bool
+}
+
+// stageRollback validates the snapshot request, stages its halves and writes the recovery journal.
+func (s *supervisor) stageRollback(w http.ResponseWriter, name, stagedApp, snapshot string) (*rollbackPlan, bool) {
+	if s.backups == nil || s.storage == nil {
+		writeError(w, http.StatusServiceUnavailable, "coordinated rollback needs storage and backups")
+		return nil, false
+	}
+	if pendingRollback(s.cfg.stateDir, name) {
+		writeError(w, http.StatusConflict, "an earlier rollback is pending recovery; restart the supervisor")
+		return nil, false
+	}
+
+	dataDir, hasData, stagedDB, err := s.backups.stageSnapshot(name, snapshot, true)
+	if err != nil {
+		writeBackupError(w, err)
+		return nil, false
+	}
+	if !hasData && stagedDB == "" {
+		removeIfExists(dataDir)
+		removeIfExists(stagedDB)
+		writeError(w, http.StatusBadRequest, "snapshot has no database or data archive")
+		return nil, false
+	}
+
+	old := s.lookup(name)
+	if old == nil {
+		removeIfExists(dataDir)
+		removeIfExists(stagedDB)
+		writeError(w, http.StatusNotFound, "app not found")
+		return nil, false
+	}
+	old.mu.Lock()
+	running := old.cmd != nil && !old.exited
+	old.mu.Unlock()
+
+	liveApp := filepath.Join(s.cfg.appsDir, name)
+	liveData := filepath.Join(s.cfg.stateDir, name)
+	liveDB := s.storage.databasePath(name)
+	suffix := fmt.Sprintf(".rollback-%d", time.Now().UnixNano())
+	journal := rollbackJournal{
+		Name:       name,
+		Snapshot:   snapshot,
+		AppDir:     liveApp,
+		AppBackup:  liveApp + suffix,
+		DataDir:    liveData,
+		DataBackup: liveData + suffix,
+		DB:         liveDB,
+		DBBackup:   liveDB + suffix,
+		StagedApp:  stagedApp,
+		StagedData: dataDir,
+		StagedDB:   stagedDB,
+	}
+	journalPath, err := writeRollbackJournal(s.cfg.stateDir, journal)
+	if err != nil {
+		removeIfExists(dataDir)
+		removeIfExists(stagedDB)
+		writeError(w, http.StatusInternalServerError, "write rollback journal: "+err.Error())
+		return nil, false
+	}
+	return &rollbackPlan{
+		s:           s,
+		journal:     journal,
+		journalPath: journalPath,
+		old:         old,
+		running:     running,
+		dataDir:     dataDir,
+		hasData:     hasData,
+		stagedDB:    stagedDB,
+	}, true
+}
+
+// installCode moves the live app aside and puts the staged bundle in its place.
+func (p *rollbackPlan) installCode(w http.ResponseWriter) bool {
+	var err error
+	p.appMoved, err = moveAside(p.journal.AppDir, p.journal.AppBackup)
+	if err == nil {
+		err = os.Rename(p.journal.StagedApp, p.journal.AppDir)
+	}
+	if err != nil {
+		_ = restoreAside(p.journal.AppDir, p.journal.AppBackup, p.appMoved)
+		p.s.failRollback(w, p.journalPath, p.journal, p.old, p.running, fmt.Errorf("install code: %w", err))
 		return false
 	}
-	_, err := os.Stat(path)
-	return err == nil
+	return true
+}
+
+// installData replaces the live /data directory with the staged snapshot data.
+func (p *rollbackPlan) installData(w http.ResponseWriter) bool {
+	if !p.hasData {
+		return true
+	}
+	var err error
+	p.dataMoved, err = moveAside(p.journal.DataDir, p.journal.DataBackup)
+	if err == nil {
+		err = os.Rename(p.dataDir, p.journal.DataDir)
+	}
+	if err != nil {
+		_ = restoreAside(p.journal.DataDir, p.journal.DataBackup, p.dataMoved)
+		_ = restoreAside(p.journal.AppDir, p.journal.AppBackup, p.appMoved)
+		p.s.failRollback(w, p.journalPath, p.journal, p.old, p.running, fmt.Errorf("install data: %w", err))
+		return false
+	}
+	return true
+}
+
+// installDatabase swaps the staged database in while storage users are blocked from opening it.
+func (p *rollbackPlan) installDatabase(w http.ResponseWriter) bool {
+	if p.stagedDB == "" {
+		return true
+	}
+	s := p.s
+	// Block database viewers (and any other storage user) from opening the file while it is swapped.
+	s.storage.opMu.Lock()
+	s.storage.drop(p.journal.Name)
+	removeSQLiteSidecars(p.journal.DB)
+	swapErr := func() error {
+		if err := os.MkdirAll(filepath.Dir(p.journal.DB), 0o755); err != nil {
+			return fmt.Errorf("create storage directory: %w", err)
+		}
+		if _, err := moveAside(p.journal.DB, p.journal.DBBackup); err != nil {
+			return err
+		}
+		return os.Rename(p.stagedDB, p.journal.DB)
+	}()
+	if swapErr != nil {
+		_ = restoreDB(p.journal.DB, p.journal.DBBackup)
+	}
+	s.storage.opMu.Unlock()
+	if swapErr != nil {
+		_ = restoreAside(p.journal.DataDir, p.journal.DataBackup, p.dataMoved)
+		_ = restoreAside(p.journal.AppDir, p.journal.AppBackup, p.appMoved)
+		s.failRollback(w, p.journalPath, p.journal, p.old, p.running, fmt.Errorf("install database: %w", swapErr))
+		return false
+	}
+	return true
+}
+
+// start launches the installed version, compensating every half if it does not come up.
+func (p *rollbackPlan) start(w http.ResponseWriter, name string, cfg appConfig) *app {
+	port, err := freePort()
+	if err != nil {
+		_ = restoreDB(p.journal.DB, p.journal.DBBackup)
+		_ = restoreAside(p.journal.DataDir, p.journal.DataBackup, p.dataMoved)
+		_ = restoreAside(p.journal.AppDir, p.journal.AppBackup, p.appMoved)
+		p.s.failRollback(w, p.journalPath, p.journal, p.old, p.running, fmt.Errorf("allocate port: %w", err))
+		return nil
+	}
+	next, err := p.s.spawn(name, p.journal.AppDir, cfg, port)
+	if err != nil {
+		_ = restoreDB(p.journal.DB, p.journal.DBBackup)
+		_ = restoreAside(p.journal.DataDir, p.journal.DataBackup, p.dataMoved)
+		_ = restoreAside(p.journal.AppDir, p.journal.AppBackup, p.appMoved)
+		p.s.failRollback(w, p.journalPath, p.journal, p.old, p.running, fmt.Errorf("new version did not start: %w", err))
+		return nil
+	}
+	return next
+}
+
+// rollbackAtomic installs staged code and a snapshot together. The app is stopped for the swap, then the new version starts; any failure restores the previous code, data, database and process.
+func (s *supervisor) rollbackAtomic(w http.ResponseWriter, ctx context.Context, name, stagedApp string, cfg appConfig, snapshot string) *app {
+	plan, ok := s.stageRollback(w, name, stagedApp, snapshot)
+	if !ok {
+		return nil
+	}
+	defer removeIfExists(plan.dataDir)
+	defer removeIfExists(plan.stagedDB)
+
+	// No snapshot may start between the swap and the new app's first request.
+	s.backups.mu.Lock()
+	defer s.backups.mu.Unlock()
+
+	if plan.running {
+		if !drainApp(plan.old, drainTimeout) {
+			log.Printf("rollback %s: old version still handling requests after %s", name, drainTimeout)
+		}
+		s.stop(plan.old)
+	}
+	if !plan.installCode(w) || !plan.installData(w) || !plan.installDatabase(w) {
+		return nil
+	}
+	next := plan.start(w, name, cfg)
+	if next == nil {
+		return nil
+	}
+
+	next.dir = plan.journal.AppDir
+	s.register(next)
+	if plan.running {
+		s.stop(plan.old)
+	}
+	s.recordDeployment(name, next.dir)
+	if err := s.backups.markCurrentLocked(name, snapshot); err != nil {
+		log.Printf("rollback %s: mark snapshot current: %v", name, err)
+	}
+
+	journal := plan.journal
+	journal.Committed = true
+	if err := saveRollbackJournal(plan.journalPath, journal); err != nil {
+		log.Printf("rollback %s: commit journal: %v", name, err)
+	}
+	removeIfExists(journal.AppBackup)
+	removeIfExists(journal.DataBackup)
+	removeIfExists(journal.DBBackup)
+	_ = os.Remove(plan.journalPath)
+	log.Printf("%s %s at %s with snapshot %s", "rolled back", name, cfg.Host, snapshot)
+	return next
 }
