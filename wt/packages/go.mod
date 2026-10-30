@@ -1,7 +1,6 @@
 module wt.packages
 
 go 1.27.1
-toolchain go1.27.3
 
 require go.bytecodealliance.org/pkg v0.4.0
 

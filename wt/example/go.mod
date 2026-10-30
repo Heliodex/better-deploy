@@ -1,7 +1,6 @@
 module wt.example
 
 go 1.27.1
-toolchain go1.27.3
 
 require wt.packages v0.0.0
 
