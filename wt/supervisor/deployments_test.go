@@ -208,3 +208,34 @@ func TestDeploymentHistoryByteBudget(t *testing.T) {
 		t.Errorf("history length = %d, want 1 under a tiny byte budget", len(infos))
 	}
 }
+
+func TestDeploymentHistoryKeepsStaticFiles(t *testing.T) {
+	manager := newDeploymentManager(t.TempDir())
+	source := writeDeploymentSource(t, "demo.localhost")
+	static := filepath.Join(source, "static", "_app", "immutable", "app.js")
+	if err := os.MkdirAll(filepath.Dir(static), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(static, []byte("console.log('app')"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := manager.record("demo", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, err := manager.bundle("demo", info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "static", "_app", "immutable", "app.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "console.log('app')" {
+		t.Errorf("static file = %q", body)
+	}
+	if info.Bytes == 0 {
+		t.Error("bundle bytes do not include static files")
+	}
+}

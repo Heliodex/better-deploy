@@ -106,6 +106,16 @@ func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer a.requests.Done()
+	started := time.Now()
+	wrapped := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+
+	// Static files come from the bundle and do not consume the app's concurrency slots.
+	if a.serveStatic(wrapped, r) {
+		if a.logs != nil {
+			a.logs.logSupervisor(formatAccessLog(r.Method, wrapped.status, time.Since(started), r.URL.RequestURI()))
+		}
+		return
+	}
 
 	a.mu.Lock()
 	slots := a.slots
@@ -126,8 +136,6 @@ func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(ctx)
 	}
 
-	started := time.Now()
-	wrapped := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 	a.proxy.ServeHTTP(wrapped, r)
 	if a.logs != nil {
 		a.logs.logSupervisor(formatAccessLog(r.Method, wrapped.status, time.Since(started), r.URL.RequestURI()))

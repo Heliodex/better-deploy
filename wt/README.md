@@ -26,7 +26,7 @@ The first request for a precompiled Go component is tens of milliseconds on a la
   - `example/notes` – JSON notes persisted in a real `notes` table through the supervisor's SQLite service.
   - `example/shelf` – link shelf with tags, search, pagination and click analytics.
   - `example/ticker` – logs a `ticker beat` line every 10 seconds from an `app.json` schedule, so the supervisor log tail has a steady stream to show.
-  - `example/guestbook` – SvelteKit static frontend with a Go JSON API, embedded into one wasm component.
+  - `example/guestbook` – SvelteKit static frontend with a Go JSON API; the frontend is served from the bundle's `static/` directory, not embedded in the component.
 - `supervisor/` – runs apps, proxies by `Host`, deploys bundles blue/green.
   - `supervisor/web` – SvelteKit admin panel, embedded into the supervisor binary (not tracked: `web/build`, `web/node_modules`, `web/.svelte-kit`).
 - `deploy/` – builds, precompiles and uploads an app.
@@ -34,7 +34,7 @@ The first request for a precompiled Go component is tens of milliseconds on a la
 ## Requirements
 
 - Go 1.27.1 or newer. `componentize-go` is declared as a tool in both `packages/go.mod` (binding generation) and `example/go.mod` (app builds); it downloads the patched Go it needs for async components.
-- The `example/guestbook` build also needs Bun. It runs `bun install` and `bun run build` in `example/guestbook/web`, then embeds the static output. `example/guestbook/contract/generate.go` turns the Valibot request schemas into JSON Schema and generated Go request types. `go generate ./contract/` runs it as part of the build; the generated schema and Go files are not tracked.
+- The `example/guestbook` build also needs Bun. It runs `bun install` and `bun run build` in `example/guestbook/web`, then copies the static output into `example/guestbook/static`, which `wt-deploy` packs beside the component. `example/guestbook/contract/generate.go` turns the Valibot request schemas into JSON Schema and generated Go request types. `go generate ./contract/` runs it as part of the build; the generated schema and Go files are not tracked.
 - wasmtime **50.0.0** on the machine running `wt-deploy` to compile the artifact. The precompiled artifact is tied to that version and target triple, so bundles also carry `main.wasm` and an `artifact.json` with the compiler version and target. A supervisor whose runtime no longer matches can rebuild `main.cwasm` from `main.wasm` when it has a compiler, rather than failing to load the old artifact. The client and supervisor both default to `x86_64-unknown-linux-musl`, which is what the runtime-only image can execute; a different target needs a matching runtime build.
 - The WIT in `packages/wit` is the final `wasi:http@0.3.0` from wasmtime v50 (`crates/wasi-http/src/p3/wit`), plus `wasi:cli/imports`.
 
@@ -144,7 +144,7 @@ curl -H 'Host: hello.localhost' http://127.0.0.1:8080/hello
 # path=/hello
 ```
 
-`wt-deploy` reads `app.json`, runs its `build` command, precompiles `main.wasm` with `wasmtime compile`, and uploads `app.json`, `main.cwasm`, `main.wasm` and `artifact.json` as a gzipped tarball. `artifact.json` records the wasmtime version, target triple and compile time; `main.wasm` lets the supervisor rebuild the artifact after a runtime upgrade. `--app-host` overrides the host written into the uploaded `app.json`, which is useful when the supervisor sits behind a real ingress domain. The supervisor starts the new version on a new loopback port while the old one serves, waits for a 2xx health response, swaps the host route, drains in-flight requests for up to ten seconds and then stops the old process.
+`wt-deploy` reads `app.json`, runs its `build` command, precompiles `main.wasm` with `wasmtime compile`, and uploads `app.json`, `main.cwasm`, `main.wasm`, `artifact.json` and any `static/` files as a gzipped tarball. `artifact.json` records the wasmtime version, target triple and compile time; `main.wasm` lets the supervisor rebuild the artifact after a runtime upgrade. `--app-host` overrides the host written into the uploaded `app.json`, which is useful when the supervisor sits behind a real ingress domain. The supervisor starts the new version on a new loopback port while the old one serves, waits for a 2xx health response, swaps the host route, drains in-flight requests for up to ten seconds and then stops the old process.
 
 The notes example uses the per-app storage service:
 
@@ -179,7 +179,7 @@ POST   /apps/<name>?dry_run=1   validate an uploaded bundle without installing i
 
 `disk_mb` is a soft per-app quota over `/data` plus the app's SQLite database files. Logs, backups and deployment bundles are not counted. The app snapshot reports `diskBytes`, `diskLimitBytes` and `overQuota`; the supervisor does not stop an app for exceeding the quota. `0` or an omitted value means unlimited.
 
-Every successful deploy or rollback retains a bundle under `WT_STATE_DIR/.deployments/<app>`: `app.json`, `main.cwasm`, `main.wasm`, `artifact.json`, and a `meta.json` with its digest, size and artifact metadata. Identical artifacts are stored once under `.deployments/<app>/.blobs` and hardlinked into each bundle, so a config-only redeploy does not copy the component again. The newest ten bundles are kept, and history is capped at 1 GiB per app; the panel shows the resulting on-disk size. A rollback installs the retained code and config but leaves the live database and `/data` untouched, so schema changes between the two versions still matter.
+Every successful deploy or rollback retains a bundle under `WT_STATE_DIR/.deployments/<app>`: `app.json`, `main.cwasm`, `main.wasm`, `artifact.json`, `static/`, and a `meta.json` with its digest, size and artifact metadata. Identical artifacts are stored once under `.deployments/<app>/.blobs` and hardlinked into each bundle, so a config-only redeploy does not copy the component again. The newest ten bundles are kept, and history is capped at 1 GiB per app; the panel shows the resulting on-disk size. A rollback installs the retained code and config but leaves the live database and `/data` untouched, so schema changes between the two versions still matter.
 
 `DELETE` is deliberately conservative: it removes the app directory and stops the process, but leaves the database, backups, logs, resource history, deployment history and `/data` intact unless `purge=1` is set.
 
@@ -211,6 +211,8 @@ wasmtime serve -Scli -Sp3 -S inherit-network -W component-model-async=y \
   --env WT_STORAGE_TOKEN=<token> \
   main.cwasm
 ```
+
+Before the proxy runs, the supervisor answers `GET`/`HEAD` from the app's `static/` directory. A matching file is served with immutable caching under `/_app/immutable/` and revalidation elsewhere; an unknown path falls back to `static/index.html` only when the request accepts `text/html`, so API fetches still reach the component. This keeps frontend assets out of the wasm component and lets a static-only change ship without recompiling it. `wt.packages/app.StaticFiles` remains available for apps that prefer to embed a frontend.
 
 `app.json` carries `name`, `host`, `health`, `env`, `memory_mb`, `disk_mb`, `max_concurrency`, `request_timeout`, `network`, `schedule` and the local `build` command. `memory_mb`, when set, becomes wasmtime's `-W max-memory-size`; `max_concurrency` and `request_timeout` are enforced by the supervisor proxy. `request_timeout` is a Go duration between `1s` and `24h`; leave it unset for streaming or long-running responses. `network` defaults to `inherit`, which passes `-S inherit-network` so the guest can reach the loopback storage service and other hosts; `none` omits it, so the guest cannot open sockets. An app with `network` set to `none` cannot use the storage service or make outbound HTTP requests, which suits static or self-contained components. The health path must answer with a 2xx status before a new version is considered ready. The runtime-only image has no compiler, so `main.wasm` cannot run there: `main.cwasm` is required. At startup the supervisor compares `artifact.json` with its own wasmtime version and target and rebuilds `main.cwasm` from `main.wasm` when they differ. The compiler defaults to `WT_WASMTIME`; set `WT_WASMTIME_COMPILER` (or `--wasmtime-compiler`) to a wasmtime build with the `compile` subcommand when the runtime binary cannot compile. If no compiler is available, the existing `main.cwasm` is kept; if it is missing or incompatible, the app fails to start and keeps its previous version, and you redeploy with a matching `wt-deploy`.
 

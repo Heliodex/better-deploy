@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"embed"
-	"io/fs"
 	"net/http"
 	"strconv"
 	"strings"
@@ -24,9 +22,6 @@ const (
 	reactionEyes   = "eyes"
 	reactionBrain  = "brain"
 )
-
-//go:embed all:static
-var staticFiles embed.FS
 
 type reactionCounts struct {
 	Rocket int64 `json:"rocket"`
@@ -259,16 +254,11 @@ func init() {
 		return
 	}
 
-	sub, err := fs.Sub(staticFiles, "static")
-	if err != nil {
-		panic(err)
-	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/messages", handleListMessages)
 	mux.HandleFunc("POST /api/messages", handleCreateMessage)
 	mux.HandleFunc("POST /api/messages/{id}/react", handleReact)
 	mux.HandleFunc("GET /api/stats", handleStats)
-	mux.Handle("/", app.StaticFiles(sub))
 
 	wasihttp.Handle(app.ServeStorage(storeErr, migrate, mux).ServeHTTP)
 }

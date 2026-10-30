@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"embed"
-	"io/fs"
 	"net/http"
 	"strconv"
 	"strings"
@@ -20,9 +18,6 @@ const (
 	defaultLimit = 50
 	maxLimit     = 100
 )
-
-//go:embed all:static
-var staticFiles embed.FS
 
 type note struct {
 	ID        string `json:"id"`
@@ -114,14 +109,9 @@ func init() {
 		return
 	}
 
-	sub, err := fs.Sub(staticFiles, "static")
-	if err != nil {
-		panic(err)
-	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/notes", handleListNotes)
 	mux.HandleFunc("POST /api/notes", handleCreateNote)
-	mux.Handle("/", app.StaticFiles(sub))
 
 	wasihttp.Handle(app.ServeStorage(storeErr, migrate, mux))
 }

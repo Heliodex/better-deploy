@@ -326,6 +326,34 @@ func copyOptional(src, dst, name string) error {
 	return nil
 }
 
+// copyStatic copies the bundle's static/ directory when it exists.
+func copyStatic(src, dst string) error {
+	root := filepath.Join(src, "static")
+	if info, err := os.Stat(root); err != nil || !info.IsDir() {
+		return nil
+	}
+	return filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		if !entry.Type().IsRegular() {
+			return nil
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		return copyFile(path, target)
+	})
+}
+
 func copyBundle(src, dst string) error {
 	if err := copyFile(filepath.Join(src, "app.json"), filepath.Join(dst, "app.json")); err != nil {
 		return fmt.Errorf("copy app.json: %w", err)
@@ -335,7 +363,7 @@ func copyBundle(src, dst string) error {
 			return err
 		}
 	}
-	return nil
+	return copyStatic(src, dst)
 }
 
 func fileDigest(path string) (string, error) {
@@ -406,9 +434,18 @@ func (m *deploymentManager) record(app, source string) (deploymentInfo, error) {
 	if err := copyOptional(source, temp, artifactName); err != nil {
 		return deploymentInfo{}, err
 	}
+	if err := copyStatic(source, temp); err != nil {
+		return deploymentInfo{}, err
+	}
 	for _, name := range []string{"app.json", artifactName} {
 		if info, err := os.Stat(filepath.Join(temp, name)); err == nil {
 			total += info.Size()
+		}
+	}
+	static := filepath.Join(temp, "static")
+	if info, err := os.Stat(static); err == nil && info.IsDir() {
+		if err := walkSize(static, &total); err != nil {
+			return deploymentInfo{}, err
 		}
 	}
 	recorded := deploymentInfo{

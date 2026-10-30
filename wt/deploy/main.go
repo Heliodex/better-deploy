@@ -219,6 +219,29 @@ func writeTarFile(tw *tar.Writer, name string, data []byte) error {
 	return nil
 }
 
+// writeTarPath adds a file from disk to the bundle with its relative name.
+func writeTarPath(tw *tar.Writer, name, path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	header, err := tar.FileInfoHeader(info, "")
+	if err != nil {
+		return err
+	}
+	header.Name = name
+	if err := tw.WriteHeader(header); err != nil {
+		return err
+	}
+	_, err = io.CopyN(tw, file, info.Size())
+	return err
+}
+
 func bundle(dir string, m manifest) ([]byte, error) {
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
@@ -249,6 +272,29 @@ func bundle(dir string, m manifest) ([]byte, error) {
 		}
 		if err := writeTarFile(tw, name, extra); err != nil {
 			return nil, err
+		}
+	}
+	// Static files are served by the supervisor, so a frontend change does not need to be inside the component.
+	static := filepath.Join(dir, "static")
+	if info, err := os.Stat(static); err == nil && info.IsDir() {
+		err := filepath.WalkDir(static, func(path string, entry os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			if !entry.Type().IsRegular() {
+				return nil
+			}
+			rel, err := filepath.Rel(dir, path)
+			if err != nil {
+				return err
+			}
+			return writeTarPath(tw, filepath.ToSlash(rel), path)
+		})
+		if err != nil {
+			return nil, fmt.Errorf("add static files: %w", err)
 		}
 	}
 	if err := tw.Close(); err != nil {
