@@ -87,7 +87,6 @@ function changeLines(event: Event): void {
 			placeholder="Filter logs"
 			bind:value={query}
 		>
-		<span class="flex-1"></span>
 		<select aria-label="Minimum level" class="field" onchange={changeLevel} value={minLevel}>
 			<option value="trace">All levels</option>
 			<option value="debug">Debug and above</option>
@@ -113,6 +112,12 @@ function changeLines(event: Event): void {
 	{:else}
 		<div class="min-h-0 flex-1 overflow-auto bg-black p-2 text-xs" onscroll={handleScroll} bind:this={pane}>
 			<table class="w-full table-fixed border-collapse">
+				<colgroup>
+					<col class="w-20">
+					<col class="w-16">
+					<col class="w-16">
+					<col>
+				</colgroup>
 				<tbody>
 					{#if topHeight > 0}
 						<tr aria-hidden="true" style:height={`${topHeight}px`}>
@@ -127,7 +132,7 @@ function changeLines(event: Event): void {
 							title={entry.message}
 							style:height={`${ROW_HEIGHT}px`}
 						>
-							<td class="w-20 pr-3 align-middle whitespace-nowrap text-neutral-500 tabular-nums">
+							<td class="pr-3 align-middle whitespace-nowrap text-neutral-500 tabular-nums">
 								<time class="log-time" datetime={entry.time}>
 									<span class="log-time-segment">{timeParts[0] ?? ""}</span>
 									{#if timeParts.length > 1}
@@ -140,7 +145,7 @@ function changeLines(event: Event): void {
 									{/if}
 								</time>
 							</td>
-							<td class="w-16 pr-3 align-middle whitespace-nowrap">
+							<td class="pr-3 align-middle whitespace-nowrap">
 								{#if entry.source === "supervisor"}
 									<span
 										class="inline-block border border-violet-500/60 px-1 text-[10px] tracking-wide text-violet-300 uppercase"
@@ -157,7 +162,7 @@ function changeLines(event: Event): void {
 									</span>
 								{/if}
 							</td>
-							<td class="w-16 pr-3 align-middle whitespace-nowrap {levelClasses[entry.level]}">
+							<td class="pr-3 align-middle whitespace-nowrap {levelClasses[entry.level]}">
 								{#if !access}
 									{entry.level.toUpperCase()}
 								{/if}
