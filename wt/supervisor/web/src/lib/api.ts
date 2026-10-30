@@ -329,6 +329,56 @@ export function subscribeLogs(
 export const restartApp = (token: string, name: string): Promise<AppInfo> =>
 	request(`/apps/${encodeURIComponent(name)}/restart`, { method: "POST", token }, appInfoSchema)
 
+export const stopApp = (token: string, name: string): Promise<AppInfo> =>
+	request(`/apps/${encodeURIComponent(name)}/stop`, { method: "POST", token }, appInfoSchema)
+
+export const startApp = (token: string, name: string): Promise<AppInfo> =>
+	request(`/apps/${encodeURIComponent(name)}/start`, { method: "POST", token }, appInfoSchema)
+
+const deleteAppSchema = object({
+	name: pipe(string(), minLength(1)),
+	purged: boolean(),
+})
+
+export const deleteApp = (token: string, name: string, purge: boolean): Promise<boolean> =>
+	request(
+		`/apps/${encodeURIComponent(name)}${purge ? "?purge=1" : ""}`,
+		{ method: "DELETE", token },
+		deleteAppSchema,
+	).then(result => result.purged)
+
+const appConfigSchema = object({
+	disk_mb: pipe(number(), minValue(0)),
+	env_keys: array(string()),
+	health: pipe(string(), minLength(1)),
+	host: pipe(string(), minLength(1)),
+	max_concurrency: pipe(number(), minValue(0)),
+	memory_mb: pipe(number(), minValue(0)),
+	name: pipe(string(), minLength(1)),
+	network: picklist(["inherit", "none"]),
+	request_timeout: string(),
+	restart_required: optional(boolean()),
+	schedule: array(unknownSchema()),
+})
+
+export type AppConfig = InferOutput<typeof appConfigSchema>
+
+export interface AppConfigPatch {
+	disk_mb?: number
+	health?: string
+	host?: string
+	max_concurrency?: number
+	memory_mb?: number
+	network?: "inherit" | "none"
+	request_timeout?: string
+}
+
+export const fetchAppConfig = (token: string, name: string): Promise<AppConfig> =>
+	request(`/apps/${encodeURIComponent(name)}/config`, { token }, appConfigSchema)
+
+export const saveAppConfig = (token: string, name: string, patch: AppConfigPatch): Promise<AppConfig> =>
+	request(`/apps/${encodeURIComponent(name)}/config`, { json: patch, method: "PATCH", token }, appConfigSchema)
+
 export function deployBundle(token: string, name: string, file: File): Promise<AppInfo> {
 	const body = new FormData()
 	body.append("artifact", file)

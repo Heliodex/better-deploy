@@ -3,6 +3,8 @@ import { onMount } from "svelte"
 import AllAppsOverview from "../lib/AllAppsOverview.svelte"
 import AppSidebar from "../lib/AppSidebar.svelte"
 import {
+	type AppConfig,
+	type AppConfigPatch,
 	type AppInfo,
 	type BackupInfo,
 	type BackupSettings,
@@ -10,7 +12,9 @@ import {
 	createBackup,
 	type DatabaseRows,
 	type DeploymentInfo,
+	deleteApp,
 	deployBundle,
+	fetchAppConfig,
 	fetchApp,
 	fetchApps,
 	fetchBackups,
@@ -30,9 +34,12 @@ import {
 	restartApp,
 	restoreBackup,
 	rollbackDeployment,
+	saveAppConfig,
 	type StorageChange,
 	saveBackupSettings,
 	setToken,
+	startApp,
+	stopApp,
 	subscribe,
 	subscribeLogs,
 } from "../lib/api"
@@ -44,6 +51,7 @@ import { formatTime, uptime } from "../lib/format"
 import LogsPane from "../lib/LogsPane.svelte"
 import { levelIndex } from "../lib/log-format"
 import OverviewTab from "../lib/OverviewTab.svelte"
+import SettingsTab from "../lib/SettingsTab.svelte"
 import { type Tab, tabs } from "../lib/tabs"
 
 const MIN_SIDEBAR = 200
@@ -104,6 +112,13 @@ let importingBackups = $state(false)
 let savingBackups = $state(false)
 let restoringBackup = $state<string | null>(null)
 let confirmRestore = $state<string | null>(null)
+let config = $state<AppConfig | null>(null)
+let configLoading = $state(false)
+let configSaving = $state(false)
+let configError = $state("")
+let configMessage = $state("")
+let configLoadedFor = $state<string | null>(null)
+let lifecycleBusy = $state(false)
 let databaseExists = $state(false)
 let databaseMessage = $state("")
 let databaseImporting = $state(false)
@@ -216,6 +231,7 @@ function select(name: string | null): void {
 	savingBackups = false
 	restoringBackup = null
 	confirmRestore = null
+	resetSettings()
 	resetDatabase()
 	resetDeployments()
 	closeLogs()
@@ -226,6 +242,7 @@ function select(name: string | null): void {
 		void loadDetail(token, name)
 		void loadResourceHistory(token, name)
 		void loadBackups(token, name)
+		if (tab === "settings") void loadConfig(token, name)
 		if (tab === "database") void loadDatabase(token, name)
 		if (tab === "deployments") void loadDeployments(token, name)
 		openLogs(name)
@@ -352,6 +369,94 @@ async function revertBackup(name: string): Promise<void> {
 	}
 }
 
+function resetSettings(): void {
+	config = null
+	configLoading = false
+	configSaving = false
+	configError = ""
+	configMessage = ""
+	configLoadedFor = null
+	lifecycleBusy = false
+}
+
+async function loadConfig(key: string, name: string): Promise<void> {
+	configLoading = true
+	configError = ""
+	try {
+		const result = await fetchAppConfig(key, name)
+		if (selected !== name) return
+		config = result
+		configLoadedFor = name
+	} catch (err) {
+		if (selected !== name) return
+		configError = err instanceof Error ? err.message : "Could not load the config."
+	} finally {
+		if (selected === name) configLoading = false
+	}
+}
+
+async function saveConfig(patch: AppConfigPatch): Promise<void> {
+	if (!token || !selected) return
+	configSaving = true
+	configError = ""
+	configMessage = ""
+	try {
+		const result = await saveAppConfig(token, selected, patch)
+		config = result
+		configMessage = result.restart_required
+			? "Config saved. Restart to apply memory, concurrency, timeout or network changes."
+			: "Config saved."
+		void loadDetail(token, selected)
+	} catch (err) {
+		configError = err instanceof Error ? err.message : "Could not save the config."
+	} finally {
+		configSaving = false
+	}
+}
+
+async function stopSelected(): Promise<void> {
+	if (!token || !selected) return
+	lifecycleBusy = true
+	configError = ""
+	configMessage = ""
+	try {
+		detail = await stopApp(token, selected)
+		configMessage = "App stopped."
+	} catch (err) {
+		configError = err instanceof Error ? err.message : "Could not stop the app."
+	} finally {
+		lifecycleBusy = false
+	}
+}
+
+async function startSelected(): Promise<void> {
+	if (!token || !selected) return
+	lifecycleBusy = true
+	configError = ""
+	configMessage = ""
+	try {
+		detail = await startApp(token, selected)
+		configMessage = "App started."
+	} catch (err) {
+		configError = err instanceof Error ? err.message : "Could not start the app."
+	} finally {
+		lifecycleBusy = false
+	}
+}
+
+async function deleteSelected(purge: boolean): Promise<void> {
+	if (!token || !selected) return
+	lifecycleBusy = true
+	configError = ""
+	try {
+		await deleteApp(token, selected, purge)
+		select(null)
+	} catch (err) {
+		configError = err instanceof Error ? err.message : "Could not delete the app."
+		lifecycleBusy = false
+	}
+}
+
 function resetDatabase(): void {
 	databaseExists = false
 	databaseMessage = ""
@@ -374,6 +479,8 @@ function resetDatabase(): void {
 function openTab(next: Tab): void {
 	tab = next
 	if (next === "database" && token && selected && databaseLoadedFor !== selected) void loadDatabase(token, selected)
+	if (next === "settings" && token && selected && configLoadedFor !== selected)
+		void loadConfig(token, selected)
 	if (next === "deployments" && token && selected && deploymentsLoadedFor !== selected)
 		void loadDeployments(token, selected)
 }
@@ -1007,6 +1114,23 @@ onMount((): (() => void) => {
 							history={resourceHistory}
 							onupload={upload}
 							bind:span={detailSpan}
+						/>
+					{:else if tab === "settings"}
+						<SettingsTab
+							busy={lifecycleBusy}
+							{config}
+							error={configError}
+							loading={configLoading}
+							message={configMessage}
+							ondelete={deleteSelected}
+							onreload={async (): Promise<void> => {
+								if (token && selected) await loadConfig(token, selected)
+							}}
+							onsave={saveConfig}
+							onstart={startSelected}
+							onstop={stopSelected}
+							saving={configSaving}
+							status={detail?.status ?? "stopped"}
 						/>
 					{:else if tab === "backups"}
 						<BackupsTab
