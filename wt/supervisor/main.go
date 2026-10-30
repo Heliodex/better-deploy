@@ -657,6 +657,16 @@ func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
 }
 
+// requireMethod writes 405 with an Allow header unless the request uses method.
+func requireMethod(w http.ResponseWriter, r *http.Request, method string) bool {
+	if r.Method == method {
+		return true
+	}
+	w.Header().Set("Allow", method)
+	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	return false
+}
+
 type appInfo struct {
 	Name        string    `json:"name"`
 	Host        string    `json:"host"`
@@ -891,9 +901,7 @@ func (s *supervisor) deploy(w http.ResponseWriter, r *http.Request, name string)
 }
 
 func (s *supervisor) handleApps(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 	if !s.requireAuth(w, r) {
@@ -919,12 +927,8 @@ func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
 	case "":
 		switch r.Method {
 		case http.MethodGet:
-			if !s.requireAuth(w, r) {
-				return
-			}
-			a := s.lookup(name)
-			if a == nil {
-				http.Error(w, "app not found", http.StatusNotFound)
+			a, ok := s.requireApp(w, r, name)
+			if !ok {
 				return
 			}
 			a.sampleResources(time.Now())
@@ -939,47 +943,29 @@ func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 	case "logs/stream":
-		if r.Method != http.MethodGet {
-			w.Header().Set("Allow", http.MethodGet)
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		if !requireMethod(w, r, http.MethodGet) {
 			return
 		}
-		if !s.requireAuth(w, r) {
-			return
-		}
-		a := s.lookup(name)
-		if a == nil {
-			http.Error(w, "app not found", http.StatusNotFound)
+		a, ok := s.requireApp(w, r, name)
+		if !ok {
 			return
 		}
 		s.handleLogStream(w, r, a)
 	case "logs":
-		if r.Method != http.MethodGet {
-			w.Header().Set("Allow", http.MethodGet)
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		if !requireMethod(w, r, http.MethodGet) {
 			return
 		}
-		if !s.requireAuth(w, r) {
-			return
-		}
-		a := s.lookup(name)
-		if a == nil {
-			http.Error(w, "app not found", http.StatusNotFound)
+		a, ok := s.requireApp(w, r, name)
+		if !ok {
 			return
 		}
 		s.handleLogs(w, r, a)
 	case "resources":
-		if r.Method != http.MethodGet {
-			w.Header().Set("Allow", http.MethodGet)
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		if !requireMethod(w, r, http.MethodGet) {
 			return
 		}
-		if !s.requireAuth(w, r) {
-			return
-		}
-		a := s.lookup(name)
-		if a == nil {
-			http.Error(w, "app not found", http.StatusNotFound)
+		a, ok := s.requireApp(w, r, name)
+		if !ok {
 			return
 		}
 		s.handleResources(w, r, a)
@@ -990,17 +976,11 @@ func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
 	case "database/changes":
 		s.handleDatabaseChanges(w, r, name)
 	case "restart":
-		if r.Method != http.MethodPost {
-			w.Header().Set("Allow", http.MethodPost)
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		if !requireMethod(w, r, http.MethodPost) {
 			return
 		}
-		if !s.requireAuth(w, r) {
-			return
-		}
-		a := s.lookup(name)
-		if a == nil {
-			http.Error(w, "app not found", http.StatusNotFound)
+		a, ok := s.requireApp(w, r, name)
+		if !ok {
 			return
 		}
 		s.handleRestart(w, r, a)

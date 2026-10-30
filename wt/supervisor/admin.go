@@ -362,9 +362,7 @@ func (s *supervisor) broadcast() {
 
 // handleEvents streams app snapshots over SSE, with comment pings to keep the connection alive through proxies. EventSource cannot set headers, so browsers authenticate with the wt_token cookie instead of a bearer token.
 func (s *supervisor) handleEvents(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 	if !s.authorized(r) {
@@ -425,6 +423,19 @@ func (s *supervisor) requireAuth(w http.ResponseWriter, r *http.Request) bool {
 	return false
 }
 
+// requireApp authenticates the request and returns the named app, writing 401 or 404 when it cannot.
+func (s *supervisor) requireApp(w http.ResponseWriter, r *http.Request, name string) (*app, bool) {
+	if !s.requireAuth(w, r) {
+		return nil, false
+	}
+	a := s.lookup(name)
+	if a == nil {
+		http.Error(w, "app not found", http.StatusNotFound)
+		return nil, false
+	}
+	return a, true
+}
+
 // logTailParam reads the ?tail= query, writing 400 when it is out of range.
 func logTailParam(w http.ResponseWriter, r *http.Request) (int, bool) {
 	value := r.URL.Query().Get("tail")
@@ -465,9 +476,7 @@ type logStreamMessage struct {
 
 // handleLogStream streams an app's log: the recent backlog on connect, then each new line as the supervisor writes it, with comment pings to hold the connection.
 func (s *supervisor) handleLogStream(w http.ResponseWriter, r *http.Request, a *app) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 	if !s.requireAuth(w, r) {
@@ -563,11 +572,7 @@ const maxBackupRequestBytes = 4 << 10
 
 // handleBackupRoute serves the app's database snapshots, their policy and restores.
 func (s *supervisor) handleBackupRoute(w http.ResponseWriter, r *http.Request, name, rest string) {
-	if !s.requireAuth(w, r) {
-		return
-	}
-	if s.lookup(name) == nil {
-		http.Error(w, "app not found", http.StatusNotFound)
+	if _, ok := s.requireApp(w, r, name); !ok {
 		return
 	}
 	if s.backups == nil {
@@ -605,9 +610,7 @@ func (s *supervisor) handleBackups(w http.ResponseWriter, r *http.Request, name 
 }
 
 func (s *supervisor) handleBackupSettings(w http.ResponseWriter, r *http.Request, name string) {
-	if r.Method != http.MethodPut {
-		w.Header().Set("Allow", http.MethodPut)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !requireMethod(w, r, http.MethodPut) {
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBackupRequestBytes)
@@ -628,9 +631,7 @@ func (s *supervisor) handleBackupSettings(w http.ResponseWriter, r *http.Request
 }
 
 func (s *supervisor) handleBackupRestore(w http.ResponseWriter, r *http.Request, name, file string) {
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	if err := s.backups.restore(r.Context(), name, file); err != nil {

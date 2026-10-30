@@ -381,20 +381,10 @@ func changeLimitParam(w http.ResponseWriter, r *http.Request) (int, bool) {
 }
 
 func (s *supervisor) handleDatabaseChanges(w http.ResponseWriter, r *http.Request, name string) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	if !s.requireAuth(w, r) {
-		return
-	}
-	if s.lookup(name) == nil {
-		http.Error(w, "app not found", http.StatusNotFound)
-		return
-	}
-	if s.storage == nil {
-		http.Error(w, "database unavailable", http.StatusServiceUnavailable)
+	if !s.requireStorage(w, r, name) {
 		return
 	}
 	limit, ok := changeLimitParam(w, r)

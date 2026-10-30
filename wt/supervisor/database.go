@@ -158,21 +158,23 @@ func databaseRowsParam(w http.ResponseWriter, r *http.Request) (limit, offset in
 	return limit, offset, true
 }
 
-func (s *supervisor) handleDatabase(w http.ResponseWriter, r *http.Request, name string) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if !s.requireAuth(w, r) {
-		return
-	}
-	if s.lookup(name) == nil {
-		http.Error(w, "app not found", http.StatusNotFound)
-		return
+// requireStorage authenticates the request and checks the app exists and the storage service is running.
+func (s *supervisor) requireStorage(w http.ResponseWriter, r *http.Request, name string) bool {
+	if _, ok := s.requireApp(w, r, name); !ok {
+		return false
 	}
 	if s.storage == nil {
 		http.Error(w, "database unavailable", http.StatusServiceUnavailable)
+		return false
+	}
+	return true
+}
+
+func (s *supervisor) handleDatabase(w http.ResponseWriter, r *http.Request, name string) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	if !s.requireStorage(w, r, name) {
 		return
 	}
 	if !s.storage.hasDatabase(name) {
@@ -188,20 +190,10 @@ func (s *supervisor) handleDatabase(w http.ResponseWriter, r *http.Request, name
 }
 
 func (s *supervisor) handleDatabaseRows(w http.ResponseWriter, r *http.Request, name string) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	if !s.requireAuth(w, r) {
-		return
-	}
-	if s.lookup(name) == nil {
-		http.Error(w, "app not found", http.StatusNotFound)
-		return
-	}
-	if s.storage == nil {
-		http.Error(w, "database unavailable", http.StatusServiceUnavailable)
+	if !s.requireStorage(w, r, name) {
 		return
 	}
 	if !s.storage.hasDatabase(name) {
