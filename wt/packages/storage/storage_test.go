@@ -255,6 +255,21 @@ func TestClientQueryPageStopsOnShortPage(t *testing.T) {
 	}
 }
 
+func TestClientQueryPageAdvancesByReturnedRowsWhenServerTruncates(t *testing.T) {
+	client := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"columns":["id"],"rows":[["a"]],"truncated":true}`)
+	})
+
+	rows, err := client.QueryPage(context.Background(), `select id from things`, Page{Limit: 10, Offset: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	if next, ok := rows.NextPage(); !ok || next != (Page{Limit: 10, Offset: 5}) {
+		t.Errorf("next page = %+v, %v; want offset 5 based on the returned row", next, ok)
+	}
+}
+
 func TestClientQueryPageValidatesPage(t *testing.T) {
 	client := newTestClient(t, func(http.ResponseWriter, *http.Request) {
 		t.Error("invalid page reached the server")

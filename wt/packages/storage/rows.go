@@ -15,11 +15,13 @@ func (r *Rows) Next() bool {
 //
 // Offset pagination is not stable under concurrent writes, so use a deterministic ORDER BY and expect rows to move between pages.
 func (r *Rows) NextPage() (Page, bool) {
-	if r == nil || !r.Truncated || r.page.Limit <= 0 {
+	if r == nil || !r.Truncated || r.page.Limit <= 0 || len(r.rows) == 0 {
 		return Page{}, false
 	}
 	next := r.page
-	next.Offset += r.page.Limit
+	// Advance by the rows actually returned. The server may cap a page below the
+	// requested limit, and skipping its full requested width would lose rows.
+	next.Offset += len(r.rows)
 	return next, true
 }
 
