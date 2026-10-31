@@ -147,7 +147,7 @@ Remaining limitations of this prototype:
 - SQLite still runs **in the supervisor process**, not in a separate storage process. Each connection now uses `temp_store=FILE`, a 2 MiB page cache, `mmap_size=0`, SQL-length/value/row limits, a global 16-query semaphore and a pre-update row capture that checks size before base64 encoding. That reduces the blast radius but is not full control-plane isolation; the complete fix is a separate storage process with its own limits.
 - There is no network namespace and no per-app loopback isolation: the iptables owner rules are the only egress boundary, and `inherit-network` still exposes the shared loopback stack to allowed destinations. A compromised kernel or an allowed storage endpoint remains part of the trust boundary.
 - There is no user namespace; isolation relies on the supervisor running as root and dropping to numeric UIDs.
-- Data is not encrypted at rest, and one global token still deploys and reads every app. There are no per-app tokens, scopes, audit log or login rate limiting.
+- Data is not encrypted at rest, including `.secrets` files, and one global token still deploys and reads every app. There are no per-app tokens, scopes, audit log or login rate limiting. Log redaction cannot scrub existing files or transformed values.
 - App ports are dynamic and the proxy container is still expected to run as root (see the container notes).
 
 ## Resource usage
@@ -222,8 +222,11 @@ The admin token also guards the lifecycle and config endpoints:
 
 ```text
 GET    /usage                  measured disk usage and the global budget
-GET    /apps/<name>/config      runtime config, with env keys but not values
+GET    /apps/<name>/config      runtime config, with env and secret keys but not values
 PATCH  /apps/<name>/config      partial config update
+GET    /apps/<name>/secrets     write-only secret names, never values
+PUT    /apps/<name>/secrets/<key> set or rotate one secret
+DELETE /apps/<name>/secrets/<key> remove one secret
 GET    /apps/<name>/deployments list retained deployment bundles
 POST   /apps/<name>/rollback/<id> install a retained code bundle
        ?backup=<file>             also restore that snapshot's database and /data
@@ -234,7 +237,13 @@ DELETE /apps/<name>?purge=1     also remove the database, backups, logs, history
 POST   /apps/<name>?dry_run=1   validate an uploaded bundle without installing it
 ```
 
-`PATCH` accepts any of `host`, `hosts`, `health`, `env`, `memory_mb`, `disk_mb`, `cpu_millicores`, `pids_max`, `io_weight`, `max_concurrency`, `request_timeout`, `startup_timeout`, `health_interval`, `health_failures`, `restart_on_unhealthy`, `network` and `schedule`. Env changes are a merge; a `null` value removes a key. `GET` returns `env_keys` rather than values, so secrets are never echoed back. Host, host aliases, health and schedule changes take effect immediately; env, memory, disk, CPU, pids, IO, concurrency, timeout and network changes are saved to `app.json` and applied on the next start or restart, which the response reports as `restart_required`. Host changes update routing at once, and are rejected with `409` if another app already owns the host, an alias, or an overlapping wildcard.
+`PATCH` accepts any of `host`, `hosts`, `health`, `env`, `memory_mb`, `disk_mb`, `cpu_millicores`, `pids_max`, `io_weight`, `max_concurrency`, `request_timeout`, `startup_timeout`, `health_interval`, `health_failures`, `restart_on_unhealthy`, `network` and `schedule`. Env changes are a merge; a `null` value removes a key. `GET` returns `env_keys` and `secret_keys` rather than values, so secrets are never echoed back. Host, host aliases, health and schedule changes take effect immediately; env, memory, disk, CPU, pids, IO, concurrency, timeout and network changes are saved to `app.json` and applied on the next start or restart, which the response reports as `restart_required`. Host changes update routing at once, and are rejected with `409` if another app already owns the host, an alias, or an overlapping wildcard.
+
+Secrets live in a write-only per-app store under `WT_STATE_DIR/.secrets/<app>.json` (directory `0700`, file `0600`, atomic replacement) instead of `app.json`. `GET /apps/<name>/secrets` returns only `{"keys":[...]}`. `PUT /apps/<name>/secrets/<key>` takes `{"value":"..."}`, and `DELETE` removes the key; both return `{"key":"...","restart_required":true}` and never echo the value. Keys are environment-style identifiers (`[A-Za-z_][A-Za-z0-9_]*`, at most 128 bytes); values are at most 64 KiB and cannot contain NUL. The body limit is 80 KiB. The secret endpoints use the same admin token and app scope as the rest of `/apps`, and a missing app returns `404`.
+
+In `app.json`, an env value of `secret://NAME` resolves from that app's store at launch. Literal values pass through unchanged. A missing secret is a clear launch error and the app is not started, so the previous version keeps serving. The bundle and deployment history keep the reference, never the resolved value. Each deploy or rollback records only `secret://NAME` because `app.json` is copied as uploaded; the resolved values exist only in the supervisor's memory and the app process environment. `DELETE` without `purge` keeps the secret file as app state; `?purge=1` removes it.
+
+A running process keeps the values it started with. Setting, rotating or deleting a secret returns `restart_required: true` but does not restart the app; use `POST /apps/<name>/restart` or a deploy when the new value should apply. Redaction is best effort: the supervisor replaces whole stored values, longest first, in new app log lines, supervisor access lines, the log tail and `lastError`. Previous values stay in memory for redaction until the supervisor restarts. Existing log files, backups, `/data`, and anything an app already wrote elsewhere are not retroactively scrubbed, and a value an app transforms or logs in pieces may still appear.
 
 `disk_mb` measures `/data` plus the app's SQLite database files; logs, backups and deployment bundles are not counted. In trusted mode it is a soft quota: the app snapshot reports `diskBytes`, `diskLimitBytes` and `overQuota`, and the supervisor does not stop the app. In untrusted mode it defaults to 256 MiB, is enforced by a monitor that stops an over-quota app with a `lastError`, and also caps each file through `RLIMIT_FSIZE`; with `WT_DATA_QUOTA_MODE=setquota` it also becomes the app UID's equal soft and hard block limit, with `maxAppEntries` as its inode limit. `0` or an omitted value means unlimited in trusted mode; untrusted mode fills in its default instead. It also becomes the database's `max_page_count`, so an app cannot write its SQLite file past `disk_mb` even before the monitor runs.
 
@@ -263,15 +272,18 @@ curl -X PATCH -H "Authorization: Bearer $WT_TOKEN" \
 ## What each app runs
 
 ```sh
+KEY=VALUE WT_STORAGE_URL=http://127.0.0.1:<storage-port> WT_STORAGE_TOKEN=<token> \
 wasmtime serve -Scli -Sp3 -S inherit-network -W component-model-async=y \
   --allow-precompiled \
   --addr 127.0.0.1:0 \
   --dir /tmp/wt/state/<name>::/data \
-  --env KEY=VALUE \
-  --env WT_STORAGE_URL=http://127.0.0.1:<storage-port> \
-  --env WT_STORAGE_TOKEN=<token> \
+  --env KEY \
+  --env WT_STORAGE_URL \
+  --env WT_STORAGE_TOKEN \
   main.cwasm
 ```
+
+Env values are passed in the process environment through `cmd.Env`, while argv carries only `--env KEY`. Values therefore do not appear in `/proc/<pid>/cmdline`. This includes `WT_STORAGE_URL` and `WT_STORAGE_TOKEN`. A `secret://NAME` env value is resolved before the process starts.
 
 The supervisor asks wasmtime to bind a free loopback port and reads the actual address from its `Serving HTTP on ...` startup line, so there is no separate port probe to race another process. A restarted process may therefore get a different port; the proxy is updated before traffic is routed to it.
 
