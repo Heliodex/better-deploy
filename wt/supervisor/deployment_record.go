@@ -98,6 +98,58 @@ func fileDigest(path string) (string, error) {
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
+// storeStatic content-addresses every regular file under source/static and hardlinks it into dst/static at the same relative path. It returns the path-to-digest map and the unique bytes stored.
+func (m *deploymentManager) storeStatic(app, source, dst string) (map[string]string, int64, error) {
+	root := filepath.Join(source, "static")
+	info, err := os.Stat(root)
+	if os.IsNotExist(err) {
+		return nil, 0, nil
+	}
+	if err != nil {
+		return nil, 0, err
+	}
+	if !info.IsDir() {
+		return nil, 0, nil
+	}
+
+	files := map[string]string{}
+	seen := map[string]struct{}{}
+	var total int64
+	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || !entry.Type().IsRegular() {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		stored, size, err := m.storeBlob(app, path)
+		if err != nil {
+			return fmt.Errorf("store static %s: %w", rel, err)
+		}
+		target := filepath.Join(dst, "static", rel)
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		if err := linkBlob(filepath.Join(m.blobDir(app), stored), target); err != nil {
+			return fmt.Errorf("link static %s: %w", rel, err)
+		}
+		files[filepath.ToSlash(rel)] = stored
+		if _, ok := seen[stored]; !ok {
+			seen[stored] = struct{}{}
+			total += size
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	return files, total, nil
+}
+
 func (m *deploymentManager) record(app, source string) (deploymentInfo, error) {
 	if err := os.MkdirAll(m.appDir(app), 0o755); err != nil {
 		return deploymentInfo{}, fmt.Errorf("deployment dir: %w", err)
@@ -153,7 +205,8 @@ func (m *deploymentManager) record(app, source string) (deploymentInfo, error) {
 	if err := copyOptional(source, temp, artifactName); err != nil {
 		return deploymentInfo{}, err
 	}
-	if err := copyStatic(source, temp); err != nil {
+	static, staticBytes, err := m.storeStatic(app, source, temp)
+	if err != nil {
 		return deploymentInfo{}, err
 	}
 	for _, name := range []string{"app.json", artifactName} {
@@ -161,12 +214,7 @@ func (m *deploymentManager) record(app, source string) (deploymentInfo, error) {
 			total += info.Size()
 		}
 	}
-	static := filepath.Join(temp, "static")
-	if info, err := os.Stat(static); err == nil && info.IsDir() {
-		if err := walkSize(static, &total); err != nil {
-			return deploymentInfo{}, err
-		}
-	}
+	total += staticBytes
 	recorded := deploymentInfo{
 		ID:          id,
 		DeployedAt:  now,
@@ -179,6 +227,7 @@ func (m *deploymentManager) record(app, source string) (deploymentInfo, error) {
 		Rebuildable: files["main.wasm"] != "",
 		Bytes:       total,
 		Blobs:       files,
+		Static:      static,
 	}
 	meta, err := json.Marshal(recorded)
 	if err != nil {

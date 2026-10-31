@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func writeDeploymentSource(t *testing.T, host string) string {
@@ -222,6 +223,233 @@ func TestDeploymentHistoryByteBudget(t *testing.T) {
 	}
 	if len(infos) != 1 {
 		t.Errorf("history length = %d, want 1 under a tiny byte budget", len(infos))
+	}
+}
+
+func writeStaticFile(t *testing.T, source, rel, body string) {
+	t.Helper()
+	path := filepath.Join(source, "static", filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDeploymentHistorySharesStatic(t *testing.T) {
+	manager := newDeploymentManager(t.TempDir())
+	source := writeDeploymentSource(t, "demo.localhost")
+	body := bytes.Repeat([]byte("s"), 8<<10)
+	writeStaticFile(t, source, "_app/immutable/app.js", string(body))
+
+	first, err := manager.record("demo", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel := "_app/immutable/app.js"
+	if first.Static[rel] == "" {
+		t.Fatalf("static metadata = %v, want the file digest", first.Static)
+	}
+	blobsBefore, err := os.ReadDir(filepath.Join(manager.appDir("demo"), deploymentBlobDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := manager.usage("demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := manager.record("demo", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blobsAfter, err := os.ReadDir(filepath.Join(manager.appDir("demo"), deploymentBlobDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blobsAfter) != len(blobsBefore) {
+		t.Errorf("blob count = %d, want %d: identical static files added blobs", len(blobsAfter), len(blobsBefore))
+	}
+	after, err := manager.usage("demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after-before >= int64(len(body)) {
+		t.Errorf("usage grew by %d bytes, want the shared static tree counted once", after-before)
+	}
+
+	firstDir, err := manager.bundle("demo", first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondDir, err := manager.bundle("demo", second.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstInfo, err := os.Stat(filepath.Join(firstDir, "static", filepath.FromSlash(rel)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondInfo, err := os.Stat(filepath.Join(secondDir, "static", filepath.FromSlash(rel)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(firstInfo, secondInfo) {
+		t.Error("identical static files were copied instead of shared")
+	}
+	blobInfo, err := os.Stat(filepath.Join(manager.blobDir("demo"), first.Static[rel]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(firstInfo, blobInfo) {
+		t.Error("the bundle's static file is not hardlinked to its blob")
+	}
+}
+
+func TestDeploymentHistoryPrunesStaticBlobs(t *testing.T) {
+	manager := newDeploymentManager(t.TempDir())
+	source := writeDeploymentSource(t, "demo.localhost")
+	writeStaticFile(t, source, "_app/immutable/app.js", "console.log('app')")
+
+	first, err := manager.record("demo", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := manager.record("demo", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel := "_app/immutable/app.js"
+	blob := filepath.Join(manager.blobDir("demo"), first.Static[rel])
+
+	if err := os.RemoveAll(filepath.Join(manager.appDir("demo"), first.ID)); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.prune("demo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(blob); err != nil {
+		t.Errorf("shared static blob was removed while another bundle references it: %v", err)
+	}
+	secondDir, err := manager.bundle("demo", second.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := os.ReadFile(filepath.Join(secondDir, "static", filepath.FromSlash(rel)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(stored) != "console.log('app')" {
+		t.Errorf("static file = %q", stored)
+	}
+
+	if err := os.RemoveAll(secondDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.prune("demo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(blob); !os.IsNotExist(err) {
+		t.Errorf("unreferenced static blob still exists: %v", err)
+	}
+}
+
+func TestDeploymentHistoryChangedStaticGetsNewBlob(t *testing.T) {
+	manager := newDeploymentManager(t.TempDir())
+	source := writeDeploymentSource(t, "demo.localhost")
+	rel := "_app/immutable/app.js"
+	writeStaticFile(t, source, rel, "one")
+
+	first, err := manager.record("demo", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeStaticFile(t, source, rel, "two")
+	second, err := manager.record("demo", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Static[rel] == second.Static[rel] {
+		t.Fatalf("digests are equal: %q", first.Static[rel])
+	}
+	blobs, err := os.ReadDir(filepath.Join(manager.appDir("demo"), deploymentBlobDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// One shared cwasm plus one blob per static version.
+	if len(blobs) != 3 {
+		t.Errorf("blob count = %d, want 3", len(blobs))
+	}
+	firstDir, err := manager.bundle("demo", first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondDir, err := manager.bundle("demo", second.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldBody, err := os.ReadFile(filepath.Join(firstDir, "static", filepath.FromSlash(rel)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	newBody, err := os.ReadFile(filepath.Join(secondDir, "static", filepath.FromSlash(rel)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(oldBody) != "one" || string(newBody) != "two" {
+		t.Errorf("static bodies = %q and %q", oldBody, newBody)
+	}
+}
+
+func TestDeploymentHistoryLegacyStaticWithoutMetadata(t *testing.T) {
+	manager := newDeploymentManager(t.TempDir())
+	id := time.Now().UTC().Format(deploymentTimeLayout)
+	dir := filepath.Join(manager.appDir("demo"), id)
+	if err := os.MkdirAll(filepath.Join(dir, "static"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"app.json":      `{"name":"demo","host":"demo.localhost"}`,
+		"main.cwasm":    "cwasm demo.localhost",
+		"static/app.js": "console.log('legacy')",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(name)), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	meta := fmt.Sprintf(`{"id":%q,"deployedAt":%q,"digest":"legacy","size":19,"rebuildable":false,"bytes":61}`+"\n", id, time.Now().UTC().Format(time.RFC3339Nano))
+	if err := os.WriteFile(filepath.Join(dir, deploymentMetaName), []byte(meta), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	infos, err := manager.list("demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 1 || infos[0].Static != nil {
+		t.Fatalf("legacy list = %+v, want one bundle without static metadata", infos)
+	}
+	bundle, err := manager.bundle("demo", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dst := t.TempDir()
+	if err := copyBundle(bundle, dst); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(dst, "static", "app.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "console.log('legacy')" {
+		t.Errorf("copied static file = %q", body)
+	}
+	if err := manager.prune("demo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Errorf("legacy bundle was pruned: %v", err)
 	}
 }
 

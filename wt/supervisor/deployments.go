@@ -37,6 +37,7 @@ type deploymentInfo struct {
 	Rebuildable bool              `json:"rebuildable"`
 	Bytes       int64             `json:"bytes"`
 	Blobs       map[string]string `json:"blobs,omitempty"`
+	Static      map[string]string `json:"static,omitempty"`
 }
 
 // deploymentManager keeps a bounded history of app bundles under the state directory.
@@ -198,6 +199,9 @@ func (m *deploymentManager) gcBlobs(app string) error {
 			continue
 		}
 		for _, digest := range info.Blobs {
+			referenced[digest] = struct{}{}
+		}
+		for _, digest := range info.Static {
 			referenced[digest] = struct{}{}
 		}
 	}
