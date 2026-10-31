@@ -41,6 +41,7 @@ type config struct {
 	appsDir, stateDir, cacheDir, listen, storageListen, domain string
 	wasmtime, wasmtimeCompiler, wasmtimeTarget                 string
 	token, tlsCert, tlsKey                                     string
+	tenantMode, adminListen                                    string
 	cacheMaxBytes                                              int64
 }
 
@@ -140,9 +141,17 @@ func (s *supervisor) hostTaken(host, except string) bool {
 	return false
 }
 
+// authRequired reports whether admin and API requests must carry a token. Untrusted tenancy always does, even when the listener is loopback-only.
+func (s *supervisor) authRequired() bool {
+	return s.cfg.token != "" || s.cfg.untrusted()
+}
+
 func (s *supervisor) authorized(r *http.Request) bool {
-	if s.cfg.token == "" {
+	if !s.authRequired() {
 		return true
+	}
+	if s.cfg.token == "" {
+		return false
 	}
 	const prefix = "Bearer "
 	header := r.Header.Get("Authorization")
@@ -416,16 +425,32 @@ func parseConfig() config {
 	flag.StringVar(&cfg.wasmtime, "wasmtime", cfg.wasmtime, "wasmtime binary")
 	flag.StringVar(&cfg.wasmtimeCompiler, "wasmtime-compiler", cfg.wasmtimeCompiler, "wasmtime binary with the compile subcommand, used to rebuild stale artifacts")
 	flag.StringVar(&cfg.wasmtimeTarget, "wasmtime-target", cfg.wasmtimeTarget, "wasmtime target triple (must match the compiler)")
-	flag.StringVar(&cfg.token, "token", cfg.token, "deploy bearer token (required off loopback)")
+	flag.StringVar(&cfg.token, "token", cfg.token, "deploy bearer token (required off loopback and in untrusted mode)")
 	flag.StringVar(&cfg.tlsCert, "tls-cert", cfg.tlsCert, "TLS certificate (with --tls-key)")
 	flag.StringVar(&cfg.tlsKey, "tls-key", cfg.tlsKey, "TLS private key (with --tls-cert)")
+	flag.StringVar(&cfg.tenantMode, "tenant-mode", cfg.tenantMode, "tenant trust model: trusted or untrusted")
+	flag.StringVar(&cfg.adminListen, "admin-listen", cfg.adminListen, "separate admin listener (TCP address or unix:/path)")
 	flag.Parse()
 
-	if cfg.token == "" && !loopbackListen(cfg.listen) {
-		log.Fatalf("WT_TOKEN is required when listening on %s", cfg.listen)
+	cfg.tenantMode = strings.ToLower(strings.TrimSpace(cfg.tenantMode))
+	if err := validateTenantConfig(cfg); err != nil {
+		log.Fatalf("%v", err)
 	}
-	if cfg.token == "" {
-		log.Printf("warning: WT_TOKEN is empty; admin and deploy APIs are unauthenticated on the loopback listener")
+	if cfg.untrusted() {
+		log.Printf("untrusted tenant mode: per-app uid, cgroup and network isolation are required")
+		if os.Geteuid() != 0 {
+			log.Printf("warning: untrusted tenant mode needs root; apps will refuse to launch")
+		}
+		if cfg.adminListen == "" {
+			log.Printf("warning: WT_ADMIN_LISTEN is unset; admin routes stay on the public listener behind WT_TOKEN")
+		}
+	} else {
+		if cfg.token == "" && !loopbackListen(cfg.listen) {
+			log.Fatalf("WT_TOKEN is required when listening on %s", cfg.listen)
+		}
+		if cfg.token == "" {
+			log.Printf("warning: WT_TOKEN is empty; admin and deploy APIs are unauthenticated on the loopback listener")
+		}
 	}
 
 	absoluteApps, err := filepath.Abs(cfg.appsDir)
@@ -505,12 +530,44 @@ func serve(s *supervisor) {
 	go s.monitorResources(resourceSampleInterval)
 	go s.monitorHealth()
 
+	// When admin routes have their own listener, the public one serves app hosts and /healthz only.
+	publicOnly := cfg.adminListen != ""
+	handler := s.handler()
+	if publicOnly {
+		handler = s.publicHandler()
+	}
 	server := &http.Server{
 		Addr:              cfg.listen,
-		Handler:           s.handler(),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    1 << 20,
+	}
+
+	var adminServer *http.Server
+	var adminCleanup func()
+	if publicOnly {
+		network, address, err := parseAdminListen(cfg.adminListen)
+		if err != nil {
+			log.Fatalf("admin listen: %v", err)
+		}
+		listener, cleanup, err := listenAdmin(network, address)
+		if err != nil {
+			log.Fatalf("admin listen: %v", err)
+		}
+		adminCleanup = cleanup
+		adminServer = &http.Server{
+			Handler:           s.adminHandler(),
+			ReadHeaderTimeout: 5 * time.Second,
+			IdleTimeout:       60 * time.Second,
+			MaxHeaderBytes:    1 << 20,
+		}
+		go func() {
+			if err := adminServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Printf("admin listen: %v", err)
+			}
+		}()
+		log.Printf("admin listener on %s with %d app(s)", cfg.adminListen, len(s.apps))
 	}
 
 	stop := make(chan os.Signal, 1)
@@ -519,6 +576,11 @@ func serve(s *supervisor) {
 		<-stop
 		s.stopping.Store(true)
 		log.Printf("shutting down")
+		if adminServer != nil {
+			if err := shutdownServer(adminServer, shutdownTimeout); err != nil {
+				log.Printf("graceful admin shutdown: %v", err)
+			}
+		}
 		if err := shutdownServer(server, shutdownTimeout); err != nil {
 			log.Printf("graceful shutdown: %v", err)
 		}
@@ -534,9 +596,15 @@ func serve(s *supervisor) {
 	} else {
 		err = server.ListenAndServe()
 	}
+	if adminServer != nil {
+		_ = shutdownServer(adminServer, shutdownTimeout)
+	}
 	s.stopAll()
 	s.persistResources()
 	s.storage.close()
+	if adminCleanup != nil {
+		adminCleanup()
+	}
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("listen: %v", err)
 	}

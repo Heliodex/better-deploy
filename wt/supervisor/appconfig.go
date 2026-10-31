@@ -18,7 +18,30 @@ const (
 	defaultStartupTimeout = 15 * time.Second
 	minStartupTimeout     = time.Second
 	maxStartupTimeout     = 10 * time.Minute
+
+	tenantTrusted   = "trusted"
+	tenantUntrusted = "untrusted"
 )
+
+// untrusted reports whether apps are treated as hostile tenants that need enforced isolation.
+func (c config) untrusted() bool {
+	return c.tenantMode == tenantUntrusted
+}
+
+// validateTenantConfig rejects an unsafe tenant mode. Untrusted tenancy has no tokenless path, even on loopback.
+func validateTenantConfig(cfg config) error {
+	switch cfg.tenantMode {
+	case "", tenantTrusted:
+		return nil
+	case tenantUntrusted:
+		if strings.TrimSpace(cfg.token) == "" {
+			return fmt.Errorf("WT_TOKEN is required when WT_TENANT_MODE=%s", tenantUntrusted)
+		}
+		return nil
+	default:
+		return fmt.Errorf("WT_TENANT_MODE must be %s or %s, got %q", tenantTrusted, tenantUntrusted, cfg.tenantMode)
+	}
+}
 
 func env(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
@@ -54,6 +77,8 @@ func configFromEnv() config {
 		token:            os.Getenv("WT_TOKEN"),
 		tlsCert:          os.Getenv("WT_TLS_CERT"),
 		tlsKey:           os.Getenv("WT_TLS_KEY"),
+		tenantMode:       env("WT_TENANT_MODE", tenantTrusted),
+		adminListen:      os.Getenv("WT_ADMIN_LISTEN"),
 	}
 }
 

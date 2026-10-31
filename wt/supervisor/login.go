@@ -36,11 +36,12 @@ func (s *supervisor) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	token := strings.TrimSpace(req.Token)
-	if s.cfg.token != "" && subtle.ConstantTimeCompare([]byte(token), []byte(s.cfg.token)) != 1 {
-		writeError(w, http.StatusUnauthorized, "invalid token")
-		return
-	}
-	if s.cfg.token == "" {
+	if s.authRequired() {
+		if s.cfg.token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(s.cfg.token)) != 1 {
+			writeError(w, http.StatusUnauthorized, "invalid token")
+			return
+		}
+	} else {
 		token = ""
 	}
 	w.Header().Set("Cache-Control", "no-store")

@@ -169,7 +169,8 @@ func (s *supervisor) isAppHost(host string) bool {
 	return s.hosts[host] != nil
 }
 
-func (s *supervisor) handler() http.Handler {
+// adminMux holds the supervisor's own routes and never proxies app hosts.
+func (s *supervisor) adminMux() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("content-type", "text/plain; charset=utf-8")
@@ -180,10 +181,46 @@ func (s *supervisor) handler() http.Handler {
 	mux.HandleFunc("GET /events", s.handleEvents)
 	mux.HandleFunc("POST /login", s.handleLogin)
 	mux.HandleFunc("POST /logout", s.handleLogout)
-	mux.HandleFunc("/admin", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/admin", s.guardAdminStatic(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin/", http.StatusFound)
+	})))
+	mux.Handle("/admin/", s.guardAdminStatic(http.StripPrefix("/admin", adminStatic())))
+	return mux
+}
+
+// guardAdminStatic keeps the panel's own files behind the token in untrusted mode; trusted mode keeps the existing open panel shell.
+func (s *supervisor) guardAdminStatic(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.cfg.untrusted() && !s.requireAuth(w, r) {
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
-	mux.Handle("/admin/", http.StripPrefix("/admin", adminStatic()))
+}
+
+// adminHandler serves admin/API routes on the separate admin listener.
+func (s *supervisor) adminHandler() http.Handler {
+	return s.adminMux()
+}
+
+// publicHandler serves app hosts and the health check only. Admin routes live on the separate listener.
+func (s *supervisor) publicHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.isAppHost(requestHost(r)) {
+			s.handleProxy(w, r)
+			return
+		}
+		if r.URL.Path == "/healthz" {
+			w.Header().Set("content-type", "text/plain; charset=utf-8")
+			_, _ = io.WriteString(w, "ok\n")
+			return
+		}
+		http.NotFound(w, r)
+	})
+}
+
+func (s *supervisor) handler() http.Handler {
+	mux := s.adminMux()
 	mux.HandleFunc("/", s.handleProxy)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.isAppHost(requestHost(r)) {
