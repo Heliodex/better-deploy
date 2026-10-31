@@ -370,15 +370,7 @@ func (p *rollbackPlan) installDatabase(w http.ResponseWriter) bool {
 
 // start launches the installed version, compensating every half if it does not come up.
 func (p *rollbackPlan) start(w http.ResponseWriter, name string, cfg appConfig) *app {
-	port, err := freePort()
-	if err != nil {
-		_ = restoreDB(p.journal.DB, p.journal.DBBackup)
-		_ = restoreAside(p.journal.DataDir, p.journal.DataBackup, p.dataMoved)
-		_ = restoreAside(p.journal.AppDir, p.journal.AppBackup, p.appMoved)
-		p.s.failRollback(w, p.journalPath, p.journal, p.old, p.running, fmt.Errorf("allocate port: %w", err))
-		return nil
-	}
-	next, err := p.s.spawn(name, p.journal.AppDir, cfg, port)
+	next, err := p.s.spawn(name, p.journal.AppDir, cfg)
 	if err != nil {
 		_ = restoreDB(p.journal.DB, p.journal.DBBackup)
 		_ = restoreAside(p.journal.DataDir, p.journal.DataBackup, p.dataMoved)
@@ -403,10 +395,7 @@ func (s *supervisor) rollbackAtomic(w http.ResponseWriter, ctx context.Context, 
 	defer s.backups.mu.Unlock()
 
 	if plan.running {
-		if !drainApp(plan.old, drainTimeout) {
-			log.Printf("rollback %s: old version still handling requests after %s", name, drainTimeout)
-		}
-		s.stop(plan.old)
+		s.drainAndStop(plan.old, "rollback")
 	}
 	if !plan.installCode(w) || !plan.installData(w) || !plan.installDatabase(w) {
 		return nil
@@ -418,9 +407,6 @@ func (s *supervisor) rollbackAtomic(w http.ResponseWriter, ctx context.Context, 
 
 	next.dir = plan.journal.AppDir
 	s.register(next)
-	if plan.running {
-		s.stop(plan.old)
-	}
 	s.recordDeployment(name, next.dir)
 	if err := s.backups.markCurrentLocked(name, snapshot); err != nil {
 		log.Printf("rollback %s: mark snapshot current: %v", name, err)
@@ -435,6 +421,9 @@ func (s *supervisor) rollbackAtomic(w http.ResponseWriter, ctx context.Context, 
 	removeIfExists(journal.DataBackup)
 	removeIfExists(journal.DBBackup)
 	_ = os.Remove(plan.journalPath)
+	if plan.old.logs != nil {
+		plan.old.logs.close()
+	}
 	log.Printf("%s %s at %s with snapshot %s", "rolled back", name, cfg.Host, snapshot)
 	return next
 }

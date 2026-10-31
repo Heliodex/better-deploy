@@ -180,6 +180,7 @@ func TestDeploySameDigestKeepsProcessAndUpdatesStatic(t *testing.T) {
 		}
 	}
 
+	old := s.lookup("demo")
 	third := writeTarGz(t, map[string]string{
 		"app.json":          appJSON,
 		"main.wasm":         "wasm-two",
@@ -197,6 +198,15 @@ func TestDeploySameDigestKeepsProcessAndUpdatesStatic(t *testing.T) {
 	}
 	if got := compileCount(t, counter); got != 2 {
 		t.Errorf("compile calls = %d, want a changed wasm to compile", got)
+	}
+	if old.logs == nil {
+		t.Fatal("old app has no log handle")
+	}
+	old.logs.mu.Lock()
+	closed := old.logs.closed
+	old.logs.mu.Unlock()
+	if !closed {
+		t.Error("deploy did not close the replaced app's log files")
 	}
 }
 

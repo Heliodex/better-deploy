@@ -25,7 +25,7 @@ func (s *supervisor) appArgs(a *app, source string) []string {
 		"-W", "component-model-async=y",
 		"--allow-precompiled",
 		"--target", s.cfg.wasmtimeTarget,
-		"--addr", fmt.Sprintf("127.0.0.1:%d", a.port),
+		"--addr", serveAddr,
 	}
 	if cfg.Network != "none" {
 		args = append(args, "-S", "inherit-network")
@@ -53,14 +53,38 @@ func (s *supervisor) appArgs(a *app, source string) []string {
 	return append(args, source)
 }
 
+// waitForPort waits for wasmtime to report the loopback port it bound.
+func (s *supervisor) waitForPort(a *app, finder *portFinder, done <-chan struct{}, deadline time.Time) error {
+	timer := time.NewTimer(time.Until(deadline))
+	defer timer.Stop()
+	select {
+	case port := <-finder.port:
+		a.mu.Lock()
+		a.port = port
+		a.mu.Unlock()
+		return nil
+	case <-done:
+		return fmt.Errorf("wasmtime exited before it reported a serve address")
+	case <-timer.C:
+		return fmt.Errorf("wasmtime did not report a serve address within the startup timeout")
+	}
+}
+
 func (s *supervisor) waitReady(a *app, done <-chan struct{}) error {
+	a.mu.Lock()
+	limit := a.cfg.startupLimit()
+	a.mu.Unlock()
+	return s.waitReadyUntil(a, done, time.Now().Add(limit))
+}
+
+func (s *supervisor) waitReadyUntil(a *app, done <-chan struct{}, deadline time.Time) error {
 	client := &http.Client{Timeout: 500 * time.Millisecond}
 	a.mu.Lock()
 	health := a.cfg.Health
+	port := a.port
 	limit := a.cfg.startupLimit()
 	a.mu.Unlock()
-	target := fmt.Sprintf("http://127.0.0.1:%d%s", a.port, health)
-	deadline := time.Now().Add(limit)
+	target := fmt.Sprintf("http://127.0.0.1:%d%s", port, health)
 	lastFailure := ""
 	wait := 50 * time.Millisecond
 
@@ -90,6 +114,25 @@ func (s *supervisor) waitReady(a *app, done <-chan struct{}) error {
 		time.Sleep(wait)
 		wait = min(wait*2, time.Second)
 	}
+}
+
+// beginRequest tracks a proxied request unless the app is already draining, so new requests cannot extend a drain.
+func (a *app) beginRequest() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.draining || a.retired {
+		return false
+	}
+	a.requests.Add(1)
+	return true
+}
+
+// markDraining stops new proxied requests from entering the app before its in-flight requests are drained.
+func (a *app) markDraining() {
+	a.mu.Lock()
+	a.draining = true
+	a.ready = false
+	a.mu.Unlock()
 }
 
 func (s *supervisor) kill(a *app) {
@@ -126,6 +169,18 @@ func (s *supervisor) stop(a *app) {
 	a.mu.Unlock()
 	s.stopSchedule(a)
 	s.kill(a)
+}
+
+// drainAndStop stops routing new requests, waits for in-flight work, then stops the process.
+func (s *supervisor) drainAndStop(a *app, action string) {
+	if a == nil {
+		return
+	}
+	a.markDraining()
+	if !drainApp(a, drainTimeout) {
+		log.Printf("%s %s: still handling requests after %s", action, a.name, drainTimeout)
+	}
+	s.stop(a)
 }
 
 func (s *supervisor) cancelRestart(a *app) {
@@ -205,6 +260,8 @@ func (s *supervisor) restart(a *app) {
 func (s *supervisor) launch(a *app, source string) error {
 	a.mu.Lock()
 	a.starting = true
+	a.port = 0
+	deadline := time.Now().Add(a.cfg.startupLimit())
 	if a.cfg.MaxConcurrent > 0 {
 		a.slots = make(chan struct{}, a.cfg.MaxConcurrent)
 	} else {
@@ -217,9 +274,10 @@ func (s *supervisor) launch(a *app, source string) error {
 		a.mu.Unlock()
 	}()
 
+	finder := newPortFinder()
 	logging := log.New(os.Stderr, "["+a.name+"] ", 0).Writer()
 	recent := newLogRing()
-	writers := []io.Writer{logging, recent}
+	writers := []io.Writer{finder, logging, recent}
 	if a.logs != nil {
 		writers = append(writers, a.logs)
 	}
@@ -282,16 +340,24 @@ func (s *supervisor) launch(a *app, source string) error {
 		s.scheduleRestart(a, delay)
 	}()
 
-	if err := s.waitReady(a, done); err != nil {
+	if err := s.waitForPort(a, finder, done, deadline); err != nil {
 		err = withLaunchLog(source, recent, err)
 		a.mu.Lock()
 		a.lastError = err.Error()
 		a.mu.Unlock()
 		return err
 	}
-	a.proxy = s.newProxy(a)
+	if err := s.waitReadyUntil(a, done, deadline); err != nil {
+		err = withLaunchLog(source, recent, err)
+		a.mu.Lock()
+		a.lastError = err.Error()
+		a.mu.Unlock()
+		return err
+	}
+	proxy := s.newProxy(a)
 	a.mu.Lock()
 	host := a.cfg.Host
+	a.proxy = proxy
 	a.healthOK = true
 	a.ready = true
 	a.healthFailures = 0
@@ -304,7 +370,7 @@ func (s *supervisor) launch(a *app, source string) error {
 	return nil
 }
 
-func (s *supervisor) spawn(name, dir string, cfg appConfig, port int) (*app, error) {
+func (s *supervisor) spawn(name, dir string, cfg appConfig) (*app, error) {
 	if err := os.MkdirAll(filepath.Join(s.cfg.stateDir, name), 0o755); err != nil {
 		return nil, fmt.Errorf("state dir: %w", err)
 	}
@@ -322,7 +388,6 @@ func (s *supervisor) spawn(name, dir string, cfg appConfig, port int) (*app, err
 		name:      name,
 		dir:       dir,
 		digest:    sourceDigest(dir),
-		port:      port,
 		cfg:       cfg,
 		logs:      logs,
 		done:      make(chan struct{}),
@@ -363,12 +428,7 @@ func (s *supervisor) loadApps() error {
 			log.Printf("app %s: host %q is already used; skipped", name, cfg.Host)
 			continue
 		}
-		port, err := freePort()
-		if err != nil {
-			log.Printf("app %s: %v (skipped)", name, err)
-			continue
-		}
-		a, err := s.spawn(name, dir, cfg, port)
+		a, err := s.spawn(name, dir, cfg)
 		if err != nil {
 			log.Printf("app %s: %v (skipped)", name, err)
 			continue

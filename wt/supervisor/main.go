@@ -33,6 +33,7 @@ const (
 	maxBackupTarFiles     = 100_000
 	stopTimeout           = 5 * time.Second
 	drainTimeout          = 10 * time.Second
+	shutdownTimeout       = 15 * time.Second
 	defaultCacheMaxBytes  = 2 << 30
 )
 
@@ -98,6 +99,7 @@ type app struct {
 	done             chan struct{}
 	exited, retired  bool
 	starting         bool
+	draining         bool
 	unhealthyRestart bool
 
 	slots          chan struct{}
@@ -257,7 +259,10 @@ func (s *supervisor) stopAll() {
 		wg.Add(1)
 		go func(a *app) {
 			defer wg.Done()
-			s.stop(a)
+			s.drainAndStop(a, "shutdown")
+			if a.logs != nil {
+				a.logs.close()
+			}
 		}(a)
 	}
 	wg.Wait()
@@ -480,6 +485,17 @@ func startSupervisor(cfg config) *supervisor {
 	return s
 }
 
+// shutdownServer stops accepting connections and waits for in-flight handlers, forcing the server closed at the deadline.
+func shutdownServer(server *http.Server, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	if err := server.Shutdown(ctx); err != nil {
+		_ = server.Close()
+		return err
+	}
+	return nil
+}
+
 // serve runs the HTTP server and background monitors until a signal arrives.
 func serve(s *supervisor) {
 	cfg := s.cfg
@@ -503,7 +519,9 @@ func serve(s *supervisor) {
 		<-stop
 		s.stopping.Store(true)
 		log.Printf("shutting down")
-		_ = server.Close()
+		if err := shutdownServer(server, shutdownTimeout); err != nil {
+			log.Printf("graceful shutdown: %v", err)
+		}
 	}()
 
 	if (cfg.tlsCert == "") != (cfg.tlsKey == "") {

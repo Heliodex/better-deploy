@@ -97,16 +97,21 @@ func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
 	host := requestHost(r)
 	s.mu.RLock()
 	a := s.hosts[host]
-	if a != nil {
-		a.requests.Add(1)
-	}
 	s.mu.RUnlock()
 	if a == nil {
 		http.Error(w, "no app for this host", http.StatusNotFound)
 		return
 	}
-	defer a.requests.Done()
 	started := time.Now()
+	if !a.beginRequest() {
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "app is restarting", http.StatusServiceUnavailable)
+		if a.logs != nil {
+			a.logs.logSupervisor(formatAccessLog(r.Method, http.StatusServiceUnavailable, time.Since(started), r.URL.RequestURI()))
+		}
+		return
+	}
+	defer a.requests.Done()
 	wrapped := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 	static, ready := a.servingState()
 
@@ -129,7 +134,13 @@ func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
 	a.mu.Lock()
 	slots := a.slots
 	timeout := a.cfg.requestTimeout
+	proxy := a.proxy
 	a.mu.Unlock()
+	if proxy == nil {
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "app is not ready", http.StatusServiceUnavailable)
+		return
+	}
 	if slots != nil {
 		select {
 		case slots <- struct{}{}:
@@ -145,7 +156,7 @@ func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(ctx)
 	}
 
-	a.proxy.ServeHTTP(wrapped, r)
+	proxy.ServeHTTP(wrapped, r)
 	if a.logs != nil {
 		a.logs.logSupervisor(formatAccessLog(r.Method, wrapped.status, time.Since(started), r.URL.RequestURI()))
 	}

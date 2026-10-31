@@ -86,6 +86,8 @@ The supervisor speaks plain HTTP by default; set `WT_TLS_CERT` and `WT_TLS_KEY` 
 
 Every app is probed at its `health_interval` (default ten seconds, three-second probe timeout), and the supervisor reports `running`, `unhealthy`, `restarting` or `stopped`. `/healthz` is the default health path. `health_failures` consecutive failures mark the app unready: component traffic gets `503` with `Retry-After` while probing continues, and a later success clears the error, restores routing and updates `lastHealthy`. `ready` appears in `GET /apps`, the SSE snapshot and the admin panel. With `restart_on_unhealthy` set, crossing the threshold kills the process once and the normal restart backoff applies; otherwise health state does not stop or restart it. `startup_timeout` (default 15s) bounds how long a new process may take to answer its health path.
 
+Restart, stop, delete, deploy and rollback stop routing new requests, drain in-flight proxied requests for up to ten seconds and then stop the process. On `SIGINT`/`SIGTERM` the supervisor calls `http.Server.Shutdown` with a fifteen-second deadline, then drains apps and stops their processes. It does not adopt running apps across an upgrade: `Pdeathsig` prevents orphans if it crashes, and a new supervisor starts apps from disk. Replaced processes have their log files closed instead of leaving them to garbage collection.
+
 The supervisor scans `WT_APPS_DIR` at boot, starts every app found there, and serves `GET /apps`, `GET /apps/<name>` and `POST /apps/<name>` (deploy, bearer token). `/healthz` is the supervisor's own health check, and it is also the default component health path on an app host. These supervisor paths, including `/admin/` and `/events`, only exist on hosts that are not app hosts: an app owns every path on its own host, so requests to those names are proxied to the app rather than swallowed by the supervisor.
 
 ## Admin panel
@@ -204,13 +206,15 @@ curl -X PATCH -H "Authorization: Bearer $WT_TOKEN" \
 ```sh
 wasmtime serve -Scli -Sp3 -S inherit-network -W component-model-async=y \
   --allow-precompiled \
-  --addr 127.0.0.1:<port> \
+  --addr 127.0.0.1:0 \
   --dir /tmp/wt/state/<name>::/data \
   --env KEY=VALUE \
   --env WT_STORAGE_URL=http://127.0.0.1:<storage-port> \
   --env WT_STORAGE_TOKEN=<token> \
   main.cwasm
 ```
+
+The supervisor asks wasmtime to bind a free loopback port and reads the actual address from its `Serving HTTP on ...` startup line, so there is no separate port probe to race another process. A restarted process may therefore get a different port; the proxy is updated before traffic is routed to it.
 
 Before the proxy runs, the supervisor answers `GET`/`HEAD` from the app's `static/` directory. A matching file is served with immutable caching under `/_app/immutable/` and revalidation elsewhere; an unknown path falls back to `static/index.html` only when the request accepts `text/html`, so API fetches still reach the component. This keeps frontend assets out of the wasm component and lets a static-only change ship without recompiling it. Static files are only served while the app process is running; a stopped app returns `503`. During a deploy the old process keeps its route until draining, and its directory already points at the new bundle, so it serves the new assets. `wt.packages/app.StaticFiles` remains available for apps that prefer to embed a frontend.
 
@@ -369,7 +373,7 @@ The `net/http` adapter in `packages/wasihttp` is adapted from [spin-go-sdk v3](h
 
 ## Limits of this prototype
 
-- One `wasmtime serve` process per app. A crashed app restarts with exponential backoff (2s up to 30s), reusing its port and proxy route.
+- One `wasmtime serve` process per app. A crashed app restarts with exponential backoff (2s up to 30s) on a fresh loopback port that the supervisor discovers before restoring its proxy route.
 - `memory_mb` is a per-app linear-memory cap; CPU stays a container-level concern.
 - `disk_mb` is a soft quota over `/data` and database files only. It reports `overQuota` but does not block writes; logs, backups and deployment bundles are outside it. `max_concurrency` and `request_timeout` bound proxy work; `request_timeout` also interrupts CPU-bound guest execution on epoch-enabled bundles. Health failures stop routing to an unready app and optionally restart it, but there is no fuel or percentage-of-CPU quota and no separate maintenance mode.
 - TLS is optional and basic (certificate files); use the Orchard ingress for real certificates and wildcard hosts.

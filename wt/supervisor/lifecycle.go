@@ -30,7 +30,7 @@ func (s *supervisor) unregister(a *app) {
 	s.broadcast()
 }
 
-// handleStop stops an app without removing it; its host keeps returning 502 until it is started again.
+// handleStop drains in-flight requests and stops an app without removing it; its host returns 503 until it is started again.
 func (s *supervisor) handleStop(w http.ResponseWriter, r *http.Request, name string) {
 	s.deployMu.Lock()
 	defer s.deployMu.Unlock()
@@ -38,7 +38,7 @@ func (s *supervisor) handleStop(w http.ResponseWriter, r *http.Request, name str
 	if !ok {
 		return
 	}
-	s.stop(a)
+	s.drainAndStop(a, "stop")
 	writeJSON(w, http.StatusOK, s.info(a))
 }
 
@@ -56,6 +56,7 @@ func (s *supervisor) startStopped(a *app) error {
 	s.stopSchedule(a)
 	a.mu.Lock()
 	a.retired = false
+	a.draining = false
 	a.delay = time.Second
 	a.wasmEpoch = epoch
 	a.mu.Unlock()
@@ -144,10 +145,7 @@ func (s *supervisor) handleDelete(w http.ResponseWriter, r *http.Request, name s
 	}
 
 	s.unregister(a)
-	if !drainApp(a, drainTimeout) {
-		log.Printf("delete %s: still handling requests after %s", name, drainTimeout)
-	}
-	s.stop(a)
+	s.drainAndStop(a, "delete")
 	if a.logs != nil {
 		a.logs.close()
 	}

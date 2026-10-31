@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -24,7 +25,13 @@ func TestMain(m *testing.M) {
 		if arg != "--addr" || i+1 >= len(os.Args) {
 			continue
 		}
-		err := http.ListenAndServe(os.Args[i+1], http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		listener, err := net.Listen("tcp", os.Args[i+1])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "Serving HTTP on http://%s/\n", listener.Addr())
+		err = http.Serve(listener, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusNoContent)
 		}))
 		if err != nil {
@@ -339,16 +346,52 @@ func TestWaitReadyHonorsStartupTimeout(t *testing.T) {
 	}
 }
 
+func TestShutdownServerWaitsForInflightHandler(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(started)
+		<-release
+		w.WriteHeader(http.StatusNoContent)
+	})}
+	go func() { _ = server.Serve(listener) }()
+
+	response := make(chan error, 1)
+	go func() {
+		resp, err := http.Get("http://" + listener.Addr().String())
+		if err == nil {
+			_ = resp.Body.Close()
+		}
+		response <- err
+	}()
+	<-started
+
+	shutdown := make(chan error, 1)
+	go func() { shutdown <- shutdownServer(server, 2*time.Second) }()
+	select {
+	case err := <-shutdown:
+		t.Fatalf("shutdown returned before the handler finished: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(release)
+	if err := <-response; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-shutdown; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestHandleRestartRestartsSchedule(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "main.cwasm"), []byte("cwasm"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	port, err := freePort()
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	s := testSupervisor()
 	s.cfg.wasmtime = os.Args[0]
 	s.cfg.stateDir = t.TempDir()
@@ -359,7 +402,7 @@ func TestHandleRestartRestartsSchedule(t *testing.T) {
 		Schedule: []scheduleConfig{
 			{Path: "/tick", Every: "1s"},
 		},
-	}, port)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

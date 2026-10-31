@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func spawnTestApp(t *testing.T, s *supervisor, name string) *app {
@@ -20,15 +21,11 @@ func spawnTestApp(t *testing.T, s *supervisor, name string) *app {
 	if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(`{"name":"`+name+`","host":"`+name+`.localhost"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	port, err := freePort()
-	if err != nil {
-		t.Fatal(err)
-	}
 	a, err := s.spawn(name, dir, appConfig{
 		Name:   name,
 		Host:   name + ".localhost",
 		Health: "/",
-	}, port)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,6 +41,81 @@ func newLifecycleSupervisor(t *testing.T) *supervisor {
 	s.cfg.appsDir = t.TempDir()
 	s.cfg.stateDir = t.TempDir()
 	return s
+}
+
+func TestSpawnDiscoversPort(t *testing.T) {
+	s := newLifecycleSupervisor(t)
+	a := spawnTestApp(t, s, "demo")
+	if a.port == 0 {
+		t.Error("spawn did not discover the wasmtime serve port")
+	}
+}
+
+func TestHandleStopDrainsInflightRequests(t *testing.T) {
+	s := newLifecycleSupervisor(t)
+	a := spawnTestApp(t, s, "demo")
+	a.requests.Add(1)
+
+	done := make(chan int, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/apps/demo/stop", nil)
+		req.Header.Set("Authorization", "Bearer secret")
+		s.handleStop(rec, req, "demo")
+		done <- rec.Code
+	}()
+	select {
+	case <-done:
+		t.Fatal("stop returned before the in-flight request finished")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	a.requests.Done()
+	select {
+	case code := <-done:
+		if code != http.StatusOK {
+			t.Errorf("stop status = %d, want 200", code)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("stop did not finish after the request drained")
+	}
+	if a.beginRequest() {
+		a.requests.Done()
+		t.Error("a stopped app accepted a new request")
+	}
+}
+
+func TestHandleRestartDrainsInflightRequests(t *testing.T) {
+	s := newLifecycleSupervisor(t)
+	a := spawnTestApp(t, s, "demo")
+	a.requests.Add(1)
+
+	done := make(chan int, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/apps/demo/restart", nil)
+		req.Header.Set("Authorization", "Bearer secret")
+		s.handleRestart(rec, req, a)
+		done <- rec.Code
+	}()
+	select {
+	case <-done:
+		t.Fatal("restart returned before the in-flight request finished")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	a.requests.Done()
+	select {
+	case code := <-done:
+		if code != http.StatusOK {
+			t.Errorf("restart status = %d, want 200", code)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("restart did not finish after the request drained")
+	}
+	if got := appPID(a); got == 0 {
+		t.Error("restart did not launch a new process")
+	}
 }
 
 func TestAppStopAndStart(t *testing.T) {

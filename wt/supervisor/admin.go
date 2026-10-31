@@ -180,7 +180,7 @@ func (s *supervisor) handleRestart(w http.ResponseWriter, _ *http.Request, a *ap
 	a.mu.Lock()
 	name := a.name
 	a.mu.Unlock()
-	s.stop(a)
+	s.drainAndStop(a, "restart")
 	if err := s.startStopped(a); err != nil {
 		log.Printf("restart %s: %v", name, err)
 		status := http.StatusBadGateway

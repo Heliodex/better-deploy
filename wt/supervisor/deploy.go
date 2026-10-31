@@ -302,12 +302,7 @@ func (s *supervisor) installBundle(w http.ResponseWriter, name string, cfg appCo
 		return old, "static"
 	}
 
-	port, err := freePort()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "allocate port")
-		return nil, ""
-	}
-	next, err := s.spawn(name, dir, cfg, port)
+	next, err := s.spawn(name, dir, cfg)
 	if err != nil {
 		log.Printf("%s %s: %v", action, name, err)
 		writeError(w, http.StatusBadGateway, "new version did not start: "+err.Error())
@@ -324,13 +319,13 @@ func (s *supervisor) installBundle(w http.ResponseWriter, name string, cfg appCo
 
 	s.register(next)
 	if old != nil {
-		if !drainApp(old, drainTimeout) {
-			log.Printf("%s %s: old version still handling requests after %s", action, name, drainTimeout)
+		s.drainAndStop(old, action)
+		if old.logs != nil {
+			old.logs.close()
 		}
-		s.stop(old)
 	}
 
-	log.Printf("%s %s at %s (127.0.0.1:%d)", action, name, cfg.Host, port)
+	log.Printf("%s %s at %s (127.0.0.1:%d)", action, name, cfg.Host, next.port)
 	return next, "full"
 }
 

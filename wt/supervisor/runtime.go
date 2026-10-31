@@ -3,22 +3,67 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 )
 
-func freePort() (int, error) {
-	listener, err := net.Listen("tcp4", "127.0.0.1:0")
-	if err != nil {
-		return 0, err
+const (
+	// serveAddr lets wasmtime bind any free loopback port; the supervisor learns the chosen port from its startup line.
+	serveAddr          = "127.0.0.1:0"
+	serveAddressPrefix = "Serving HTTP on http://127.0.0.1:"
+	maxPortLineBytes   = 8 << 10
+)
+
+// portFinder watches a wasmtime process's output for the actual address it bound.
+type portFinder struct {
+	mu      sync.Mutex
+	pending []byte
+	port    chan int
+	once    sync.Once
+}
+
+func newPortFinder() *portFinder {
+	return &portFinder{port: make(chan int, 1)}
+}
+
+func (p *portFinder) Write(data []byte) (int, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.pending = append(p.pending, data...)
+	for {
+		index := bytes.IndexByte(p.pending, '\n')
+		if index < 0 {
+			break
+		}
+		line := string(p.pending[:index])
+		p.pending = p.pending[index+1:]
+		if port, ok := parseServePort(line); ok {
+			p.once.Do(func() { p.port <- port })
+		}
 	}
-	defer listener.Close()
-	return listener.Addr().(*net.TCPAddr).Port, nil
+	if len(p.pending) > maxPortLineBytes {
+		p.pending = append([]byte{}, p.pending[len(p.pending)-maxPortLineBytes:]...)
+	}
+	return len(data), nil
+}
+
+func parseServePort(line string) (int, bool) {
+	rest, ok := strings.CutPrefix(strings.TrimSpace(line), serveAddressPrefix)
+	if !ok {
+		return 0, false
+	}
+	portText, _, _ := strings.Cut(rest, "/")
+	port, err := strconv.Atoi(strings.TrimSpace(portText))
+	if err != nil || port < 1 || port > 65535 {
+		return 0, false
+	}
+	return port, true
 }
 
 func minimalEnv() []string {
