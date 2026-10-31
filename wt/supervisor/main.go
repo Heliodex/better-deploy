@@ -42,6 +42,8 @@ type config struct {
 	wasmtime, wasmtimeCompiler, wasmtimeTarget                 string
 	token, tlsCert, tlsKey                                     string
 	tenantMode, adminListen                                    string
+	cgroupRoot, iptables                                       string
+	appUIDBase                                                 int
 	cacheMaxBytes                                              int64
 }
 
@@ -53,6 +55,9 @@ type appConfig struct {
 	Build              string            `json:"build,omitempty"`
 	MemoryMB           int               `json:"memory_mb,omitempty"`
 	DiskMB             int               `json:"disk_mb,omitempty"`
+	CPUMillicores      int               `json:"cpu_millicores,omitempty"`
+	PidsMax            int               `json:"pids_max,omitempty"`
+	IOWeight           int               `json:"io_weight,omitempty"`
 	MaxConcurrent      int               `json:"max_concurrency,omitempty"`
 	RequestTimeout     string            `json:"request_timeout,omitempty"`
 	StartupTimeout     string            `json:"startup_timeout,omitempty"`
@@ -83,6 +88,7 @@ const (
 type app struct {
 	name, dir, digest string
 	port              int
+	uid               int
 	cfg               appConfig
 	proxy             *httputil.ReverseProxy
 	started           time.Time
@@ -119,6 +125,8 @@ type supervisor struct {
 	backups     *backupManager
 	events      *hub
 	deployments *deploymentManager
+	uids        *uidAllocator
+	cgroups     *cgroupManager
 
 	mu          sync.RWMutex
 	apps, hosts map[string]*app
@@ -201,6 +209,7 @@ func (s *supervisor) info(a *app) appInfo {
 	info.LastError = a.lastError
 	info.CurrentDigest = a.digest
 	info.Ready = a.ready
+	info.UID = a.uid
 	if a.cmd != nil && a.cmd.Process != nil && !a.exited {
 		info.PID = a.cmd.Process.Pid
 	}
@@ -244,6 +253,7 @@ type appInfo struct {
 	Name           string    `json:"name"`
 	Host           string    `json:"host"`
 	Port           int       `json:"port"`
+	UID            int       `json:"uid,omitempty"`
 	Status         string    `json:"status"`
 	PID            int       `json:"pid,omitempty"`
 	StartedAt      time.Time `json:"startedAt"`
@@ -430,6 +440,9 @@ func parseConfig() config {
 	flag.StringVar(&cfg.tlsKey, "tls-key", cfg.tlsKey, "TLS private key (with --tls-cert)")
 	flag.StringVar(&cfg.tenantMode, "tenant-mode", cfg.tenantMode, "tenant trust model: trusted or untrusted")
 	flag.StringVar(&cfg.adminListen, "admin-listen", cfg.adminListen, "separate admin listener (TCP address or unix:/path)")
+	flag.StringVar(&cfg.cgroupRoot, "cgroup-root", cfg.cgroupRoot, "cgroup v2 root for per-app limits")
+	flag.StringVar(&cfg.iptables, "iptables", cfg.iptables, "iptables binary for per-app egress rules")
+	flag.IntVar(&cfg.appUIDBase, "app-uid-base", cfg.appUIDBase, "first allocated uid/gid for apps in untrusted mode")
 	flag.Parse()
 
 	cfg.tenantMode = strings.ToLower(strings.TrimSpace(cfg.tenantMode))
@@ -498,8 +511,16 @@ func startSupervisor(cfg config) *supervisor {
 		backups:     newBackupManager(filepath.Join(cfg.stateDir, ".backups"), storage, cfg.stateDir),
 		events:      newHub(),
 		deployments: newDeploymentManager(filepath.Join(cfg.stateDir, ".deployments")),
+		cgroups:     newCgroupManager(cfg.cgroupRoot),
 		apps:        map[string]*app{},
 		hosts:       map[string]*app{},
+	}
+	if cfg.untrusted() {
+		uids, err := newUIDAllocator(filepath.Join(cfg.stateDir, ".uids.json"), cfg.appUIDBase)
+		if err != nil {
+			log.Fatalf("uid allocator: %v", err)
+		}
+		s.uids = uids
 	}
 	if err := recoverRollbacks(cfg.stateDir, s.backups); err != nil {
 		log.Fatalf("rollback recovery: %v", err)

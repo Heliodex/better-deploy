@@ -169,6 +169,7 @@ func (s *supervisor) stop(a *app) {
 	a.mu.Unlock()
 	s.stopSchedule(a)
 	s.kill(a)
+	s.releaseAppIsolation(a)
 }
 
 // drainAndStop stops routing new requests, waits for in-flight work, then stops the process.
@@ -261,9 +262,10 @@ func (s *supervisor) launch(a *app, source string) error {
 	a.mu.Lock()
 	a.starting = true
 	a.port = 0
-	deadline := time.Now().Add(a.cfg.startupLimit())
-	if a.cfg.MaxConcurrent > 0 {
-		a.slots = make(chan struct{}, a.cfg.MaxConcurrent)
+	cfg := a.cfg
+	deadline := time.Now().Add(cfg.startupLimit())
+	if cfg.MaxConcurrent > 0 {
+		a.slots = make(chan struct{}, cfg.MaxConcurrent)
 	} else {
 		a.slots = nil
 	}
@@ -273,6 +275,14 @@ func (s *supervisor) launch(a *app, source string) error {
 		a.starting = false
 		a.mu.Unlock()
 	}()
+
+	iso, err := s.prepareLaunch(a, cfg)
+	if err != nil {
+		a.mu.Lock()
+		a.lastError = err.Error()
+		a.mu.Unlock()
+		return err
+	}
 
 	finder := newPortFinder()
 	logging := log.New(os.Stderr, "["+a.name+"] ", 0).Writer()
@@ -285,9 +295,13 @@ func (s *supervisor) launch(a *app, source string) error {
 	cmd := exec.Command(s.cfg.wasmtime, s.appArgs(a, source)...)
 	cmd.Env = minimalEnv()
 	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGTERM}
+	if credential := appCredential(iso); credential != nil {
+		cmd.SysProcAttr.Credential = credential
+	}
 	cmd.Stdout = out
 	cmd.Stderr = out
 	if err := cmd.Start(); err != nil {
+		s.releaseIsolation(a, iso)
 		return fmt.Errorf("start wasmtime: %w", err)
 	}
 
@@ -340,19 +354,35 @@ func (s *supervisor) launch(a *app, source string) error {
 		s.scheduleRestart(a, delay)
 	}()
 
-	if err := s.waitForPort(a, finder, done, deadline); err != nil {
-		err = withLaunchLog(source, recent, err)
+	// A failed launch after the process started must leave no process, cgroup or firewall rule behind.
+	fail := func(err error) error {
 		a.mu.Lock()
 		a.lastError = err.Error()
 		a.mu.Unlock()
+		s.kill(a)
+		s.releaseIsolation(a, iso)
 		return err
 	}
+	if err := applyProcessLimits(cmd.Process.Pid, cfg); err != nil {
+		err = fmt.Errorf("apply rlimits: %w", err)
+		if s.cfg.untrusted() {
+			return fail(err)
+		}
+		log.Printf("app %s: %v (trusted mode)", a.name, err)
+	}
+	if iso.cgroup != "" && s.cgroups != nil {
+		if err := s.cgroups.addPID(a.name, cmd.Process.Pid); err != nil {
+			if s.cfg.untrusted() {
+				return fail(err)
+			}
+			log.Printf("app %s: %v (trusted mode)", a.name, err)
+		}
+	}
+	if err := s.waitForPort(a, finder, done, deadline); err != nil {
+		return fail(withLaunchLog(source, recent, err))
+	}
 	if err := s.waitReadyUntil(a, done, deadline); err != nil {
-		err = withLaunchLog(source, recent, err)
-		a.mu.Lock()
-		a.lastError = err.Error()
-		a.mu.Unlock()
-		return err
+		return fail(withLaunchLog(source, recent, err))
 	}
 	proxy := s.newProxy(a)
 	a.mu.Lock()
@@ -419,7 +449,7 @@ func (s *supervisor) loadApps() error {
 			continue
 		}
 		dir := filepath.Join(s.cfg.appsDir, name)
-		cfg, err := readAppConfig(dir, name, s.cfg.domain)
+		cfg, err := readAppConfig(dir, name, s.cfg.domain, s.cfg.tenantMode)
 		if err != nil {
 			log.Printf("app %s: %v (skipped)", name, err)
 			continue

@@ -21,6 +21,17 @@ const (
 
 	tenantTrusted   = "trusted"
 	tenantUntrusted = "untrusted"
+
+	defaultCPUMillicores = 1000
+	defaultPidsMax       = 128
+	defaultIOWeight      = 100
+	maxIOWeight          = 10000
+
+	// Untrusted tenancy defaults are deliberately finite: an app with omitted fields must not inherit unbounded CPU, memory, disk or time.
+	untrustedDefaultRequestTimeout = "30s"
+	untrustedDefaultMemoryMB       = 256
+	untrustedDefaultDiskMB         = 256
+	untrustedDefaultNetwork        = "storage"
 )
 
 // untrusted reports whether apps are treated as hostile tenants that need enforced isolation.
@@ -79,6 +90,9 @@ func configFromEnv() config {
 		tlsKey:           os.Getenv("WT_TLS_KEY"),
 		tenantMode:       env("WT_TENANT_MODE", tenantTrusted),
 		adminListen:      os.Getenv("WT_ADMIN_LISTEN"),
+		cgroupRoot:       env("WT_CGROUP_ROOT", "/sys/fs/cgroup/wt"),
+		iptables:         env("WT_IPTABLES", "iptables"),
+		appUIDBase:       int(envInt64("WT_APP_UID_BASE", 20000)),
 	}
 }
 
@@ -91,6 +105,9 @@ func sameRuntimeConfig(a, b appConfig) bool {
 		return false
 	}
 	if a.MemoryMB != b.MemoryMB || a.DiskMB != b.DiskMB || a.MaxConcurrent != b.MaxConcurrent {
+		return false
+	}
+	if a.CPUMillicores != b.CPUMillicores || a.PidsMax != b.PidsMax || a.IOWeight != b.IOWeight {
 		return false
 	}
 	if a.requestTimeout != b.requestTimeout || a.Network != b.Network {
@@ -152,14 +169,16 @@ func validateAppHost(host string) error {
 	return nil
 }
 
-// parseRequestTimeout validates an optional per-request deadline. Empty or zero means no supervisor deadline.
+// parseRequestTimeout validates an optional per-request deadline. Empty means no configured deadline;
+// "0" and "none" are explicit ways to disable it, which matters where untrusted mode supplies a default.
 func parseRequestTimeout(value string) (time.Duration, error) {
-	if strings.TrimSpace(value) == "" {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "0" || strings.EqualFold(value, "none") {
 		return 0, nil
 	}
 	timeout, err := time.ParseDuration(value)
 	if err != nil || timeout < time.Second || timeout > 24*time.Hour {
-		return 0, fmt.Errorf("request_timeout %q must be a duration between 1s and 24h", value)
+		return 0, fmt.Errorf("request_timeout %q must be a duration between 1s and 24h, or 0/none to disable", value)
 	}
 	return timeout, nil
 }
@@ -232,8 +251,17 @@ func parseScheduleInterval(entry scheduleConfig) (time.Duration, error) {
 	return every, nil
 }
 
-// normalizeAppConfig fills in defaults and validates an app's runtime config.
-func normalizeAppConfig(cfg appConfig, name, domain string) (appConfig, error) {
+// tenantModeArg returns the optional tenant mode passed to normalization helpers, defaulting to trusted.
+func tenantModeArg(modes []string) string {
+	if len(modes) > 0 && modes[0] != "" {
+		return modes[0]
+	}
+	return tenantTrusted
+}
+
+// normalizeAppConfig fills in defaults and validates an app's runtime config. The optional mode applies untrusted defaults.
+func normalizeAppConfig(cfg appConfig, name, domain string, modes ...string) (appConfig, error) {
+	mode := tenantModeArg(modes)
 	if strings.TrimSpace(cfg.Name) == "" {
 		cfg.Name = name
 	}
@@ -267,12 +295,47 @@ func normalizeAppConfig(cfg appConfig, name, domain string) (appConfig, error) {
 	if cfg.MaxConcurrent < 0 {
 		return cfg, fmt.Errorf("max_concurrency must be 0 or more")
 	}
+	if cfg.CPUMillicores < 0 {
+		return cfg, fmt.Errorf("cpu_millicores must be 0 or more")
+	}
+	if cfg.PidsMax < 0 {
+		return cfg, fmt.Errorf("pids_max must be 0 or more")
+	}
+	if cfg.IOWeight < 0 || cfg.IOWeight > maxIOWeight {
+		return cfg, fmt.Errorf("io_weight must be between 0 and %d", maxIOWeight)
+	}
+	if mode == tenantUntrusted {
+		if cfg.MemoryMB == 0 {
+			cfg.MemoryMB = untrustedDefaultMemoryMB
+		}
+		if cfg.DiskMB == 0 {
+			cfg.DiskMB = untrustedDefaultDiskMB
+		}
+		if strings.TrimSpace(cfg.RequestTimeout) == "" {
+			cfg.RequestTimeout = untrustedDefaultRequestTimeout
+		}
+		if cfg.Network == "" {
+			cfg.Network = untrustedDefaultNetwork
+		}
+	}
+	if cfg.CPUMillicores == 0 {
+		cfg.CPUMillicores = defaultCPUMillicores
+	}
+	if cfg.PidsMax == 0 {
+		cfg.PidsMax = defaultPidsMax
+	}
+	if cfg.IOWeight == 0 {
+		cfg.IOWeight = defaultIOWeight
+	}
 	switch cfg.Network {
 	case "", "inherit":
 		cfg.Network = "inherit"
-	case "none":
+	case "none", "storage":
 	default:
-		return cfg, fmt.Errorf("network must be inherit or none")
+		return cfg, fmt.Errorf("network must be inherit, storage or none")
+	}
+	if mode == tenantUntrusted && cfg.Network == "inherit" {
+		return cfg, fmt.Errorf("network inherit is not allowed in untrusted mode; use storage or none")
 	}
 	timeout, err := parseRequestTimeout(cfg.RequestTimeout)
 	if err != nil {
@@ -312,7 +375,7 @@ func normalizeAppConfig(cfg appConfig, name, domain string) (appConfig, error) {
 	return cfg, nil
 }
 
-func readAppConfig(dir, name, domain string) (appConfig, error) {
+func readAppConfig(dir, name, domain string, modes ...string) (appConfig, error) {
 	cfg := appConfig{Name: name, Env: map[string]string{}}
 
 	data, err := os.ReadFile(filepath.Join(dir, "app.json"))
@@ -325,5 +388,5 @@ func readAppConfig(dir, name, domain string) (appConfig, error) {
 	default:
 		return cfg, fmt.Errorf("read app.json: %w", err)
 	}
-	return normalizeAppConfig(cfg, name, domain)
+	return normalizeAppConfig(cfg, name, domain, modes...)
 }

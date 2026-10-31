@@ -208,7 +208,7 @@ func (s *supervisor) receiveBundle(w http.ResponseWriter, r *http.Request, name 
 		}
 	}
 
-	cfg, err = readAppConfig(dir, name, s.cfg.domain)
+	cfg, err = readAppConfig(dir, name, s.cfg.domain, s.cfg.tenantMode)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return "", appConfig{}, cleanup, false

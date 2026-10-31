@@ -19,6 +19,9 @@ type appConfigPatch struct {
 	Env                map[string]*string `json:"env"`
 	MemoryMB           *int               `json:"memory_mb"`
 	DiskMB             *int               `json:"disk_mb"`
+	CPUMillicores      *int               `json:"cpu_millicores"`
+	PidsMax            *int               `json:"pids_max"`
+	IOWeight           *int               `json:"io_weight"`
 	MaxConcurrent      *int               `json:"max_concurrency"`
 	RequestTimeout     *string            `json:"request_timeout"`
 	StartupTimeout     *string            `json:"startup_timeout"`
@@ -37,6 +40,9 @@ type appConfigResponse struct {
 	EnvKeys            []string         `json:"env_keys"`
 	MemoryMB           int              `json:"memory_mb"`
 	DiskMB             int              `json:"disk_mb"`
+	CPUMillicores      int              `json:"cpu_millicores"`
+	PidsMax            int              `json:"pids_max"`
+	IOWeight           int              `json:"io_weight"`
 	MaxConcurrent      int              `json:"max_concurrency"`
 	RequestTimeout     string           `json:"request_timeout"`
 	StartupTimeout     string           `json:"startup_timeout"`
@@ -60,6 +66,9 @@ func configResponse(cfg appConfig) appConfigResponse {
 		EnvKeys:            sortedKeys(cfg.Env),
 		MemoryMB:           cfg.MemoryMB,
 		DiskMB:             cfg.DiskMB,
+		CPUMillicores:      cfg.CPUMillicores,
+		PidsMax:            cfg.PidsMax,
+		IOWeight:           cfg.IOWeight,
 		MaxConcurrent:      cfg.MaxConcurrent,
 		RequestTimeout:     cfg.RequestTimeout,
 		StartupTimeout:     cfg.StartupTimeout,
@@ -83,6 +92,15 @@ func applyConfigPatch(cfg appConfig, patch appConfigPatch) appConfig {
 	}
 	if patch.DiskMB != nil {
 		cfg.DiskMB = *patch.DiskMB
+	}
+	if patch.CPUMillicores != nil {
+		cfg.CPUMillicores = *patch.CPUMillicores
+	}
+	if patch.PidsMax != nil {
+		cfg.PidsMax = *patch.PidsMax
+	}
+	if patch.IOWeight != nil {
+		cfg.IOWeight = *patch.IOWeight
 	}
 	if patch.MaxConcurrent != nil {
 		cfg.MaxConcurrent = *patch.MaxConcurrent
@@ -169,7 +187,7 @@ func (s *supervisor) handleAppConfig(w http.ResponseWriter, r *http.Request, nam
 	a.mu.Lock()
 	cfg := a.cfg
 	a.mu.Unlock()
-	next, err := normalizeAppConfig(applyConfigPatch(cfg, patch), a.name, s.cfg.domain)
+	next, err := normalizeAppConfig(applyConfigPatch(cfg, patch), a.name, s.cfg.domain, s.cfg.tenantMode)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -198,7 +216,9 @@ func (s *supervisor) handleAppConfig(w http.ResponseWriter, r *http.Request, nam
 	s.mu.Unlock()
 
 	restartRequired := !maps.Equal(cfg.Env, next.Env) || cfg.MemoryMB != next.MemoryMB ||
-		cfg.MaxConcurrent != next.MaxConcurrent || cfg.RequestTimeout != next.RequestTimeout || cfg.Network != next.Network
+		cfg.DiskMB != next.DiskMB || cfg.CPUMillicores != next.CPUMillicores || cfg.PidsMax != next.PidsMax ||
+		cfg.IOWeight != next.IOWeight || cfg.MaxConcurrent != next.MaxConcurrent ||
+		cfg.RequestTimeout != next.RequestTimeout || cfg.Network != next.Network
 	if !slices.Equal(cfg.Schedule, next.Schedule) {
 		a.mu.Lock()
 		running := a.cmd != nil && !a.exited
