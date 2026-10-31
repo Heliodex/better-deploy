@@ -43,6 +43,7 @@ type config struct {
 	token, tlsCert, tlsKey                                     string
 	tenantMode, adminListen                                    string
 	cgroupRoot, iptables, ip6tables                            string
+	dataQuotaMode, setquota, findmnt, dataQuotaFS              string
 	appUIDBase                                                 int
 	ipv6Egress                                                 bool
 	cacheMaxBytes                                              int64
@@ -130,6 +131,7 @@ type supervisor struct {
 	uids        *uidAllocator
 	cgroups     *cgroupManager
 	egress      *egressManager
+	quota       *dataQuota
 
 	mu          sync.RWMutex
 	apps, hosts map[string]*app
@@ -448,6 +450,10 @@ func parseConfig() config {
 	flag.StringVar(&cfg.cgroupRoot, "cgroup-root", cfg.cgroupRoot, "cgroup v2 root for per-app limits")
 	flag.StringVar(&cfg.iptables, "iptables", cfg.iptables, "iptables binary for per-app IPv4 egress rules")
 	flag.StringVar(&cfg.ip6tables, "ip6tables", cfg.ip6tables, "ip6tables binary for per-app IPv6 egress rules")
+	flag.StringVar(&cfg.dataQuotaMode, "data-quota-mode", cfg.dataQuotaMode, "untrusted /data quota backend: monitor or setquota")
+	flag.StringVar(&cfg.setquota, "setquota", cfg.setquota, "setquota binary for per-uid filesystem quotas")
+	flag.StringVar(&cfg.findmnt, "findmnt", cfg.findmnt, "findmnt binary used to resolve the quota filesystem")
+	flag.StringVar(&cfg.dataQuotaFS, "data-quota-fs", cfg.dataQuotaFS, "filesystem or mount point for per-uid quotas (default: resolve WT_STATE_DIR with findmnt)")
 	flag.BoolVar(&cfg.ipv6Egress, "ipv6-egress", cfg.ipv6Egress, "reject IPv6 egress from untrusted app uids")
 	flag.IntVar(&cfg.appUIDBase, "app-uid-base", cfg.appUIDBase, "first allocated uid/gid for apps in untrusted mode")
 	flag.Parse()
@@ -460,6 +466,12 @@ func parseConfig() config {
 	cfg.tenantMode = strings.ToLower(strings.TrimSpace(cfg.tenantMode))
 	if err := validateTenantConfig(cfg); err != nil {
 		log.Fatalf("%v", err)
+	}
+	if err := validateDataQuotaConfig(&cfg); err != nil {
+		log.Fatalf("%v", err)
+	}
+	if !cfg.untrusted() && cfg.dataQuotaMode == dataQuotaSetquota {
+		log.Printf("warning: WT_DATA_QUOTA_MODE=setquota is ignored in trusted mode; disk_mb stays a report")
 	}
 	if cfg.untrusted() {
 		log.Printf("untrusted tenant mode: per-app uid, cgroup and network isolation are required")
@@ -539,6 +551,7 @@ func startSupervisor(cfg config) *supervisor {
 		s.cgroups = newCgroupManager(cfg.cgroupRoot)
 		s.egress = newEgressManager(cfg.iptables, cfg.ip6tables, storageIP, storagePort, nil)
 		s.egress.ipv6 = cfg.ipv6Egress
+		s.quota = newDataQuota(cfg.dataQuotaMode, cfg.dataQuotaFS, cfg.stateDir, cfg.setquota, cfg.findmnt, nil)
 	}
 	if err := recoverRollbacks(cfg.stateDir, s.backups); err != nil {
 		log.Fatalf("rollback recovery: %v", err)
