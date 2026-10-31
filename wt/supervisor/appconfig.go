@@ -111,6 +111,7 @@ func configFromEnv() config {
 		ip6tables:        env("WT_IP6TABLES", "ip6tables"),
 		appUIDBase:       int(envInt64("WT_APP_UID_BASE", 20000)),
 		ipv6Egress:       envBool("WT_IPV6_EGRESS", true),
+		diskBudgetBytes:  envInt64("WT_DISK_BUDGET_MB", 0) << 20,
 	}
 }
 

@@ -333,6 +333,9 @@ func (s *supervisor) deploy(w http.ResponseWriter, r *http.Request, name string)
 	s.deployMu.Lock()
 	defer s.deployMu.Unlock()
 
+	if s.rejectOverBudget(w) {
+		return
+	}
 	tmpDir, cfg, cleanup, ok := s.receiveBundle(w, r, name)
 	defer cleanup()
 	if !ok {

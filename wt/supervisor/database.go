@@ -258,6 +258,9 @@ func (s *supervisor) handleDatabaseImport(w http.ResponseWriter, r *http.Request
 	}
 	s.deployMu.Lock()
 	defer s.deployMu.Unlock()
+	if s.rejectOverBudget(w) {
+		return
+	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxBackupExtractBytes)
 	if err := r.ParseMultipartForm(16 << 20); err != nil {

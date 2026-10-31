@@ -46,6 +46,7 @@ type config struct {
 	appUIDBase                                                 int
 	ipv6Egress                                                 bool
 	cacheMaxBytes                                              int64
+	diskBudgetBytes                                            int64
 }
 
 type appConfig struct {
@@ -428,11 +429,13 @@ func loopbackListen(addr string) bool {
 // parseConfig reads flags and environment, then prepares the runtime directories.
 func parseConfig() config {
 	cfg := configFromEnv()
+	diskBudgetMB := cfg.diskBudgetBytes >> 20
 	flag.StringVar(&cfg.listen, "listen", cfg.listen, "public listen address")
 	flag.StringVar(&cfg.appsDir, "apps", cfg.appsDir, "directory containing one directory per app")
 	flag.StringVar(&cfg.stateDir, "state", cfg.stateDir, "per-app state directory")
 	flag.StringVar(&cfg.cacheDir, "cache-dir", cfg.cacheDir, "compiled cwasm cache (default WT_STATE_DIR/.cache)")
 	flag.Int64Var(&cfg.cacheMaxBytes, "cache-max-bytes", cfg.cacheMaxBytes, "compiled cwasm cache byte cap")
+	flag.Int64Var(&diskBudgetMB, "disk-budget-mb", diskBudgetMB, "global disk budget in MiB across apps and state (0 = unlimited)")
 	flag.StringVar(&cfg.domain, "domain", cfg.domain, "default app host suffix")
 	flag.StringVar(&cfg.wasmtime, "wasmtime", cfg.wasmtime, "wasmtime binary")
 	flag.StringVar(&cfg.wasmtimeCompiler, "wasmtime-compiler", cfg.wasmtimeCompiler, "wasmtime binary with the compile subcommand, used to rebuild stale artifacts")
@@ -449,6 +452,11 @@ func parseConfig() config {
 	flag.IntVar(&cfg.appUIDBase, "app-uid-base", cfg.appUIDBase, "first allocated uid/gid for apps in untrusted mode")
 	flag.Parse()
 
+	if diskBudgetMB > 0 {
+		cfg.diskBudgetBytes = diskBudgetMB << 20
+	} else {
+		cfg.diskBudgetBytes = 0
+	}
 	cfg.tenantMode = strings.ToLower(strings.TrimSpace(cfg.tenantMode))
 	if err := validateTenantConfig(cfg); err != nil {
 		log.Fatalf("%v", err)
@@ -560,6 +568,7 @@ func serve(s *supervisor) {
 	go s.backups.loop(backupCtx)
 	go s.monitorResources(resourceSampleInterval)
 	go s.monitorHealth()
+	go s.monitorDiskBudget()
 	if cfg.untrusted() {
 		go s.monitorDiskQuota()
 	}

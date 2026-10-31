@@ -243,6 +243,9 @@ func (s *supervisor) handleBackups(w http.ResponseWriter, r *http.Request, name 
 	case http.MethodGet:
 		s.writeBackups(w, name, "")
 	case http.MethodPost:
+		if s.rejectOverBudget(w) {
+			return
+		}
 		info, err := s.backups.create(r.Context(), name)
 		if err != nil && !errors.Is(err, errBackupUnchanged) {
 			writeBackupError(w, err)
@@ -367,6 +370,9 @@ func (s *supervisor) handleBackupDownload(w http.ResponseWriter, r *http.Request
 // handleBackupImport stores a snapshot uploaded from another installation.
 func (s *supervisor) handleBackupImport(w http.ResponseWriter, r *http.Request, name string) {
 	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if s.rejectOverBudget(w) {
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBackupExtractBytes)

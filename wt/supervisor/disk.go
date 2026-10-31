@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -172,5 +173,141 @@ func (s *supervisor) monitorDiskQuota() {
 		for _, a := range s.allApps() {
 			s.enforceDiskQuota(a)
 		}
+	}
+}
+
+// diskTotals is the measured size of the apps and state trees, without counting a tree twice when one contains the other.
+type diskTotals struct {
+	appsBytes, stateBytes, totalBytes int64
+}
+
+// treeBytes sums the regular files under root. A missing tree is empty rather than an error.
+func treeBytes(root string) (int64, error) {
+	if _, err := os.Stat(root); err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	var total int64
+	if err := walkSize(root, &total); err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
+// pathWithin reports whether inner is outer itself or lies below it.
+func pathWithin(inner, outer string) bool {
+	rel, err := filepath.Rel(outer, inner)
+	if err != nil {
+		return false
+	}
+	if rel == "." {
+		return true
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// diskTotals measures WT_APPS_DIR and WT_STATE_DIR. When one is nested in the other, only the containing tree is counted.
+func (s *supervisor) diskTotals() (diskTotals, error) {
+	apps, err := treeBytes(s.cfg.appsDir)
+	if err != nil {
+		return diskTotals{}, fmt.Errorf("apps directory: %w", err)
+	}
+	state, err := treeBytes(s.cfg.stateDir)
+	if err != nil {
+		return diskTotals{}, fmt.Errorf("state directory: %w", err)
+	}
+
+	totals := diskTotals{appsBytes: apps, stateBytes: state}
+	switch {
+	case pathWithin(s.cfg.stateDir, s.cfg.appsDir):
+		totals.totalBytes = apps
+	case pathWithin(s.cfg.appsDir, s.cfg.stateDir):
+		totals.totalBytes = state
+	default:
+		totals.totalBytes = apps + state
+	}
+	return totals, nil
+}
+
+// overBudget reports whether measured usage is above the global budget. Zero means unlimited.
+func (s *supervisor) overBudget() bool {
+	if s.cfg.diskBudgetBytes <= 0 {
+		return false
+	}
+	totals, err := s.diskTotals()
+	if err != nil {
+		log.Printf("disk budget: %v", err)
+		return false
+	}
+	return totals.totalBytes > s.cfg.diskBudgetBytes
+}
+
+// rejectOverBudget writes 507 and reports true when the global budget is already exceeded.
+func (s *supervisor) rejectOverBudget(w http.ResponseWriter) bool {
+	if !s.overBudget() {
+		return false
+	}
+	totals, err := s.diskTotals()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "measure disk usage: "+err.Error())
+		return true
+	}
+	writeError(w, http.StatusInsufficientStorage, fmt.Sprintf(
+		"global disk budget exceeded: %d of %d bytes used; free space or raise WT_DISK_BUDGET_MB",
+		totals.totalBytes, s.cfg.diskBudgetBytes))
+	return true
+}
+
+// diskUsageResponse is the authenticated GET /usage body. budgetBytes is zero when unlimited.
+type diskUsageResponse struct {
+	AppsBytes   int64 `json:"appsBytes"`
+	StateBytes  int64 `json:"stateBytes"`
+	TotalBytes  int64 `json:"totalBytes"`
+	BudgetBytes int64 `json:"budgetBytes"`
+	OverBudget  bool  `json:"overBudget"`
+}
+
+func (s *supervisor) handleUsage(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
+	totals, err := s.diskTotals()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "measure disk usage: "+err.Error())
+		return
+	}
+	budget := s.cfg.diskBudgetBytes
+	writeJSON(w, http.StatusOK, diskUsageResponse{
+		AppsBytes:   totals.appsBytes,
+		StateBytes:  totals.stateBytes,
+		TotalBytes:  totals.totalBytes,
+		BudgetBytes: budget,
+		OverBudget:  budget > 0 && totals.totalBytes > budget,
+	})
+}
+
+// monitorDiskBudget logs crossing the global budget without deleting data or stopping apps.
+func (s *supervisor) monitorDiskBudget() {
+	ticker := time.NewTicker(diskUsageInterval)
+	defer ticker.Stop()
+	over := false
+	for range ticker.C {
+		if s.stopping.Load() {
+			return
+		}
+		now := s.overBudget()
+		switch {
+		case now && !over:
+			if totals, err := s.diskTotals(); err == nil {
+				log.Printf("warning: disk budget exceeded: %d of %d bytes used", totals.totalBytes, s.cfg.diskBudgetBytes)
+			} else {
+				log.Printf("warning: disk budget exceeded")
+			}
+		case !now && over:
+			log.Printf("disk budget usage is back under the limit")
+		}
+		over = now
 	}
 }
