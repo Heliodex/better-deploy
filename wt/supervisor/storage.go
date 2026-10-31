@@ -40,6 +40,8 @@ const (
 	// maxStorageConcurrentQueries bounds all apps' storage work together, so many tenants cannot exhaust the supervisor.
 	maxStorageConcurrentQueries = 16
 	storageQueueTimeout         = 5 * time.Second
+	// storagePageSize is SQLite's default page size for a new database. Per-app max_page_count is derived from it.
+	storagePageSize = 4096
 )
 
 var (
@@ -54,8 +56,10 @@ type storageServer struct {
 	server       *http.Server
 
 	mu, changeMu sync.Mutex
-	// opMu blocks new queries while a restore replaces the database file; normal queries share it as readers.
-	opMu   sync.RWMutex
+	// opMu blocks new queries while a restore or quota change replaces a database pool; normal queries share it as readers.
+	opMu sync.RWMutex
+	// quotas is the per-app database byte quota; zero means unlimited. Guarded by mu.
+	quotas map[string]int64
 	tokens map[string]string // token -> app name
 	dbs    map[string]*sql.DB
 	// readDBs are query-only pools. They let /v1/query run without any write capability, even a mistaken one.
@@ -111,6 +115,7 @@ func newStorageServer(dir, listen string) (*storageServer, error) {
 	s := &storageServer{
 		dir:         dir,
 		baseURL:     "http://" + listener.Addr().String(),
+		quotas:      map[string]int64{},
 		tokens:      map[string]string{},
 		dbs:         map[string]*sql.DB{},
 		readDBs:     map[string]*sql.DB{},
@@ -177,6 +182,7 @@ func (s *storageServer) drop(app string) {
 	readDB := s.readDBs[app]
 	delete(s.dbs, app)
 	delete(s.readDBs, app)
+	delete(s.quotas, app)
 	for token, name := range s.tokens {
 		if name == app {
 			delete(s.tokens, token)
@@ -220,6 +226,68 @@ func (s *storageServer) appFor(r *http.Request) (string, bool) {
 	return app, ok
 }
 
+// storageDSN applies the hardened pragmas to every physical connection through the driver DSN.
+// The write pool owns WAL, while both pools get busy_timeout, foreign keys and synchronous=NORMAL.
+// A positive quota becomes SQLite's per-database max_page_count, assuming the default 4096-byte page size.
+func storageDSN(path string, readOnly bool, quotaBytes int64) string {
+	dsn := url.URL{Scheme: "file", Path: path}
+	query := url.Values{}
+	query.Set("_busy_timeout", "5000")
+	query.Set("_foreign_keys", "on")
+	query.Set("_synchronous", "NORMAL")
+	if !readOnly {
+		query.Set("_journal_mode", "WAL")
+	}
+	query.Add("_pragma", "trusted_schema(OFF)")
+	query.Add("_pragma", "temp_store(FILE)")
+	query.Add("_pragma", "cache_size(-2048)")
+	query.Add("_pragma", "mmap_size(0)")
+	if quotaBytes > 0 {
+		pages := quotaBytes / storagePageSize
+		if pages < 1 {
+			pages = 1
+		}
+		query.Add("_pragma", fmt.Sprintf("max_page_count(%d)", pages))
+	}
+	if readOnly {
+		query.Set("_query_only", "1")
+	}
+	dsn.RawQuery = query.Encode()
+	return dsn.String()
+}
+
+// setQuota records an app's database byte quota and drops its pools when the value changes, so the next request opens them with the new max_page_count.
+func (s *storageServer) setQuota(app string, bytes int64) {
+	if bytes < 0 {
+		bytes = 0
+	}
+	s.opMu.Lock()
+	s.mu.Lock()
+	if s.quotas == nil {
+		s.quotas = map[string]int64{}
+	}
+	old, ok := s.quotas[app]
+	if ok && old == bytes {
+		s.mu.Unlock()
+		s.opMu.Unlock()
+		return
+	}
+	s.quotas[app] = bytes
+	db := s.dbs[app]
+	readDB := s.readDBs[app]
+	delete(s.dbs, app)
+	delete(s.readDBs, app)
+	s.mu.Unlock()
+	s.opMu.Unlock()
+
+	if readDB != nil {
+		_ = readDB.Close()
+	}
+	if db != nil {
+		_ = db.Close()
+	}
+}
+
 func (s *storageServer) dbFor(app string) (*sql.DB, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -231,7 +299,7 @@ func (s *storageServer) dbFor(app string) (*sql.DB, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("app storage dir: %w", err)
 	}
-	db, err := sql.Open("sqlite", filepath.Join(dir, "storage.db"))
+	db, err := sql.Open("sqlite", storageDSN(filepath.Join(dir, "storage.db"), false, s.quotas[app]))
 	if err != nil {
 		return nil, fmt.Errorf("open storage: %w", err)
 	}
@@ -241,18 +309,6 @@ func (s *storageServer) dbFor(app string) (*sql.DB, error) {
 	db.SetConnMaxLifetime(0)
 	db.SetConnMaxIdleTime(0)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	for _, pragma := range []string{
-		`pragma busy_timeout = 5000`,
-		`pragma journal_mode = WAL`,
-		`pragma synchronous = NORMAL`,
-	} {
-		if _, err := db.ExecContext(ctx, pragma); err != nil {
-			db.Close()
-			return nil, fmt.Errorf("storage pragma: %w", err)
-		}
-	}
 	s.dbs[app] = db
 	return db, nil
 }
@@ -269,12 +325,7 @@ func (s *storageServer) readDBFor(app string) (*sql.DB, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("app storage dir: %w", err)
 	}
-	dsn := url.URL{Scheme: "file", Path: filepath.Join(dir, "storage.db")}
-	query := dsn.Query()
-	query.Set("_pragma", "query_only(1)")
-	dsn.RawQuery = query.Encode()
-
-	db, err := sql.Open("sqlite", dsn.String())
+	db, err := sql.Open("sqlite", storageDSN(filepath.Join(dir, "storage.db"), true, s.quotas[app]))
 	if err != nil {
 		return nil, fmt.Errorf("open read storage: %w", err)
 	}
@@ -356,14 +407,10 @@ func checkBackupDatabase(path string) error {
 	return nil
 }
 
-// configureStorageConn applies per-connection safety limits. ATTACH is disabled at the SQLite level, which also blocks VACUUM INTO and therefore arbitrary file writes from SQL.
-// Temp tables spill to files rather than anonymous memory, the page cache is small, and mmap is off so one query cannot balloon the supervisor's RSS.
+// configureStorageConn applies the per-connection safety limits that the DSN cannot express.
+// ATTACH is disabled at the SQLite level, which also blocks VACUUM INTO and therefore arbitrary file writes from SQL.
+// The pragmas themselves, including temp_store, cache_size, mmap_size and synchronous, are set in storageDSN for every physical connection.
 func configureStorageConn(ctx context.Context, conn *sql.Conn) error {
-	for _, pragma := range storageConnectionPragmas {
-		if _, err := conn.ExecContext(ctx, pragma); err != nil {
-			return err
-		}
-	}
 	for _, limit := range []struct {
 		id, value int
 	}{
@@ -380,16 +427,6 @@ func configureStorageConn(ctx context.Context, conn *sql.Conn) error {
 		}
 	}
 	return nil
-}
-
-// storageConnectionPragmas is also asserted by tests so the hardened settings cannot silently regress.
-var storageConnectionPragmas = []string{
-	`pragma busy_timeout = 5000`,
-	`pragma foreign_keys = ON`,
-	`pragma trusted_schema = OFF`,
-	`pragma temp_store = FILE`,
-	`pragma cache_size = -2048`,
-	`pragma mmap_size = 0`,
 }
 
 func (s *storageServer) withConn(ctx context.Context, app string, fn func(*sql.Conn) error) error {
