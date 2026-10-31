@@ -363,19 +363,14 @@ func (s *supervisor) launch(a *app, source string) error {
 		s.releaseIsolation(a, iso)
 		return err
 	}
-	if err := applyProcessLimits(cmd.Process.Pid, cfg); err != nil {
-		err = fmt.Errorf("apply rlimits: %w", err)
-		if s.cfg.untrusted() {
-			return fail(err)
+	if s.cfg.untrusted() {
+		if err := applyProcessLimits(cmd.Process.Pid, cfg); err != nil {
+			return fail(fmt.Errorf("apply rlimits: %w", err))
 		}
-		log.Printf("app %s: %v (trusted mode)", a.name, err)
 	}
 	if iso.cgroup != "" && s.cgroups != nil {
 		if err := s.cgroups.addPID(a.name, cmd.Process.Pid); err != nil {
-			if s.cfg.untrusted() {
-				return fail(err)
-			}
-			log.Printf("app %s: %v (trusted mode)", a.name, err)
+			return fail(err)
 		}
 	}
 	if err := s.waitForPort(a, finder, done, deadline); err != nil {

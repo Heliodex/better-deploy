@@ -30,43 +30,51 @@ func (m *cgroupManager) path(name string) string {
 	return filepath.Join(m.root, name)
 }
 
-// enableControllers turns on cpu, memory, pids and io for child cgroups under the manager root.
-func (m *cgroupManager) enableControllers() error {
-	if strings.TrimSpace(m.root) == "" {
-		return fmt.Errorf("WT_CGROUP_ROOT is empty")
-	}
-	if err := os.MkdirAll(m.root, 0o755); err != nil {
-		return fmt.Errorf("create cgroup root %s: %w", m.root, err)
-	}
-	controllers, err := os.ReadFile(filepath.Join(m.root, "cgroup.controllers"))
+// missingControllersError reports which controllers a cgroup directory does not expose.
+type missingControllersError struct {
+	dir     string
+	missing []string
+}
+
+func (e *missingControllersError) Error() string {
+	return fmt.Sprintf("cgroup controllers %s are not available under %s", strings.Join(e.missing, ", "), e.dir)
+}
+
+// enableControllersAt enables required controllers for that directory's children.
+func enableControllersAt(dir string, required []string) error {
+	controllers, err := os.ReadFile(filepath.Join(dir, "cgroup.controllers"))
 	if err != nil {
-		return fmt.Errorf("read cgroup controllers under %s (cgroup v2 required): %w", m.root, err)
+		return fmt.Errorf("read cgroup controllers under %s (cgroup v2 required): %w", dir, err)
 	}
 	available := map[string]bool{}
 	for _, name := range strings.Fields(string(controllers)) {
-		available[name] = true
+		available[strings.TrimPrefix(name, "+")] = true
 	}
-	for _, name := range strings.Fields(requiredControllers) {
+	var missing []string
+	for _, name := range required {
 		if !available[name] {
-			return fmt.Errorf("cgroup controller %q is not available under %s", name, m.root)
+			missing = append(missing, name)
 		}
 	}
+	if len(missing) > 0 {
+		return &missingControllersError{dir: dir, missing: missing}
+	}
 
-	subtreePath := filepath.Join(m.root, "cgroup.subtree_control")
+	subtreePath := filepath.Join(dir, "cgroup.subtree_control")
 	existing, err := os.ReadFile(subtreePath)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("read %s: %w", subtreePath, err)
 	}
 	// cgroup.subtree_control reads back bare names ("cpu memory") but only accepts "+name"/"-name" writes.
 	enabled := map[string]bool{}
-	tokens := make([]string, 0, 4)
+	tokens := make([]string, 0, len(required))
 	for _, token := range strings.Fields(string(existing)) {
 		name := strings.TrimPrefix(token, "+")
 		enabled[name] = true
 		tokens = append(tokens, "+"+name)
 	}
 	changed := false
-	for _, name := range strings.Fields(requiredControllers) {
+	for _, name := range required {
 		if !enabled[name] {
 			tokens = append(tokens, "+"+name)
 			enabled[name] = true
@@ -75,8 +83,44 @@ func (m *cgroupManager) enableControllers() error {
 	}
 	if changed || len(strings.Fields(string(existing))) == 0 {
 		if err := os.WriteFile(subtreePath, []byte(strings.Join(tokens, " ")+"\n"), 0o644); err != nil {
-			return fmt.Errorf("enable cgroup controllers under %s: %w", m.root, err)
+			return fmt.Errorf("enable cgroup controllers under %s: %w", dir, err)
 		}
+	}
+	return nil
+}
+
+// enableControllers turns on cpu, memory, pids and io for child cgroups under the manager root.
+// A freshly created WT_CGROUP_ROOT often has an empty cgroup.controllers until its parent enables them,
+// so try the parent once and re-read before failing closed.
+func (m *cgroupManager) enableControllers() error {
+	if strings.TrimSpace(m.root) == "" {
+		return fmt.Errorf("WT_CGROUP_ROOT is empty")
+	}
+	if err := os.MkdirAll(m.root, 0o755); err != nil {
+		return fmt.Errorf("create cgroup root %s: %w", m.root, err)
+	}
+	required := strings.Fields(requiredControllers)
+	err := enableControllersAt(m.root, required)
+	if err == nil {
+		return nil
+	}
+	var missing *missingControllersError
+	if !errors.As(err, &missing) {
+		return err
+	}
+
+	parent := filepath.Dir(m.root)
+	if parent == m.root {
+		return err
+	}
+	if _, statErr := os.Stat(filepath.Join(parent, "cgroup.controllers")); statErr != nil {
+		return err
+	}
+	if parentErr := enableControllersAt(parent, required); parentErr != nil {
+		return fmt.Errorf("%w (enabling parent %s: %v)", err, parent, parentErr)
+	}
+	if err := enableControllersAt(m.root, required); err != nil {
+		return fmt.Errorf("cgroup controllers under %s after enabling parent %s: %w", m.root, parent, err)
 	}
 	return nil
 }
@@ -143,12 +187,29 @@ func (m *cgroupManager) addPID(name string, pid int) error {
 	return nil
 }
 
-// remove deletes an app's cgroup. The kernel only allows rmdir once it has no processes.
+// remove kills any stray processes left in the app cgroup, then deletes it.
 func (m *cgroupManager) remove(name string) error {
 	path := m.path(name)
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("stat cgroup %s: %w", path, err)
+	}
+	kill := filepath.Join(path, "cgroup.kill")
+	if _, err := os.Stat(kill); err == nil {
+		if err := os.WriteFile(kill, []byte("1"), 0o644); err != nil {
+			return fmt.Errorf("kill cgroup %s: %w", path, err)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat %s: %w", kill, err)
+	}
+
 	err := os.Remove(path)
 	switch {
-	case err == nil, os.IsNotExist(err):
+	case err == nil:
+		return nil
+	case os.IsNotExist(err):
 		return nil
 	case errors.Is(err, syscall.ENOTEMPTY):
 		// A filesystem-backed test root keeps its limit files; a real cgroup directory does not.

@@ -39,6 +39,9 @@ func (s *supervisor) prepareLaunch(a *app, cfg appConfig) (*launchIsolation, err
 		if err := chownTree(dataDir, uid, uid); err != nil {
 			return nil, fmt.Errorf("chown /data to uid %d: %w", uid, err)
 		}
+		if err := ensureAppReadable(a.dir); err != nil {
+			return nil, fmt.Errorf("make app readable by uid %d: %w", uid, err)
+		}
 		a.mu.Lock()
 		a.uid = uid
 		a.mu.Unlock()
@@ -51,18 +54,48 @@ func (s *supervisor) prepareLaunch(a *app, cfg appConfig) (*launchIsolation, err
 			return nil, fmt.Errorf("cgroup: %w", err)
 		}
 		iso.cgroup = path
-		return iso, nil
-	}
-
-	if s.cgroups != nil {
-		path, err := s.cgroups.create(a.name, cfg)
-		if err != nil {
-			log.Printf("app %s: cgroup limits unavailable (trusted mode): %v", a.name, err)
-		} else {
-			iso.cgroup = path
-		}
 	}
 	return iso, nil
+}
+
+// ensureAppReadable makes a bundle traversable and readable by the app uid.
+// Directories become 0755; regular files become 0644 while keeping any execute bits they already had.
+func ensureAppReadable(root string) error {
+	info, err := os.Stat(root)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("app path %s is not a directory", root)
+	}
+	if err := os.Chmod(root, 0o755); err != nil {
+		return err
+	}
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == root || entry.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		mode := info.Mode()
+		switch {
+		case mode.IsDir():
+			return os.Chmod(path, 0o755)
+		case mode.IsRegular():
+			perm := os.FileMode(0o644)
+			if mode.Perm()&0o111 != 0 {
+				perm = 0o755
+			}
+			return os.Chmod(path, perm)
+		default:
+			return nil
+		}
+	})
 }
 
 // releaseIsolation removes resources that belong to one launch attempt. The process must already be gone.

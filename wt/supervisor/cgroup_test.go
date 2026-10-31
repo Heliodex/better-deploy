@@ -64,12 +64,23 @@ func TestCgroupManagerWritesLimitsAndCleansUp(t *testing.T) {
 	if got := readTestFile(t, filepath.Join(path, "cgroup.procs")); got != "4242" {
 		t.Errorf("cgroup.procs = %q, want 4242", got)
 	}
+	// A symlink models cgroup.kill: remove writes 1 into it, then deletes the cgroup directory.
+	killTarget := filepath.Join(root, "kill-result")
+	if err := os.WriteFile(killTarget, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(killTarget, filepath.Join(path, "cgroup.kill")); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := manager.remove("demo"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Errorf("cgroup directory still exists: %v", err)
+	}
+	if got := readTestFile(t, killTarget); got != "1" {
+		t.Errorf("cgroup.kill received %q, want 1", got)
 	}
 	if err := manager.remove("demo"); err != nil {
 		t.Errorf("removing a missing cgroup should be harmless: %v", err)
@@ -91,6 +102,43 @@ func TestCgroupManagerReusesExistingDirectory(t *testing.T) {
 	}
 	if got := readTestFile(t, filepath.Join(path, "pids.max")); got != "64" {
 		t.Errorf("pids.max = %q", got)
+	}
+}
+
+func TestCgroupManagerEnablesParentControllers(t *testing.T) {
+	parent := t.TempDir()
+	if err := os.WriteFile(filepath.Join(parent, "cgroup.controllers"), []byte("cpu io memory pids\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(parent, "cgroup.subtree_control"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	child := filepath.Join(parent, "wt")
+	if err := os.MkdirAll(child, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A real hierarchy repopulates child/cgroup.controllers after the parent enables a controller.
+	// Pointing the fake child file at the parent's subtree file models that transition.
+	if err := os.Symlink(filepath.Join(parent, "cgroup.subtree_control"), filepath.Join(child, "cgroup.controllers")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(child, "cgroup.subtree_control"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	manager := newCgroupManager(child)
+	path, err := manager.create("demo", appConfig{CPUMillicores: 1000, PidsMax: 128, IOWeight: 100})
+	if err != nil {
+		t.Fatalf("create should succeed after enabling the parent: %v", err)
+	}
+	parentSubtree := readTestFile(t, filepath.Join(parent, "cgroup.subtree_control"))
+	for _, controller := range strings.Fields(requiredControllers) {
+		if !strings.Contains(parentSubtree, "+"+controller) {
+			t.Errorf("parent subtree_control = %q, missing +%s", parentSubtree, controller)
+		}
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("app cgroup was not created: %v", err)
 	}
 }
 

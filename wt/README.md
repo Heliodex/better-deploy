@@ -105,6 +105,8 @@ sudo WT_TENANT_MODE=untrusted \
   WT_APPS_DIR=/var/lib/wt/apps \
   WT_STATE_DIR=/var/lib/wt \
   WT_CGROUP_ROOT=/sys/fs/cgroup/wt \
+  WT_IPTABLES=iptables \
+  WT_IP6TABLES=ip6tables \
   /tmp/wt-supervisor
 ```
 
@@ -113,21 +115,22 @@ Untrusted mode requires a non-empty `WT_TOKEN`; there is no tokenless loopback a
 Requirements and failure behaviour:
 
 - **Root.** The supervisor must run as root so it can set `SysProcAttr.Credential`, chown `/data`, populate cgroups and apply iptables rules. If it is not root, untrusted apps refuse to launch.
-- **cgroup v2.** A writable cgroup v2 hierarchy must contain `cpu`, `memory`, `pids` and `io`. `WT_CGROUP_ROOT` defaults to `/sys/fs/cgroup/wt`. Missing controllers, an unwritable root or a failed limit write is fatal in untrusted mode; in trusted mode cgroup problems are logged and the app still runs.
-- **iptables.** `WT_IPTABLES` (default `iptables`) must be able to create the `WT-EGRESS` chain and an `OUTPUT` jump, and every command runs with `-w`. In untrusted mode a `network: storage` app whose rules cannot be installed is stopped. In trusted mode a missing iptables only produces a warning; the app keeps the old unrestricted network.
+- **cgroup v2.** A writable cgroup v2 hierarchy must contain `cpu`, `memory`, `pids` and `io`. `WT_CGROUP_ROOT` defaults to `/sys/fs/cgroup/wt`; if its `cgroup.controllers` is empty because the parent has not delegated the controllers yet, the supervisor enables them in the parent's `cgroup.subtree_control` and re-reads before failing. Missing controllers, an unwritable root or a failed limit write is fatal in untrusted mode. Trusted mode does not create per-app cgroups at all, so its previous unlimited behaviour is preserved.
+- **iptables and ip6tables.** `WT_IPTABLES` (default `iptables`) must be able to create the `WT-EGRESS` chain and an `OUTPUT` jump, and `WT_IP6TABLES` (default `ip6tables`) must create `WT-EGRESS6`; every command runs with `-w`. In untrusted mode a `network: storage` app whose IPv4 or IPv6 rules cannot be installed is stopped. IPv6 is rejected for the app UID because the storage service is IPv4-only. If the host genuinely has IPv6 disabled, set `WT_IPV6_EGRESS=off` (or `--ipv6-egress=false`) as an explicit opt-out; the supervisor logs a warning and does not silently skip a failed ip6tables invocation.
 
 Per-app identity and limits:
 
 - `WT_APP_UID_BASE` (default `20000`) is the first UID/GID. A persistent allocator at `WT_STATE_DIR/.uids.json` gives each app a stable dedicated UID, resolves collisions on load and survives restarts. The app's `/data` tree is chowned to that UID before launch, and the UID appears as `uid` in app info and `GET /apps/<name>`.
-- Each app gets `WT_CGROUP_ROOT/<name>` with `cpu.max` derived from `cpu_millicores` (period `100000`), `memory.max` from `memory_mb`, `memory.swap.max=0`, `pids.max` and `io.weight` (`default N`). The process is added after start and the cgroup is removed on stop and after a failed launch.
-- After start the supervisor applies `RLIMIT_NOFILE=256`, `RLIMIT_FSIZE=<disk_mb> MiB`, and `RLIMIT_CORE=0` with `prlimit`. In untrusted mode a failure is fatal. `memory_mb` also remains wasmtime's `-W max-memory-size`.
-- `cpu_millicores`, `pids_max` and `io_weight` are accepted in `app.json`, `PATCH /apps/<name>/config` and the config response; defaults are 1000, 128 and 100 in both modes.
+- Each app gets `WT_CGROUP_ROOT/<name>` with `cpu.max` derived from `cpu_millicores` (period `100000`), `memory.max` from `memory_mb`, `memory.swap.max=0`, `pids.max` and `io.weight` (`default N`). The process is added after start; on stop the supervisor writes `1` to `cgroup.kill` when available, then removes the cgroup, and it also removes the cgroup after a failed launch.
+- After start the supervisor applies `RLIMIT_NOFILE=1024`, `RLIMIT_FSIZE=<disk_mb> MiB`, and `RLIMIT_CORE=0` with `prlimit`, only in untrusted mode. A failure is fatal. `memory_mb` also remains wasmtime's `-W max-memory-size`.
+- Before an untrusted launch the app bundle is made readable by its UID: the app directory and its subdirectories become `0755`, regular files become `0644`, and existing execute bits are preserved. `main.cwasm` is also chmodded `0644` when installed from the cache or an upload.
+- `cpu_millicores`, `pids_max` and `io_weight` are accepted in `app.json`, `PATCH /apps/<name>/config` and the config response; defaults are 1000, 128 and 100, but they are enforced only in untrusted mode.
 
 Untrusted defaults for omitted fields are finite: `request_timeout=30s`, `memory_mb=256`, `disk_mb=256`, `cpu_millicores=1000`, `pids_max=128`, `io_weight=100` and `network=storage`. An explicit `request_timeout` of `0` or `none` disables the deadline. Trusted mode keeps its old defaults: no memory, disk or request timeout unless configured, and `network=inherit`.
 
 Network modes:
 
-- `storage` is the untrusted default. The app still receives `-S inherit-network` so it can reach the loopback storage service, but a per-UID iptables rule set allows only TCP to the storage address and port, allows replies from the app's own listening port back to loopback, and rejects every other packet from that UID. Rules are installed after the app port is known and before readiness.
+- `storage` is the untrusted default. The app still receives `-S inherit-network` so it can reach the loopback storage service, but a per-UID iptables rule set allows only TCP to the storage address and port, allows owner-scoped replies from the app's own listening port back to loopback, and rejects every other IPv4 packet from that UID. A separate `WT-EGRESS6` ip6tables chain rejects all IPv6 traffic from the UID, since storage is IPv4-only. Rules are installed after the app port is known and before readiness, and a failure in either family is fatal.
 - `none` passes no `inherit-network`, needs no firewall rules and cannot use storage.
 - `inherit` is rejected in untrusted mode. Trusted mode keeps it, and a trusted `storage` app (which has no dedicated UID) logs a warning and is not restricted.
 

@@ -9,6 +9,21 @@ import (
 	"time"
 )
 
+func TestIPv6EgressConfig(t *testing.T) {
+	t.Setenv("WT_IPV6_EGRESS", "off")
+	if configFromEnv().ipv6Egress {
+		t.Error("WT_IPV6_EGRESS=off should disable IPv6 egress rules")
+	}
+	t.Setenv("WT_IPV6_EGRESS", "not-a-bool")
+	if !configFromEnv().ipv6Egress {
+		t.Error("an invalid value should keep the fail-closed default")
+	}
+	t.Setenv("WT_IP6TABLES", "/sbin/ip6tables")
+	if got := configFromEnv().ip6tables; got != "/sbin/ip6tables" {
+		t.Errorf("ip6tables = %q", got)
+	}
+}
+
 func TestUntrustedDefaults(t *testing.T) {
 	cfg, err := normalizeAppConfig(appConfig{}, "demo", "localhost", tenantUntrusted)
 	if err != nil {

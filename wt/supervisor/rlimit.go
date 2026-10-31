@@ -8,7 +8,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const defaultNofileLimit = 256
+// defaultNofileLimit leaves wasmtime room for its listener, proxy connections and storage sockets.
+const defaultNofileLimit = 1024
 
 type rlimitSpec struct {
 	Resource int

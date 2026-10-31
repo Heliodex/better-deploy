@@ -160,6 +160,9 @@ func installArtifact(src, dst string) error {
 		_ = os.Remove(name)
 		return err
 	}
+	if err := os.Chmod(dst, 0o644); err != nil {
+		return fmt.Errorf("chmod %s: %w", dst, err)
+	}
 	return nil
 }
 
@@ -167,6 +170,9 @@ func installArtifact(src, dst string) error {
 func (s *supervisor) importCachedArtifact(src string, key artifactKey) (string, error) {
 	dst := s.artifactCachePath(key)
 	if _, err := os.Stat(dst); err == nil {
+		if err := os.Chmod(dst, 0o644); err != nil {
+			return "", fmt.Errorf("chmod %s: %w", dst, err)
+		}
 		return dst, nil
 	}
 	dir := filepath.Dir(dst)
@@ -192,6 +198,9 @@ func (s *supervisor) importCachedArtifact(src string, key artifactKey) (string, 
 	if err := os.Rename(name, dst); err != nil {
 		_ = os.Remove(name)
 		return "", err
+	}
+	if err := os.Chmod(dst, 0o644); err != nil {
+		return "", fmt.Errorf("chmod %s: %w", dst, err)
 	}
 	return dst, nil
 }
@@ -230,9 +239,15 @@ func (s *supervisor) compileCachedArtifact(dir, wasm string, key artifactKey) (s
 	if err := os.Rename(temp, dst); err != nil {
 		_ = os.Remove(temp)
 		if _, statErr := os.Stat(dst); statErr == nil {
+			if chmodErr := os.Chmod(dst, 0o644); chmodErr != nil {
+				return "", fmt.Errorf("chmod %s: %w", dst, chmodErr)
+			}
 			return dst, nil
 		}
 		return "", err
+	}
+	if err := os.Chmod(dst, 0o644); err != nil {
+		return "", fmt.Errorf("chmod %s: %w", dst, err)
 	}
 	return dst, nil
 }

@@ -42,8 +42,9 @@ type config struct {
 	wasmtime, wasmtimeCompiler, wasmtimeTarget                 string
 	token, tlsCert, tlsKey                                     string
 	tenantMode, adminListen                                    string
-	cgroupRoot, iptables                                       string
+	cgroupRoot, iptables, ip6tables                            string
 	appUIDBase                                                 int
+	ipv6Egress                                                 bool
 	cacheMaxBytes                                              int64
 }
 
@@ -442,7 +443,9 @@ func parseConfig() config {
 	flag.StringVar(&cfg.tenantMode, "tenant-mode", cfg.tenantMode, "tenant trust model: trusted or untrusted")
 	flag.StringVar(&cfg.adminListen, "admin-listen", cfg.adminListen, "separate admin listener (TCP address or unix:/path)")
 	flag.StringVar(&cfg.cgroupRoot, "cgroup-root", cfg.cgroupRoot, "cgroup v2 root for per-app limits")
-	flag.StringVar(&cfg.iptables, "iptables", cfg.iptables, "iptables binary for per-app egress rules")
+	flag.StringVar(&cfg.iptables, "iptables", cfg.iptables, "iptables binary for per-app IPv4 egress rules")
+	flag.StringVar(&cfg.ip6tables, "ip6tables", cfg.ip6tables, "ip6tables binary for per-app IPv6 egress rules")
+	flag.BoolVar(&cfg.ipv6Egress, "ipv6-egress", cfg.ipv6Egress, "reject IPv6 egress from untrusted app uids")
 	flag.IntVar(&cfg.appUIDBase, "app-uid-base", cfg.appUIDBase, "first allocated uid/gid for apps in untrusted mode")
 	flag.Parse()
 
@@ -457,6 +460,9 @@ func parseConfig() config {
 		}
 		if cfg.adminListen == "" {
 			log.Printf("warning: WT_ADMIN_LISTEN is unset; admin routes stay on the public listener behind WT_TOKEN")
+		}
+		if !cfg.ipv6Egress {
+			log.Printf("warning: WT_IPV6_EGRESS is off; untrusted apps have no IPv6 egress boundary")
 		}
 	} else {
 		if cfg.token == "" && !loopbackListen(cfg.listen) {
@@ -506,15 +512,12 @@ func startSupervisor(cfg config) *supervisor {
 	if err != nil {
 		log.Fatalf("storage: %v", err)
 	}
-	storageIP, storagePort := storage.endpoint()
 	s := &supervisor{
 		cfg:         cfg,
 		storage:     storage,
 		backups:     newBackupManager(filepath.Join(cfg.stateDir, ".backups"), storage, cfg.stateDir),
 		events:      newHub(),
 		deployments: newDeploymentManager(filepath.Join(cfg.stateDir, ".deployments")),
-		cgroups:     newCgroupManager(cfg.cgroupRoot),
-		egress:      newEgressManager(cfg.iptables, storageIP, storagePort, nil),
 		apps:        map[string]*app{},
 		hosts:       map[string]*app{},
 	}
@@ -524,6 +527,10 @@ func startSupervisor(cfg config) *supervisor {
 			log.Fatalf("uid allocator: %v", err)
 		}
 		s.uids = uids
+		storageIP, storagePort := storage.endpoint()
+		s.cgroups = newCgroupManager(cfg.cgroupRoot)
+		s.egress = newEgressManager(cfg.iptables, cfg.ip6tables, storageIP, storagePort, nil)
+		s.egress.ipv6 = cfg.ipv6Egress
 	}
 	if err := recoverRollbacks(cfg.stateDir, s.backups); err != nil {
 		log.Fatalf("rollback recovery: %v", err)

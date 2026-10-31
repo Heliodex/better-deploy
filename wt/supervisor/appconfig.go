@@ -65,6 +65,18 @@ func env(key, fallback string) string {
 	return fallback
 }
 
+// envBool reads a boolean opt-in/opt-out. An unknown value keeps the fallback, so a typo cannot silently disable a boundary.
+func envBool(key string, fallback bool) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+	case "1", "true", "on", "yes":
+		return true
+	case "0", "false", "off", "no":
+		return false
+	default:
+		return fallback
+	}
+}
+
 func envInt64(key string, fallback int64) int64 {
 	value := os.Getenv(key)
 	if value == "" {
@@ -96,7 +108,9 @@ func configFromEnv() config {
 		adminListen:      os.Getenv("WT_ADMIN_LISTEN"),
 		cgroupRoot:       env("WT_CGROUP_ROOT", "/sys/fs/cgroup/wt"),
 		iptables:         env("WT_IPTABLES", "iptables"),
+		ip6tables:        env("WT_IP6TABLES", "ip6tables"),
 		appUIDBase:       int(envInt64("WT_APP_UID_BASE", 20000)),
+		ipv6Egress:       envBool("WT_IPV6_EGRESS", true),
 	}
 }
 
