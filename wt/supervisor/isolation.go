@@ -51,6 +51,9 @@ func (s *supervisor) prepareLaunch(a *app, cfg appConfig) (*launchIsolation, err
 		a.mu.Lock()
 		a.uid = uid
 		a.mu.Unlock()
+		if err := s.quota.apply(uid, int64(cfg.DiskMB)<<20, maxAppEntries); err != nil {
+			return nil, fmt.Errorf("data quota: %w", err)
+		}
 
 		if s.cgroups == nil {
 			return nil, fmt.Errorf("untrusted mode has no cgroup manager")

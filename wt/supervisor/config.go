@@ -208,6 +208,18 @@ func (s *supervisor) handleAppConfig(w http.ResponseWriter, r *http.Request, nam
 		writeError(w, http.StatusConflict, fmt.Sprintf("host %q is already used by another app", next.Host))
 		return
 	}
+	if s.cfg.untrusted() && cfg.DiskMB != next.DiskMB && s.quota.enabled() {
+		a.mu.Lock()
+		uid := a.uid
+		a.mu.Unlock()
+		// An app that has never launched gets its quota from prepareLaunch instead.
+		if uid > 0 {
+			if err := s.quota.apply(uid, int64(next.DiskMB)<<20, maxAppEntries); err != nil {
+				writeError(w, http.StatusInternalServerError, "apply data quota: "+err.Error())
+				return
+			}
+		}
+	}
 	if err := persistAppConfig(a.dir, next, s.cfg.tenantMode); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

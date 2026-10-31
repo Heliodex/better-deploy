@@ -151,6 +151,7 @@ func (s *supervisor) handleDelete(w http.ResponseWriter, r *http.Request, name s
 	if a.logs != nil {
 		a.logs.close()
 	}
+	s.clearAppDataQuota(name, a)
 	if err := os.RemoveAll(filepath.Join(s.cfg.appsDir, name)); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
