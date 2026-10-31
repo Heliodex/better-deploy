@@ -89,6 +89,15 @@ func envInt64(key string, fallback int64) int64 {
 	return parsed
 }
 
+// envStorageMigrationTimeout applies WT_STORAGE_MIGRATION_TIMEOUT, falling back to the default for an empty or invalid value. The explicit flag is validated separately.
+func envStorageMigrationTimeout() time.Duration {
+	timeout, err := parseStorageMigrationTimeout(os.Getenv("WT_STORAGE_MIGRATION_TIMEOUT"))
+	if err != nil {
+		return defaultStorageMigrationTimeout
+	}
+	return timeout
+}
+
 func configFromEnv() config {
 	return config{
 		appsDir:          env("WT_APPS_DIR", "./apps"),
@@ -116,6 +125,8 @@ func configFromEnv() config {
 		appUIDBase:       int(envInt64("WT_APP_UID_BASE", 20000)),
 		ipv6Egress:       envBool("WT_IPV6_EGRESS", true),
 		diskBudgetBytes:  envInt64("WT_DISK_BUDGET_MB", 0) << 20,
+
+		storageMigrationTimeout: envStorageMigrationTimeout(),
 	}
 }
 

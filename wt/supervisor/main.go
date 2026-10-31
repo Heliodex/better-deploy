@@ -48,6 +48,7 @@ type config struct {
 	ipv6Egress                                                 bool
 	cacheMaxBytes                                              int64
 	diskBudgetBytes                                            int64
+	storageMigrationTimeout                                    time.Duration
 }
 
 type appConfig struct {
@@ -438,6 +439,7 @@ func parseConfig() config {
 	flag.StringVar(&cfg.cacheDir, "cache-dir", cfg.cacheDir, "compiled cwasm cache (default WT_STATE_DIR/.cache)")
 	flag.Int64Var(&cfg.cacheMaxBytes, "cache-max-bytes", cfg.cacheMaxBytes, "compiled cwasm cache byte cap")
 	flag.Int64Var(&diskBudgetMB, "disk-budget-mb", diskBudgetMB, "global disk budget in MiB across apps and state (0 = unlimited)")
+	flag.DurationVar(&cfg.storageMigrationTimeout, "storage-migration-timeout", cfg.storageMigrationTimeout, "timeout for one migration, between 1s and 1h (default 5m)")
 	flag.StringVar(&cfg.domain, "domain", cfg.domain, "default app host suffix")
 	flag.StringVar(&cfg.wasmtime, "wasmtime", cfg.wasmtime, "wasmtime binary")
 	flag.StringVar(&cfg.wasmtimeCompiler, "wasmtime-compiler", cfg.wasmtimeCompiler, "wasmtime binary with the compile subcommand, used to rebuild stale artifacts")
@@ -458,6 +460,9 @@ func parseConfig() config {
 	flag.IntVar(&cfg.appUIDBase, "app-uid-base", cfg.appUIDBase, "first allocated uid/gid for apps in untrusted mode")
 	flag.Parse()
 
+	if cfg.storageMigrationTimeout < minStorageMigrationTimeout || cfg.storageMigrationTimeout > maxStorageMigrationTimeout {
+		log.Fatalf("storage migration timeout %s must be between %s and %s", cfg.storageMigrationTimeout, minStorageMigrationTimeout, maxStorageMigrationTimeout)
+	}
 	if diskBudgetMB > 0 {
 		cfg.diskBudgetBytes = diskBudgetMB << 20
 	} else {
@@ -531,6 +536,9 @@ func startSupervisor(cfg config) *supervisor {
 	storage, err := newStorageServer(filepath.Join(cfg.stateDir, ".storage"), cfg.storageListen)
 	if err != nil {
 		log.Fatalf("storage: %v", err)
+	}
+	if cfg.storageMigrationTimeout > 0 {
+		storage.migrationTimeout = cfg.storageMigrationTimeout
 	}
 	s := &supervisor{
 		cfg:         cfg,

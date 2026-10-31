@@ -37,6 +37,10 @@ const (
 	maxStorageReadConns  = 4
 	storageTimeout       = 5 * time.Second
 	storageSessionLease  = 30 * time.Second
+	// Migrations may build indexes or backfill rows, so they get their own longer and configurable deadline.
+	defaultStorageMigrationTimeout = 5 * time.Minute
+	minStorageMigrationTimeout     = time.Second
+	maxStorageMigrationTimeout     = time.Hour
 	// maxStorageConcurrentQueries bounds all apps' storage work together, so many tenants cannot exhaust the supervisor.
 	maxStorageConcurrentQueries = 16
 	storageQueueTimeout         = 5 * time.Second
@@ -72,6 +76,8 @@ type storageServer struct {
 	sessionClosed  bool
 	sessionStop    chan struct{}
 	sessionDone    chan struct{}
+
+	migrationTimeout time.Duration
 
 	querySem chan struct{}
 }
@@ -123,6 +129,8 @@ func newStorageServer(dir, listen string) (*storageServer, error) {
 		sessionStop: make(chan struct{}),
 		sessionDone: make(chan struct{}),
 		querySem:    make(chan struct{}, maxStorageConcurrentQueries),
+
+		migrationTimeout: defaultStorageMigrationTimeout,
 	}
 	s.sessionCond = sync.NewCond(&s.sessionMu)
 	s.listener = listener
@@ -227,7 +235,7 @@ func (s *storageServer) appFor(r *http.Request) (string, bool) {
 }
 
 // storageDSN applies the hardened pragmas to every physical connection through the driver DSN.
-// The write pool owns WAL, while both pools get busy_timeout, foreign keys and synchronous=NORMAL.
+// The write pool owns WAL and starts every transaction with BEGIN IMMEDIATE, while both pools get busy_timeout, foreign keys and synchronous=NORMAL.
 // A positive quota becomes SQLite's per-database max_page_count, assuming the default 4096-byte page size.
 func storageDSN(path string, readOnly bool, quotaBytes int64) string {
 	dsn := url.URL{Scheme: "file", Path: path}
@@ -237,6 +245,7 @@ func storageDSN(path string, readOnly bool, quotaBytes int64) string {
 	query.Set("_synchronous", "NORMAL")
 	if !readOnly {
 		query.Set("_journal_mode", "WAL")
+		query.Set("_txlock", "immediate")
 	}
 	query.Add("_pragma", "trusted_schema(OFF)")
 	query.Add("_pragma", "temp_store(FILE)")
@@ -254,6 +263,19 @@ func storageDSN(path string, readOnly bool, quotaBytes int64) string {
 	}
 	dsn.RawQuery = query.Encode()
 	return dsn.String()
+}
+
+// parseStorageMigrationTimeout validates the host-wide deadline for a migration. It defaults to five minutes and stays within one second and one hour.
+func parseStorageMigrationTimeout(value string) (time.Duration, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return defaultStorageMigrationTimeout, nil
+	}
+	timeout, err := time.ParseDuration(value)
+	if err != nil || timeout < minStorageMigrationTimeout || timeout > maxStorageMigrationTimeout {
+		return 0, fmt.Errorf("storage migration timeout %q must be a duration between %s and %s", value, minStorageMigrationTimeout, maxStorageMigrationTimeout)
+	}
+	return timeout, nil
 }
 
 // setQuota records an app's database byte quota and drops its pools when the value changes, so the next request opens them with the new max_page_count.

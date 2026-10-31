@@ -54,6 +54,12 @@ func TestStorageDSNSetsHardenedPragmas(t *testing.T) {
 	if got := read.Get("_journal_mode"); got != "" {
 		t.Errorf("read _journal_mode = %q, want unset", got)
 	}
+	if got := write.Get("_txlock"); got != "immediate" {
+		t.Errorf("write _txlock = %q, want immediate", got)
+	}
+	if got := read.Get("_txlock"); got != "" {
+		t.Errorf("read _txlock = %q, want unset", got)
+	}
 	if got := write.Get("_query_only"); got != "" {
 		t.Errorf("write _query_only = %q, want unset", got)
 	}
