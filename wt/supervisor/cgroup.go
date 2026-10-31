@@ -32,6 +32,9 @@ func (m *cgroupManager) path(name string) string {
 
 // enableControllers turns on cpu, memory, pids and io for child cgroups under the manager root.
 func (m *cgroupManager) enableControllers() error {
+	if strings.TrimSpace(m.root) == "" {
+		return fmt.Errorf("WT_CGROUP_ROOT is empty")
+	}
 	if err := os.MkdirAll(m.root, 0o755); err != nil {
 		return fmt.Errorf("create cgroup root %s: %w", m.root, err)
 	}

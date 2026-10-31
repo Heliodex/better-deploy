@@ -96,7 +96,7 @@ The supervisor serves a small admin panel at `/admin/` on its own address (for e
 
 ## Untrusted tenant mode
 
-`WT_TENANT_MODE` selects the trust model. `trusted` (the default) keeps the personal-app behaviour described elsewhere in this document. `untrusted` treats every app as hostile code and refuses to start the supervisor or an app when a required isolation primitive is unavailable.
+`WT_TENANT_MODE` selects the trust model. `trusted` (the default) keeps the personal-app behaviour described elsewhere in this document. `untrusted` treats every app as hostile code and refuses to start an app when a required isolation primitive is unavailable. The supervisor itself refuses to start in untrusted mode without a token, and refuses to start at all with an unknown mode.
 
 ```sh
 sudo WT_TENANT_MODE=untrusted \
