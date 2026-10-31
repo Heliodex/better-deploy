@@ -103,12 +103,24 @@ func (m *cgroupManager) create(name string, cfg appConfig) (string, error) {
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		return "", fmt.Errorf("create cgroup %s: %w", path, err)
 	}
+	cpu := cfg.CPUMillicores
+	if cpu <= 0 {
+		cpu = defaultCPUMillicores
+	}
+	pids := cfg.PidsMax
+	if pids <= 0 {
+		pids = defaultPidsMax
+	}
+	ioWeight := cfg.IOWeight
+	if ioWeight <= 0 {
+		ioWeight = defaultIOWeight
+	}
 	files := []struct{ name, value string }{
-		{"cpu.max", cpuMax(cfg.CPUMillicores)},
+		{"cpu.max", cpuMax(cpu)},
 		{"memory.max", memoryMax(cfg.MemoryMB)},
 		{"memory.swap.max", "0"},
-		{"pids.max", strconv.Itoa(cfg.PidsMax)},
-		{"io.weight", fmt.Sprintf("default %d", cfg.IOWeight)},
+		{"pids.max", strconv.Itoa(pids)},
+		{"io.weight", fmt.Sprintf("default %d", ioWeight)},
 	}
 	for _, file := range files {
 		if err := os.WriteFile(filepath.Join(path, file.name), []byte(file.value+"\n"), 0o644); err != nil {

@@ -94,6 +94,24 @@ func TestCgroupManagerReusesExistingDirectory(t *testing.T) {
 	}
 }
 
+func TestCgroupManagerFillsMissingLimitDefaults(t *testing.T) {
+	root := fakeCgroupRoot(t)
+	manager := newCgroupManager(root)
+	path, err := manager.create("demo", appConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := readTestFile(t, filepath.Join(path, "cpu.max")); got != "100000 100000" {
+		t.Errorf("cpu.max = %q, want the 1000 millicore default", got)
+	}
+	if got := readTestFile(t, filepath.Join(path, "pids.max")); got != "128" {
+		t.Errorf("pids.max = %q, want 128", got)
+	}
+	if got := readTestFile(t, filepath.Join(path, "io.weight")); got != "default 100" {
+		t.Errorf("io.weight = %q, want default 100", got)
+	}
+}
+
 func TestCgroupManagerFailsWithoutControllers(t *testing.T) {
 	root := t.TempDir()
 	manager := newCgroupManager(root)
