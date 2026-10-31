@@ -37,6 +37,9 @@ func WriteError(w http.ResponseWriter, status int, message string) {
 	WriteJSON(w, status, map[string]string{"error": message})
 }
 
+// HealthPath is the reserved readiness path the supervisor probes.
+const HealthPath = "/healthz"
+
 // ServeStorage runs next behind the storage service. It answers 503 while the storage client is unavailable, and 500 until the migration succeeds; a failed migration is retried on the next request, a successful one runs only once.
 func ServeStorage(storeErr error, migrate func(context.Context) error, next http.Handler) http.Handler {
 	var mu sync.Mutex
@@ -56,6 +59,11 @@ func ServeStorage(storeErr error, migrate func(context.Context) error, next http
 			ready = true
 		}
 		mu.Unlock()
+		// The supervisor readiness probe answers after migrations have run, so it never reports ready against an unmigrated store.
+		if r.URL.Path == HealthPath && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }

@@ -94,6 +94,73 @@ func TestServeStorageMigratesOnce(t *testing.T) {
 	}
 }
 
+func TestServeStorageHealth(t *testing.T) {
+	var migrations atomic.Int64
+	migrate := func(context.Context) error {
+		migrations.Add(1)
+		return nil
+	}
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("next should not run for the health path")
+	})
+	handler := ServeStorage(nil, migrate, next)
+
+	for range 2 {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, HealthPath, nil))
+		if rec.Code != http.StatusNoContent {
+			t.Fatalf("status = %d, want 204", rec.Code)
+		}
+	}
+	if got := migrations.Load(); got != 1 {
+		t.Errorf("migrations = %d, want 1", got)
+	}
+}
+
+func TestServeStorageHealthUnavailable(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("next should not run without storage")
+	})
+	rec := httptest.NewRecorder()
+	ServeStorage(errors.New("down"), nil, next).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, HealthPath, nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503", rec.Code)
+	}
+}
+
+func TestServeStorageHealthFailedMigration(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("next should not run when migration fails")
+	})
+	handler := ServeStorage(nil, func(context.Context) error {
+		return errors.New("not ready")
+	}, next)
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, HealthPath, nil))
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", rec.Code)
+	}
+}
+
+func TestServeStorageNormalPath(t *testing.T) {
+	var served atomic.Int64
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		served.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	})
+	handler := ServeStorage(nil, func(context.Context) error { return nil }, next)
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", rec.Code)
+	}
+	if got := served.Load(); got != 1 {
+		t.Errorf("served = %d, want 1", got)
+	}
+}
+
 func TestServeStorageRetriesFailedMigration(t *testing.T) {
 	var attempts atomic.Int64
 	migrate := func(context.Context) error {
