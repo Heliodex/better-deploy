@@ -4,7 +4,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -67,6 +69,34 @@ func TestServeStaticFiles(t *testing.T) {
 	req.Header.Set("Accept", "text/html")
 	if a.serveStatic(httptest.NewRecorder(), req) {
 		t.Error("POST was served from static files")
+	}
+}
+
+func TestStoppedAppDoesNotServeStatic(t *testing.T) {
+	s := testSupervisor()
+	a := staticTestApp(t)
+	s.apps[a.name] = a
+	s.hosts["demo.localhost"] = a
+
+	req := httptest.NewRequest(http.MethodGet, "http://demo.localhost/", nil)
+	req.Header.Set("Accept", "text/html")
+	rec := httptest.NewRecorder()
+	s.handleProxy(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("stopped app status = %d, want 503", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "spa") {
+		t.Error("stopped app served its static index")
+	}
+
+	a.mu.Lock()
+	a.cmd = &exec.Cmd{}
+	a.ready = true
+	a.mu.Unlock()
+	rec = httptest.NewRecorder()
+	s.handleProxy(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "spa") {
+		t.Errorf("running app static response = %d %q", rec.Code, rec.Body.String())
 	}
 }
 

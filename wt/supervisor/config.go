@@ -7,36 +7,45 @@ import (
 	"net/http"
 	"path/filepath"
 	"slices"
+	"time"
 )
 
 const maxConfigRequestBytes = 64 << 10
 
 // appConfigPatch changes only the fields it names. A null env value removes that key.
 type appConfigPatch struct {
-	Host           *string            `json:"host"`
-	Health         *string            `json:"health"`
-	Env            map[string]*string `json:"env"`
-	MemoryMB       *int               `json:"memory_mb"`
-	DiskMB         *int               `json:"disk_mb"`
-	MaxConcurrent  *int               `json:"max_concurrency"`
-	RequestTimeout *string            `json:"request_timeout"`
-	Network        *string            `json:"network"`
-	Schedule       *[]scheduleConfig  `json:"schedule"`
+	Host               *string            `json:"host"`
+	Health             *string            `json:"health"`
+	Env                map[string]*string `json:"env"`
+	MemoryMB           *int               `json:"memory_mb"`
+	DiskMB             *int               `json:"disk_mb"`
+	MaxConcurrent      *int               `json:"max_concurrency"`
+	RequestTimeout     *string            `json:"request_timeout"`
+	StartupTimeout     *string            `json:"startup_timeout"`
+	HealthInterval     *string            `json:"health_interval"`
+	HealthFailures     *int               `json:"health_failures"`
+	RestartOnUnhealthy *bool              `json:"restart_on_unhealthy"`
+	Network            *string            `json:"network"`
+	Schedule           *[]scheduleConfig  `json:"schedule"`
 }
 
 // appConfigResponse is the runtime config the panel may show. Env values stay hidden; only their keys are listed.
 type appConfigResponse struct {
-	Name            string           `json:"name"`
-	Host            string           `json:"host"`
-	Health          string           `json:"health"`
-	EnvKeys         []string         `json:"env_keys"`
-	MemoryMB        int              `json:"memory_mb"`
-	DiskMB          int              `json:"disk_mb"`
-	MaxConcurrent   int              `json:"max_concurrency"`
-	RequestTimeout  string           `json:"request_timeout"`
-	Network         string           `json:"network"`
-	Schedule        []scheduleConfig `json:"schedule"`
-	RestartRequired bool             `json:"restart_required,omitempty"`
+	Name               string           `json:"name"`
+	Host               string           `json:"host"`
+	Health             string           `json:"health"`
+	EnvKeys            []string         `json:"env_keys"`
+	MemoryMB           int              `json:"memory_mb"`
+	DiskMB             int              `json:"disk_mb"`
+	MaxConcurrent      int              `json:"max_concurrency"`
+	RequestTimeout     string           `json:"request_timeout"`
+	StartupTimeout     string           `json:"startup_timeout"`
+	HealthInterval     string           `json:"health_interval"`
+	HealthFailures     int              `json:"health_failures"`
+	RestartOnUnhealthy bool             `json:"restart_on_unhealthy"`
+	Network            string           `json:"network"`
+	Schedule           []scheduleConfig `json:"schedule"`
+	RestartRequired    bool             `json:"restart_required,omitempty"`
 }
 
 func configResponse(cfg appConfig) appConfigResponse {
@@ -45,16 +54,20 @@ func configResponse(cfg appConfig) appConfigResponse {
 		schedule = []scheduleConfig{}
 	}
 	return appConfigResponse{
-		Name:           cfg.Name,
-		Host:           cfg.Host,
-		Health:         cfg.Health,
-		EnvKeys:        sortedKeys(cfg.Env),
-		MemoryMB:       cfg.MemoryMB,
-		DiskMB:         cfg.DiskMB,
-		MaxConcurrent:  cfg.MaxConcurrent,
-		RequestTimeout: cfg.RequestTimeout,
-		Network:        cfg.Network,
-		Schedule:       schedule,
+		Name:               cfg.Name,
+		Host:               cfg.Host,
+		Health:             cfg.Health,
+		EnvKeys:            sortedKeys(cfg.Env),
+		MemoryMB:           cfg.MemoryMB,
+		DiskMB:             cfg.DiskMB,
+		MaxConcurrent:      cfg.MaxConcurrent,
+		RequestTimeout:     cfg.RequestTimeout,
+		StartupTimeout:     cfg.StartupTimeout,
+		HealthInterval:     cfg.HealthInterval,
+		HealthFailures:     cfg.HealthFailures,
+		RestartOnUnhealthy: cfg.RestartOnUnhealthy,
+		Network:            cfg.Network,
+		Schedule:           schedule,
 	}
 }
 
@@ -76,6 +89,18 @@ func applyConfigPatch(cfg appConfig, patch appConfigPatch) appConfig {
 	}
 	if patch.RequestTimeout != nil {
 		cfg.RequestTimeout = *patch.RequestTimeout
+	}
+	if patch.StartupTimeout != nil {
+		cfg.StartupTimeout = *patch.StartupTimeout
+	}
+	if patch.HealthInterval != nil {
+		cfg.HealthInterval = *patch.HealthInterval
+	}
+	if patch.HealthFailures != nil {
+		cfg.HealthFailures = *patch.HealthFailures
+	}
+	if patch.RestartOnUnhealthy != nil {
+		cfg.RestartOnUnhealthy = *patch.RestartOnUnhealthy
 	}
 	if patch.Network != nil {
 		cfg.Network = *patch.Network
@@ -162,6 +187,9 @@ func (s *supervisor) handleAppConfig(w http.ResponseWriter, r *http.Request, nam
 	a.mu.Lock()
 	oldHost := a.cfg.Host
 	a.cfg = next
+	if cfg.Health != next.Health || cfg.healthInterval != next.healthInterval {
+		a.nextHealth = time.Time{}
+	}
 	a.mu.Unlock()
 	if oldHost != next.Host {
 		delete(s.hosts, oldHost)

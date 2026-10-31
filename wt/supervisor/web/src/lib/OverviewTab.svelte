@@ -34,6 +34,12 @@ let { actionMessage, deploying, detail, error, history, onupload, span = $bindab
 				<dd class="text-sm">{detail.status}</dd>
 			</div>
 			<div class="flex flex-col">
+				<dt class="text-xs tracking-wide text-neutral-500 uppercase">Ready</dt>
+				<dd class={detail.ready ? "text-sm text-primary-300" : "text-sm text-amber-400"}>
+					{detail.ready ? "yes" : "no"}
+				</dd>
+			</div>
+			<div class="flex flex-col">
 				<dt class="text-xs tracking-wide text-neutral-500 uppercase">Started</dt>
 				<dd class="text-sm">{formatTime(detail.startedAt)}</dd>
 			</div>

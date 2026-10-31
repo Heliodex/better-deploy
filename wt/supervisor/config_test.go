@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestAppConfigGetAndPatch(t *testing.T) {
@@ -80,6 +81,44 @@ func TestAppConfigGetAndPatch(t *testing.T) {
 	}
 	if saved.Host != "new.localhost" || saved.Health != "/ready" || saved.MemoryMB != 256 || saved.DiskMB != 512 || saved.Build != "make app" {
 		t.Errorf("saved config = %+v", saved)
+	}
+}
+
+func TestAppConfigPatchesHealthSettings(t *testing.T) {
+	dir := t.TempDir()
+	cfg := appConfig{Name: "demo", Host: "demo.localhost", Health: "/healthz", Env: map[string]string{}}
+	cfg, err := normalizeAppConfig(cfg, "demo", "localhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := persistAppConfig(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	s := testSupervisor()
+	a := &app{name: "demo", dir: dir, cfg: cfg}
+	s.apps["demo"] = a
+	s.hosts[cfg.Host] = a
+
+	patch := `{"startup_timeout":"30s","health_interval":"5s","health_failures":3,"restart_on_unhealthy":true}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(patch))
+	req.Header.Set("Authorization", "Bearer secret")
+	s.handleAppConfig(rec, req, "demo")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PATCH config status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var got appConfigResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.StartupTimeout != "30s" || got.HealthInterval != "5s" || got.HealthFailures != 3 || !got.RestartOnUnhealthy {
+		t.Errorf("PATCH health config = %+v", got)
+	}
+	a.mu.Lock()
+	live := a.cfg
+	a.mu.Unlock()
+	if live.startupTimeout != 30*time.Second || live.healthInterval != 5*time.Second {
+		t.Errorf("live health durations = %+v", live)
 	}
 }
 

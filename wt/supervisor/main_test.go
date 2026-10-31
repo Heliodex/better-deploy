@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -220,7 +221,7 @@ func TestHandleProxyLogsRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := &app{name: "test", cfg: appConfig{Host: "app.example"}, logs: logs}
+	a := &app{name: "test", cfg: appConfig{Host: "app.example"}, logs: logs, cmd: &exec.Cmd{}, ready: true}
 	a.proxy = s.newProxy(&app{name: "test", port: port})
 	s.apps["test"] = a
 	s.hosts["app.example"] = a
@@ -311,6 +312,33 @@ func TestWaitReadyRequiresSuccessStatus(t *testing.T) {
 	}
 }
 
+func TestWaitReadyHonorsStartupTimeout(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "still migrating", http.StatusInternalServerError)
+	}))
+	defer backend.Close()
+
+	parsed, err := url.Parse(backend.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(parsed.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := &supervisor{}
+	a := &app{port: port, cfg: appConfig{Health: "/", startupTimeout: 150 * time.Millisecond}}
+	started := time.Now()
+	err = s.waitReady(a, make(chan struct{}))
+	if err == nil || !strings.Contains(err.Error(), "150ms") {
+		t.Fatalf("waitReady error = %v, want the configured 150ms timeout", err)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Errorf("waitReady waited %s for a 150ms timeout", elapsed)
+	}
+}
+
 func TestHandleRestartRestartsSchedule(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "main.cwasm"), []byte("cwasm"), 0o644); err != nil {
@@ -383,7 +411,7 @@ func TestHandleProxyTracksInFlightRequests(t *testing.T) {
 	}
 
 	s := testSupervisor()
-	a := &app{name: "demo", port: port, cfg: appConfig{Host: "demo.localhost"}}
+	a := &app{name: "demo", port: port, cfg: appConfig{Host: "demo.localhost"}, cmd: &exec.Cmd{}, ready: true}
 	a.proxy = s.newProxy(a)
 	s.hosts["demo.localhost"] = a
 
@@ -421,7 +449,7 @@ func TestHandlerLetsAppHostsOwnAdminPaths(t *testing.T) {
 	}
 
 	s := testSupervisor()
-	a := &app{name: "demo", port: port, cfg: appConfig{Host: "demo.localhost"}}
+	a := &app{name: "demo", port: port, cfg: appConfig{Host: "demo.localhost"}, cmd: &exec.Cmd{}, ready: true}
 	a.proxy = s.newProxy(a)
 	s.hosts["demo.localhost"] = a
 	handler := s.handler()

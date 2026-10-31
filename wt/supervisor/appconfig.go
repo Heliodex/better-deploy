@@ -14,6 +14,12 @@ import (
 	"time"
 )
 
+const (
+	defaultStartupTimeout = 15 * time.Second
+	minStartupTimeout     = time.Second
+	maxStartupTimeout     = 10 * time.Minute
+)
+
 func env(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
@@ -63,6 +69,12 @@ func sameRuntimeConfig(a, b appConfig) bool {
 		return false
 	}
 	if a.requestTimeout != b.requestTimeout || a.Network != b.Network {
+		return false
+	}
+	if a.StartupTimeout != b.StartupTimeout || a.HealthInterval != b.HealthInterval {
+		return false
+	}
+	if a.HealthFailures != b.HealthFailures || a.RestartOnUnhealthy != b.RestartOnUnhealthy {
 		return false
 	}
 	return slices.Equal(a.Schedule, b.Schedule)
@@ -127,6 +139,62 @@ func parseRequestTimeout(value string) (time.Duration, error) {
 	return timeout, nil
 }
 
+// parseStartupTimeout validates how long a new process may take to answer its health path.
+func parseStartupTimeout(value string) (time.Duration, error) {
+	if strings.TrimSpace(value) == "" {
+		return defaultStartupTimeout, nil
+	}
+	timeout, err := time.ParseDuration(value)
+	if err != nil || timeout < minStartupTimeout || timeout > maxStartupTimeout {
+		return 0, fmt.Errorf("startup_timeout %q must be a duration between %s and %s", value, minStartupTimeout, maxStartupTimeout)
+	}
+	return timeout, nil
+}
+
+// parseHealthInterval validates how often a running app is probed.
+func parseHealthInterval(value string) (time.Duration, error) {
+	if strings.TrimSpace(value) == "" {
+		return defaultHealthInterval, nil
+	}
+	interval, err := time.ParseDuration(value)
+	if err != nil || interval < minHealthInterval || interval > maxHealthInterval {
+		return 0, fmt.Errorf("health_interval %q must be a duration between %s and %s", value, minHealthInterval, maxHealthInterval)
+	}
+	return interval, nil
+}
+
+// parseHealthFailures validates the consecutive failure count that marks an app unready.
+func parseHealthFailures(value int) (int, error) {
+	if value == 0 {
+		return defaultHealthFailures, nil
+	}
+	if value < minHealthFailures || value > maxHealthFailures {
+		return 0, fmt.Errorf("health_failures must be between %d and %d", minHealthFailures, maxHealthFailures)
+	}
+	return value, nil
+}
+
+func (cfg appConfig) startupLimit() time.Duration {
+	if cfg.startupTimeout > 0 {
+		return cfg.startupTimeout
+	}
+	return defaultStartupTimeout
+}
+
+func (cfg appConfig) probeInterval() time.Duration {
+	if cfg.healthInterval > 0 {
+		return cfg.healthInterval
+	}
+	return defaultHealthInterval
+}
+
+func (cfg appConfig) failureLimit() int {
+	if cfg.HealthFailures > 0 {
+		return cfg.HealthFailures
+	}
+	return defaultHealthFailures
+}
+
 // parseScheduleInterval validates an entry's period and reports how often it fires.
 func parseScheduleInterval(entry scheduleConfig) (time.Duration, error) {
 	every, err := time.ParseDuration(entry.Every)
@@ -152,7 +220,7 @@ func normalizeAppConfig(cfg appConfig, name, domain string) (appConfig, error) {
 		return cfg, err
 	}
 	if cfg.Health == "" {
-		cfg.Health = "/"
+		cfg.Health = defaultHealthPath
 	}
 	if !strings.HasPrefix(cfg.Health, "/") {
 		return cfg, fmt.Errorf("health must start with /")
@@ -186,6 +254,27 @@ func normalizeAppConfig(cfg appConfig, name, domain string) (appConfig, error) {
 		return cfg, err
 	}
 	cfg.requestTimeout = timeout
+	if cfg.StartupTimeout == "" {
+		cfg.StartupTimeout = defaultStartupTimeout.String()
+	}
+	startup, err := parseStartupTimeout(cfg.StartupTimeout)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.startupTimeout = startup
+	if cfg.HealthInterval == "" {
+		cfg.HealthInterval = defaultHealthInterval.String()
+	}
+	interval, err := parseHealthInterval(cfg.HealthInterval)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.healthInterval = interval
+	failures, err := parseHealthFailures(cfg.HealthFailures)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.HealthFailures = failures
 	for i := range cfg.Schedule {
 		entry := &cfg.Schedule[i]
 		if !strings.HasPrefix(entry.Path, "/") {

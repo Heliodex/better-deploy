@@ -31,6 +31,7 @@ const appInfoSchema = object({
 	overQuota: optional(boolean()),
 	pid: optional(pipe(number(), integer())),
 	port: pipe(number(), integer(), minValue(0)),
+	ready: optional(boolean()),
 	sampledAt: pipe(string(), minLength(1)),
 	startedAt: pipe(string(), minLength(1)),
 	status: picklist(["running", "stopped", "unhealthy", "restarting"]),
@@ -351,14 +352,18 @@ const appConfigSchema = object({
 	disk_mb: pipe(number(), minValue(0)),
 	env_keys: array(string()),
 	health: pipe(string(), minLength(1)),
+	health_failures: pipe(number(), minValue(1)),
+	health_interval: string(),
 	host: pipe(string(), minLength(1)),
 	max_concurrency: pipe(number(), minValue(0)),
 	memory_mb: pipe(number(), minValue(0)),
 	name: pipe(string(), minLength(1)),
 	network: picklist(["inherit", "none"]),
 	request_timeout: string(),
+	restart_on_unhealthy: boolean(),
 	restart_required: optional(boolean()),
 	schedule: array(unknownSchema()),
+	startup_timeout: string(),
 })
 
 export type AppConfig = InferOutput<typeof appConfigSchema>
@@ -366,11 +371,15 @@ export type AppConfig = InferOutput<typeof appConfigSchema>
 export interface AppConfigPatch {
 	disk_mb?: number
 	health?: string
+	health_failures?: number
+	health_interval?: string
 	host?: string
 	max_concurrency?: number
 	memory_mb?: number
 	network?: "inherit" | "none"
 	request_timeout?: string
+	restart_on_unhealthy?: boolean
+	startup_timeout?: string
 }
 
 export const fetchAppConfig = (token: string, name: string): Promise<AppConfig> =>
@@ -408,7 +417,11 @@ export const restoreBackup = (token: string, name: string, backup: string): Prom
 export const importBackup = (token: string, name: string, file: File): Promise<BackupsResult> => {
 	const body = new FormData()
 	body.append("snapshot", file)
-	return request(`/apps/${encodeURIComponent(name)}/backups/import`, { body, method: "POST", token }, backupsResponseSchema)
+	return request(
+		`/apps/${encodeURIComponent(name)}/backups/import`,
+		{ body, method: "POST", token },
+		backupsResponseSchema,
+	)
 }
 
 export const fetchDeployments = (token: string, name: string): Promise<DeploymentInfo[]> =>

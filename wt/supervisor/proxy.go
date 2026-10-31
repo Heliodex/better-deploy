@@ -108,11 +108,20 @@ func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
 	defer a.requests.Done()
 	started := time.Now()
 	wrapped := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+	static, ready := a.servingState()
 
-	// Static files come from the bundle and do not consume the app's concurrency slots.
-	if a.serveStatic(wrapped, r) {
+	// Static files come from the bundle and do not consume the app's concurrency slots, but a stopped app does not serve them.
+	if static && a.serveStatic(wrapped, r) {
 		if a.logs != nil {
 			a.logs.logSupervisor(formatAccessLog(r.Method, wrapped.status, time.Since(started), r.URL.RequestURI()))
+		}
+		return
+	}
+	if !ready {
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "app not ready", http.StatusServiceUnavailable)
+		if a.logs != nil {
+			a.logs.logSupervisor(formatAccessLog(r.Method, http.StatusServiceUnavailable, time.Since(started), r.URL.RequestURI()))
 		}
 		return
 	}

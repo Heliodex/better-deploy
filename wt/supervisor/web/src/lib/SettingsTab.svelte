@@ -16,27 +16,19 @@ interface Props {
 	status: string
 }
 
-let {
-	busy,
-	config,
-	error,
-	loading,
-	message,
-	ondelete,
-	onreload,
-	onsave,
-	onstart,
-	onstop,
-	saving,
-	status,
-}: Props = $props()
+let { busy, config, error, loading, message, ondelete, onreload, onsave, onstart, onstop, saving, status }: Props =
+	$props()
 
 let host = $state("")
-let health = $state("/")
+let health = $state("/healthz")
 let memoryMB = $state(0)
 let diskMB = $state(0)
 let maxConcurrent = $state(0)
 let requestTimeout = $state("")
+let startupTimeout = $state("15s")
+let healthInterval = $state("10s")
+let healthFailures = $state(2)
+let restartOnUnhealthy = $state(false)
 let network = $state<"inherit" | "none">("inherit")
 let confirmDelete = $state(false)
 let purge = $state(false)
@@ -50,6 +42,10 @@ $effect(() => {
 	diskMB = current.disk_mb
 	maxConcurrent = current.max_concurrency
 	requestTimeout = current.request_timeout
+	startupTimeout = current.startup_timeout
+	healthInterval = current.health_interval
+	healthFailures = current.health_failures
+	restartOnUnhealthy = current.restart_on_unhealthy
 	network = current.network
 })
 
@@ -58,11 +54,15 @@ function save(event: SubmitEvent): void {
 	void onsave({
 		disk_mb: diskMB,
 		health: health.trim(),
+		health_failures: healthFailures,
+		health_interval: healthInterval.trim(),
 		host: host.trim(),
 		max_concurrency: maxConcurrent,
 		memory_mb: memoryMB,
 		network,
 		request_timeout: requestTimeout.trim(),
+		restart_on_unhealthy: restartOnUnhealthy,
+		startup_timeout: startupTimeout.trim(),
 	})
 }
 
@@ -84,7 +84,9 @@ async function remove(): Promise<void> {
 >
 	<div class="flex flex-wrap items-center justify-between gap-2">
 		<div class="flex items-center gap-2">
-			<h3 class="text-xs font-semibold tracking-wide text-neutral-400 uppercase" id="settings-title">Lifecycle</h3>
+			<h3 class="text-xs font-semibold tracking-wide text-neutral-400 uppercase" id="settings-title">
+				Lifecycle
+			</h3>
 			<span class="border border-line px-1 text-[10px] tracking-wide text-neutral-400 uppercase">{status}</span>
 		</div>
 		<div class="flex flex-wrap items-center gap-2">
@@ -154,11 +156,33 @@ async function remove(): Promise<void> {
 				>
 			</label>
 			<label class="flex flex-col gap-1">
+				<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Startup timeout</span>
+				<input aria-label="Startup timeout" class="field" bind:value={startupTimeout}>
+			</label>
+			<label class="flex flex-col gap-1">
+				<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Health interval</span>
+				<input aria-label="Health interval" class="field" bind:value={healthInterval}>
+			</label>
+			<label class="flex flex-col gap-1">
+				<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Health failures</span>
+				<input
+					aria-label="Health failure threshold"
+					class="field"
+					min="1"
+					type="number"
+					bind:value={healthFailures}
+				>
+			</label>
+			<label class="flex flex-col gap-1">
 				<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Network</span>
 				<select aria-label="Network access" class="field" bind:value={network}>
 					<option value="inherit">inherit (storage and outbound)</option>
 					<option value="none">none (no sockets)</option>
 				</select>
+			</label>
+			<label class="flex items-center gap-2 self-end pb-1 text-sm text-neutral-300">
+				<input class="accent-primary-500" type="checkbox" bind:checked={restartOnUnhealthy}>
+				Restart when health checks fail
 			</label>
 			<div class="flex flex-col gap-1">
 				<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Env keys</span>
@@ -172,7 +196,7 @@ async function remove(): Promise<void> {
 				</button>
 				<p class="text-xs text-neutral-500">
 					Env values stay hidden. Memory, concurrency, timeout and network changes need a restart; host and
-					health apply immediately.
+					health settings apply immediately.
 				</p>
 			</div>
 		</form>
@@ -186,12 +210,7 @@ async function remove(): Promise<void> {
 				<input class="accent-red-500" bind:checked={purge} type="checkbox">
 				Also remove the database, backups, logs, deployment history and /data
 			</label>
-			<button
-				class={confirmDelete ? "btn btn-danger" : "btn"}
-				disabled={busy}
-				onclick={remove}
-				type="button"
-			>
+			<button class={confirmDelete ? "btn btn-danger" : "btn"} disabled={busy} onclick={remove} type="button">
 				{confirmDelete ? "Click again to delete" : "Delete app"}
 			</button>
 		</section>

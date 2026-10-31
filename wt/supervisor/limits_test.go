@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,7 +24,7 @@ func backendApp(t testing.TB, s *supervisor, handler http.Handler, cfg appConfig
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := &app{name: "demo", port: port, cfg: cfg}
+	a := &app{name: "demo", port: port, cfg: cfg, cmd: &exec.Cmd{}, healthOK: true, ready: true}
 	if cfg.MaxConcurrent > 0 {
 		a.slots = make(chan struct{}, cfg.MaxConcurrent)
 	}
@@ -107,6 +108,48 @@ func TestNormalizeRequestLimits(t *testing.T) {
 		{RequestTimeout: "48h"},
 		{MaxConcurrent: -1},
 		{Network: "open"},
+	} {
+		if _, err := normalizeAppConfig(bad, "demo", "localhost"); err == nil {
+			t.Errorf("config %+v should be rejected", bad)
+		}
+	}
+}
+
+func TestNormalizeHealthSettings(t *testing.T) {
+	cfg, err := normalizeAppConfig(appConfig{}, "demo", "localhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Health != defaultHealthPath {
+		t.Errorf("default health = %q, want %q", cfg.Health, defaultHealthPath)
+	}
+	if cfg.startupTimeout != defaultStartupTimeout || cfg.healthInterval != defaultHealthInterval || cfg.HealthFailures != defaultHealthFailures {
+		t.Errorf("default health settings = %+v", cfg)
+	}
+
+	cfg, err = normalizeAppConfig(appConfig{
+		StartupTimeout:     "30s",
+		HealthInterval:     "5s",
+		HealthFailures:     3,
+		RestartOnUnhealthy: true,
+	}, "demo", "localhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.startupTimeout != 30*time.Second || cfg.healthInterval != 5*time.Second {
+		t.Errorf("parsed health settings = %+v", cfg)
+	}
+	if cfg.HealthFailures != 3 || !cfg.RestartOnUnhealthy {
+		t.Errorf("health failure settings = %+v", cfg)
+	}
+
+	for _, bad := range []appConfig{
+		{StartupTimeout: "soon"},
+		{StartupTimeout: "100ms"},
+		{HealthInterval: "100ms"},
+		{HealthInterval: "2h"},
+		{HealthFailures: -1},
+		{HealthFailures: 101},
 	} {
 		if _, err := normalizeAppConfig(bad, "demo", "localhost"); err == nil {
 			t.Errorf("config %+v should be rejected", bad)

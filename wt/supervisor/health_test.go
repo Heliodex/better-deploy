@@ -18,6 +18,7 @@ func testApp(port int) *app {
 		cfg:      appConfig{Health: "/"},
 		cmd:      &exec.Cmd{},
 		healthOK: true,
+		ready:    true,
 	}
 }
 
@@ -33,7 +34,8 @@ func TestAppStatusLocked(t *testing.T) {
 		{"retired", &app{retired: true}, "stopped"},
 		{"starting", &app{starting: true}, "restarting"},
 		{"waiting to restart", &app{timer: timer}, "restarting"},
-		{"healthy", &app{cmd: &exec.Cmd{}, healthOK: true}, "running"},
+		{"healthy", &app{cmd: &exec.Cmd{}, healthOK: true, ready: true}, "running"},
+		{"unready", &app{cmd: &exec.Cmd{}, healthOK: true}, "unhealthy"},
 		{"unhealthy", &app{cmd: &exec.Cmd{}}, "unhealthy"},
 		{"exited", &app{exited: true}, "stopped"},
 	}
@@ -52,8 +54,8 @@ func TestRecordHealthTransitions(t *testing.T) {
 		t.Error("first failure should publish the new error")
 	}
 	a.mu.Lock()
-	if !a.healthOK || a.healthFailures != 1 || a.lastError != "connection refused" {
-		t.Errorf("after one failure: healthy = %v, failures = %d, error = %q", a.healthOK, a.healthFailures, a.lastError)
+	if !a.healthOK || !a.ready || a.healthFailures != 1 || a.lastError != "connection refused" {
+		t.Errorf("after one failure: healthy = %v, ready = %v, failures = %d, error = %q", a.healthOK, a.ready, a.healthFailures, a.lastError)
 	}
 	a.mu.Unlock()
 
@@ -61,8 +63,8 @@ func TestRecordHealthTransitions(t *testing.T) {
 		t.Error("second failure should publish the unhealthy state")
 	}
 	a.mu.Lock()
-	if a.healthOK || a.healthFailures != 2 {
-		t.Errorf("after two failures: healthy = %v, failures = %d", a.healthOK, a.healthFailures)
+	if a.healthOK || a.ready || a.healthFailures != 2 {
+		t.Errorf("after two failures: healthy = %v, ready = %v, failures = %d", a.healthOK, a.ready, a.healthFailures)
 	}
 	a.mu.Unlock()
 
@@ -76,8 +78,8 @@ func TestRecordHealthTransitions(t *testing.T) {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if !a.healthOK || a.healthFailures != 0 || a.lastError != "" || !a.lastHealthy.Equal(now.UTC()) {
-		t.Errorf("after recovery: healthy = %v, failures = %d, error = %q, lastHealthy = %s", a.healthOK, a.healthFailures, a.lastError, a.lastHealthy)
+	if !a.healthOK || !a.ready || a.healthFailures != 0 || a.lastError != "" || !a.lastHealthy.Equal(now.UTC()) {
+		t.Errorf("after recovery: healthy = %v, ready = %v, failures = %d, error = %q, lastHealthy = %s", a.healthOK, a.ready, a.healthFailures, a.lastError, a.lastHealthy)
 	}
 }
 
@@ -126,6 +128,155 @@ func TestCheckHealthSkipsStoppedApp(t *testing.T) {
 	a := &app{name: "demo", port: 1, cfg: appConfig{Health: "/"}, cmd: nil}
 	if changed := a.recordHealth(errString("boom"), time.Now()); changed {
 		t.Error("a stopped app should not record health")
+	}
+}
+
+func TestRecordHealthHonorsFailureLimit(t *testing.T) {
+	a := testApp(1)
+	a.cfg.HealthFailures = 3
+
+	for range 2 {
+		a.recordHealth(errString("boom"), time.Now())
+	}
+	a.mu.Lock()
+	if !a.ready {
+		t.Error("app became unready before the configured failure count")
+	}
+	a.mu.Unlock()
+	a.recordHealth(errString("boom"), time.Now())
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.ready {
+		t.Error("app stayed ready after the configured failure count")
+	}
+}
+
+func TestCheckAllHealthHonorsInterval(t *testing.T) {
+	s := testSupervisor()
+	a := testApp(1)
+	a.nextHealth = time.Now().Add(time.Minute)
+	s.apps[a.name] = a
+	s.hosts["demo.localhost"] = a
+
+	s.checkAllHealth()
+	a.mu.Lock()
+	failures := a.healthFailures
+	a.mu.Unlock()
+	if failures != 0 {
+		t.Errorf("probe ran before the health interval: failures = %d", failures)
+	}
+
+	a.mu.Lock()
+	a.nextHealth = time.Time{}
+	a.mu.Unlock()
+	s.checkAllHealth()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.healthFailures != 1 {
+		t.Errorf("failures = %d, want a due probe", a.healthFailures)
+	}
+}
+
+func TestReadinessBlocksTrafficUntilRecovery(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer backend.Close()
+	parsed, err := url.Parse(backend.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(parsed.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := testSupervisor()
+	a := &app{name: "demo", port: port, cfg: appConfig{Health: "/"}, cmd: &exec.Cmd{}, healthOK: true, ready: true}
+	a.proxy = s.newProxy(a)
+	s.apps[a.name] = a
+	s.hosts["demo.localhost"] = a
+
+	rec := httptest.NewRecorder()
+	s.handleProxy(rec, httptest.NewRequest(http.MethodGet, "http://demo.localhost/", nil))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("ready app status = %d, want 204", rec.Code)
+	}
+
+	a.mu.Lock()
+	a.ready = false
+	a.healthOK = false
+	a.mu.Unlock()
+	rec = httptest.NewRecorder()
+	s.handleProxy(rec, httptest.NewRequest(http.MethodGet, "http://demo.localhost/", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("unready app status = %d, want 503", rec.Code)
+	}
+	if rec.Header().Get("Retry-After") == "" {
+		t.Error("unready response has no Retry-After")
+	}
+
+	s.checkHealth(a)
+	rec = httptest.NewRecorder()
+	s.handleProxy(rec, httptest.NewRequest(http.MethodGet, "http://demo.localhost/", nil))
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("recovered app status = %d, want 204", rec.Code)
+	}
+}
+
+func TestRestartOnUnhealthyKillsProcess(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "not ready", http.StatusInternalServerError)
+	}))
+	defer backend.Close()
+	parsed, err := url.Parse(backend.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(parsed.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(done)
+	}()
+	t.Cleanup(func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+	})
+
+	s := testSupervisor()
+	a := &app{
+		name:           "demo",
+		port:           port,
+		cfg:            appConfig{Health: "/", HealthFailures: 1, RestartOnUnhealthy: true},
+		cmd:            cmd,
+		done:           done,
+		healthOK:       true,
+		ready:          true,
+		healthFailures: 0,
+	}
+	s.apps[a.name] = a
+	s.hosts["demo.localhost"] = a
+
+	s.checkHealth(a)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("unhealthy app was not restarted")
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.ready {
+		t.Error("app stayed ready after a failed health check")
 	}
 }
 

@@ -31,7 +31,6 @@ const (
 	// Backup archives are internal and may hold more data than an uploaded bundle.
 	maxBackupExtractBytes = 8 << 30
 	maxBackupTarFiles     = 100_000
-	readyTimeout          = 15 * time.Second
 	stopTimeout           = 5 * time.Second
 	drainTimeout          = 10 * time.Second
 	defaultCacheMaxBytes  = 2 << 30
@@ -45,19 +44,25 @@ type config struct {
 }
 
 type appConfig struct {
-	Name           string            `json:"name"`
-	Host           string            `json:"host"`
-	Health         string            `json:"health"`
-	Env            map[string]string `json:"env"`
-	Build          string            `json:"build,omitempty"`
-	MemoryMB       int               `json:"memory_mb,omitempty"`
-	DiskMB         int               `json:"disk_mb,omitempty"`
-	MaxConcurrent  int               `json:"max_concurrency,omitempty"`
-	RequestTimeout string            `json:"request_timeout,omitempty"`
-	Network        string            `json:"network,omitempty"`
-	Schedule       []scheduleConfig  `json:"schedule,omitempty"`
+	Name               string            `json:"name"`
+	Host               string            `json:"host"`
+	Health             string            `json:"health"`
+	Env                map[string]string `json:"env"`
+	Build              string            `json:"build,omitempty"`
+	MemoryMB           int               `json:"memory_mb,omitempty"`
+	DiskMB             int               `json:"disk_mb,omitempty"`
+	MaxConcurrent      int               `json:"max_concurrency,omitempty"`
+	RequestTimeout     string            `json:"request_timeout,omitempty"`
+	StartupTimeout     string            `json:"startup_timeout,omitempty"`
+	HealthInterval     string            `json:"health_interval,omitempty"`
+	HealthFailures     int               `json:"health_failures,omitempty"`
+	RestartOnUnhealthy bool              `json:"restart_on_unhealthy,omitempty"`
+	Network            string            `json:"network,omitempty"`
+	Schedule           []scheduleConfig  `json:"schedule,omitempty"`
 
 	requestTimeout time.Duration
+	startupTimeout time.Duration
+	healthInterval time.Duration
 }
 
 // scheduleConfig asks the supervisor to call an app endpoint on a timer. Components cannot run their own background loops under `wasmtime serve`, so time is driven from the host.
@@ -87,17 +92,20 @@ type app struct {
 	history           diskUsageCache
 	requests          sync.WaitGroup // in-flight proxied requests, drained before a replaced version stops
 
-	mu              sync.Mutex
-	scheduleCancel  context.CancelFunc
-	cmd             *exec.Cmd
-	done            chan struct{}
-	exited, retired bool
-	starting        bool
+	mu               sync.Mutex
+	scheduleCancel   context.CancelFunc
+	cmd              *exec.Cmd
+	done             chan struct{}
+	exited, retired  bool
+	starting         bool
+	unhealthyRestart bool
 
 	slots          chan struct{}
 	wasmEpoch      bool
 	healthOK       bool
+	ready          bool
 	healthFailures int
+	nextHealth     time.Time
 	lastHealthy    time.Time
 	lastError      string
 }
@@ -181,6 +189,7 @@ func (s *supervisor) info(a *app) appInfo {
 	info.LastHealthy = a.lastHealthy
 	info.LastError = a.lastError
 	info.CurrentDigest = a.digest
+	info.Ready = a.ready
 	if a.cmd != nil && a.cmd.Process != nil && !a.exited {
 		info.PID = a.cmd.Process.Pid
 	}
@@ -237,6 +246,7 @@ type appInfo struct {
 	LastHealthy    time.Time `json:"lastHealthy,omitempty"`
 	LastError      string    `json:"lastError,omitempty"`
 	CurrentDigest  string    `json:"currentDigest,omitempty"`
+	Ready          bool      `json:"ready"`
 }
 
 func (s *supervisor) stopAll() {

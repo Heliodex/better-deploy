@@ -57,10 +57,12 @@ func (s *supervisor) waitReady(a *app, done <-chan struct{}) error {
 	client := &http.Client{Timeout: 500 * time.Millisecond}
 	a.mu.Lock()
 	health := a.cfg.Health
+	limit := a.cfg.startupLimit()
 	a.mu.Unlock()
 	target := fmt.Sprintf("http://127.0.0.1:%d%s", a.port, health)
-	deadline := time.Now().Add(readyTimeout)
+	deadline := time.Now().Add(limit)
 	lastFailure := ""
+	wait := 50 * time.Millisecond
 
 	for {
 		select {
@@ -81,11 +83,12 @@ func (s *supervisor) waitReady(a *app, done <-chan struct{}) error {
 		}
 		if time.Now().After(deadline) {
 			if lastFailure != "" {
-				return fmt.Errorf("no healthy response on %s within %s (last: %s)", target, readyTimeout, lastFailure)
+				return fmt.Errorf("no healthy response on %s within %s (last: %s)", target, limit, lastFailure)
 			}
-			return fmt.Errorf("no response on %s within %s", target, readyTimeout)
+			return fmt.Errorf("no response on %s within %s", target, limit)
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(wait)
+		wait = min(wait*2, time.Second)
 	}
 }
 
@@ -115,6 +118,7 @@ func (s *supervisor) stop(a *app) {
 	a.mu.Lock()
 	a.retired = true
 	a.healthOK = false
+	a.ready = false
 	if a.timer != nil {
 		a.timer.Stop()
 		a.timer = nil
@@ -252,6 +256,7 @@ func (s *supervisor) launch(a *app, source string) error {
 		a.cmd = nil
 		a.exited = true
 		a.healthOK = false
+		a.ready = false
 		if err != nil {
 			a.lastError = err.Error()
 		}
@@ -288,7 +293,9 @@ func (s *supervisor) launch(a *app, source string) error {
 	a.mu.Lock()
 	host := a.cfg.Host
 	a.healthOK = true
+	a.ready = true
 	a.healthFailures = 0
+	a.nextHealth = time.Now().Add(a.cfg.probeInterval())
 	a.lastHealthy = time.Now().UTC()
 	a.lastError = ""
 	a.mu.Unlock()

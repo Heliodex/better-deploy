@@ -12,12 +12,19 @@ import (
 )
 
 const (
-	// healthCheckInterval is how often a running app's health endpoint is probed.
-	healthCheckInterval = 10 * time.Second
+	defaultHealthPath = "/healthz"
+	// defaultHealthInterval is how often a running app's health endpoint is probed unless app.json overrides it.
+	defaultHealthInterval = 10 * time.Second
+	minHealthInterval     = time.Second
+	maxHealthInterval     = time.Hour
+	// defaultHealthFailures is the number of consecutive failures before an app is marked unready.
+	defaultHealthFailures = 2
+	minHealthFailures     = 1
+	maxHealthFailures     = 100
+	// healthMonitorInterval is the base tick that decides which apps are due for a probe.
+	healthMonitorInterval = time.Second
 	// healthCheckTimeout caps one probe, so a hung app does not stall the loop.
 	healthCheckTimeout = 3 * time.Second
-	// healthFailureThreshold is the number of consecutive failures before a running app is reported unhealthy.
-	healthFailureThreshold = 2
 )
 
 var healthClient = &http.Client{
@@ -50,7 +57,29 @@ func trimMessage(body []byte) string {
 	return text
 }
 
-// recordHealth folds one probe result into an app's status. It reports whether the visible health state changed.
+// servingState reports whether static files may be served and whether component traffic should be routed.
+func (a *app) servingState() (static, ready bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	running := a.cmd != nil && !a.exited && !a.retired
+	return running, running && a.ready
+}
+
+// healthDue reports whether this app is due for a probe and advances its next probe time.
+func (a *app) healthDue(now time.Time) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cmd == nil || a.exited || a.starting || a.retired {
+		return false
+	}
+	if !a.nextHealth.IsZero() && now.Before(a.nextHealth) {
+		return false
+	}
+	a.nextHealth = now.Add(a.cfg.probeInterval())
+	return true
+}
+
+// recordHealth folds one probe result into an app's readiness. It reports whether the visible health state changed.
 func (a *app) recordHealth(err error, now time.Time) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -58,8 +87,9 @@ func (a *app) recordHealth(err error, now time.Time) bool {
 		return false
 	}
 	if err == nil {
-		changed := !a.healthOK || a.lastError != ""
+		changed := !a.healthOK || !a.ready || a.lastError != ""
 		a.healthOK = true
+		a.ready = true
 		a.healthFailures = 0
 		a.lastHealthy = now.UTC()
 		a.lastError = ""
@@ -68,11 +98,36 @@ func (a *app) recordHealth(err error, now time.Time) bool {
 
 	a.healthFailures++
 	a.lastError = err.Error()
-	if a.healthOK && a.healthFailures >= healthFailureThreshold {
+	wasReady := a.healthOK && a.ready
+	if wasReady && a.healthFailures >= a.cfg.failureLimit() {
 		a.healthOK = false
+		a.ready = false
 		return true
 	}
 	return a.healthFailures == 1
+}
+
+// restartUnhealthy kills a process that failed its health checks when restart_on_unhealthy is set.
+// The normal process watcher then applies the usual restart backoff.
+func (s *supervisor) restartUnhealthy(a *app) {
+	a.mu.Lock()
+	should := a.cfg.RestartOnUnhealthy && !a.ready && !a.retired && !a.starting && a.cmd != nil && !a.exited
+	if !should || a.unhealthyRestart {
+		a.mu.Unlock()
+		return
+	}
+	a.unhealthyRestart = true
+	a.mu.Unlock()
+
+	log.Printf("app %s: restarting after failed health checks", a.name)
+	go func() {
+		defer func() {
+			a.mu.Lock()
+			a.unhealthyRestart = false
+			a.mu.Unlock()
+		}()
+		s.kill(a)
+	}()
 }
 
 // checkHealth probes one app and records the result, ignoring probes for apps that are stopped or starting.
@@ -91,12 +146,19 @@ func (s *supervisor) checkHealth(a *app) {
 		}
 		s.broadcast()
 	}
+	if err != nil {
+		s.restartUnhealthy(a)
+	}
 }
 
-// checkAllHealth probes every registered app concurrently and publishes any status change.
+// checkAllHealth probes apps whose configured interval is due and publishes any status change.
 func (s *supervisor) checkAllHealth() {
+	now := time.Now()
 	var wg sync.WaitGroup
 	for _, a := range s.allApps() {
+		if !a.healthDue(now) {
+			continue
+		}
 		wg.Add(1)
 		go func(a *app) {
 			defer wg.Done()
@@ -108,7 +170,7 @@ func (s *supervisor) checkAllHealth() {
 
 // monitorHealth runs periodic health probes until shutdown.
 func (s *supervisor) monitorHealth() {
-	ticker := time.NewTicker(healthCheckInterval)
+	ticker := time.NewTicker(healthMonitorInterval)
 	defer ticker.Stop()
 	for range ticker.C {
 		if s.stopping.Load() {
@@ -126,7 +188,7 @@ func (a *app) statusLocked() string {
 	case a.starting || (a.cmd == nil && a.timer != nil):
 		return "restarting"
 	case a.cmd != nil && !a.exited:
-		if a.healthOK {
+		if a.ready {
 			return "running"
 		}
 		return "unhealthy"
