@@ -94,7 +94,7 @@ func TestUntrustedEmptyTokenCannotReachAdmin(t *testing.T) {
 	s.cfg.token = ""
 	s.cfg.tenantMode = tenantUntrusted
 
-	for _, target := range []string{"/apps", "/events", "/admin/"} {
+	for _, target := range []string{"/apps", "/events"} {
 		req := httptest.NewRequest(http.MethodGet, target, nil)
 		rec := httptest.NewRecorder()
 		s.adminHandler().ServeHTTP(rec, req)
@@ -103,11 +103,38 @@ func TestUntrustedEmptyTokenCannotReachAdmin(t *testing.T) {
 		}
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{}`))
+	req := httptest.NewRequest(http.MethodGet, "/admin/", nil)
 	rec := httptest.NewRecorder()
+	s.adminHandler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("GET /admin/ with no token = %d, want the public panel shell", rec.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{}`))
+	rec = httptest.NewRecorder()
 	s.adminHandler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("login with no token = %d, want 401", rec.Code)
+	}
+}
+
+func TestAdminStaticIsPublicWhileAPIRemainsProtected(t *testing.T) {
+	s := testSupervisor()
+	s.cfg.tenantMode = tenantUntrusted
+	handler := s.adminHandler()
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("GET /admin/ without a token = %d, want 200", rec.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/apps", nil)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("GET /apps without a token = %d, want 401", rec.Code)
 	}
 }
 

@@ -181,21 +181,12 @@ func (s *supervisor) adminMux() *http.ServeMux {
 	mux.HandleFunc("GET /events", s.handleEvents)
 	mux.HandleFunc("POST /login", s.handleLogin)
 	mux.HandleFunc("POST /logout", s.handleLogout)
-	mux.Handle("/admin", s.guardAdminStatic(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/admin", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin/", http.StatusFound)
-	})))
-	mux.Handle("/admin/", s.guardAdminStatic(http.StripPrefix("/admin", adminStatic())))
-	return mux
-}
-
-// guardAdminStatic keeps the panel's own files behind the token in untrusted mode; trusted mode keeps the existing open panel shell.
-func (s *supervisor) guardAdminStatic(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.cfg.untrusted() && !s.requireAuth(w, r) {
-			return
-		}
-		next.ServeHTTP(w, r)
 	})
+	// The panel shell is public so the browser can load the login form; every API route stays authenticated.
+	mux.Handle("/admin/", http.StripPrefix("/admin", adminStatic()))
+	return mux
 }
 
 // adminHandler serves admin/API routes on the separate admin listener.
