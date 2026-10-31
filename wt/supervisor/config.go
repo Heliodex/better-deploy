@@ -227,6 +227,10 @@ func (s *supervisor) handleAppConfig(w http.ResponseWriter, r *http.Request, nam
 	s.hosts[next.Host] = a
 	s.mu.Unlock()
 
+	if s.storage != nil && cfg.DiskMB != next.DiskMB {
+		s.storage.setQuota(a.name, int64(next.DiskMB)<<20)
+	}
+
 	restartRequired := !maps.Equal(cfg.Env, next.Env) || cfg.MemoryMB != next.MemoryMB ||
 		cfg.DiskMB != next.DiskMB || cfg.CPUMillicores != next.CPUMillicores || cfg.PidsMax != next.PidsMax ||
 		cfg.IOWeight != next.IOWeight || cfg.MaxConcurrent != next.MaxConcurrent ||

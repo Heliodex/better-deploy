@@ -409,6 +409,9 @@ func (s *supervisor) spawn(name, dir string, cfg appConfig) (*app, error) {
 	if err := os.MkdirAll(filepath.Join(s.cfg.stateDir, name), 0o755); err != nil {
 		return nil, fmt.Errorf("state dir: %w", err)
 	}
+	if s.storage != nil {
+		s.storage.setQuota(name, int64(cfg.DiskMB)<<20)
+	}
 
 	cwasm := filepath.Join(dir, "main.cwasm")
 	epoch, err := s.ensureArtifact(dir, cfg.requestTimeout > 0)
