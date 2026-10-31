@@ -26,6 +26,27 @@ func New(httpClient *http.Client) (*Client, error) {
 	return &Client{baseURL: baseURL, token: token, http: httpClient}, nil
 }
 
+// responseError reads the flat error body and keeps both the legacy message and the typed fields.
+func responseError(resp *http.Response) error {
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+	var body errorResponse
+	_ = json.Unmarshal(raw, &body)
+	message := strings.TrimSpace(body.Error)
+	if message == "" {
+		message = strings.TrimSpace(string(raw))
+	}
+	if message == "" {
+		message = resp.Status
+	}
+	return &Error{
+		Status:     resp.StatusCode,
+		Code:       body.Code,
+		Message:    message,
+		SQLiteCode: body.SQLiteCode,
+		Constraint: body.Constraint,
+	}
+}
+
 func (c *Client) post(ctx context.Context, path string, body, out any) error {
 	data, err := json.Marshal(body)
 	if err != nil {
@@ -44,8 +65,7 @@ func (c *Client) post(ctx context.Context, path string, body, out any) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		message, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
-		return fmt.Errorf("storage: %s: %s", resp.Status, strings.TrimSpace(string(message)))
+		return responseError(resp)
 	}
 	if err := json.UnmarshalRead(io.LimitReader(resp.Body, maxResponseBytes), out); err != nil {
 		return fmt.Errorf("storage: decode response: %w", err)
@@ -66,8 +86,7 @@ func (c *Client) get(ctx context.Context, path string, out any) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		message, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
-		return fmt.Errorf("storage: %s: %s", resp.Status, strings.TrimSpace(string(message)))
+		return responseError(resp)
 	}
 	if err := json.UnmarshalRead(io.LimitReader(resp.Body, maxResponseBytes), out); err != nil {
 		return fmt.Errorf("storage: decode response: %w", err)
@@ -98,6 +117,19 @@ func decodeResponseRows(resp response) ([][]any, error) {
 func (c *Client) Query(ctx context.Context, query string, args ...any) (*Rows, error) {
 	var resp response
 	if err := c.post(ctx, "/v1/query", request{SQL: query, Params: encodeParams(args)}, &resp); err != nil {
+		return nil, err
+	}
+	rows, err := decodeResponseRows(resp)
+	if err != nil {
+		return nil, err
+	}
+	return &Rows{Columns: resp.Columns, Truncated: resp.Truncated, rows: rows}, nil
+}
+
+// WriteReturning runs a write that returns rows, such as INSERT ... RETURNING. It is the write counterpart of Query: the change is captured in the change log, unlike an INSERT ... RETURNING sent to Query (which is rejected).
+func (c *Client) WriteReturning(ctx context.Context, query string, args ...any) (*Rows, error) {
+	var resp response
+	if err := c.post(ctx, "/v1/write", request{SQL: query, Params: encodeParams(args)}, &resp); err != nil {
 		return nil, err
 	}
 	rows, err := decodeResponseRows(resp)

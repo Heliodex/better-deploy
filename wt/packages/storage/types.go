@@ -3,12 +3,29 @@ package storage
 import (
 	"encoding/json/jsontext"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 )
 
 // ErrNoRows is returned by Row.Scan when the query returned no rows.
 var ErrNoRows = errors.New("storage: no rows")
+
+// Error is a typed storage service error. Status is the HTTP status, Code is the stable server code such as constraint or busy, and the message is also kept in the original string field on the wire.
+type Error struct {
+	Status     int
+	Code       string
+	Message    string
+	SQLiteCode int
+	Constraint string
+}
+
+func (e *Error) Error() string {
+	if e.Code != "" {
+		return fmt.Sprintf("storage: %s: %s", e.Code, e.Message)
+	}
+	return fmt.Sprintf("storage: HTTP %d: %s", e.Status, e.Message)
+}
 
 // Client talks to the storage service with a wasi:http transport in components.
 type Client struct {
@@ -78,6 +95,13 @@ type response struct {
 	RowsAffected int64              `json:"rows_affected"`
 	LastInsertID int64              `json:"last_insert_id"`
 	Truncated    bool               `json:"truncated"`
+}
+
+type errorResponse struct {
+	Error      string `json:"error"`
+	Code       string `json:"code"`
+	SQLiteCode int    `json:"sqlite_code"`
+	Constraint string `json:"constraint"`
 }
 
 type batchResponse struct {

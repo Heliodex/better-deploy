@@ -320,3 +320,58 @@ func TestClientWithTxRollsBackOnError(t *testing.T) {
 		t.Errorf("paths = %v, want a rollback", paths)
 	}
 }
+
+func TestClientTypedError(t *testing.T) {
+	client := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("content-type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_, _ = io.WriteString(w, `{"error":"constraint failed: UNIQUE constraint failed: items.id","code":"constraint","sqlite_code":2067,"constraint":"UNIQUE"}`)
+	})
+
+	_, err := client.Exec(context.Background(), `insert into items (id) values (?)`, "a")
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	var storageErr *Error
+	if !errors.As(err, &storageErr) {
+		t.Fatalf("error = %v (%T), want *Error", err, err)
+	}
+	if storageErr.Status != http.StatusConflict || storageErr.Code != "constraint" || storageErr.SQLiteCode != 2067 || storageErr.Constraint != "UNIQUE" {
+		t.Errorf("error = %+v", storageErr)
+	}
+	if !strings.Contains(storageErr.Message, "UNIQUE constraint failed") {
+		t.Errorf("message = %q", storageErr.Message)
+	}
+}
+
+func TestClientWriteReturning(t *testing.T) {
+	var received request
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/write" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		if err := json.UnmarshalRead(r.Body, &received); err != nil {
+			t.Errorf("body: %v", err)
+		}
+		_, _ = io.WriteString(w, `{"columns":["id","value"],"rows":[["a","one"]],"rows_affected":1}`)
+	})
+
+	rows, err := client.WriteReturning(context.Background(), `insert into items (id, value) values (?, ?) returning id, value`, "a", "one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	if received.SQL != `insert into items (id, value) values (?, ?) returning id, value` || len(received.Params) != 2 {
+		t.Errorf("request = %+v", received)
+	}
+	if !rows.Next() {
+		t.Fatal("no row")
+	}
+	var id, value string
+	if err := rows.Scan(&id, &value); err != nil {
+		t.Fatal(err)
+	}
+	if id != "a" || value != "one" {
+		t.Errorf("row = %q %q", id, value)
+	}
+}
