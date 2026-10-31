@@ -11,7 +11,10 @@ import (
 	"time"
 )
 
-const diskUsageInterval = 10 * time.Second
+const (
+	diskUsageInterval  = 10 * time.Second
+	diskBudgetInterval = time.Minute
+)
 
 // maxAppEntries bounds inode use as well as bytes. It is a variable so tests can use a small limit.
 var maxAppEntries int64 = 100_000
@@ -245,14 +248,18 @@ func (s *supervisor) overBudget() bool {
 }
 
 // rejectOverBudget writes 507 and reports true when the global budget is already exceeded.
+// It measures once, and fails closed with 500 when usage cannot be measured.
 func (s *supervisor) rejectOverBudget(w http.ResponseWriter) bool {
-	if !s.overBudget() {
+	if s.cfg.diskBudgetBytes <= 0 {
 		return false
 	}
 	totals, err := s.diskTotals()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "measure disk usage: "+err.Error())
 		return true
+	}
+	if totals.totalBytes <= s.cfg.diskBudgetBytes {
+		return false
 	}
 	writeError(w, http.StatusInsufficientStorage, fmt.Sprintf(
 		"global disk budget exceeded: %d of %d bytes used; free space or raise WT_DISK_BUDGET_MB",
@@ -290,7 +297,7 @@ func (s *supervisor) handleUsage(w http.ResponseWriter, r *http.Request) {
 
 // monitorDiskBudget logs crossing the global budget without deleting data or stopping apps.
 func (s *supervisor) monitorDiskBudget() {
-	ticker := time.NewTicker(diskUsageInterval)
+	ticker := time.NewTicker(diskBudgetInterval)
 	defer ticker.Stop()
 	over := false
 	for range ticker.C {
