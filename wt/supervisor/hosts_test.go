@@ -227,6 +227,36 @@ func TestAppConfigHostAliases(t *testing.T) {
 	}
 }
 
+func TestInstallStaticUpdatesHostAliases(t *testing.T) {
+	s := testSupervisor()
+	appDir := t.TempDir()
+	source := t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "app.json"), []byte(`{"name":"demo"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := &app{
+		name: "demo",
+		dir:  appDir,
+		cfg:  appConfig{Name: "demo", Host: "demo.example.com", Hosts: []string{"old.example.com"}},
+	}
+	s.register(a)
+
+	next := a.cfg
+	next.Hosts = []string{"new.example.com"}
+	if err := s.installStatic(a, next, source); err != nil {
+		t.Fatal(err)
+	}
+	if s.hosts["new.example.com"] != a {
+		t.Errorf("new alias was not routed: %v", s.hosts)
+	}
+	if s.hosts["old.example.com"] != nil {
+		t.Errorf("old alias was left behind: %v", s.hosts)
+	}
+	if s.hosts["demo.example.com"] != a {
+		t.Errorf("primary host was lost: %v", s.hosts)
+	}
+}
+
 func TestAppConfigRejectsWildcardAliasConflict(t *testing.T) {
 	dir := t.TempDir()
 	cfg, err := normalizeAppConfig(appConfig{Name: "demo", Host: "demo.example.com", Env: map[string]string{}}, "demo", "example.com")

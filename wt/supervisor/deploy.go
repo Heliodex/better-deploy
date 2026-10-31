@@ -279,9 +279,13 @@ func (s *supervisor) installStatic(a *app, cfg appConfig, dir string) error {
 	}
 
 	a.mu.Lock()
+	oldCfg := a.cfg
 	a.cfg = cfg
 	a.mu.Unlock()
-	s.register(a)
+	s.mu.Lock()
+	s.setAppHostsLocked(a, oldCfg, cfg)
+	s.mu.Unlock()
+	s.broadcast()
 	log.Printf("deployed %s static only (wasm %s)", a.name, a.digest)
 	return nil
 }
