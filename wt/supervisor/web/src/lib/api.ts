@@ -360,6 +360,7 @@ export const deleteApp = (token: string, name: string, purge: boolean): Promise<
 const appConfigSchema = object({
 	disk_mb: pipe(number(), minValue(0)),
 	env_keys: array(string()),
+	secret_keys: optional(array(string())),
 	health: pipe(string(), minLength(1)),
 	health_failures: pipe(number(), minValue(1)),
 	health_interval: string(),
@@ -398,6 +399,32 @@ export const fetchAppConfig = (token: string, name: string): Promise<AppConfig> 
 
 export const saveAppConfig = (token: string, name: string, patch: AppConfigPatch): Promise<AppConfig> =>
 	request(`/apps/${encodeURIComponent(name)}/config`, { json: patch, method: "PATCH", token }, appConfigSchema)
+
+const secretKeysSchema = object({
+	keys: array(string()),
+})
+
+const secretMutationSchema = object({
+	key: string(),
+	restart_required: boolean(),
+})
+
+export const fetchSecretKeys = (token: string, name: string): Promise<string[]> =>
+	request(`/apps/${encodeURIComponent(name)}/secrets`, { token }, secretKeysSchema).then(result => result.keys)
+
+export const setAppSecret = (token: string, name: string, key: string, value: string): Promise<boolean> =>
+	request(
+		`/apps/${encodeURIComponent(name)}/secrets/${encodeURIComponent(key)}`,
+		{ json: { value }, method: "PUT", token },
+		secretMutationSchema,
+	).then(result => result.restart_required)
+
+export const deleteAppSecret = (token: string, name: string, key: string): Promise<boolean> =>
+	request(
+		`/apps/${encodeURIComponent(name)}/secrets/${encodeURIComponent(key)}`,
+		{ method: "DELETE", token },
+		secretMutationSchema,
+	).then(result => result.restart_required)
 
 export function deployBundle(token: string, name: string, file: File): Promise<AppInfo> {
 	const body = new FormData()

@@ -7,8 +7,10 @@ interface Props {
 	error: string
 	loading: boolean
 	message: string
+	onaddsecret(key: string, value: string): Promise<void>
 	ondelete(purge: boolean): Promise<void>
 	onreload(): Promise<void>
+	onremovesecret(key: string): Promise<void>
 	onsave(patch: AppConfigPatch): Promise<void>
 	onstart(): Promise<void>
 	onstop(): Promise<void>
@@ -16,8 +18,22 @@ interface Props {
 	status: string
 }
 
-let { busy, config, error, loading, message, ondelete, onreload, onsave, onstart, onstop, saving, status }: Props =
-	$props()
+let {
+	busy,
+	config,
+	error,
+	loading,
+	message,
+	onaddsecret,
+	ondelete,
+	onreload,
+	onremovesecret,
+	onsave,
+	onstart,
+	onstop,
+	saving,
+	status,
+}: Props = $props()
 
 let host = $state("")
 let hosts = $state("")
@@ -33,6 +49,12 @@ let restartOnUnhealthy = $state(false)
 let network = $state<"inherit" | "none">("inherit")
 let confirmDelete = $state(false)
 let purge = $state(false)
+let secretKey = $state("")
+let secretValue = $state("")
+let secretBusy = $state(false)
+let secretError = $state("")
+
+const secretKeys = $derived(config?.secret_keys ?? [])
 
 $effect(() => {
 	const current = config
@@ -85,6 +107,38 @@ async function remove(): Promise<void> {
 	}
 	await ondelete(purge)
 	confirmDelete = false
+}
+
+async function addSecret(event: SubmitEvent): Promise<void> {
+	event.preventDefault()
+	const key = secretKey.trim()
+	if (!key) {
+		secretError = "Enter a secret key such as API_KEY."
+		return
+	}
+	secretBusy = true
+	secretError = ""
+	try {
+		await onaddsecret(key, secretValue)
+		secretKey = ""
+		secretValue = ""
+	} catch (err) {
+		secretError = err instanceof Error ? err.message : "Could not save the secret."
+	} finally {
+		secretBusy = false
+	}
+}
+
+async function removeSecret(key: string): Promise<void> {
+	secretBusy = true
+	secretError = ""
+	try {
+		await onremovesecret(key)
+	} catch (err) {
+		secretError = err instanceof Error ? err.message : "Could not remove the secret."
+	} finally {
+		secretBusy = false
+	}
 }
 </script>
 
@@ -222,6 +276,57 @@ async function remove(): Promise<void> {
 				</p>
 			</div>
 		</form>
+
+		<section class="mt-4 flex max-w-3xl flex-col gap-2 border-t border-line pt-4">
+			<h4 class="text-xs font-semibold tracking-wide text-neutral-400 uppercase">Secrets</h4>
+			<p class="text-xs text-neutral-500">
+				Stored separately from app.json and never shown again. Reference one as secret://KEY in an env
+				value; a restart applies it.
+			</p>
+			{#if secretError}
+				<p class="border border-red-500/80 bg-red-500/10 px-2 py-1 text-sm text-red-400" role="alert">
+					{secretError}
+				</p>
+			{/if}
+			{#if secretKeys.length === 0}
+				<p class="text-sm text-neutral-400">No secrets set.</p>
+			{:else}
+				<ul class="flex flex-col gap-1">
+					{#each secretKeys as key (key)}
+						<li class="flex items-center justify-between gap-2 border border-line-soft px-2 py-1">
+							<span class="font-mono text-sm text-neutral-300">{key}</span>
+							<button
+								class="btn btn-danger"
+								disabled={secretBusy}
+								onclick={() => void removeSecret(key)}
+								type="button"
+							>
+								Remove
+							</button>
+						</li>
+					{/each}
+				</ul>
+			{/if}
+			<form class="flex flex-wrap items-end gap-2" onsubmit={addSecret}>
+				<label class="flex flex-col gap-1">
+					<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Key</span>
+					<input aria-label="Secret key" class="field" placeholder="API_KEY" bind:value={secretKey}>
+				</label>
+				<label class="flex flex-col gap-1">
+					<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Value</span>
+					<input
+						aria-label="Secret value"
+						autocomplete="new-password"
+						class="field"
+						type="password"
+						bind:value={secretValue}
+					>
+				</label>
+				<button class="btn btn-primary" disabled={secretBusy} type="submit">
+					{secretBusy ? "Saving…" : "Set secret"}
+				</button>
+			</form>
+		</section>
 
 		<section class="mt-4 flex max-w-3xl flex-col gap-2 border-t border-red-500/30 pt-4">
 			<h4 class="text-xs font-semibold tracking-wide text-red-400 uppercase">Delete app</h4>

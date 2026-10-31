@@ -14,6 +14,7 @@ import {
 	type DatabaseTableStat,
 	type DeploymentInfo,
 	deleteApp,
+	deleteAppSecret,
 	deployBundle,
 	fetchAppConfig,
 	fetchApp,
@@ -36,6 +37,7 @@ import {
 	restoreBackup,
 	rollbackDeployment,
 	saveAppConfig,
+	setAppSecret,
 	type StorageChange,
 	saveBackupSettings,
 	setToken,
@@ -413,6 +415,34 @@ async function saveConfig(patch: AppConfigPatch): Promise<void> {
 		configError = err instanceof Error ? err.message : "Could not save the config."
 	} finally {
 		configSaving = false
+	}
+}
+
+async function addSecret(key: string, value: string): Promise<void> {
+	if (!token || !selected) return
+	configError = ""
+	configMessage = ""
+	try {
+		await setAppSecret(token, selected, key, value)
+		await loadConfig(token, selected)
+		configMessage = `Secret ${key} saved. Restart to apply it.`
+	} catch (err) {
+		configError = err instanceof Error ? err.message : "Could not save the secret."
+		throw err
+	}
+}
+
+async function removeSecret(key: string): Promise<void> {
+	if (!token || !selected) return
+	configError = ""
+	configMessage = ""
+	try {
+		await deleteAppSecret(token, selected, key)
+		await loadConfig(token, selected)
+		configMessage = `Secret ${key} removed. Restart to apply it.`
+	} catch (err) {
+		configError = err instanceof Error ? err.message : "Could not remove the secret."
+		throw err
 	}
 }
 
@@ -1126,10 +1156,12 @@ onMount((): (() => void) => {
 							error={configError}
 							loading={configLoading}
 							message={configMessage}
+							onaddsecret={addSecret}
 							ondelete={deleteSelected}
 							onreload={async (): Promise<void> => {
 								if (token && selected) await loadConfig(token, selected)
 							}}
+							onremovesecret={removeSecret}
 							onsave={saveConfig}
 							onstart={startSelected}
 							onstop={stopSelected}
