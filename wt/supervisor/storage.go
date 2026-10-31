@@ -32,7 +32,9 @@ const (
 	maxStorageStatements = 64
 	maxStorageColumns    = 256
 	maxStorageResult     = 8 << 20
+	maxStorageSessions   = 8
 	storageTimeout       = 5 * time.Second
+	storageSessionLease  = 30 * time.Second
 )
 
 var errStorageUnavailable = errors.New("storage unavailable")
@@ -48,6 +50,14 @@ type storageServer struct {
 	opMu   sync.RWMutex
 	tokens map[string]string // token -> app name
 	dbs    map[string]*sql.DB
+
+	sessionMu      sync.Mutex
+	sessionCond    *sync.Cond
+	sessions       map[string]*storageSession
+	sessionsPaused int
+	sessionClosed  bool
+	sessionStop    chan struct{}
+	sessionDone    chan struct{}
 }
 
 type storageRequest struct {
@@ -87,11 +97,15 @@ func newStorageServer(dir, listen string) (*storageServer, error) {
 	}
 
 	s := &storageServer{
-		dir:     dir,
-		baseURL: "http://" + listener.Addr().String(),
-		tokens:  map[string]string{},
-		dbs:     map[string]*sql.DB{},
+		dir:         dir,
+		baseURL:     "http://" + listener.Addr().String(),
+		tokens:      map[string]string{},
+		dbs:         map[string]*sql.DB{},
+		sessions:    map[string]*storageSession{},
+		sessionStop: make(chan struct{}),
+		sessionDone: make(chan struct{}),
 	}
+	s.sessionCond = sync.NewCond(&s.sessionMu)
 	s.listener = listener
 	s.server = &http.Server{
 		Handler:           http.HandlerFunc(s.handle),
@@ -102,6 +116,7 @@ func newStorageServer(dir, listen string) (*storageServer, error) {
 			log.Printf("storage: %v", err)
 		}
 	}()
+	go s.sessionLoop()
 	return s, nil
 }
 
@@ -111,6 +126,13 @@ func (s *storageServer) url() string {
 
 func (s *storageServer) close() {
 	_ = s.server.Close()
+	close(s.sessionStop)
+	<-s.sessionDone
+	s.sessionMu.Lock()
+	s.sessionClosed = true
+	s.sessionCond.Broadcast()
+	s.sessionMu.Unlock()
+	s.closeSessionsFor("")
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, db := range s.dbs {
@@ -178,9 +200,9 @@ func (s *storageServer) dbFor(app string) (*sql.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open storage: %w", err)
 	}
-	// WAL allows concurrent readers; SQLite still serialises writers. A small pool keeps big reads from blocking every other query.
-	db.SetMaxOpenConns(4)
-	db.SetMaxIdleConns(4)
+	// WAL allows concurrent readers; SQLite still serialises writers. Sessions pin connections, so leave half the pool for ordinary queries.
+	db.SetMaxOpenConns(2 * maxStorageSessions)
+	db.SetMaxIdleConns(2 * maxStorageSessions)
 	db.SetConnMaxLifetime(0)
 	db.SetConnMaxIdleTime(0)
 
@@ -326,6 +348,9 @@ func (s *storageServer) backupTo(ctx context.Context, app, dst string) error {
 
 // restoreFrom copies a snapshot over the live database. It holds opMu exclusively, so no query is in flight while the copy runs.
 func (s *storageServer) restoreFrom(ctx context.Context, app, src string) error {
+	s.pauseSessions()
+	defer s.resumeSessions()
+	s.closeSessionsForPaused(app)
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	return s.withConnUnlocked(ctx, app, func(conn *sql.Conn) error {
@@ -598,6 +623,28 @@ func (s *storageServer) handle(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="wt-storage"`)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if r.URL.Path == "/v1/sessions" {
+		s.handleSQL(w, r, func(w http.ResponseWriter, r *http.Request) {
+			s.createSession(w, r, app)
+		})
+		return
+	}
+	if id, action, ok := sessionAction(r.URL.Path); ok {
+		s.handleSQL(w, r, func(w http.ResponseWriter, r *http.Request) {
+			switch action {
+			case "query":
+				s.sessionQuery(w, r, app, id)
+			case "exec":
+				s.sessionExec(w, r, app, id)
+			case "commit":
+				s.closeSessionRequest(w, r, app, id, true)
+			case "rollback":
+				s.closeSessionRequest(w, r, app, id, false)
+			}
+		})
 		return
 	}
 

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 func storageDo(t *testing.T, method, url, token, body string) *http.Response {
@@ -439,6 +440,194 @@ func TestStorageTransaction(t *testing.T) {
 	resp = storageSQL(t, s, token, "/v1/transaction", map[string]any{"statements": []map[string]any{}})
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("empty transaction = %d, want 400", resp.StatusCode)
+	}
+	resp.Body.Close()
+}
+
+func storageSessionOf(t *testing.T, s *storageServer, token string) storageSessionResponse {
+	t.Helper()
+	resp := storageSQL(t, s, token, "/v1/sessions", map[string]any{})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("create session: %d %s", resp.StatusCode, readBody(t, resp))
+	}
+	var session storageSessionResponse
+	if err := json.UnmarshalRead(resp.Body, &session); err != nil {
+		t.Fatal(err)
+	}
+	if session.ID == "" || session.ExpiresAt.IsZero() {
+		t.Fatalf("session = %+v", session)
+	}
+	return session
+}
+
+func storageSessionCount(t *testing.T, s *storageServer, token, table string) float64 {
+	t.Helper()
+	resp := storageSQL(t, s, token, "/v1/query", map[string]any{"sql": `select count(*) from ` + table})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("count %s: %d %s", table, resp.StatusCode, readBody(t, resp))
+	}
+	result := storageResultOf(t, resp)
+	if len(result.Rows) != 1 || len(result.Rows[0]) != 1 {
+		t.Fatalf("count rows = %+v", result.Rows)
+	}
+	return result.Rows[0][0].(float64)
+}
+
+func TestStorageSessionCommit(t *testing.T) {
+	s, err := newStorageServer(t.TempDir(), "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.close()
+	token := s.tokenFor("notes")
+
+	resp := storageSQL(t, s, token, "/v1/exec", map[string]any{"sql": `create table items (id text primary key, value text not null)`})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("create table: %d %s", resp.StatusCode, readBody(t, resp))
+	}
+	resp.Body.Close()
+
+	session := storageSessionOf(t, s, token)
+	base := "/v1/sessions/" + session.ID
+	resp = storageSQL(t, s, token, base+"/exec", map[string]any{
+		"sql":    `insert into items (id, value) values (?, ?)`,
+		"params": []any{"a", "one"},
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("session exec: %d %s", resp.StatusCode, readBody(t, resp))
+	}
+	resp.Body.Close()
+
+	resp = storageSQL(t, s, token, base+"/query", map[string]any{"sql": `select value from items where id = 'a'`})
+	result := storageResultOf(t, resp)
+	if len(result.Rows) != 1 || result.Rows[0][0] != "one" {
+		t.Errorf("uncommitted session read = %+v", result.Rows)
+	}
+	if count := storageSessionCount(t, s, token, "items"); count != 0 {
+		t.Errorf("external count before commit = %v, want 0", count)
+	}
+
+	resp = storageSQL(t, s, token, base+"/commit", map[string]any{})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("session commit: %d %s", resp.StatusCode, readBody(t, resp))
+	}
+	resp.Body.Close()
+	if count := storageSessionCount(t, s, token, "items"); count != 1 {
+		t.Errorf("count after commit = %v, want 1", count)
+	}
+	changes, err := s.recentChanges("notes", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	committed := false
+	for _, change := range changes {
+		if strings.Contains(change.SQL, "insert into items") {
+			committed = true
+		}
+	}
+	if !committed {
+		t.Error("committed session write was not added to the change log")
+	}
+}
+
+func TestStorageSessionRollback(t *testing.T) {
+	s, err := newStorageServer(t.TempDir(), "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.close()
+	token := s.tokenFor("notes")
+
+	resp := storageSQL(t, s, token, "/v1/exec", map[string]any{"sql": `create table items (id text primary key, value text not null)`})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("create table: %d %s", resp.StatusCode, readBody(t, resp))
+	}
+	resp.Body.Close()
+
+	session := storageSessionOf(t, s, token)
+	base := "/v1/sessions/" + session.ID
+	resp = storageSQL(t, s, token, base+"/exec", map[string]any{
+		"sql":    `insert into items (id, value) values (?, ?)`,
+		"params": []any{"b", "two"},
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("session exec: %d %s", resp.StatusCode, readBody(t, resp))
+	}
+	resp.Body.Close()
+
+	resp = storageSQL(t, s, token, base+"/rollback", map[string]any{})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("session rollback: %d %s", resp.StatusCode, readBody(t, resp))
+	}
+	resp.Body.Close()
+	if count := storageSessionCount(t, s, token, "items"); count != 0 {
+		t.Errorf("count after rollback = %v, want 0", count)
+	}
+	changes, err := s.recentChanges("notes", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, change := range changes {
+		if strings.Contains(change.SQL, "insert into items") {
+			t.Error("rolled-back session write was added to the change log")
+		}
+	}
+}
+
+func TestStorageSessionLeaseExpiryRollsBack(t *testing.T) {
+	s, err := newStorageServer(t.TempDir(), "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.close()
+	token := s.tokenFor("notes")
+
+	resp := storageSQL(t, s, token, "/v1/exec", map[string]any{"sql": `create table items (id text primary key, value text not null)`})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("create table: %d %s", resp.StatusCode, readBody(t, resp))
+	}
+	resp.Body.Close()
+
+	session := storageSessionOf(t, s, token)
+	base := "/v1/sessions/" + session.ID
+	resp = storageSQL(t, s, token, base+"/exec", map[string]any{
+		"sql":    `insert into items (id, value) values (?, ?)`,
+		"params": []any{"c", "three"},
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("session exec: %d %s", resp.StatusCode, readBody(t, resp))
+	}
+	resp.Body.Close()
+
+	s.sessionMu.Lock()
+	s.sessions[session.ID].expiresAt = time.Now().Add(-time.Second)
+	s.sessionMu.Unlock()
+	s.expireSessions(time.Now())
+
+	if count := storageSessionCount(t, s, token, "items"); count != 0 {
+		t.Errorf("count after lease expiry = %v, want 0", count)
+	}
+	resp = storageSQL(t, s, token, base+"/query", map[string]any{"sql": `select count(*) from items`})
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("expired session query = %d, want 404", resp.StatusCode)
+	}
+	resp.Body.Close()
+}
+
+func TestStorageSessionIsScopedToApp(t *testing.T) {
+	s, err := newStorageServer(t.TempDir(), "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.close()
+	token := s.tokenFor("notes")
+	other := s.tokenFor("other")
+	session := storageSessionOf(t, s, token)
+
+	resp := storageSQL(t, s, other, "/v1/sessions/"+session.ID+"/query", map[string]any{"sql": `select 1`})
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("other app used session: %d, want 404", resp.StatusCode)
 	}
 	resp.Body.Close()
 }

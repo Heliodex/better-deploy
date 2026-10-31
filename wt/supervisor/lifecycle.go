@@ -105,6 +105,7 @@ func (s *supervisor) purgeAppState(name string) error {
 		defer s.backups.mu.Unlock()
 	}
 	if s.storage != nil {
+		s.storage.closeSessionsFor(name)
 		s.storage.drop(name)
 	}
 	for _, dir := range []string{

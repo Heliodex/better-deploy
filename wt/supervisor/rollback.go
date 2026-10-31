@@ -185,6 +185,8 @@ func recoverRollbacks(stateDir string, backups *backupManager) error {
 // failRollback restores the previous halves and process, then reports the original error.
 func (s *supervisor) failRollback(w http.ResponseWriter, journalPath string, journal rollbackJournal, old *app, running bool, cause error) {
 	if s.storage != nil {
+		s.storage.pauseSessions()
+		s.storage.closeSessionsForPaused(journal.Name)
 		s.storage.opMu.Lock()
 		s.storage.drop(journal.Name)
 		removeSQLiteSidecars(journal.DB)
@@ -192,6 +194,7 @@ func (s *supervisor) failRollback(w http.ResponseWriter, journalPath string, jou
 	restoreErr := restoreDB(journal.DB, journal.DBBackup)
 	if s.storage != nil {
 		s.storage.opMu.Unlock()
+		s.storage.resumeSessions()
 	}
 	if restoreErr == nil {
 		restoreErr = restoreAside(journal.DataDir, journal.DataBackup, existsPath(journal.DataBackup))
@@ -342,7 +345,9 @@ func (p *rollbackPlan) installDatabase(w http.ResponseWriter) bool {
 		return true
 	}
 	s := p.s
-	// Block database viewers (and any other storage user) from opening the file while it is swapped.
+	// Block sessions and database viewers (and any other storage user) while the file is swapped.
+	s.storage.pauseSessions()
+	s.storage.closeSessionsForPaused(p.journal.Name)
 	s.storage.opMu.Lock()
 	s.storage.drop(p.journal.Name)
 	removeSQLiteSidecars(p.journal.DB)
@@ -359,6 +364,7 @@ func (p *rollbackPlan) installDatabase(w http.ResponseWriter) bool {
 		_ = restoreDB(p.journal.DB, p.journal.DBBackup)
 	}
 	s.storage.opMu.Unlock()
+	s.storage.resumeSessions()
 	if swapErr != nil {
 		_ = restoreAside(p.journal.DataDir, p.journal.DataBackup, p.dataMoved)
 		_ = restoreAside(p.journal.AppDir, p.journal.AppBackup, p.appMoved)

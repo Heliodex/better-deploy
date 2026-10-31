@@ -3,10 +3,12 @@ package storage
 import (
 	"context"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -231,5 +233,90 @@ func TestClientTransaction(t *testing.T) {
 	}
 	if len(results[1].Rows) != 1 || results[1].Rows[0][0] != "two" {
 		t.Errorf("read rows = %+v", results[1].Rows)
+	}
+}
+
+func TestClientWithTxCommit(t *testing.T) {
+	var paths []string
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		switch {
+		case r.URL.Path == "/v1/sessions":
+			_, _ = io.WriteString(w, `{"id":"session-1","expiresAt":"2026-10-31T12:00:00Z"}`)
+		case strings.HasSuffix(r.URL.Path, "/exec"):
+			_, _ = io.WriteString(w, `{"rows_affected":1,"last_insert_id":4}`)
+		case strings.HasSuffix(r.URL.Path, "/query"):
+			_, _ = io.WriteString(w, `{"columns":["value"],"rows":[["two"]]}`)
+		case strings.HasSuffix(r.URL.Path, "/commit"):
+			_, _ = io.WriteString(w, `{"committed":true}`)
+		default:
+			t.Errorf("path = %q", r.URL.Path)
+		}
+	})
+
+	err := client.WithTx(context.Background(), func(tx *Tx) error {
+		if tx.ExpiresAt().IsZero() {
+			t.Error("session expiry was not decoded")
+		}
+		result, err := tx.Exec(context.Background(), `insert into items (value) values (?)`, "two")
+		if err != nil {
+			return err
+		}
+		if result.RowsAffected != 1 || result.LastInsertID != 4 {
+			t.Errorf("exec result = %+v", result)
+		}
+		rows, err := tx.Query(context.Background(), `select value from items where id = ?`, 4)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		if !rows.Next() {
+			t.Fatal("no row")
+		}
+		var value string
+		if err := rows.Scan(&value); err != nil {
+			return err
+		}
+		if value != "two" {
+			t.Errorf("value = %q", value)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 4 || paths[0] != "/v1/sessions" || !strings.HasSuffix(paths[1], "/exec") || !strings.HasSuffix(paths[2], "/query") || !strings.HasSuffix(paths[3], "/commit") {
+		t.Errorf("paths = %v", paths)
+	}
+}
+
+func TestClientWithTxRollsBackOnError(t *testing.T) {
+	var paths []string
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		switch {
+		case r.URL.Path == "/v1/sessions":
+			_, _ = io.WriteString(w, `{"id":"session-2","expiresAt":"2026-10-31T12:00:00Z"}`)
+		case strings.HasSuffix(r.URL.Path, "/exec"):
+			_, _ = io.WriteString(w, `{"rows_affected":1}`)
+		case strings.HasSuffix(r.URL.Path, "/rollback"):
+			_, _ = io.WriteString(w, `{"rolled_back":true}`)
+		default:
+			t.Errorf("path = %q", r.URL.Path)
+		}
+	})
+
+	sentinel := errors.New("stop")
+	err := client.WithTx(context.Background(), func(tx *Tx) error {
+		if _, err := tx.Exec(context.Background(), `insert into items (value) values (?)`, "three"); err != nil {
+			return err
+		}
+		return sentinel
+	})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("WithTx error = %v, want the callback error", err)
+	}
+	if len(paths) != 3 || !strings.HasSuffix(paths[2], "/rollback") {
+		t.Errorf("paths = %v, want a rollback", paths)
 	}
 }

@@ -267,9 +267,17 @@ POST /v1/query   {"sql": "...", "params": [...], "max_rows": 1000}
 POST /v1/exec    {"sql": "...", "params": [...]}
 POST /v1/batch   {"statements": [{"sql": "...", "params": [...]}, ...]}
 POST /v1/transaction {"statements": [{"sql": "...", "query": true}, ...]}
+
+POST /v1/sessions
+POST /v1/sessions/{id}/query
+POST /v1/sessions/{id}/exec
+POST /v1/sessions/{id}/commit
+POST /v1/sessions/{id}/rollback
 ```
 
-`query` returns `{"columns": [...], "rows": [[...]], "truncated": false}`. `exec` returns `{"rows_affected": n, "last_insert_id": n}`. `batch` runs every write statement in one transaction and returns one result per statement; use `query` for reads (it also runs `INSERT ... RETURNING`). `transaction` runs reads and writes in one transaction: mark read statements with `"query": true` to get their rows back, and the rest return `rows_affected` and `last_insert_id`. This keeps a read-modify-write in one atomic request without an open session; in Go, `store.Transaction(ctx, statements...)` returns the same shape. Queries use a small WAL-backed connection pool, so reads can proceed while one write is in flight, while SQLite still serialises writers. Values are JSON scalars; blobs are `{"$b64": "..."}`. Parameters are bound, not interpolated. A few SQLite features are blocked (`ATTACH`, `VACUUM INTO`, `PRAGMA`, `load_extension`, `readfile`, `writefile`, transaction-control statements) and `SQLITE_LIMIT_ATTACHED` is zero, so a component cannot read another app's database or write files through SQL. Queries time out after five seconds and are capped at 10,000 rows, 1 MiB per value and 8 MiB per response.
+`query` returns `{"columns": [...], "rows": [[...]], "truncated": false}`. `exec` returns `{"rows_affected": n, "last_insert_id": n}`. `batch` runs every write statement in one transaction and returns one result per statement; use `query` for reads (it also runs `INSERT ... RETURNING`). `transaction` runs reads and writes in one transaction: mark read statements with `"query": true` to get their rows back, and the rest return `rows_affected` and `last_insert_id`.
+
+A session pins one connection and an open transaction across requests, so an app can read a value, decide in code and write it back without another writer slipping in. `POST /v1/sessions` returns `{"id": "...", "expiresAt": "..."}`; the session endpoints take the same query/exec bodies as their non-session counterparts and commit or roll back everything at once. The idle lease is 30 seconds and resets on every operation; expiry rolls back automatically and releases the connection. A supervisor keeps at most 8 sessions per app and leaves half the connection pool for ordinary queries, closes sessions before replacing a database file, and logs session writes only when they commit. In Go, `store.WithTx(ctx, func(tx *storage.Tx) error { ... })` commits on success and rolls back on error; `store.BeginTx` exposes the session when the callback style does not fit. Queries use a small WAL-backed connection pool, so reads can proceed while one write is in flight, while SQLite still serialises writers. Values are JSON scalars; blobs are `{"$b64": "..."}`. Parameters are bound, not interpolated. A few SQLite features are blocked (`ATTACH`, `VACUUM INTO`, `PRAGMA`, `load_extension`, `readfile`, `writefile`, transaction-control statements) and `SQLITE_LIMIT_ATTACHED` is zero, so a component cannot read another app's database or write files through SQL. Queries time out after five seconds and are capped at 10,000 rows, 1 MiB per value and 8 MiB per response.
 
 Schema changes go through a versioned migration instead of raw `PRAGMA`:
 
@@ -291,6 +299,15 @@ _, err = store.Batch(ctx,
     storage.Statement{SQL: `insert into notes (id, body, created_at) values (?, ?, ?)`, Args: []any{id, body, at}},
     storage.Statement{SQL: `delete from notes where id not in (select id from notes order by created_at desc, id desc limit ?)`, Args: []any{50}},
 )
+
+err = store.WithTx(ctx, func(tx *storage.Tx) error {
+    var reactions int
+    if err := tx.QueryRow(ctx, `select reactions from notes where id = ?`, id).Scan(&reactions); err != nil {
+        return err
+    }
+    _, err := tx.Exec(ctx, `update notes set reactions = ? where id = ?`, reactions+1, id)
+    return err
+})
 ```
 
 The notes example uses a real `notes` table. The one-time migration from the old JSON value has already run on the demo deployment, and the old `/v1/kv` endpoints have been removed.

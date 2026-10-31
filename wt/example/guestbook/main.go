@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -22,6 +23,8 @@ const (
 	reactionEyes   = "eyes"
 	reactionBrain  = "brain"
 )
+
+var errMessageNotFound = errors.New("message not found")
 
 type reactionCounts struct {
 	Rocket int64 `json:"rocket"`
@@ -211,25 +214,27 @@ func handleReact(w http.ResponseWriter, r *http.Request) {
 	}
 	reaction := string(request.Reaction)
 
-	var exists int64
-	if err := store.QueryRow(r.Context(), `select count(*) from messages where id = ?`, id).Scan(&exists); err != nil {
-		app.WriteError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if exists == 0 {
+	var count int64
+	err := store.WithTx(r.Context(), func(tx *storage.Tx) error {
+		var exists int64
+		if err := tx.QueryRow(r.Context(), `select count(*) from messages where id = ?`, id).Scan(&exists); err != nil {
+			return err
+		}
+		if exists == 0 {
+			return errMessageNotFound
+		}
+		if _, err := tx.Exec(r.Context(), `insert into reactions (message_id, reaction, count) values (?, ?, 1)
+			on conflict(message_id, reaction) do update set count = count + 1`, id, reaction); err != nil {
+			return err
+		}
+		return tx.QueryRow(r.Context(), `select count from reactions where message_id = ? and reaction = ?`,
+			id, reaction).Scan(&count)
+	})
+	if errors.Is(err, errMessageNotFound) {
 		app.WriteError(w, http.StatusNotFound, "message not found")
 		return
 	}
-
-	if _, err := store.Exec(r.Context(), `insert into reactions (message_id, reaction, count) values (?, ?, 1)
-		on conflict(message_id, reaction) do update set count = count + 1`, id, reaction); err != nil {
-		app.WriteError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	var count int64
-	if err := store.QueryRow(r.Context(), `select count from reactions where message_id = ? and reaction = ?`,
-		id, reaction).Scan(&count); err != nil {
+	if err != nil {
 		app.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

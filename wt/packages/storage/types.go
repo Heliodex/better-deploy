@@ -4,6 +4,7 @@ import (
 	"encoding/json/jsontext"
 	"errors"
 	"net/http"
+	"time"
 )
 
 // ErrNoRows is returned by Row.Scan when the query returned no rows.
@@ -116,6 +117,16 @@ type transactionRequest struct {
 
 type transactionResponse struct {
 	Results []response `json:"results"`
+}
+
+type sessionResponse struct {
+	ID        string    `json:"id"`
+	ExpiresAt time.Time `json:"expiresAt"`
+}
+
+type sessionCloseResponse struct {
+	Committed  bool `json:"committed"`
+	RolledBack bool `json:"rolled_back"`
 }
 
 type migrationRequest struct {
