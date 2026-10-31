@@ -346,6 +346,55 @@ func TestClientSchemaAndMigrate(t *testing.T) {
 	}
 }
 
+func TestClientSchemaStats(t *testing.T) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/schema" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("stats"); got != "1" {
+			t.Errorf("stats = %q, want 1", got)
+		}
+		w.Header().Set("content-type", "application/json")
+		_, _ = io.WriteString(w, `{
+			"version":1,
+			"tables":[{
+				"name":"notes",
+				"columns":[{"name":"id","type":"text","notNull":true,"primaryKey":1}],
+				"indexes":[{"name":"notes_body","unique":false,"origin":"c","partial":false,"columns":["body",null]}],
+				"foreignKeys":[{"id":0,"seq":0,"table":"users","from":"user_id","to":null,"onUpdate":"NO ACTION","onDelete":"CASCADE","match":"NONE"}],
+				"rows":3,
+				"bytes":8192
+			}],
+			"views":[{"name":"note_ids","sql":"CREATE VIEW note_ids AS SELECT id FROM notes","columns":[{"name":"id","type":"text","notNull":false}]}],
+			"migrations":[{"version":1,"checksum":"abc","appliedAt":"2026-10-31T00:00:00Z"}]
+		}`)
+	})
+
+	schema, err := client.SchemaStats(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if schema.Version != 1 || len(schema.Tables) != 1 || len(schema.Views) != 1 || len(schema.Migrations) != 1 {
+		t.Fatalf("schema = %+v", schema)
+	}
+	table := schema.Tables[0]
+	if table.Rows == nil || *table.Rows != 3 || table.Bytes == nil || *table.Bytes != 8192 {
+		t.Errorf("stats = rows %v bytes %v", table.Rows, table.Bytes)
+	}
+	if len(table.Indexes) != 1 || len(table.Indexes[0].Columns) != 2 || table.Indexes[0].Columns[1] != nil {
+		t.Errorf("indexes = %+v", table.Indexes)
+	}
+	if len(table.ForeignKeys) != 1 || table.ForeignKeys[0].To != nil {
+		t.Errorf("foreign keys = %+v", table.ForeignKeys)
+	}
+	if schema.Views[0].Name != "note_ids" || len(schema.Views[0].Columns) != 1 {
+		t.Errorf("views = %+v", schema.Views)
+	}
+	if schema.Migrations[0].Checksum != "abc" {
+		t.Errorf("migrations = %+v", schema.Migrations)
+	}
+}
+
 func TestClientTransaction(t *testing.T) {
 	var request transactionRequest
 	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {

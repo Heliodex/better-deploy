@@ -1,6 +1,6 @@
 <script lang="ts">
-import type { DatabaseRows, StorageChange } from "./api"
-import { formatChangeParams, formatDatabaseValue, formatRowValue, formatTime, rowOpClass } from "./format"
+import type { DatabaseRows, DatabaseTableStat, StorageChange } from "./api"
+import { formatChangeParams, formatDatabaseValue, formatRowValue, formatSize, formatTime, rowOpClass } from "./format"
 
 interface Props {
 	changes: StorageChange[]
@@ -23,6 +23,7 @@ interface Props {
 	onselecttable(event: Event): void
 	rows: DatabaseRows | null
 	rowsLoading: boolean
+	stats: DatabaseTableStat[]
 	table: string | null
 	tables: string[]
 	version: number
@@ -49,12 +50,14 @@ let {
 	onselecttable,
 	rows,
 	rowsLoading,
+	stats,
 	table,
 	tables,
 	version,
 }: Props = $props()
 
 let maintenanceOp = $state("optimize")
+const selectedStats = $derived(stats.find((entry) => entry.name === table) ?? null)
 
 async function importFile(event: Event): Promise<void> {
 	const input = event.currentTarget as HTMLInputElement
@@ -151,6 +154,13 @@ async function importFile(event: Event): Promise<void> {
 					{/each}
 				</select>
 			</label>
+			{#if selectedStats}
+				<span class="pb-1.5 text-xs text-neutral-500 tabular-nums">
+					{selectedStats.rows.toLocaleString()}
+					{selectedStats.rows === 1 ? "row" : "rows"}
+					· {formatSize(selectedStats.bytes)}
+				</span>
+			{/if}
 			<label class="flex flex-col gap-1">
 				<span class="text-[10px] tracking-wide text-neutral-500 uppercase"> Rows </span>
 				<select aria-label="Rows per page" class="field" onchange={onchangelimit} value={limit}>

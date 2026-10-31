@@ -224,10 +224,24 @@ func (c *Client) Transaction(ctx context.Context, statements ...TransactionState
 	return results, nil
 }
 
-// Schema returns the database's user_version and table definitions.
+// Schema returns the database's user_version and table definitions. It does not request row counts or page sizes.
 func (c *Client) Schema(ctx context.Context) (Schema, error) {
+	return c.SchemaWithOptions(ctx, SchemaOptions{})
+}
+
+// SchemaStats returns the full schema with row counts and page sizes, which scans every table and is opt-in.
+func (c *Client) SchemaStats(ctx context.Context) (Schema, error) {
+	return c.SchemaWithOptions(ctx, SchemaOptions{Stats: true})
+}
+
+// SchemaWithOptions returns the schema with optional statistics.
+func (c *Client) SchemaWithOptions(ctx context.Context, options SchemaOptions) (Schema, error) {
+	path := "/v1/schema"
+	if options.Stats {
+		path += "?stats=1"
+	}
 	var schema Schema
-	if err := c.get(ctx, "/v1/schema", &schema); err != nil {
+	if err := c.get(ctx, path, &schema); err != nil {
 		return Schema{}, err
 	}
 	return schema, nil

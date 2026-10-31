@@ -11,6 +11,7 @@ import {
 	type BackupsResult,
 	createBackup,
 	type DatabaseRows,
+	type DatabaseTableStat,
 	type DeploymentInfo,
 	deleteApp,
 	deployBundle,
@@ -125,6 +126,7 @@ let databaseImporting = $state(false)
 let databaseMaintaining = $state(false)
 let databaseVersion = $state(0)
 let databaseTables = $state<string[]>([])
+let databaseStats = $state<DatabaseTableStat[]>([])
 let databaseTable = $state<string | null>(null)
 let databaseRows = $state<DatabaseRows | null>(null)
 let databaseLoadedFor = $state<string | null>(null)
@@ -464,6 +466,7 @@ function resetDatabase(): void {
 	databaseMaintaining = false
 	databaseVersion = 0
 	databaseTables = []
+	databaseStats = []
 	databaseTable = null
 	databaseRows = null
 	databaseLoadedFor = null
@@ -562,11 +565,12 @@ async function loadDatabase(key: string, name: string): Promise<void> {
 	databaseError = ""
 	void loadChanges(key, name)
 	try {
-		const overview = await fetchDatabase(key, name)
+		const overview = await fetchDatabase(key, name, true)
 		if (selected !== name) return
 		databaseExists = overview.database
 		databaseVersion = overview.version
 		databaseTables = overview.tables
+		databaseStats = overview.stats ?? []
 		databaseLoadedFor = name
 		databaseOffset = 0
 		if (!overview.database || overview.tables.length === 0) {
@@ -1178,6 +1182,7 @@ onMount((): (() => void) => {
 							onselecttable={selectDatabaseTable}
 							rows={databaseRows}
 							rowsLoading={databaseRowsLoading}
+							stats={databaseStats}
 							table={databaseTable}
 							tables={databaseTables}
 							version={databaseVersion}

@@ -122,16 +122,27 @@ type batchResponse struct {
 	Results []response `json:"results"`
 }
 
-// Schema describes the database's migration version and its tables.
+// Schema describes the database's migration version, tables, views and applied migration checksums.
 type Schema struct {
-	Version int     `json:"version"`
-	Tables  []Table `json:"tables"`
+	Version    int               `json:"version"`
+	Tables     []Table           `json:"tables"`
+	Views      []View            `json:"views"`
+	Migrations []MigrationRecord `json:"migrations"`
+}
+
+// SchemaOptions tunes schema introspection. Stats adds row counts and page sizes, which require scanning the database.
+type SchemaOptions struct {
+	Stats bool
 }
 
 // Table is one table in a Schema.
 type Table struct {
-	Name    string   `json:"name"`
-	Columns []Column `json:"columns"`
+	Name        string       `json:"name"`
+	Columns     []Column     `json:"columns"`
+	Indexes     []Index      `json:"indexes"`
+	ForeignKeys []ForeignKey `json:"foreignKeys"`
+	Rows        *int64       `json:"rows,omitempty"`
+	Bytes       *int64       `json:"bytes,omitempty"`
 }
 
 // Column is one column in a Table.
@@ -141,6 +152,41 @@ type Column struct {
 	NotNull    bool    `json:"notNull"`
 	Default    *string `json:"default,omitempty"`
 	PrimaryKey int     `json:"primaryKey,omitempty"`
+}
+
+// Index is one index in a Table. A nil entry in Columns is an expression or rowid column, which SQLite reports with a NULL name.
+type Index struct {
+	Name    string    `json:"name"`
+	Unique  bool      `json:"unique"`
+	Origin  string    `json:"origin"`
+	Partial bool      `json:"partial"`
+	Columns []*string `json:"columns"`
+}
+
+// ForeignKey is one outgoing foreign key in a Table. To is nil when SQLite reports a NULL target column.
+type ForeignKey struct {
+	ID       int     `json:"id"`
+	Seq      int     `json:"seq"`
+	Table    string  `json:"table"`
+	From     string  `json:"from"`
+	To       *string `json:"to"`
+	OnUpdate string  `json:"onUpdate"`
+	OnDelete string  `json:"onDelete"`
+	Match    string  `json:"match"`
+}
+
+// View is one view in a Schema, with its columns where SQLite can describe them.
+type View struct {
+	Name    string   `json:"name"`
+	SQL     string   `json:"sql"`
+	Columns []Column `json:"columns"`
+}
+
+// MigrationRecord is one applied migration and its deterministic checksum.
+type MigrationRecord struct {
+	Version   int    `json:"version"`
+	Checksum  string `json:"checksum"`
+	AppliedAt string `json:"appliedAt"`
 }
 
 type transactionStatement struct {

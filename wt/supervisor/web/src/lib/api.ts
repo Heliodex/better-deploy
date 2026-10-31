@@ -225,10 +225,19 @@ export type DeploymentInfo = InferOutput<typeof deploymentInfoSchema>
 
 const deploymentsSchema = array(deploymentInfoSchema)
 
+const databaseTableStatSchema = object({
+	bytes: pipe(number(), minValue(0)),
+	name: pipe(string(), minLength(1)),
+	rows: pipe(number(), minValue(0)),
+})
+
+export type DatabaseTableStat = InferOutput<typeof databaseTableStatSchema>
+
 const databaseOverviewSchema = object({
 	database: boolean(),
 	tables: array(string()),
 	version: pipe(number(), minValue(0)),
+	stats: optional(array(databaseTableStatSchema)),
 })
 
 export type DatabaseOverview = InferOutput<typeof databaseOverviewSchema>
@@ -434,8 +443,8 @@ export const rollbackDeployment = (token: string, name: string, id: string): Pro
 		appInfoSchema,
 	)
 
-export const fetchDatabase = (token: string, name: string): Promise<DatabaseOverview> =>
-	request(`/apps/${encodeURIComponent(name)}/database`, { token }, databaseOverviewSchema)
+export const fetchDatabase = (token: string, name: string, stats = false): Promise<DatabaseOverview> =>
+	request(`/apps/${encodeURIComponent(name)}/database${stats ? "?stats=1" : ""}`, { token }, databaseOverviewSchema)
 
 export const importDatabase = (token: string, name: string, file: File): Promise<boolean> => {
 	const body = new FormData()
