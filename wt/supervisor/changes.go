@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -57,7 +58,10 @@ type rowChangeCollector struct {
 	omitted, bytes int
 }
 
-func preUpdateValues(data sqlite.SQLitePreUpdateData, new bool) ([]any, error) {
+var errRowChangeTooLarge = errors.New("row change exceeds the capture budget")
+
+// preUpdateValues fetches a row's values, checks their encoded size against the budget, and only then base64-encodes blobs.
+func preUpdateValues(data sqlite.SQLitePreUpdateData, new bool, budget int) ([]any, int, error) {
 	count := data.Count()
 	values := make([]any, count)
 	var err error
@@ -67,73 +71,63 @@ func preUpdateValues(data sqlite.SQLitePreUpdateData, new bool) ([]any, error) {
 		err = data.Old(values...)
 	}
 	if err != nil {
-		return nil, err
+		return nil, 0, err
+	}
+	total := 0
+	for _, value := range values {
+		total += storageValueSize(value)
+		if total > budget {
+			return nil, total, errRowChangeTooLarge
+		}
 	}
 	encoded := make([]any, count)
 	for i, value := range values {
 		encoded[i] = encodeStorageValue(value)
 	}
-	return encoded, nil
+	return encoded, total, nil
 }
 
-func collectRowChange(data sqlite.SQLitePreUpdateData) (rowChange, error) {
+func collectRowChange(data sqlite.SQLitePreUpdateData, budget int) (rowChange, int, error) {
 	change := rowChange{Table: data.TableName, Columns: []string{}}
 	switch data.Op {
 	case sqlite3.SQLITE_INSERT:
 		change.Op = "insert"
 		change.RowID = data.NewRowID
-		newValues, err := preUpdateValues(data, true)
+		newValues, size, err := preUpdateValues(data, true, budget)
 		if err != nil {
-			return rowChange{}, err
+			return rowChange{}, size, err
 		}
 		change.New = newValues
+		return change, size, nil
 	case sqlite3.SQLITE_DELETE:
 		change.Op = "delete"
 		change.RowID = data.OldRowID
-		oldValues, err := preUpdateValues(data, false)
+		oldValues, size, err := preUpdateValues(data, false, budget)
 		if err != nil {
-			return rowChange{}, err
+			return rowChange{}, size, err
 		}
 		change.Old = oldValues
+		return change, size, nil
 	case sqlite3.SQLITE_UPDATE:
 		change.Op = "update"
 		change.RowID = data.OldRowID
 		if change.RowID == 0 {
 			change.RowID = data.NewRowID
 		}
-		oldValues, err := preUpdateValues(data, false)
+		oldValues, oldSize, err := preUpdateValues(data, false, budget)
 		if err != nil {
-			return rowChange{}, err
+			return rowChange{}, oldSize, err
 		}
-		newValues, err := preUpdateValues(data, true)
+		newValues, newSize, err := preUpdateValues(data, true, budget-oldSize)
 		if err != nil {
-			return rowChange{}, err
+			return rowChange{}, oldSize + newSize, err
 		}
 		change.Old = oldValues
 		change.New = newValues
+		return change, oldSize + newSize, nil
 	default:
-		return rowChange{}, fmt.Errorf("unknown pre-update operation %d", data.Op)
+		return rowChange{}, 0, fmt.Errorf("unknown pre-update operation %d", data.Op)
 	}
-	return change, nil
-}
-
-// changeValueSize measures encoded values; blobs arrive as a base64 wrapper, which storageValueSize does not know about.
-func changeValueSize(value any) int {
-	if blob, ok := value.(map[string]string); ok {
-		return len(blob["$b64"])
-	}
-	return storageValueSize(value)
-}
-
-func rowChangeSize(change rowChange) int {
-	size := len(change.Table) + len(change.Op) + 16
-	for _, value := range change.Old {
-		size += changeValueSize(value)
-	}
-	for _, value := range change.New {
-		size += changeValueSize(value)
-	}
-	return size
 }
 
 func (c *rowChangeCollector) add(data sqlite.SQLitePreUpdateData) {
@@ -141,13 +135,17 @@ func (c *rowChangeCollector) add(data sqlite.SQLitePreUpdateData) {
 		c.omitted++
 		return
 	}
-	change, err := collectRowChange(data)
+	change, size, err := collectRowChange(data, maxCollectedRowBytes-c.bytes)
 	if err != nil {
-		log.Printf("storage: pre-update hook: %v", err)
+		if !errors.Is(err, errRowChangeTooLarge) {
+			log.Printf("storage: pre-update hook: %v", err)
+		}
 		c.omitted++
+		if errors.Is(err, errRowChangeTooLarge) {
+			c.bytes = maxCollectedRowBytes
+		}
 		return
 	}
-	size := rowChangeSize(change)
 	if c.bytes+size > maxCollectedRowBytes {
 		c.omitted++
 		c.bytes = maxCollectedRowBytes

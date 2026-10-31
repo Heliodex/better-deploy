@@ -127,6 +127,7 @@ type supervisor struct {
 	deployments *deploymentManager
 	uids        *uidAllocator
 	cgroups     *cgroupManager
+	egress      *egressManager
 
 	mu          sync.RWMutex
 	apps, hosts map[string]*app
@@ -505,6 +506,7 @@ func startSupervisor(cfg config) *supervisor {
 	if err != nil {
 		log.Fatalf("storage: %v", err)
 	}
+	storageIP, storagePort := storage.endpoint()
 	s := &supervisor{
 		cfg:         cfg,
 		storage:     storage,
@@ -512,6 +514,7 @@ func startSupervisor(cfg config) *supervisor {
 		events:      newHub(),
 		deployments: newDeploymentManager(filepath.Join(cfg.stateDir, ".deployments")),
 		cgroups:     newCgroupManager(cfg.cgroupRoot),
+		egress:      newEgressManager(cfg.iptables, storageIP, storagePort, nil),
 		apps:        map[string]*app{},
 		hosts:       map[string]*app{},
 	}
@@ -550,6 +553,9 @@ func serve(s *supervisor) {
 	go s.backups.loop(backupCtx)
 	go s.monitorResources(resourceSampleInterval)
 	go s.monitorHealth()
+	if cfg.untrusted() {
+		go s.monitorDiskQuota()
+	}
 
 	// When admin routes have their own listener, the public one serves app hosts and /healthz only.
 	publicOnly := cfg.adminListen != ""
@@ -621,6 +627,14 @@ func serve(s *supervisor) {
 		_ = shutdownServer(adminServer, shutdownTimeout)
 	}
 	s.stopAll()
+	if s.egress != nil {
+		if err := s.egress.shutdown(); err != nil {
+			log.Printf("egress shutdown: %v", err)
+		}
+	}
+	if s.cgroups != nil {
+		s.cgroups.close()
+	}
 	s.persistResources()
 	s.storage.close()
 	if adminCleanup != nil {

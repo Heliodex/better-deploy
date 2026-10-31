@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -87,4 +88,50 @@ func (s *supervisor) diskBytes(a *app) int64 {
 	a.disk.at = now
 	a.disk.mu.Unlock()
 	return bytes
+}
+
+// enforceDiskQuota stops an untrusted app whose measured /data and database usage exceeds disk_mb.
+// Stopping retires the app, so the process watcher does not restart it and the reason stays in lastError.
+func (s *supervisor) enforceDiskQuota(a *app) bool {
+	if a == nil || !s.cfg.untrusted() {
+		return false
+	}
+	a.mu.Lock()
+	limit := int64(a.cfg.DiskMB) << 20
+	a.mu.Unlock()
+	if limit <= 0 {
+		return false
+	}
+	bytes, err := s.appDataBytes(a.name)
+	if err != nil {
+		log.Printf("app %s: disk quota check: %v", a.name, err)
+		return false
+	}
+	if bytes <= limit {
+		return false
+	}
+
+	message := fmt.Sprintf("disk quota exceeded: %d bytes of %d bytes used; app stopped", bytes, limit)
+	a.mu.Lock()
+	a.lastError = message
+	a.mu.Unlock()
+	log.Printf("app %s: %s", a.name, message)
+	s.cancelRestart(a)
+	s.drainAndStop(a, "disk quota")
+	s.broadcast()
+	return true
+}
+
+// monitorDiskQuota checks each app's measured usage on the same cadence as the usage cache.
+func (s *supervisor) monitorDiskQuota() {
+	ticker := time.NewTicker(diskUsageInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		if s.stopping.Load() {
+			return
+		}
+		for _, a := range s.allApps() {
+			s.enforceDiskQuota(a)
+		}
+	}
 }

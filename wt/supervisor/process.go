@@ -381,6 +381,16 @@ func (s *supervisor) launch(a *app, source string) error {
 	if err := s.waitForPort(a, finder, done, deadline); err != nil {
 		return fail(withLaunchLog(source, recent, err))
 	}
+	if cfg.Network == "storage" {
+		if s.cfg.untrusted() {
+			// Rules must be in place before readiness and before the proxy routes traffic.
+			if err := s.applyEgress(a); err != nil {
+				return fail(fmt.Errorf("egress rules: %w", err))
+			}
+		} else {
+			log.Printf("app %s: network storage in trusted mode has no per-app uid, so inherit-network stays unrestricted", a.name)
+		}
+	}
 	if err := s.waitReadyUntil(a, done, deadline); err != nil {
 		return fail(withLaunchLog(source, recent, err))
 	}

@@ -54,20 +54,23 @@ func (m *cgroupManager) enableControllers() error {
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("read %s: %w", subtreePath, err)
 	}
+	// cgroup.subtree_control reads back bare names ("cpu memory") but only accepts "+name"/"-name" writes.
 	enabled := map[string]bool{}
-	tokens := strings.Fields(string(existing))
-	for _, token := range tokens {
-		enabled[token] = true
+	tokens := make([]string, 0, 4)
+	for _, token := range strings.Fields(string(existing)) {
+		name := strings.TrimPrefix(token, "+")
+		enabled[name] = true
+		tokens = append(tokens, "+"+name)
 	}
 	changed := false
 	for _, name := range strings.Fields(requiredControllers) {
-		token := "+" + name
-		if !enabled[token] {
-			tokens = append(tokens, token)
+		if !enabled[name] {
+			tokens = append(tokens, "+"+name)
+			enabled[name] = true
 			changed = true
 		}
 	}
-	if changed {
+	if changed || len(strings.Fields(string(existing))) == 0 {
 		if err := os.WriteFile(subtreePath, []byte(strings.Join(tokens, " ")+"\n"), 0o644); err != nil {
 			return fmt.Errorf("enable cgroup controllers under %s: %w", m.root, err)
 		}

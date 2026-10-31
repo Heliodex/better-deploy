@@ -3,8 +3,65 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestUntrustedDiskQuotaStopsApp(t *testing.T) {
+	s := testSupervisor()
+	s.cfg.tenantMode = tenantUntrusted
+	s.cfg.stateDir = t.TempDir()
+	a := &app{name: "demo", cfg: appConfig{DiskMB: 1}}
+	s.apps["demo"] = a
+
+	dataDir := filepath.Join(s.cfg.stateDir, "demo")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "blob"), make([]byte, 2<<20), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if !s.enforceDiskQuota(a) {
+		t.Fatal("expected the quota check to stop the app")
+	}
+	a.mu.Lock()
+	retired, lastError, timer := a.retired, a.lastError, a.timer
+	a.mu.Unlock()
+	if !retired {
+		t.Error("over-quota app was not retired")
+	}
+	if !strings.Contains(lastError, "disk quota exceeded") {
+		t.Errorf("lastError = %q, want a disk quota message", lastError)
+	}
+	if timer != nil {
+		t.Error("over-quota app kept a restart timer")
+	}
+}
+
+func TestTrustedDiskQuotaStaysSoft(t *testing.T) {
+	s := testSupervisor()
+	s.cfg.stateDir = t.TempDir()
+	a := &app{name: "demo", cfg: appConfig{DiskMB: 1}}
+	s.apps["demo"] = a
+
+	dataDir := filepath.Join(s.cfg.stateDir, "demo")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "blob"), make([]byte, 2<<20), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if s.enforceDiskQuota(a) {
+		t.Error("trusted mode must not stop an app for disk usage")
+	}
+	a.mu.Lock()
+	retired := a.retired
+	a.mu.Unlock()
+	if retired {
+		t.Error("trusted app was retired")
+	}
+}
 
 func TestAppDiskUsageAndQuota(t *testing.T) {
 	s := testSupervisor()

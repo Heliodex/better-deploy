@@ -3,6 +3,8 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -38,6 +40,52 @@ func TestPublicAndAdminHandlersSeparateRoutes(t *testing.T) {
 		if rec.Code != tc.status {
 			t.Errorf("%s: %s %s = %d, want %d", tc.name, tc.method, tc.target, rec.Code, tc.status)
 		}
+	}
+}
+
+func TestPublicHandlerProxiesAppHosts(t *testing.T) {
+	s := testSupervisor()
+	backendApp(t, s, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("app"))
+	}), appConfig{})
+
+	req := httptest.NewRequest(http.MethodGet, "http://demo.localhost/anything", nil)
+	req.Host = "demo.localhost"
+	rec := httptest.NewRecorder()
+	s.publicHandler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || rec.Body.String() != "app" {
+		t.Errorf("public app host = %d %q, want 200 \"app\"", rec.Code, rec.Body.String())
+	}
+}
+
+func TestListenAdminUnixSocketIsPrivateAndCleanedUp(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "admin.sock")
+	network, address, err := parseAdminListen("unix:" + path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, cleanup, err := listenAdmin(network, address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("socket mode = %o, want 600", info.Mode().Perm())
+	}
+	_ = listener.Close()
+	// A closed Unix listener leaves its socket path behind; a second bind must remove the stale socket.
+	listener, cleanup2, err := listenAdmin(network, address)
+	if err != nil {
+		t.Fatalf("rebind over a stale socket: %v", err)
+	}
+	_ = listener.Close()
+	cleanup2()
+	cleanup()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("socket still exists after cleanup: %v", err)
 	}
 }
 

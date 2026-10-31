@@ -35,6 +35,9 @@ const (
 	maxStorageSessions   = 8
 	storageTimeout       = 5 * time.Second
 	storageSessionLease  = 30 * time.Second
+	// maxStorageConcurrentQueries bounds all apps' storage work together, so many tenants cannot exhaust the supervisor.
+	maxStorageConcurrentQueries = 16
+	storageQueueTimeout         = 5 * time.Second
 )
 
 var errStorageUnavailable = errors.New("storage unavailable")
@@ -58,6 +61,8 @@ type storageServer struct {
 	sessionClosed  bool
 	sessionStop    chan struct{}
 	sessionDone    chan struct{}
+
+	querySem chan struct{}
 }
 
 type storageRequest struct {
@@ -104,6 +109,7 @@ func newStorageServer(dir, listen string) (*storageServer, error) {
 		sessions:    map[string]*storageSession{},
 		sessionStop: make(chan struct{}),
 		sessionDone: make(chan struct{}),
+		querySem:    make(chan struct{}, maxStorageConcurrentQueries),
 	}
 	s.sessionCond = sync.NewCond(&s.sessionMu)
 	s.listener = listener
@@ -122,6 +128,19 @@ func newStorageServer(dir, listen string) (*storageServer, error) {
 
 func (s *storageServer) url() string {
 	return s.baseURL
+}
+
+// endpoint returns the address apps and egress rules use to reach the storage service.
+func (s *storageServer) endpoint() (string, int) {
+	address, ok := s.listener.Addr().(*net.TCPAddr)
+	if !ok || address == nil {
+		return "", 0
+	}
+	ip := address.IP
+	if ip == nil || ip.IsUnspecified() {
+		return "127.0.0.1", address.Port
+	}
+	return ip.String(), address.Port
 }
 
 func (s *storageServer) close() {
@@ -286,13 +305,9 @@ func checkBackupDatabase(path string) error {
 }
 
 // configureStorageConn applies per-connection safety limits. ATTACH is disabled at the SQLite level, which also blocks VACUUM INTO and therefore arbitrary file writes from SQL.
+// Temp tables spill to files rather than anonymous memory, the page cache is small, and mmap is off so one query cannot balloon the supervisor's RSS.
 func configureStorageConn(ctx context.Context, conn *sql.Conn) error {
-	for _, pragma := range []string{
-		`pragma busy_timeout = 5000`,
-		`pragma foreign_keys = ON`,
-		`pragma trusted_schema = OFF`,
-		`pragma temp_store = MEMORY`,
-	} {
+	for _, pragma := range storageConnectionPragmas {
 		if _, err := conn.ExecContext(ctx, pragma); err != nil {
 			return err
 		}
@@ -313,6 +328,16 @@ func configureStorageConn(ctx context.Context, conn *sql.Conn) error {
 		}
 	}
 	return nil
+}
+
+// storageConnectionPragmas is also asserted by tests so the hardened settings cannot silently regress.
+var storageConnectionPragmas = []string{
+	`pragma busy_timeout = 5000`,
+	`pragma foreign_keys = ON`,
+	`pragma trusted_schema = OFF`,
+	`pragma temp_store = FILE`,
+	`pragma cache_size = -2048`,
+	`pragma mmap_size = 0`,
 }
 
 func (s *storageServer) withConn(ctx context.Context, app string, fn func(*sql.Conn) error) error {
@@ -618,12 +643,37 @@ func (s *storageServer) query(w http.ResponseWriter, r *http.Request, app string
 	writeJSON(w, http.StatusOK, result)
 }
 
+// acquireQuery takes one of the global storage slots, returning false when the service is saturated.
+func (s *storageServer) acquireQuery(w http.ResponseWriter, r *http.Request) bool {
+	if s.querySem == nil {
+		return true
+	}
+	timer := time.NewTimer(storageQueueTimeout)
+	defer timer.Stop()
+	select {
+	case s.querySem <- struct{}{}:
+		return true
+	case <-r.Context().Done():
+		writeError(w, http.StatusServiceUnavailable, "storage busy")
+		return false
+	case <-timer.C:
+		writeError(w, http.StatusServiceUnavailable, "storage busy")
+		return false
+	}
+}
+
 func (s *storageServer) handle(w http.ResponseWriter, r *http.Request) {
 	app, ok := s.appFor(r)
 	if !ok {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="wt-storage"`)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
+	}
+	if !s.acquireQuery(w, r) {
+		return
+	}
+	if s.querySem != nil {
+		defer func() { <-s.querySem }()
 	}
 
 	if r.URL.Path == "/v1/sessions" {

@@ -67,16 +67,34 @@ func (s *supervisor) prepareLaunch(a *app, cfg appConfig) (*launchIsolation, err
 
 // releaseIsolation removes resources that belong to one launch attempt. The process must already be gone.
 func (s *supervisor) releaseIsolation(a *app, iso *launchIsolation) {
-	if iso == nil || iso.cgroup == "" || s.cgroups == nil {
+	if a == nil {
 		return
 	}
-	if err := s.cgroups.remove(a.name); err != nil {
-		log.Printf("app %s: remove cgroup: %v", a.name, err)
+	s.removeAppEgress(a)
+	if iso != nil && iso.cgroup != "" {
+		s.removeAppCgroup(a)
 	}
 }
 
 // releaseAppIsolation removes per-app resources on stop, using the app name so a stopped app leaves nothing behind.
 func (s *supervisor) releaseAppIsolation(a *app) {
+	if a == nil {
+		return
+	}
+	s.removeAppEgress(a)
+	s.removeAppCgroup(a)
+}
+
+func (s *supervisor) removeAppEgress(a *app) {
+	if a == nil || s.egress == nil {
+		return
+	}
+	if err := s.egress.remove(a.name); err != nil {
+		log.Printf("app %s: remove egress rules: %v", a.name, err)
+	}
+}
+
+func (s *supervisor) removeAppCgroup(a *app) {
 	if a == nil || s.cgroups == nil {
 		return
 	}
@@ -85,10 +103,22 @@ func (s *supervisor) releaseAppIsolation(a *app) {
 	}
 }
 
+// applyEgress installs the app's owner-match rules now that its loopback port is known.
+func (s *supervisor) applyEgress(a *app) error {
+	if s.egress == nil {
+		return fmt.Errorf("no egress firewall manager")
+	}
+	a.mu.Lock()
+	uid, port := a.uid, a.port
+	a.mu.Unlock()
+	return s.egress.add(a.name, uid, port)
+}
+
 // appCredential builds the SysProcAttr credential for an untrusted app. A nil result keeps the supervisor's own identity.
 func appCredential(iso *launchIsolation) *syscall.Credential {
 	if iso == nil || iso.uid == 0 {
 		return nil
 	}
-	return &syscall.Credential{Uid: uint32(iso.uid), Gid: uint32(iso.gid)}
+	// Explicitly empty supplementary groups so the app cannot inherit root's group memberships.
+	return &syscall.Credential{Uid: uint32(iso.uid), Gid: uint32(iso.gid), Groups: []uint32{}}
 }
