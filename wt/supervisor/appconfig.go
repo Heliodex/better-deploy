@@ -5,8 +5,11 @@ package main
 import (
 	"encoding/json/v2"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -18,10 +21,24 @@ func env(key, fallback string) string {
 	return fallback
 }
 
+func envInt64(key string, fallback int64) int64 {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
+}
+
 func configFromEnv() config {
 	return config{
 		appsDir:          env("WT_APPS_DIR", "./apps"),
 		stateDir:         env("WT_STATE_DIR", "./state"),
+		cacheDir:         env("WT_CACHE_DIR", ""),
+		cacheMaxBytes:    envInt64("WT_CACHE_MAX_BYTES", defaultCacheMaxBytes),
 		listen:           env("WT_LISTEN", "127.0.0.1:8080"),
 		storageListen:    env("WT_STORAGE_LISTEN", "127.0.0.1:0"),
 		domain:           env("WT_APPS_DOMAIN", "localhost"),
@@ -32,6 +49,23 @@ func configFromEnv() config {
 		tlsCert:          os.Getenv("WT_TLS_CERT"),
 		tlsKey:           os.Getenv("WT_TLS_KEY"),
 	}
+}
+
+// sameRuntimeConfig compares the settings that require a new process, ignoring build and display metadata.
+func sameRuntimeConfig(a, b appConfig) bool {
+	if a.Host != b.Host || a.Health != b.Health {
+		return false
+	}
+	if !maps.Equal(a.Env, b.Env) {
+		return false
+	}
+	if a.MemoryMB != b.MemoryMB || a.DiskMB != b.DiskMB || a.MaxConcurrent != b.MaxConcurrent {
+		return false
+	}
+	if a.requestTimeout != b.requestTimeout || a.Network != b.Network {
+		return false
+	}
+	return slices.Equal(a.Schedule, b.Schedule)
 }
 
 func validName(name string) bool {

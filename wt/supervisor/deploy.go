@@ -239,31 +239,86 @@ func drainApp(a *app, timeout time.Duration) bool {
 type deployValidationResponse struct {
 	Valid  bool              `json:"valid"`
 	Config appConfigResponse `json:"config"`
+	Digest string            `json:"digest,omitempty"`
 }
 
-// installBundle starts a version from dir, swaps it into the app directory and drains the old process.
-func (s *supervisor) installBundle(w http.ResponseWriter, name string, cfg appConfig, dir, action string) *app {
+// canDeployStatic reports whether the running process can keep serving while only app.json and static/ change.
+func canDeployStatic(a *app, digest string, cfg appConfig) bool {
+	if a == nil || digest == "" {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	running := a.cmd != nil && !a.exited && !a.retired
+	return running && a.digest == digest && sameRuntimeConfig(a.cfg, cfg)
+}
+
+// installStatic replaces app.json and static/ in the live directory without restarting the running process.
+func (s *supervisor) installStatic(a *app, cfg appConfig, dir string) error {
+	appJSON, err := os.ReadFile(filepath.Join(dir, "app.json"))
+	if err != nil {
+		return fmt.Errorf("read app.json: %w", err)
+	}
+	staged, err := os.MkdirTemp(a.dir, ".static-*")
+	if err != nil {
+		return fmt.Errorf("stage static: %w", err)
+	}
+	defer os.RemoveAll(staged)
+	if err := copyStatic(dir, staged); err != nil {
+		return fmt.Errorf("stage static: %w", err)
+	}
+	static := filepath.Join(staged, "static")
+	if err := os.MkdirAll(static, 0o755); err != nil {
+		return fmt.Errorf("stage static: %w", err)
+	}
+	if err := writeFileAtomic(filepath.Join(a.dir, "app.json"), appJSON); err != nil {
+		return fmt.Errorf("write app.json: %w", err)
+	}
+	if err := replaceDir(static, filepath.Join(a.dir, "static")); err != nil {
+		return fmt.Errorf("install static: %w", err)
+	}
+
+	a.mu.Lock()
+	a.cfg = cfg
+	a.mu.Unlock()
+	s.register(a)
+	log.Printf("deployed %s static only (wasm %s)", a.name, a.digest)
+	return nil
+}
+
+// installBundle starts a version from dir, or updates static files in place when the wasm and runtime config are unchanged.
+func (s *supervisor) installBundle(w http.ResponseWriter, name string, cfg appConfig, dir, action string) (*app, string) {
 	s.mu.RLock()
 	old := s.apps[name]
 	s.mu.RUnlock()
 
+	digest := sourceDigest(dir)
+	if canDeployStatic(old, digest, cfg) {
+		if err := s.installStatic(old, cfg, dir); err != nil {
+			log.Printf("%s %s: %v", action, name, err)
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return nil, ""
+		}
+		return old, "static"
+	}
+
 	port, err := freePort()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "allocate port")
-		return nil
+		return nil, ""
 	}
 	next, err := s.spawn(name, dir, cfg, port)
 	if err != nil {
 		log.Printf("%s %s: %v", action, name, err)
 		writeError(w, http.StatusBadGateway, "new version did not start: "+err.Error())
-		return nil
+		return nil, ""
 	}
 
 	finalDir := filepath.Join(s.cfg.appsDir, name)
 	if err := replaceDir(dir, finalDir); err != nil {
 		s.stop(next)
 		writeError(w, http.StatusInternalServerError, err.Error())
-		return nil
+		return nil, ""
 	}
 	next.dir = finalDir
 
@@ -276,7 +331,7 @@ func (s *supervisor) installBundle(w http.ResponseWriter, name string, cfg appCo
 	}
 
 	log.Printf("%s %s at %s (127.0.0.1:%d)", action, name, cfg.Host, port)
-	return next
+	return next, "full"
 }
 
 func (s *supervisor) deploy(w http.ResponseWriter, r *http.Request, name string) {
@@ -296,15 +351,19 @@ func (s *supervisor) deploy(w http.ResponseWriter, r *http.Request, name string)
 			return
 		}
 		if dryRun {
-			writeJSON(w, http.StatusOK, deployValidationResponse{Valid: true, Config: configResponse(cfg)})
+			digest := sourceDigest(tmpDir)
+			w.Header().Set("X-WT-Wasm-Digest", digest)
+			writeJSON(w, http.StatusOK, deployValidationResponse{Valid: true, Config: configResponse(cfg), Digest: digest})
 			return
 		}
 	}
 
-	next := s.installBundle(w, name, cfg, tmpDir, "deployed")
+	next, mode := s.installBundle(w, name, cfg, tmpDir, "deployed")
 	if next == nil {
 		return
 	}
 	s.recordDeployment(name, next.dir)
+	w.Header().Set("X-WT-Wasm-Digest", next.digest)
+	w.Header().Set("X-WT-Deploy-Mode", mode)
 	writeJSON(w, http.StatusOK, s.info(next))
 }

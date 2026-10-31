@@ -34,12 +34,14 @@ const (
 	readyTimeout          = 15 * time.Second
 	stopTimeout           = 5 * time.Second
 	drainTimeout          = 10 * time.Second
+	defaultCacheMaxBytes  = 2 << 30
 )
 
 type config struct {
-	appsDir, stateDir, listen, storageListen, domain string
-	wasmtime, wasmtimeCompiler, wasmtimeTarget       string
-	token, tlsCert, tlsKey                           string
+	appsDir, stateDir, cacheDir, listen, storageListen, domain string
+	wasmtime, wasmtimeCompiler, wasmtimeTarget                 string
+	token, tlsCert, tlsKey                                     string
+	cacheMaxBytes                                              int64
 }
 
 type appConfig struct {
@@ -72,18 +74,18 @@ const (
 )
 
 type app struct {
-	name, dir string
-	port      int
-	cfg       appConfig
-	proxy     *httputil.ReverseProxy
-	started   time.Time
-	delay     time.Duration
-	timer     *time.Timer
-	logs      *appLog
-	stats     appStats
-	disk      diskUsageCache
-	history   diskUsageCache
-	requests  sync.WaitGroup // in-flight proxied requests, drained before a replaced version stops
+	name, dir, digest string
+	port              int
+	cfg               appConfig
+	proxy             *httputil.ReverseProxy
+	started           time.Time
+	delay             time.Duration
+	timer             *time.Timer
+	logs              *appLog
+	stats             appStats
+	disk              diskUsageCache
+	history           diskUsageCache
+	requests          sync.WaitGroup // in-flight proxied requests, drained before a replaced version stops
 
 	mu              sync.Mutex
 	scheduleCancel  context.CancelFunc
@@ -178,6 +180,7 @@ func (s *supervisor) info(a *app) appInfo {
 	info.Status = a.statusLocked()
 	info.LastHealthy = a.lastHealthy
 	info.LastError = a.lastError
+	info.CurrentDigest = a.digest
 	if a.cmd != nil && a.cmd.Process != nil && !a.exited {
 		info.PID = a.cmd.Process.Pid
 	}
@@ -233,6 +236,7 @@ type appInfo struct {
 	SampledAt      time.Time `json:"sampledAt"`
 	LastHealthy    time.Time `json:"lastHealthy,omitempty"`
 	LastError      string    `json:"lastError,omitempty"`
+	CurrentDigest  string    `json:"currentDigest,omitempty"`
 }
 
 func (s *supervisor) stopAll() {
@@ -391,6 +395,8 @@ func parseConfig() config {
 	flag.StringVar(&cfg.listen, "listen", cfg.listen, "public listen address")
 	flag.StringVar(&cfg.appsDir, "apps", cfg.appsDir, "directory containing one directory per app")
 	flag.StringVar(&cfg.stateDir, "state", cfg.stateDir, "per-app state directory")
+	flag.StringVar(&cfg.cacheDir, "cache-dir", cfg.cacheDir, "compiled cwasm cache (default WT_STATE_DIR/.cache)")
+	flag.Int64Var(&cfg.cacheMaxBytes, "cache-max-bytes", cfg.cacheMaxBytes, "compiled cwasm cache byte cap")
 	flag.StringVar(&cfg.domain, "domain", cfg.domain, "default app host suffix")
 	flag.StringVar(&cfg.wasmtime, "wasmtime", cfg.wasmtime, "wasmtime binary")
 	flag.StringVar(&cfg.wasmtimeCompiler, "wasmtime-compiler", cfg.wasmtimeCompiler, "wasmtime binary with the compile subcommand, used to rebuild stale artifacts")
@@ -416,11 +422,26 @@ func parseConfig() config {
 		log.Fatalf("state dir: %v", err)
 	}
 	cfg.appsDir, cfg.stateDir = absoluteApps, absoluteState
+	if cfg.cacheDir == "" {
+		cfg.cacheDir = filepath.Join(cfg.stateDir, ".cache")
+	} else {
+		absoluteCache, err := filepath.Abs(cfg.cacheDir)
+		if err != nil {
+			log.Fatalf("cache dir: %v", err)
+		}
+		cfg.cacheDir = absoluteCache
+	}
+	if cfg.cacheMaxBytes <= 0 {
+		cfg.cacheMaxBytes = defaultCacheMaxBytes
+	}
 	if err := os.MkdirAll(cfg.appsDir, 0o755); err != nil {
 		log.Fatalf("apps dir: %v", err)
 	}
 	if err := os.MkdirAll(cfg.stateDir, 0o755); err != nil {
 		log.Fatalf("state dir: %v", err)
+	}
+	if err := os.MkdirAll(cfg.cacheDir, 0o755); err != nil {
+		log.Fatalf("cache dir: %v", err)
 	}
 	return cfg
 }

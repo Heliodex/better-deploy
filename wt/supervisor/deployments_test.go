@@ -69,6 +69,9 @@ func TestDeploymentHistoryRecordListAndPrune(t *testing.T) {
 	if !recorded.Rebuildable || recorded.Runtime != "wasmtime-cli 50.0.0" || recorded.Target != "x86_64-test" {
 		t.Errorf("recorded = %+v, want a rebuildable bundle with its artifact metadata", recorded)
 	}
+	if recorded.Digest != digestText("wasm") || recorded.WasmDigest != recorded.Digest || recorded.WasmBytes != int64(len("wasm")) {
+		t.Errorf("recorded = %+v, want the wasm digest %s and its size", recorded, digestText("wasm"))
+	}
 	if _, err := manager.bundle("demo", "nope"); err == nil {
 		t.Error("invalid deployment id was accepted")
 	}
@@ -101,6 +104,19 @@ func TestRollbackInstallsPreviousBundle(t *testing.T) {
 	}
 	if len(infos) != 2 {
 		t.Errorf("history length after rollback = %d, want 2", len(infos))
+	}
+}
+
+func TestDeploymentHistoryLegacyCwasmDigest(t *testing.T) {
+	manager := newDeploymentManager(t.TempDir())
+	source := writeDeploymentSource(t, "demo.localhost")
+
+	recorded, err := manager.record("demo", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recorded.Digest != digestText("cwasm demo.localhost") || recorded.WasmDigest != "" || recorded.WasmBytes != 0 {
+		t.Errorf("legacy record = %+v, want the cwasm digest and no wasm metadata", recorded)
 	}
 }
 

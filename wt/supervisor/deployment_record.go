@@ -118,7 +118,7 @@ func (m *deploymentManager) record(app, source string) (deploymentInfo, error) {
 	artifact, _ := readArtifact(source)
 	files := map[string]string{}
 	var total, cwasmSize, wasmSize int64
-	digest := ""
+	var cwasmDigest, wasmDigest string
 	for _, name := range []string{"main.cwasm", "main.wasm"} {
 		info, err := os.Stat(filepath.Join(source, name))
 		if err != nil {
@@ -135,14 +135,14 @@ func (m *deploymentManager) record(app, source string) (deploymentInfo, error) {
 		total += size
 		switch name {
 		case "main.cwasm":
-			digest, cwasmSize = stored, info.Size()
+			cwasmDigest, cwasmSize = stored, info.Size()
 		case "main.wasm":
-			wasmSize = info.Size()
+			wasmDigest, wasmSize = stored, info.Size()
 		}
 	}
+	digest, size := wasmDigest, wasmSize
 	if digest == "" {
-		digest = files["main.wasm"]
-		cwasmSize = wasmSize
+		digest, size = cwasmDigest, cwasmSize
 	}
 	if digest == "" {
 		return deploymentInfo{}, errNoComponent
@@ -171,7 +171,9 @@ func (m *deploymentManager) record(app, source string) (deploymentInfo, error) {
 		ID:          id,
 		DeployedAt:  now,
 		Digest:      digest,
-		Size:        cwasmSize,
+		Size:        size,
+		WasmDigest:  wasmDigest,
+		WasmBytes:   wasmSize,
 		Runtime:     artifact.Wasmtime,
 		Target:      artifact.Target,
 		Rebuildable: files["main.wasm"] != "",
@@ -297,10 +299,12 @@ func (s *supervisor) handleRollback(w http.ResponseWriter, r *http.Request, name
 		writeJSON(w, http.StatusOK, s.info(next))
 		return
 	}
-	next := s.installBundle(w, name, cfg, dir, "rolled back")
+	next, mode := s.installBundle(w, name, cfg, dir, "rolled back")
 	if next == nil {
 		return
 	}
 	s.recordDeployment(name, next.dir)
+	w.Header().Set("X-WT-Wasm-Digest", next.digest)
+	w.Header().Set("X-WT-Deploy-Mode", mode)
 	writeJSON(w, http.StatusOK, s.info(next))
 }

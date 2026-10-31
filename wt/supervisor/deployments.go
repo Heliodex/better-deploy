@@ -30,6 +30,8 @@ type deploymentInfo struct {
 	DeployedAt  time.Time         `json:"deployedAt"`
 	Digest      string            `json:"digest"`
 	Size        int64             `json:"size"`
+	WasmDigest  string            `json:"wasmDigest,omitempty"`
+	WasmBytes   int64             `json:"wasmBytes,omitempty"`
 	Runtime     string            `json:"runtime,omitempty"`
 	Target      string            `json:"target,omitempty"`
 	Rebuildable bool              `json:"rebuildable"`

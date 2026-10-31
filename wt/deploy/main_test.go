@@ -4,12 +4,19 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func digestOf(body string) string {
+	sum := sha256.Sum256([]byte(body))
+	return hex.EncodeToString(sum[:])
+}
 
 func TestBundle(t *testing.T) {
 	dir := t.TempDir()
@@ -66,6 +73,153 @@ func TestBundle(t *testing.T) {
 	}
 	if !strings.Contains(entries["artifact.json"], "wasmtime-cli 50.0.0") {
 		t.Errorf("artifact.json = %q", entries["artifact.json"])
+	}
+}
+
+func TestBundleOmitsMissingCwasm(t *testing.T) {
+	dir := t.TempDir()
+	for name, body := range map[string]string{"app.json": `{"name":"hello"}`, "main.wasm": "wasm"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	data, err := bundle(dir, manifest{Name: "hello"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gz, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gz.Close()
+	names := map[string]bool{}
+	tr := tar.NewReader(gz)
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		names[header.Name] = true
+	}
+	if !names["main.wasm"] {
+		t.Error("bundle is missing main.wasm")
+	}
+	if names["main.cwasm"] {
+		t.Error("bundle included an absent main.cwasm")
+	}
+}
+
+func TestBundleRequiresWasm(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(`{"name":"hello"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.cwasm"), []byte("cwasm"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bundle(dir, manifest{Name: "hello"}); err == nil || !strings.Contains(err.Error(), "main.wasm") {
+		t.Errorf("bundle error = %v, want a missing main.wasm error", err)
+	}
+}
+
+func TestWriteArtifactRecordsWasm(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "main.wasm"), []byte("wasm"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &deployConfig{dir: dir, wasmtime: filepath.Join(dir, "missing-wasmtime"), target: "x86_64-test"}
+	if err := writeArtifact(cfg, true); err != nil {
+		t.Fatal(err)
+	}
+	info, err := readArtifactFile(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.WasmSHA256 != digestOf("wasm") || info.WasmBytes != int64(len("wasm")) {
+		t.Errorf("artifact = %+v, want the wasm digest and size", info)
+	}
+	if info.Wasmtime != "" || info.Target != "x86_64-test" || !info.Epoch {
+		t.Errorf("artifact = %+v, want the target and epoch without a runtime version", info)
+	}
+}
+
+func TestRunCompileSkipCompileWithoutCwasm(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "main.wasm"), []byte("wasm"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &deployConfig{dir: dir, wasmtime: filepath.Join(dir, "missing-wasmtime"), target: "x86_64-test", skipCompile: true}
+	if err := runCompile(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "main.cwasm")); !os.IsNotExist(err) {
+		t.Errorf("--skip-compile created main.cwasm: %v", err)
+	}
+	info, err := readArtifactFile(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.WasmSHA256 != digestOf("wasm") || info.WasmBytes != int64(len("wasm")) {
+		t.Errorf("artifact = %+v, want metadata even without a cwasm", info)
+	}
+}
+
+func TestRunCompileSkipCompileMovesStaleCwasm(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "main.wasm"), []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.cwasm"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	artifactJSON := `{"wasm_sha256":"` + digestOf("old") + `"}`
+	if err := os.WriteFile(filepath.Join(dir, artifactName), []byte(artifactJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &deployConfig{dir: dir, wasmtime: filepath.Join(dir, "missing-wasmtime"), target: "x86_64-test", skipCompile: true}
+	if err := runCompile(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "main.cwasm")); !os.IsNotExist(err) {
+		t.Errorf("stale main.cwasm was kept: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "main.cwasm.stale")); err != nil {
+		t.Errorf("stale main.cwasm was not moved aside: %v", err)
+	}
+	info, err := readArtifactFile(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.WasmSHA256 != digestOf("new") {
+		t.Errorf("artifact digest = %q, want %q", info.WasmSHA256, digestOf("new"))
+	}
+}
+
+func TestRunCompileKeepsOldCwasmOnFailure(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "main.wasm"), []byte("wasm"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.cwasm"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	compiler := filepath.Join(t.TempDir(), "wasmtime")
+	if err := os.WriteFile(compiler, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &deployConfig{dir: dir, wasmtime: compiler, target: "x86_64-test"}
+	if err := runCompile(cfg); err == nil {
+		t.Fatal("expected a compile error")
+	}
+	cwasm, err := os.ReadFile(filepath.Join(dir, "main.cwasm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(cwasm) != "old" {
+		t.Errorf("main.cwasm = %q, want the previous artifact", cwasm)
 	}
 }
 

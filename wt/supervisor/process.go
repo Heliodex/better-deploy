@@ -188,6 +188,7 @@ func (s *supervisor) restart(a *app) {
 	}
 	a.mu.Lock()
 	a.wasmEpoch = epoch
+	a.digest = sourceDigest(dir)
 	a.mu.Unlock()
 	if err := s.launch(a, cwasm); err != nil {
 		log.Printf("app %s: restart: %v", a.name, err)
@@ -313,6 +314,7 @@ func (s *supervisor) spawn(name, dir string, cfg appConfig, port int) (*app, err
 	a := &app{
 		name:      name,
 		dir:       dir,
+		digest:    sourceDigest(dir),
 		port:      port,
 		cfg:       cfg,
 		logs:      logs,
