@@ -26,6 +26,10 @@ const (
 	defaultPidsMax       = 128
 	defaultIOWeight      = 100
 	maxIOWeight          = 10000
+	maxMemoryMB          = 1 << 20
+	maxDiskMB            = 1 << 20
+	maxCPUMillicores     = 1_000_000
+	maxPidsMax           = 1_000_000
 
 	// Untrusted tenancy defaults are deliberately finite: an app with omitted fields must not inherit unbounded CPU, memory, disk or time.
 	untrustedDefaultRequestTimeout = "30s"
@@ -286,20 +290,20 @@ func normalizeAppConfig(cfg appConfig, name, domain string, modes ...string) (ap
 			return cfg, fmt.Errorf("invalid env key %q", key)
 		}
 	}
-	if cfg.MemoryMB < 0 {
-		return cfg, fmt.Errorf("memory_mb must be 0 or more")
+	if cfg.MemoryMB < 0 || cfg.MemoryMB > maxMemoryMB {
+		return cfg, fmt.Errorf("memory_mb must be between 0 and %d", maxMemoryMB)
 	}
-	if cfg.DiskMB < 0 {
-		return cfg, fmt.Errorf("disk_mb must be 0 or more")
+	if cfg.DiskMB < 0 || cfg.DiskMB > maxDiskMB {
+		return cfg, fmt.Errorf("disk_mb must be between 0 and %d", maxDiskMB)
 	}
 	if cfg.MaxConcurrent < 0 {
 		return cfg, fmt.Errorf("max_concurrency must be 0 or more")
 	}
-	if cfg.CPUMillicores < 0 {
-		return cfg, fmt.Errorf("cpu_millicores must be 0 or more")
+	if cfg.CPUMillicores < 0 || cfg.CPUMillicores > maxCPUMillicores {
+		return cfg, fmt.Errorf("cpu_millicores must be between 0 and %d", maxCPUMillicores)
 	}
-	if cfg.PidsMax < 0 {
-		return cfg, fmt.Errorf("pids_max must be 0 or more")
+	if cfg.PidsMax < 0 || cfg.PidsMax > maxPidsMax {
+		return cfg, fmt.Errorf("pids_max must be between 0 and %d", maxPidsMax)
 	}
 	if cfg.IOWeight < 0 || cfg.IOWeight > maxIOWeight {
 		return cfg, fmt.Errorf("io_weight must be between 0 and %d", maxIOWeight)
