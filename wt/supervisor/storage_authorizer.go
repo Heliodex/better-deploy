@@ -83,11 +83,32 @@ var readOnlyStorageWriteActions = map[sqlite.AuthorizerActionCode]bool{
 	sqlite.AuthAnalyze:           true,
 }
 
+// storageInternalMutation reports whether an app statement writes or changes the schema of the reserved migration table. Reads stay visible to the authorizer, but the table is hidden from every app-facing listing.
+func storageInternalMutation(action sqlite.AuthorizerActionCode, arg1, arg2 string) bool {
+	switch action {
+	case sqlite.AuthCreateIndex, sqlite.AuthCreateTempIndex, sqlite.AuthDropIndex, sqlite.AuthDropTempIndex,
+		sqlite.AuthCreateTrigger, sqlite.AuthCreateTempTrigger, sqlite.AuthDropTrigger, sqlite.AuthDropTempTrigger,
+		sqlite.AuthAlterTable:
+		// CREATE/DROP INDEX and TRIGGER report the object name first and the table second.
+		return isStorageMigrationsTable(arg2)
+	case sqlite.AuthInsert, sqlite.AuthUpdate, sqlite.AuthDelete,
+		sqlite.AuthCreateTable, sqlite.AuthCreateTempTable, sqlite.AuthDropTable, sqlite.AuthDropTempTable,
+		sqlite.AuthCreateView, sqlite.AuthCreateTempView, sqlite.AuthDropView, sqlite.AuthDropTempView,
+		sqlite.AuthCreateVTable, sqlite.AuthDropVTable, sqlite.AuthReindex, sqlite.AuthAnalyze:
+		return isStorageMigrationsTable(arg1)
+	default:
+		return false
+	}
+}
+
 // storageAuthorizer is the per-connection policy. It denies actions that can reach outside the app database, and in read-only mode it denies every write and schema change.
 func storageAuthorizer(readOnly bool) sqlite.AuthorizerFn {
 	// A table-valued pragma function such as pragma_table_info presents the same AuthPragma action as a PRAGMA statement. Track the table-function read that precedes it so reads keep working while actual PRAGMA statements stay denied.
 	inPragmaTableFunction := false
 	return func(action sqlite.AuthorizerActionCode, arg1, arg2, _, _ string) sqlite.AuthorizerReturnCode {
+		if storageInternalMutation(action, arg1, arg2) {
+			return sqlite.AuthorizerDeny
+		}
 		switch action {
 		case sqlite.AuthSelect:
 			inPragmaTableFunction = false

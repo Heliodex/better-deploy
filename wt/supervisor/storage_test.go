@@ -334,8 +334,8 @@ func TestStorageSchemaAndMigrate(t *testing.T) {
 		t.Errorf("columns = %+v", schema.Tables[0].Columns)
 	}
 
-	// Applying an old version is a no-op, so an older process can start against a newer database.
-	result = migrate(1, map[string]any{"sql": `this statement must not run`})
+	// Applying an old version with the same statements is a no-op, so an older process can start against a newer database.
+	result = migrate(1, map[string]any{"sql": `create table notes (id text primary key, body text not null)`})
 	if result.Applied || result.Version != 1 {
 		t.Errorf("repeat migration = %+v, want a no-op", result)
 	}

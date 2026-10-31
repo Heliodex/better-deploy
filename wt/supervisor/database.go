@@ -21,9 +21,17 @@ const (
 var errDatabaseTableNotFound = errors.New("table not found")
 
 type databaseOverviewResponse struct {
-	Database bool     `json:"database"`
-	Tables   []string `json:"tables"`
-	Version  int      `json:"version"`
+	Database bool                 `json:"database"`
+	Tables   []string             `json:"tables"`
+	Version  int                  `json:"version"`
+	Stats    []databaseTableStats `json:"stats,omitempty"`
+}
+
+// databaseTableStats is the optional row count and page size for one table in the panel overview.
+type databaseTableStats struct {
+	Name  string `json:"name"`
+	Rows  int64  `json:"rows"`
+	Bytes int64  `json:"bytes"`
 }
 
 // databaseRowsResponse is one page of a table, with values encoded like the app-facing SQL service.
@@ -37,11 +45,11 @@ type databaseRowsResponse struct {
 	Truncated bool     `json:"truncated"`
 }
 
-// databaseTables lists the app's user tables, excluding SQLite's internal tables.
+// databaseTables lists the app's user tables, excluding SQLite's internal tables and migration bookkeeping.
 func (s *storageServer) databaseTables(ctx context.Context, app string) ([]string, error) {
 	tables := []string{}
 	err := s.withConn(ctx, app, func(conn *sql.Conn) error {
-		rows, err := conn.QueryContext(ctx, `select name from sqlite_master where type = 'table' and substr(name, 1, 7) <> 'sqlite_' order by name`)
+		rows, err := conn.QueryContext(ctx, `select name from sqlite_master where type = 'table' and lower(substr(name, 1, 7)) <> 'sqlite_' and lower(name) <> ? order by name`, storageMigrationsTable)
 		if err != nil {
 			return err
 		}
@@ -56,6 +64,41 @@ func (s *storageServer) databaseTables(ctx context.Context, app string) ([]strin
 		return rows.Err()
 	})
 	return tables, err
+}
+
+// databaseStats counts rows and sums pages for every visible table on one connection. It is opt-in because both queries scan the database.
+func (s *storageServer) databaseStats(ctx context.Context, app string) ([]databaseTableStats, error) {
+	stats := []databaseTableStats{}
+	err := s.withConn(ctx, app, func(conn *sql.Conn) error {
+		rows, err := conn.QueryContext(ctx, `select name from sqlite_master where type = 'table' and lower(substr(name, 1, 7)) <> 'sqlite_' and lower(name) <> ? order by name`, storageMigrationsTable)
+		if err != nil {
+			return err
+		}
+		names := []string{}
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				rows.Close()
+				return err
+			}
+			names = append(names, name)
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for _, name := range names {
+			rowCount, bytes, err := tableStats(ctx, conn, name)
+			if err != nil {
+				return err
+			}
+			stats = append(stats, databaseTableStats{Name: name, Rows: rowCount, Bytes: bytes})
+		}
+		return nil
+	})
+	return stats, err
 }
 
 // quoteSQLiteIdentifier quotes a table name for the few statements that cannot bind it as a parameter.
@@ -81,7 +124,7 @@ func (s *storageServer) databaseRows(ctx context.Context, app, table string, lim
 		if err != nil {
 			return err
 		}
-		if strings.HasPrefix(name, "sqlite_") {
+		if isSQLiteInternalTable(name) {
 			return errDatabaseTableNotFound
 		}
 
@@ -168,7 +211,16 @@ func (s *supervisor) handleDatabase(w http.ResponseWriter, r *http.Request, name
 		writeStorageError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, databaseOverviewResponse{Database: true, Tables: tables, Version: version})
+	response := databaseOverviewResponse{Database: true, Tables: tables, Version: version}
+	if statsRequested(r) {
+		stats, err := s.storage.databaseStats(r.Context(), name)
+		if err != nil {
+			writeStorageError(w, err)
+			return
+		}
+		response.Stats = stats
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *supervisor) handleDatabaseRows(w http.ResponseWriter, r *http.Request, name string) {

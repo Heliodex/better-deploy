@@ -75,6 +75,40 @@ func TestDatabaseOverview(t *testing.T) {
 	}
 }
 
+func TestDatabaseOverviewStats(t *testing.T) {
+	s, storage := testDatabaseSupervisor(t)
+	token := storage.tokenFor("notes")
+	createItems(t, storage, token)
+	insertItem(t, storage, token, "two")
+
+	rec := databaseGET(t, s, "/apps/notes/database")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("overview = %d %s", rec.Code, rec.Body.String())
+	}
+	var cheap databaseOverviewResponse
+	if err := json.UnmarshalRead(rec.Body, &cheap); err != nil {
+		t.Fatal(err)
+	}
+	if len(cheap.Stats) != 0 {
+		t.Errorf("ordinary overview included stats: %+v", cheap.Stats)
+	}
+
+	rec = databaseGET(t, s, "/apps/notes/database?stats=1")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("overview stats = %d %s", rec.Code, rec.Body.String())
+	}
+	var overview databaseOverviewResponse
+	if err := json.UnmarshalRead(rec.Body, &overview); err != nil {
+		t.Fatal(err)
+	}
+	if len(overview.Tables) != 1 || overview.Tables[0] != "items" || len(overview.Stats) != 1 {
+		t.Fatalf("overview stats = %+v", overview)
+	}
+	if overview.Stats[0].Name != "items" || overview.Stats[0].Rows != 2 || overview.Stats[0].Bytes < 0 {
+		t.Errorf("table stats = %+v", overview.Stats[0])
+	}
+}
+
 func TestDatabaseRows(t *testing.T) {
 	s, storage := testDatabaseSupervisor(t)
 	token := storage.tokenFor("notes")

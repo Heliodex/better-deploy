@@ -18,6 +18,9 @@ type storageErrorResponse struct {
 	Constraint string `json:"constraint,omitempty"`
 }
 
+// errStorageMigrationChecksum marks an edited migration whose version was already applied with a different checksum.
+var errStorageMigrationChecksum = errors.New("migration checksum mismatch")
+
 // storageSQLiteError maps an extended SQLite result code to an HTTP status and a stable error code.
 func storageSQLiteError(code int) (status int, name, constraint string) {
 	base := code & 0xff
@@ -78,6 +81,8 @@ func storageErrorDetails(err error) (int, storageErrorResponse) {
 		return http.StatusBadRequest, storageErrorResponse{Error: errorMessage(err), Code: "invalid"}
 	case errors.Is(err, errStorageUnavailable):
 		return http.StatusInternalServerError, storageErrorResponse{Error: errorMessage(err), Code: "storage_unavailable"}
+	case errors.Is(err, errStorageMigrationChecksum):
+		return http.StatusConflict, storageErrorResponse{Error: errorMessage(err), Code: "migration_checksum"}
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 		return http.StatusGatewayTimeout, storageErrorResponse{Error: "storage query timed out", Code: "timeout"}
 	}
