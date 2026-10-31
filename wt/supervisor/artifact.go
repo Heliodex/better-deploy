@@ -101,8 +101,8 @@ func artifactMatches(recorded, current artifactInfo) bool {
 	if current.Epoch && !recorded.Epoch {
 		return false
 	}
-	// A cwasm without the current wasm digest cannot be proven current, so rebuild rather than reuse a stale artifact.
-	if current.WasmSHA256 != "" && recorded.WasmSHA256 != current.WasmSHA256 {
+	// An empty recorded digest is legacy metadata. Reject only a digest we know points at another wasm.
+	if recorded.WasmSHA256 != "" && current.WasmSHA256 != "" && recorded.WasmSHA256 != current.WasmSHA256 {
 		return false
 	}
 	return recorded.Wasmtime == "" || current.Wasmtime == "" || recorded.Wasmtime == current.Wasmtime
@@ -130,7 +130,7 @@ func (s *supervisor) artifactCachePath(key artifactKey) string {
 func (s *supervisor) cachedArtifact(key artifactKey) (string, time.Time, bool) {
 	path := s.artifactCachePath(key)
 	info, err := os.Stat(path)
-	if err != nil || !info.Mode().IsRegular() {
+	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
 		return "", time.Time{}, false
 	}
 	return path, info.ModTime().UTC(), true
@@ -229,6 +229,9 @@ func (s *supervisor) compileCachedArtifact(dir, wasm string, key artifactKey) (s
 	}
 	if err := os.Rename(temp, dst); err != nil {
 		_ = os.Remove(temp)
+		if _, statErr := os.Stat(dst); statErr == nil {
+			return dst, nil
+		}
 		return "", err
 	}
 	return dst, nil

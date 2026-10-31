@@ -198,6 +198,45 @@ func TestRunCompileSkipCompileMovesStaleCwasm(t *testing.T) {
 	}
 }
 
+func TestRunCompileSkipCompileMovesUnverifiedCwasm(t *testing.T) {
+	for name, artifactJSON := range map[string]string{
+		"missing artifact":   "",
+		"artifact no digest": `{"wasmtime":"wasmtime-cli 51.0.0","target":"x86_64-test"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "main.wasm"), []byte("wasm"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "main.cwasm"), []byte("unverified"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if artifactJSON != "" {
+				if err := os.WriteFile(filepath.Join(dir, artifactName), []byte(artifactJSON), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cfg := &deployConfig{dir: dir, wasmtime: filepath.Join(dir, "missing-wasmtime"), target: "x86_64-test", skipCompile: true}
+			if err := runCompile(cfg); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "main.cwasm")); !os.IsNotExist(err) {
+				t.Errorf("unverified main.cwasm was kept: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "main.cwasm.stale")); err != nil {
+				t.Errorf("unverified main.cwasm was not moved aside: %v", err)
+			}
+			info, err := readArtifactFile(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.WasmSHA256 != digestOf("wasm") {
+				t.Errorf("artifact digest = %q, want %q", info.WasmSHA256, digestOf("wasm"))
+			}
+		})
+	}
+}
+
 func TestRunCompileKeepsOldCwasmOnFailure(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "main.wasm"), []byte("wasm"), 0o644); err != nil {
@@ -229,7 +268,7 @@ func TestRunBundle(t *testing.T) {
 		"app.json":      `{"name":"hello"}`,
 		"main.wasm":     "wasm",
 		"main.cwasm":    "cwasm",
-		"artifact.json": `{"wasmtime":"wasmtime-cli 50.0.0","target":"x86_64-unknown-linux-musl"}`,
+		"artifact.json": `{"wasmtime":"wasmtime-cli 50.0.0","target":"x86_64-unknown-linux-musl","wasm_sha256":"` + digestOf("wasm") + `"}`,
 		"static/app.js": "console.log('hi')",
 	} {
 		path := filepath.Join(dir, name)

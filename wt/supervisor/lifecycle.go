@@ -59,6 +59,7 @@ func (s *supervisor) startStopped(a *app) error {
 	a.draining = false
 	a.delay = time.Second
 	a.wasmEpoch = epoch
+	a.digest = sourceDigest(dir)
 	a.mu.Unlock()
 	if err := s.launch(a, cwasm); err != nil {
 		return err

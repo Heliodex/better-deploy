@@ -235,20 +235,24 @@ func runCompile(cfg *deployConfig) error {
 	}
 	cwasm := filepath.Join(cfg.dir, "main.cwasm")
 	if cfg.skipCompile {
-		epoch := false
-		if info, err := readArtifactFile(cfg.dir); err == nil {
-			epoch = info.Epoch
-			if digest, digestErr := fileDigest(wasm); digestErr == nil && info.WasmSHA256 != "" && info.WasmSHA256 != digest {
-				stale := cwasm + ".stale"
-				if err := os.Rename(cwasm, stale); err != nil && !os.IsNotExist(err) {
-					return fmt.Errorf("move stale main.cwasm aside: %w", err)
-				}
-				fmt.Fprintf(os.Stderr, "warning: main.cwasm was built for wasm %s; moved it to %s\n", info.WasmSHA256, filepath.Base(stale))
-				epoch = false
+		digest, err := fileDigest(wasm)
+		if err != nil {
+			return fmt.Errorf("digest main.wasm: %w", err)
+		}
+		artifact, artifactErr := readArtifactFile(cfg.dir)
+		verified := artifactErr == nil && artifact.WasmSHA256 == digest
+		epoch := verified && artifact.Epoch
+		if !verified {
+			stale := cwasm + ".stale"
+			if err := os.Rename(cwasm, stale); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("move unverified main.cwasm aside: %w", err)
+			}
+			if _, err := os.Stat(stale); err == nil {
+				fmt.Fprintf(os.Stderr, "warning: main.cwasm was not verified against main.wasm; moved it to %s\n", filepath.Base(stale))
 			}
 		}
 		if _, err := os.Stat(cwasm); err != nil {
-			fmt.Fprintln(os.Stderr, "warning: --skip-compile and no main.cwasm; the supervisor will compile main.wasm if it has a compiler")
+			fmt.Fprintln(os.Stderr, "warning: --skip-compile and no verified main.cwasm; the supervisor will compile main.wasm if it has a compiler")
 		}
 		return writeArtifact(cfg, epoch)
 	}

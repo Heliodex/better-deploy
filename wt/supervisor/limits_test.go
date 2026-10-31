@@ -157,6 +157,37 @@ func TestNormalizeHealthSettings(t *testing.T) {
 	}
 }
 
+func TestSameRuntimeConfigIncludesHealthSettings(t *testing.T) {
+	base := appConfig{
+		Host:           "demo.localhost",
+		Health:         "/healthz",
+		Env:            map[string]string{"A": "1"},
+		StartupTimeout: "15s",
+		HealthInterval: "10s",
+		HealthFailures: 2,
+	}
+	if !sameRuntimeConfig(base, base) {
+		t.Fatal("identical configs were not equal")
+	}
+	cases := map[string]appConfig{
+		"startup timeout":      {Host: base.Host, Health: base.Health, Env: base.Env, StartupTimeout: "30s", HealthInterval: base.HealthInterval, HealthFailures: base.HealthFailures},
+		"health interval":      {Host: base.Host, Health: base.Health, Env: base.Env, StartupTimeout: base.StartupTimeout, HealthInterval: "5s", HealthFailures: base.HealthFailures},
+		"health failures":      {Host: base.Host, Health: base.Health, Env: base.Env, StartupTimeout: base.StartupTimeout, HealthInterval: base.HealthInterval, HealthFailures: 3},
+		"restart on unhealthy": {Host: base.Host, Health: base.Health, Env: base.Env, StartupTimeout: base.StartupTimeout, HealthInterval: base.HealthInterval, HealthFailures: base.HealthFailures, RestartOnUnhealthy: true},
+	}
+	for name, changed := range cases {
+		if sameRuntimeConfig(base, changed) {
+			t.Errorf("%s change was treated as identical", name)
+		}
+	}
+	display := base
+	display.Name = "renamed"
+	display.Build = "make something"
+	if !sameRuntimeConfig(base, display) {
+		t.Error("display metadata should not force a new process")
+	}
+}
+
 func TestAppArgsNetwork(t *testing.T) {
 	s := testSupervisor()
 	a := &app{name: "demo", port: 1, cfg: appConfig{Network: "inherit"}}
