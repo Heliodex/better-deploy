@@ -130,6 +130,7 @@ type supervisor struct {
 	backups     *backupManager
 	events      *hub
 	deployments *deploymentManager
+	secrets     *secretStore
 	uids        *uidAllocator
 	cgroups     *cgroupManager
 	egress      *egressManager
@@ -206,7 +207,7 @@ func (s *supervisor) info(a *app) appInfo {
 	info.DiskLimitBytes = int64(a.cfg.DiskMB) << 20
 	info.Status = a.statusLocked()
 	info.LastHealthy = a.lastHealthy
-	info.LastError = a.lastError
+	lastError := a.lastError
 	info.CurrentDigest = a.digest
 	info.Ready = a.ready
 	info.UID = a.uid
@@ -214,6 +215,7 @@ func (s *supervisor) info(a *app) appInfo {
 		info.PID = a.cmd.Process.Pid
 	}
 	a.mu.Unlock()
+	info.LastError = s.redactAppText(a.name, lastError)
 	info.DiskBytes = s.diskBytes(a)
 	info.HistoryBytes = s.historyBytes(a)
 	info.OverQuota = info.DiskLimitBytes > 0 && info.DiskBytes > info.DiskLimitBytes
@@ -368,12 +370,18 @@ func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
 		s.handleRollback(w, r, name, id)
 		return
 	}
+	if key, ok := strings.CutPrefix(action, "secrets/"); ok {
+		s.handleAppSecrets(w, r, name, key)
+		return
+	}
 
 	switch action {
 	case "":
 		s.handleAppRoot(w, r, name)
 	case "config":
 		s.handleAppConfig(w, r, name)
+	case "secrets":
+		s.handleAppSecrets(w, r, name, "")
 	case "deployments":
 		if !requireMethod(w, r, http.MethodGet) {
 			return
@@ -534,12 +542,17 @@ func startSupervisor(cfg config) *supervisor {
 	if cfg.storageMigrationTimeout > 0 {
 		storage.migrationTimeout = cfg.storageMigrationTimeout
 	}
+	secrets, err := newSecretStore(filepath.Join(cfg.stateDir, secretDirName))
+	if err != nil {
+		log.Fatalf("secrets: %v", err)
+	}
 	s := &supervisor{
 		cfg:         cfg,
 		storage:     storage,
 		backups:     newBackupManager(filepath.Join(cfg.stateDir, ".backups"), storage, cfg.stateDir),
 		events:      newHub(),
 		deployments: newDeploymentManager(filepath.Join(cfg.stateDir, ".deployments")),
+		secrets:     secrets,
 		apps:        map[string]*app{},
 		hosts:       map[string]*app{},
 	}

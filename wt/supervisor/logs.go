@@ -32,7 +32,38 @@ type appLog struct {
 	supervisorSize int64
 	pending        []byte
 	subs           map[chan logEntry]struct{}
+	secrets        []string
 	closed         bool
+}
+
+// setSecrets replaces the values redacted from app and supervisor log lines. Longer values sort first so one secret cannot mask part of another.
+func (l *appLog) setSecrets(values []string) {
+	unique := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		unique = append(unique, value)
+	}
+	sort.Slice(unique, func(i, j int) bool {
+		if len(unique[i]) != len(unique[j]) {
+			return len(unique[i]) > len(unique[j])
+		}
+		return unique[i] < unique[j]
+	})
+	l.mu.Lock()
+	l.secrets = unique
+	l.mu.Unlock()
+}
+
+// redactLocked replaces secret values in a line. Callers hold l.mu.
+func (l *appLog) redactLocked(text string) string {
+	return redactSecrets(text, l.secrets)
 }
 
 func (l *appLog) subscribe() chan logEntry {
@@ -151,6 +182,7 @@ func (l *appLog) logSupervisor(message string) {
 	if l.closed {
 		return
 	}
+	message = l.redactLocked(message)
 	stamp := time.Now().UTC().Format(logTimeFormat)
 	data := []byte(stamp + " INFO " + message + "\n")
 	if l.supervisorSize+int64(len(data)) > maxLogBytes {
@@ -193,6 +225,7 @@ func (l *appLog) writeLine(line string) error {
 	}
 	line = guestStderr.ReplaceAllString(line, "")
 	level, message := splitLevelPrefix(line)
+	message = l.redactLocked(message)
 	stamp := time.Now().UTC().Format(logTimeFormat)
 	data := []byte(stamp + " " + level + " " + message + "\n")
 	if l.size+int64(len(data)) > maxLogBytes {
@@ -290,7 +323,9 @@ func (l *appLog) tail(n int) ([]logEntry, error) {
 				if line == "" {
 					continue
 				}
-				out = append(out, parseSourcedLogLine(line, file.source))
+				entry := parseSourcedLogLine(line, file.source)
+				entry.Message = l.redactLocked(entry.Message)
+				out = append(out, entry)
 			}
 		}
 	}
