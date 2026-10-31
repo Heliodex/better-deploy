@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"os"
 	"path/filepath"
 	"slices"
 	"time"
@@ -139,12 +140,23 @@ func applyConfigPatch(cfg appConfig, patch appConfigPatch) appConfig {
 	return cfg
 }
 
-func persistAppConfig(dir string, cfg appConfig) error {
+// appConfigPermission keeps env secrets out of world-readable app.json files in untrusted mode.
+func appConfigPermission(untrusted bool) os.FileMode {
+	if untrusted {
+		return 0o600
+	}
+	return 0o644
+}
+
+// persistAppConfig writes app.json with the tenant-appropriate permission. The optional mode keeps
+// existing trusted callers working while untrusted PATCHes write the file 0600 from the start.
+func persistAppConfig(dir string, cfg appConfig, modes ...string) error {
 	data, err := json.Marshal(cfg)
 	if err != nil {
 		return err
 	}
-	if err := writeFileAtomic(filepath.Join(dir, "app.json"), append(data, '\n')); err != nil {
+	perm := appConfigPermission(tenantModeArg(modes) == tenantUntrusted)
+	if err := writeFileAtomicMode(filepath.Join(dir, "app.json"), append(data, '\n'), perm); err != nil {
 		return fmt.Errorf("write app.json: %w", err)
 	}
 	return nil
@@ -196,7 +208,7 @@ func (s *supervisor) handleAppConfig(w http.ResponseWriter, r *http.Request, nam
 		writeError(w, http.StatusConflict, fmt.Sprintf("host %q is already used by another app", next.Host))
 		return
 	}
-	if err := persistAppConfig(a.dir, next); err != nil {
+	if err := persistAppConfig(a.dir, next, s.cfg.tenantMode); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

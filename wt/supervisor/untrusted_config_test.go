@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -125,5 +127,12 @@ func TestConfigPatchResourceLimitsInUntrustedMode(t *testing.T) {
 	a.mu.Unlock()
 	if live.CPUMillicores != 250 || live.PidsMax != 32 || live.IOWeight != 25 {
 		t.Errorf("live cfg = %+v", live)
+	}
+	info, err := os.Stat(filepath.Join(a.dir, "app.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("app.json mode = %o, want 600 in untrusted mode", got)
 	}
 }

@@ -271,7 +271,7 @@ func (s *supervisor) installStatic(a *app, cfg appConfig, dir string) error {
 	if err := os.MkdirAll(static, 0o755); err != nil {
 		return fmt.Errorf("stage static: %w", err)
 	}
-	if err := writeFileAtomic(filepath.Join(a.dir, "app.json"), appJSON); err != nil {
+	if err := writeFileAtomicMode(filepath.Join(a.dir, "app.json"), appJSON, appConfigPermission(s.cfg.untrusted())); err != nil {
 		return fmt.Errorf("write app.json: %w", err)
 	}
 	if err := replaceDir(static, filepath.Join(a.dir, "static")); err != nil {

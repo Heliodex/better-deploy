@@ -31,6 +31,12 @@ func (s *supervisor) prepareLaunch(a *app, cfg appConfig) (*launchIsolation, err
 		if s.uids == nil {
 			return nil, fmt.Errorf("untrusted mode has no uid allocator")
 		}
+		if err := ensureDirTraversable(s.cfg.appsDir); err != nil {
+			return nil, fmt.Errorf("apps directory: %w", err)
+		}
+		if err := ensureDirTraversable(s.cfg.stateDir); err != nil {
+			return nil, fmt.Errorf("state directory: %w", err)
+		}
 		uid, err := s.uids.Allocate(a.name)
 		if err != nil {
 			return nil, fmt.Errorf("allocate app uid: %w", err)
@@ -58,8 +64,30 @@ func (s *supervisor) prepareLaunch(a *app, cfg appConfig) (*launchIsolation, err
 	return iso, nil
 }
 
+// ensureDirTraversable adds execute bits to a parent directory without granting read or write access.
+// The app UID must be able to traverse WT_APPS_DIR and WT_STATE_DIR to reach its bundle and /data preopen.
+func ensureDirTraversable(dir string) error {
+	info, err := os.Stat(dir)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s is not a directory", dir)
+	}
+	mode := info.Mode().Perm()
+	want := mode | 0o111
+	if want == mode {
+		return nil
+	}
+	if err := os.Chmod(dir, want); err != nil {
+		return fmt.Errorf("chmod %s to %o: %w", dir, want, err)
+	}
+	return nil
+}
+
 // ensureAppReadable makes a bundle traversable and readable by the app uid.
 // Directories become 0755; regular files become 0644 while keeping any execute bits they already had.
+// The root app.json holds env secrets and is made 0600 instead.
 func ensureAppReadable(root string) error {
 	info, err := os.Stat(root)
 	if err != nil {
@@ -87,6 +115,9 @@ func ensureAppReadable(root string) error {
 		case mode.IsDir():
 			return os.Chmod(path, 0o755)
 		case mode.IsRegular():
+			if path == filepath.Join(root, "app.json") {
+				return os.Chmod(path, 0o600)
+			}
 			perm := os.FileMode(0o644)
 			if mode.Perm()&0o111 != 0 {
 				perm = 0o755

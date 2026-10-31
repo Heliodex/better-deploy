@@ -12,6 +12,9 @@ import (
 
 const diskUsageInterval = 10 * time.Second
 
+// maxAppEntries bounds inode use as well as bytes. It is a variable so tests can use a small limit.
+var maxAppEntries int64 = 100_000
+
 type diskUsageCache struct {
 	mu    sync.Mutex
 	bytes int64
@@ -40,32 +43,62 @@ func walkSize(root string, total *int64) error {
 	})
 }
 
-func (s *supervisor) appDataBytes(name string) (int64, error) {
-	var total int64
-	if err := walkSize(filepath.Join(s.cfg.stateDir, name), &total); err != nil {
-		return total, err
+// appDataUsage measures /data plus the app's SQLite database files, counting every non-root directory entry
+// so empty files and directories still count against the inode quota.
+func (s *supervisor) appDataUsage(name string) (bytes, entries int64, err error) {
+	dataDir := filepath.Join(s.cfg.stateDir, name)
+	if err := filepath.WalkDir(dataDir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if os.IsNotExist(walkErr) {
+				return nil
+			}
+			return walkErr
+		}
+		if path != dataDir {
+			entries++
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if info.Mode().IsRegular() {
+			bytes += info.Size()
+		}
+		return nil
+	}); err != nil {
+		return bytes, entries, err
 	}
 
 	storageDir := filepath.Join(s.cfg.stateDir, ".storage", name)
-	entries, err := os.ReadDir(storageDir)
+	storageEntries, err := os.ReadDir(storageDir)
 	if os.IsNotExist(err) {
-		return total, nil
+		return bytes, entries, nil
 	}
 	if err != nil {
-		return total, err
+		return bytes, entries, err
 	}
-	for _, entry := range entries {
+	for _, entry := range storageEntries {
 		// storage.db, storage.db-wal and storage.db-shm are the database; changes.log is not part of the quota.
 		if entry.IsDir() || !strings.HasPrefix(entry.Name(), "storage.db") {
 			continue
 		}
 		info, err := entry.Info()
 		if err != nil {
-			return total, err
+			return bytes, entries, err
 		}
-		total += info.Size()
+		bytes += info.Size()
+		entries++
 	}
-	return total, nil
+	return bytes, entries, nil
+}
+
+// appDataBytes keeps the existing byte-only callers and report.
+func (s *supervisor) appDataBytes(name string) (int64, error) {
+	bytes, _, err := s.appDataUsage(name)
+	return bytes, err
 }
 
 // diskBytes returns cached app-data usage: /data plus the app's SQLite database files, excluding logs, backups and deployment history.
@@ -99,19 +132,25 @@ func (s *supervisor) enforceDiskQuota(a *app) bool {
 	a.mu.Lock()
 	limit := int64(a.cfg.DiskMB) << 20
 	a.mu.Unlock()
-	if limit <= 0 {
+	if limit <= 0 && maxAppEntries <= 0 {
 		return false
 	}
-	bytes, err := s.appDataBytes(a.name)
+	bytes, entries, err := s.appDataUsage(a.name)
 	if err != nil {
 		log.Printf("app %s: disk quota check: %v", a.name, err)
 		return false
 	}
-	if bytes <= limit {
+
+	var message string
+	switch {
+	case limit > 0 && bytes > limit:
+		message = fmt.Sprintf("disk quota exceeded: %d bytes of %d bytes used; app stopped", bytes, limit)
+	case maxAppEntries > 0 && entries > maxAppEntries:
+		message = fmt.Sprintf("file count quota exceeded: %d entries of %d allowed; app stopped", entries, maxAppEntries)
+	default:
 		return false
 	}
 
-	message := fmt.Sprintf("disk quota exceeded: %d bytes of %d bytes used; app stopped", bytes, limit)
 	a.mu.Lock()
 	a.lastError = message
 	a.mu.Unlock()

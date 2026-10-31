@@ -177,8 +177,17 @@ func (m *backupManager) settings(app string) (backupSettings, error) {
 
 // writeFileAtomic replaces path through a temp file, so a crash leaves the previous contents intact.
 func writeFileAtomic(path string, data []byte) error {
+	return writeFileAtomicMode(path, data, 0o644)
+}
+
+// writeFileAtomicMode is writeFileAtomic with an explicit final mode, used for app.json in untrusted mode.
+func writeFileAtomicMode(path string, data []byte, perm os.FileMode) error {
 	temp := path + backupTempSuffix
-	if err := os.WriteFile(temp, data, 0o644); err != nil {
+	if err := os.WriteFile(temp, data, perm); err != nil {
+		return err
+	}
+	if err := os.Chmod(temp, perm); err != nil {
+		_ = os.Remove(temp)
 		return err
 	}
 	if err := os.Rename(temp, path); err != nil {

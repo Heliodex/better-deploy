@@ -63,6 +63,72 @@ func TestTrustedDiskQuotaStaysSoft(t *testing.T) {
 	}
 }
 
+func TestUntrustedEntryQuotaStopsApp(t *testing.T) {
+	old := maxAppEntries
+	maxAppEntries = 2
+	defer func() { maxAppEntries = old }()
+
+	s := testSupervisor()
+	s.cfg.tenantMode = tenantUntrusted
+	s.cfg.stateDir = t.TempDir()
+	a := &app{name: "demo", cfg: appConfig{DiskMB: 1}}
+	s.apps["demo"] = a
+
+	dataDir := filepath.Join(s.cfg.stateDir, "demo")
+	if err := os.MkdirAll(filepath.Join(dataDir, "empty-dir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"one", "two", "three"} {
+		if err := os.WriteFile(filepath.Join(dataDir, name), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if !s.enforceDiskQuota(a) {
+		t.Fatal("expected the entry quota check to stop the app")
+	}
+	a.mu.Lock()
+	retired, lastError := a.retired, a.lastError
+	a.mu.Unlock()
+	if !retired {
+		t.Error("over-entry-quota app was not retired")
+	}
+	if !strings.Contains(lastError, "file count quota exceeded") {
+		t.Errorf("lastError = %q, want a file count quota message", lastError)
+	}
+}
+
+func TestTrustedEntryQuotaStaysSoft(t *testing.T) {
+	old := maxAppEntries
+	maxAppEntries = 1
+	defer func() { maxAppEntries = old }()
+
+	s := testSupervisor()
+	s.cfg.stateDir = t.TempDir()
+	a := &app{name: "demo", cfg: appConfig{DiskMB: 1}}
+	s.apps["demo"] = a
+
+	dataDir := filepath.Join(s.cfg.stateDir, "demo")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"one", "two"} {
+		if err := os.WriteFile(filepath.Join(dataDir, name), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if s.enforceDiskQuota(a) {
+		t.Error("trusted mode must not stop an app for file count")
+	}
+	a.mu.Lock()
+	retired := a.retired
+	a.mu.Unlock()
+	if retired {
+		t.Error("trusted app was retired")
+	}
+}
+
 func TestAppDiskUsageAndQuota(t *testing.T) {
 	s := testSupervisor()
 	s.cfg.stateDir = t.TempDir()
@@ -87,12 +153,18 @@ func TestAppDiskUsageAndQuota(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	bytes, err := s.appDataBytes("demo")
+	bytes, entries, err := s.appDataUsage("demo")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := int64(2 * 600 << 10); bytes != want {
 		t.Errorf("app data bytes = %d, want %d (changes.log must be excluded)", bytes, want)
+	}
+	if entries != 2 {
+		t.Errorf("app data entries = %d, want 2 (blob and storage.db; changes.log is excluded)", entries)
+	}
+	if bytesOnly, err := s.appDataBytes("demo"); err != nil || bytesOnly != bytes {
+		t.Errorf("appDataBytes = %d, %v, want %d", bytesOnly, err, bytes)
 	}
 	info := s.info(a)
 	if info.DiskBytes != bytes {
