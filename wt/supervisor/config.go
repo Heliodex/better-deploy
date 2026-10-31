@@ -16,6 +16,7 @@ const maxConfigRequestBytes = 64 << 10
 // appConfigPatch changes only the fields it names. A null env value removes that key.
 type appConfigPatch struct {
 	Host               *string            `json:"host"`
+	Hosts              *[]string          `json:"hosts"`
 	Health             *string            `json:"health"`
 	Env                map[string]*string `json:"env"`
 	MemoryMB           *int               `json:"memory_mb"`
@@ -37,6 +38,7 @@ type appConfigPatch struct {
 type appConfigResponse struct {
 	Name               string           `json:"name"`
 	Host               string           `json:"host"`
+	Hosts              []string         `json:"hosts"`
 	Health             string           `json:"health"`
 	EnvKeys            []string         `json:"env_keys"`
 	MemoryMB           int              `json:"memory_mb"`
@@ -60,9 +62,14 @@ func configResponse(cfg appConfig) appConfigResponse {
 	if schedule == nil {
 		schedule = []scheduleConfig{}
 	}
+	hosts := cfg.Hosts
+	if hosts == nil {
+		hosts = []string{}
+	}
 	return appConfigResponse{
 		Name:               cfg.Name,
 		Host:               cfg.Host,
+		Hosts:              hosts,
 		Health:             cfg.Health,
 		EnvKeys:            sortedKeys(cfg.Env),
 		MemoryMB:           cfg.MemoryMB,
@@ -84,6 +91,9 @@ func configResponse(cfg appConfig) appConfigResponse {
 func applyConfigPatch(cfg appConfig, patch appConfigPatch) appConfig {
 	if patch.Host != nil {
 		cfg.Host = *patch.Host
+	}
+	if patch.Hosts != nil {
+		cfg.Hosts = append([]string(nil), (*patch.Hosts)...)
 	}
 	if patch.Health != nil {
 		cfg.Health = *patch.Health
@@ -204,8 +214,8 @@ func (s *supervisor) handleAppConfig(w http.ResponseWriter, r *http.Request, nam
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if next.Host != cfg.Host && s.hostTaken(next.Host, a.name) {
-		writeError(w, http.StatusConflict, fmt.Sprintf("host %q is already used by another app", next.Host))
+	if err := s.hostConflictError(next, a.name); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
 	if s.cfg.untrusted() && cfg.DiskMB != next.DiskMB && s.quota.enabled() {
@@ -227,16 +237,13 @@ func (s *supervisor) handleAppConfig(w http.ResponseWriter, r *http.Request, nam
 
 	s.mu.Lock()
 	a.mu.Lock()
-	oldHost := a.cfg.Host
+	oldConfig := a.cfg
 	a.cfg = next
 	if cfg.Health != next.Health || cfg.healthInterval != next.healthInterval {
 		a.nextHealth = time.Time{}
 	}
 	a.mu.Unlock()
-	if oldHost != next.Host {
-		delete(s.hosts, oldHost)
-	}
-	s.hosts[next.Host] = a
+	s.setAppHostsLocked(a, oldConfig, next)
 	s.mu.Unlock()
 
 	if s.storage != nil && cfg.DiskMB != next.DiskMB {

@@ -331,8 +331,8 @@ func (s *supervisor) handleRollback(w http.ResponseWriter, r *http.Request, name
 		return
 	}
 	cfg.Name = name
-	if s.hostTaken(cfg.Host, name) {
-		writeError(w, http.StatusConflict, fmt.Sprintf("host %q is already used by another app", cfg.Host))
+	if err := s.hostConflictError(cfg, name); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
 	// ?backup=<snapshot> swaps code, database and /data as one operation, with compensation on failure.

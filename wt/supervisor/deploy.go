@@ -214,8 +214,8 @@ func (s *supervisor) receiveBundle(w http.ResponseWriter, r *http.Request, name 
 		return "", appConfig{}, cleanup, false
 	}
 	cfg.Name = name
-	if s.hostTaken(cfg.Host, name) {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("host %q is already used by another app", cfg.Host))
+	if err := s.hostConflictError(cfg, name); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return "", appConfig{}, cleanup, false
 	}
 	return dir, cfg, cleanup, true

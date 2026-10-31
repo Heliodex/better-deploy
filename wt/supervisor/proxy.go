@@ -93,11 +93,23 @@ func requestHost(r *http.Request) string {
 	return host
 }
 
+// appForHost finds an exact host first, then a single-label wildcard such as *.apps.example.com.
+func (s *supervisor) appForHost(host string) *app {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if a := s.hosts[host]; a != nil {
+		return a
+	}
+	labels := strings.Split(host, ".")
+	if len(labels) < 2 {
+		return nil
+	}
+	return s.hosts["*."+strings.Join(labels[1:], ".")]
+}
+
 func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
 	host := requestHost(r)
-	s.mu.RLock()
-	a := s.hosts[host]
-	s.mu.RUnlock()
+	a := s.appForHost(host)
 	if a == nil {
 		http.Error(w, "no app for this host", http.StatusNotFound)
 		return
@@ -164,9 +176,7 @@ func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 // isAppHost reports whether host belongs to an app, which owns every path on its host.
 func (s *supervisor) isAppHost(host string) bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.hosts[host] != nil
+	return s.appForHost(host) != nil
 }
 
 // adminMux holds the supervisor's own routes and never proxies app hosts.
@@ -198,7 +208,8 @@ func (s *supervisor) adminHandler() http.Handler {
 // publicHandler serves app hosts and the health check only. Admin routes live on the separate listener.
 func (s *supervisor) publicHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.isAppHost(requestHost(r)) {
+		host := requestHost(r)
+		if !s.reservedHost(host) && s.isAppHost(host) {
 			s.handleProxy(w, r)
 			return
 		}
@@ -215,7 +226,12 @@ func (s *supervisor) handler() http.Handler {
 	mux := s.adminMux()
 	mux.HandleFunc("/", s.handleProxy)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.isAppHost(requestHost(r)) {
+		host := requestHost(r)
+		if s.reservedHost(host) {
+			mux.ServeHTTP(w, r)
+			return
+		}
+		if s.isAppHost(host) {
 			s.handleProxy(w, r)
 			return
 		}

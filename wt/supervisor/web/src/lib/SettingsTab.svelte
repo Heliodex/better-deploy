@@ -20,6 +20,7 @@ let { busy, config, error, loading, message, ondelete, onreload, onsave, onstart
 	$props()
 
 let host = $state("")
+let hosts = $state("")
 let health = $state("/healthz")
 let memoryMB = $state(0)
 let diskMB = $state(0)
@@ -37,6 +38,7 @@ $effect(() => {
 	const current = config
 	if (!current) return
 	host = current.host
+	hosts = current.hosts.join(", ")
 	health = current.health
 	memoryMB = current.memory_mb
 	diskMB = current.disk_mb
@@ -49,6 +51,15 @@ $effect(() => {
 	network = current.network
 })
 
+const parseHosts = (value: string): string[] => [
+	...new Set(
+		value
+			.split(/[\s,]+/)
+			.map((entry) => entry.trim())
+			.filter((entry) => entry.length > 0),
+	),
+]
+
 function save(event: SubmitEvent): void {
 	event.preventDefault()
 	void onsave({
@@ -57,6 +68,7 @@ function save(event: SubmitEvent): void {
 		health_failures: healthFailures,
 		health_interval: healthInterval.trim(),
 		host: host.trim(),
+		hosts: parseHosts(hosts),
 		max_concurrency: maxConcurrent,
 		memory_mb: memoryMB,
 		network,
@@ -123,6 +135,15 @@ async function remove(): Promise<void> {
 			<label class="flex flex-col gap-1">
 				<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Host</span>
 				<input aria-label="Host" class="field" bind:value={host}>
+			</label>
+			<label class="flex flex-col gap-1">
+				<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Host aliases</span>
+				<input
+					aria-label="Host aliases"
+					class="field"
+					placeholder="*.apps.example.com, old.example.com"
+					bind:value={hosts}
+				>
 			</label>
 			<label class="flex flex-col gap-1">
 				<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Health path</span>
@@ -195,8 +216,9 @@ async function remove(): Promise<void> {
 					{saving ? "Saving…" : "Save config"}
 				</button>
 				<p class="text-xs text-neutral-500">
-					Env values stay hidden. Memory, concurrency, timeout and network changes need a restart; host and
-					health settings apply immediately.
+					Env values stay hidden. Memory, concurrency, timeout and network changes need a restart; host,
+					host aliases and health settings apply immediately. Use wildcard aliases such as
+					*.apps.example.com with a matching certificate.
 				</p>
 			</div>
 		</form>

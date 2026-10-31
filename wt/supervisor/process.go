@@ -196,10 +196,13 @@ func (s *supervisor) cancelRestart(a *app) {
 func (s *supervisor) register(a *app) {
 	s.mu.Lock()
 	if old := s.apps[a.name]; old != nil {
-		delete(s.hosts, old.cfg.Host)
+		s.removeAppHostsLocked(old, old.cfg)
 	}
+	s.removeAppHostsLocked(a, a.cfg)
 	s.apps[a.name] = a
-	s.hosts[a.cfg.Host] = a
+	for _, host := range appHosts(a.cfg) {
+		s.hosts[host] = a
+	}
 	s.mu.Unlock()
 	s.broadcast()
 }
@@ -462,8 +465,8 @@ func (s *supervisor) loadApps() error {
 			log.Printf("app %s: %v (skipped)", name, err)
 			continue
 		}
-		if s.hostTaken(cfg.Host, name) {
-			log.Printf("app %s: host %q is already used; skipped", name, cfg.Host)
+		if err := s.hostConflictError(cfg, name); err != nil {
+			log.Printf("app %s: %v; skipped", name, err)
 			continue
 		}
 		a, err := s.spawn(name, dir, cfg)

@@ -172,35 +172,11 @@ func validName(name string) bool {
 	return true
 }
 
-func validHost(host string) bool {
-	if host == "" || len(host) > 253 {
-		return false
-	}
-	if strings.ContainsAny(host, " /:@") || strings.HasPrefix(host, ".") ||
-		strings.HasSuffix(host, ".") || strings.Contains(host, "..") {
-		return false
-	}
-	for _, r := range host {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '.' {
-			continue
-		}
-		return false
-	}
-	return true
-}
-
 func defaultHost(name, domain string) string {
 	if domain != "" {
 		return name + "." + domain
 	}
 	return name + ".localhost"
-}
-
-func validateAppHost(host string) error {
-	if !validHost(host) {
-		return fmt.Errorf("invalid host %q", host)
-	}
-	return nil
 }
 
 // parseRequestTimeout validates an optional per-request deadline. Empty means no configured deadline;
@@ -303,9 +279,14 @@ func normalizeAppConfig(cfg appConfig, name, domain string, modes ...string) (ap
 		cfg.Host = defaultHost(name, domain)
 	}
 	cfg.Host = strings.ToLower(strings.TrimSpace(cfg.Host))
-	if err := validateAppHost(cfg.Host); err != nil {
+	if err := validateAppHost(cfg.Host, domain); err != nil {
 		return cfg, err
 	}
+	hosts, err := normalizeAppHosts(cfg.Hosts, cfg.Host, domain)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.Hosts = hosts
 	if cfg.Health == "" {
 		cfg.Health = defaultHealthPath
 	}

@@ -54,6 +54,7 @@ type config struct {
 type appConfig struct {
 	Name               string            `json:"name"`
 	Host               string            `json:"host"`
+	Hosts              []string          `json:"hosts,omitempty"`
 	Health             string            `json:"health"`
 	Env                map[string]string `json:"env"`
 	Build              string            `json:"build,omitempty"`
@@ -145,14 +146,7 @@ type supervisor struct {
 }
 
 func (s *supervisor) hostTaken(host, except string) bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for name, a := range s.apps {
-		if name != except && a.cfg.Host == host {
-			return true
-		}
-	}
-	return false
+	return s.hostConflictError(appConfig{Host: host}, except) != nil
 }
 
 // authRequired reports whether admin and API requests must carry a token. Untrusted tenancy always does, even when the listener is loopback-only.

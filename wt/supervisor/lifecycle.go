@@ -23,9 +23,7 @@ func (s *supervisor) unregister(a *app) {
 	if s.apps[a.name] == a {
 		delete(s.apps, a.name)
 	}
-	if s.hosts[a.cfg.Host] == a {
-		delete(s.hosts, a.cfg.Host)
-	}
+	s.removeAppHostsLocked(a, a.cfg)
 	s.mu.Unlock()
 	s.broadcast()
 }
