@@ -120,10 +120,10 @@ func (s *storageServer) schemaVersion(ctx context.Context, app string) (int, err
 // migrate applies statements and records a new user_version in one transaction. A version at or below the current one is a no-op, so an older blue or green process can start against a newer database.
 func (s *storageServer) migrate(ctx context.Context, app string, version int, statements []storageStatement) (storageMigrationResponse, error) {
 	if version < 1 || version > maxStorageMigrationVersion {
-		return storageMigrationResponse{}, fmt.Errorf("version must be between 1 and %d", maxStorageMigrationVersion)
+		return storageMigrationResponse{}, fmt.Errorf("%w: version must be between 1 and %d", errStorageInvalid, maxStorageMigrationVersion)
 	}
 	if len(statements) > maxStorageStatements {
-		return storageMigrationResponse{}, fmt.Errorf("at most %d statements are allowed", maxStorageStatements)
+		return storageMigrationResponse{}, fmt.Errorf("%w: at most %d statements are allowed", errStorageInvalid, maxStorageStatements)
 	}
 	params := make([][]any, len(statements))
 	for i, statement := range statements {
@@ -151,10 +151,21 @@ func (s *storageServer) migrate(ctx context.Context, app string, version int, st
 		if current >= version {
 			return nil
 		}
+
+		unregister, err := requireStorageAuthorizer(conn, false)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = unregister() }()
+
 		for i, statement := range statements {
 			if _, err := tx.ExecContext(ctx, statement.SQL, params[i]...); err != nil {
 				return fmt.Errorf("statement %d: %w", i+1, err)
 			}
+		}
+		// The version bump is host bookkeeping, not app SQL, so it runs without the app authorizer.
+		if err := unregister(); err != nil {
+			return err
 		}
 		if _, err := tx.ExecContext(ctx, fmt.Sprintf("pragma user_version = %d", version)); err != nil {
 			return err

@@ -78,8 +78,8 @@ func TestStorageChangeLog(t *testing.T) {
 	resp = storageSQL(t, s, token, "/v1/exec", map[string]any{
 		"sql": `insert into missing (value) values ('nope')`,
 	})
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("bad exec = %d, want 400", resp.StatusCode)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("bad exec = %d, want 500", resp.StatusCode)
 	}
 	resp.Body.Close()
 	after, err := s.recentChanges("notes", 10)

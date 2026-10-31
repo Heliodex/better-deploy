@@ -21,12 +21,13 @@ var (
 
 // storageSession pins one connection and an open transaction across several requests, so apps can read, decide and write atomically.
 type storageSession struct {
-	id, app   string
-	conn      *sql.Conn
-	tx        *sql.Tx
-	collector *rowChangeCollector
-	hook      bool
-	writes    []storageSessionWrite
+	id, app    string
+	conn       *sql.Conn
+	tx         *sql.Tx
+	collector  *rowChangeCollector
+	hook       bool
+	authorizer bool
+	writes     []storageSessionWrite
 
 	mu        sync.Mutex
 	closed    bool
@@ -179,6 +180,13 @@ func (s *storageServer) finishSession(session *storageSession, commit bool, ctx 
 	session.closed = true
 
 	var err error
+	if session.authorizer {
+		if clearErr := unregisterStorageAuthorizer(session.conn); clearErr != nil {
+			log.Printf("storage %s: clear session authorizer: %v", session.app, clearErr)
+			commit = false
+			err = clearErr
+		}
+	}
 	if commit {
 		if err = session.tx.Commit(); err != nil {
 			_ = session.tx.Rollback()
@@ -262,8 +270,18 @@ func (s *storageServer) createSession(w http.ResponseWriter, r *http.Request, ap
 		writeStorageError(w, err)
 		return
 	}
+	if _, err := requireStorageAuthorizer(conn, false); err != nil {
+		_ = tx.Rollback()
+		if hook {
+			_ = unregisterRowHook(conn)
+		}
+		_ = conn.Close()
+		writeStorageError(w, err)
+		return
+	}
 	id, err := newSessionID()
 	if err != nil {
+		_ = unregisterStorageAuthorizer(conn)
 		_ = tx.Rollback()
 		if hook {
 			_ = unregisterRowHook(conn)
@@ -273,13 +291,14 @@ func (s *storageServer) createSession(w http.ResponseWriter, r *http.Request, ap
 		return
 	}
 	session := &storageSession{
-		id:        id,
-		app:       app,
-		conn:      conn,
-		tx:        tx,
-		collector: collector,
-		hook:      hook,
-		expiresAt: time.Now().Add(storageSessionLease),
+		id:         id,
+		app:        app,
+		conn:       conn,
+		tx:         tx,
+		collector:  collector,
+		hook:       hook,
+		authorizer: true,
+		expiresAt:  time.Now().Add(storageSessionLease),
 	}
 
 	s.sessionMu.Lock()
@@ -317,12 +336,12 @@ func (s *storageServer) sessionQuery(w http.ResponseWriter, r *http.Request, app
 		return
 	}
 	if err := validateStorageSQL(req.SQL); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeStorageError(w, err)
 		return
 	}
 	params, err := decodeStorageParams(req.Params)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeStorageError(w, err)
 		return
 	}
 	maxRows := req.MaxRows
@@ -368,12 +387,12 @@ func (s *storageServer) sessionExec(w http.ResponseWriter, r *http.Request, app,
 		return
 	}
 	if err := validateStorageSQL(req.SQL); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeStorageError(w, err)
 		return
 	}
 	params, err := decodeStorageParams(req.Params)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeStorageError(w, err)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), storageTimeout)

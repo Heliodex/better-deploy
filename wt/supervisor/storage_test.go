@@ -2,11 +2,16 @@ package main
 
 import (
 	"encoding/json/v2"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
+
+	sqlite3 "modernc.org/sqlite/lib"
+
+	"modernc.org/sqlite"
 )
 
 func storageDo(t *testing.T, method, url, token, body string) *http.Response {
@@ -190,8 +195,8 @@ func TestStorageSQLBatch(t *testing.T) {
 			map[string]any{"sql": `insert into missing (value) values (?)`, "params": []any{"four"}},
 		},
 	})
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("bad batch: %d, want 400", resp.StatusCode)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("bad batch: %d, want 500", resp.StatusCode)
 	}
 	resp.Body.Close()
 
@@ -221,14 +226,14 @@ func TestStorageSQLRejectsUnsafeStatements(t *testing.T) {
 		`select "load_extension"('/tmp/evil.so')`,
 		"select `load_extension`('/tmp/evil.so')",
 		`select [load_extension]('/tmp/evil.so')`,
-		`select readfile('/etc/passwd')`,
 		`begin`,
 		`commit`,
 		`rollback`,
+		`savepoint one`,
 	} {
 		resp := storageSQL(t, s, token, "/v1/exec", map[string]any{"sql": statement})
-		if resp.StatusCode != http.StatusBadRequest {
-			t.Errorf("%q: %d, want 400", statement, resp.StatusCode)
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("%q: %d, want 403", statement, resp.StatusCode)
 		}
 		resp.Body.Close()
 	}
@@ -366,8 +371,8 @@ func TestStorageSchemaAndMigrate(t *testing.T) {
 
 	// Raw SQL still cannot use pragma; migrations are the only way to change user_version.
 	resp = storageSQL(t, s, token, "/v1/exec", map[string]any{"sql": `pragma user_version = 9`})
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("pragma through exec = %d, want 400", resp.StatusCode)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("pragma through exec = %d, want 403", resp.StatusCode)
 	}
 	resp.Body.Close()
 }
@@ -630,4 +635,346 @@ func TestStorageSessionIsScopedToApp(t *testing.T) {
 		t.Errorf("other app used session: %d, want 404", resp.StatusCode)
 	}
 	resp.Body.Close()
+}
+
+// storageErrorOf decodes the flat, typed error body.
+func storageErrorOf(t *testing.T, resp *http.Response) storageErrorResponse {
+	t.Helper()
+	defer resp.Body.Close()
+	var body storageErrorResponse
+	if err := json.UnmarshalRead(resp.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	return body
+}
+
+func TestStorageQueryIsReadOnly(t *testing.T) {
+	s, err := newStorageServer(t.TempDir(), "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.close()
+	token := s.tokenFor("readonly")
+
+	for _, statement := range []string{
+		`create table items (id text primary key, value text not null)`,
+		`insert into items (id, value) values ('a', 'one')`,
+	} {
+		resp := storageSQL(t, s, token, "/v1/exec", map[string]any{"sql": statement})
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("exec %q: %d %s", statement, resp.StatusCode, readBody(t, resp))
+		}
+		resp.Body.Close()
+	}
+
+	for _, statement := range []string{
+		`insert into items (id, value) values ('b', 'two')`,
+		`insert into items (id, value) values ('b', 'two') returning id`,
+		`update items set value = 'changed'`,
+		`delete from items`,
+		`create table extra (id integer)`,
+		`alter table items add column extra text`,
+		`drop table items`,
+		`pragma user_version`,
+		`begin`,
+	} {
+		resp := storageSQL(t, s, token, "/v1/query", map[string]any{"sql": statement})
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("query %q: %d, want 403", statement, resp.StatusCode)
+			resp.Body.Close()
+			continue
+		}
+		body := storageErrorOf(t, resp)
+		if body.Code != "denied" || body.Error == "" {
+			t.Errorf("query %q error = %+v", statement, body)
+		}
+	}
+
+	for _, statement := range []string{
+		`select id, value from items`,
+		`with counted as (select count(*) as n from items) select n from counted`,
+		`explain select * from items`,
+		`select * from pragma_table_info('items')`,
+		`select 'attach', 'pragma', 'load_extension'`,
+	} {
+		resp := storageSQL(t, s, token, "/v1/query", map[string]any{"sql": statement})
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("query %q: %d, want 200: %s", statement, resp.StatusCode, readBody(t, resp))
+			continue
+		}
+		resp.Body.Close()
+	}
+}
+
+func TestStorageQueryReadsFTS(t *testing.T) {
+	s, err := newStorageServer(t.TempDir(), "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.close()
+	token := s.tokenFor("fts")
+
+	resp := storageSQL(t, s, token, "/v1/exec", map[string]any{
+		"sql": `create virtual table docs using fts5(body)`,
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Skipf("fts5 is unavailable: %d %s", resp.StatusCode, readBody(t, resp))
+	}
+	resp.Body.Close()
+	resp = storageSQL(t, s, token, "/v1/exec", map[string]any{
+		"sql": `insert into docs (body) values ('hello storage')`,
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("insert: %d %s", resp.StatusCode, readBody(t, resp))
+	}
+	resp.Body.Close()
+
+	resp = storageSQL(t, s, token, "/v1/query", map[string]any{
+		"sql": `select body from docs where docs match 'hello'`,
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("fts query: %d %s", resp.StatusCode, readBody(t, resp))
+	}
+	result := storageResultOf(t, resp)
+	if len(result.Rows) != 1 || result.Rows[0][0] != "hello storage" {
+		t.Errorf("fts rows = %v", result.Rows)
+	}
+}
+
+func TestStorageWriteReturning(t *testing.T) {
+	s, err := newStorageServer(t.TempDir(), "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.close()
+	token := s.tokenFor("returning")
+
+	resp := storageSQL(t, s, token, "/v1/exec", map[string]any{
+		"sql": `create table items (id text primary key, value text not null)`,
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("create: %d %s", resp.StatusCode, readBody(t, resp))
+	}
+	resp.Body.Close()
+
+	resp = storageSQL(t, s, token, "/v1/write", map[string]any{
+		"sql":    `insert into items (id, value) values (?, ?) returning id, value`,
+		"params": []any{"a", "one"},
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("write: %d %s", resp.StatusCode, readBody(t, resp))
+	}
+	result := storageResultOf(t, resp)
+	if strings.Join(result.Columns, ",") != "id,value" || len(result.Rows) != 1 || result.Rows[0][0] != "a" || result.Rows[0][1] != "one" {
+		t.Fatalf("write result = %+v", result)
+	}
+	if result.RowsAffected != 1 {
+		t.Errorf("rows affected = %d, want 1", result.RowsAffected)
+	}
+
+	changes, err := s.recentChanges("returning", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logged := false
+	for _, change := range changes {
+		if change.SQL == `insert into items (id, value) values (?, ?) returning id, value` {
+			if change.RowsAffected != 1 || len(change.Rows) != 1 {
+				t.Errorf("logged change = %+v", change)
+			}
+			logged = true
+		}
+	}
+	if !logged {
+		t.Error("returning write was not added to the change log")
+	}
+
+	resp = storageSQL(t, s, token, "/v1/write", map[string]any{
+		"sql": `update items set value = 'two' where id = 'a' returning value`,
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("update returning: %d %s", resp.StatusCode, readBody(t, resp))
+	}
+	result = storageResultOf(t, resp)
+	if len(result.Rows) != 1 || result.Rows[0][0] != "two" || result.RowsAffected != 1 {
+		t.Errorf("update returning = %+v", result)
+	}
+}
+
+func TestStorageAllowsUnsafeLookingIdentifiers(t *testing.T) {
+	s, err := newStorageServer(t.TempDir(), "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.close()
+	token := s.tokenFor("identifiers")
+
+	for _, statement := range []string{
+		`create table "pragma" ("attach" text not null, "load_extension" text)`,
+		`insert into "pragma" ("attach", "load_extension") values ('kept', 'also kept')`,
+	} {
+		resp := storageSQL(t, s, token, "/v1/exec", map[string]any{"sql": statement})
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("exec %q: %d %s", statement, resp.StatusCode, readBody(t, resp))
+		}
+		resp.Body.Close()
+	}
+
+	resp := storageSQL(t, s, token, "/v1/query", map[string]any{
+		"sql": `select "attach", "load_extension" from "pragma"`,
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("query: %d %s", resp.StatusCode, readBody(t, resp))
+	}
+	result := storageResultOf(t, resp)
+	if len(result.Rows) != 1 || result.Rows[0][0] != "kept" || result.Rows[0][1] != "also kept" {
+		t.Errorf("rows = %v", result.Rows)
+	}
+}
+
+func TestStorageTypedConstraintError(t *testing.T) {
+	s, err := newStorageServer(t.TempDir(), "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.close()
+	token := s.tokenFor("constraints")
+
+	for _, statement := range []string{
+		`create table items (id text primary key, value text unique)`,
+		`insert into items (id, value) values ('a', 'one')`,
+	} {
+		resp := storageSQL(t, s, token, "/v1/exec", map[string]any{"sql": statement})
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("exec %q: %d %s", statement, resp.StatusCode, readBody(t, resp))
+		}
+		resp.Body.Close()
+	}
+
+	resp := storageSQL(t, s, token, "/v1/exec", map[string]any{
+		"sql": `insert into items (id, value) values ('a', 'duplicate')`,
+	})
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("duplicate insert = %d, want 409: %s", resp.StatusCode, readBody(t, resp))
+	}
+	body := storageErrorOf(t, resp)
+	if body.Code != "constraint" || body.SQLiteCode == 0 || body.Constraint == "" || body.Error == "" {
+		t.Errorf("constraint error = %+v", body)
+	}
+}
+
+func TestStorageUnknownSQLIsInternal(t *testing.T) {
+	s, err := newStorageServer(t.TempDir(), "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.close()
+	token := s.tokenFor("unknown")
+
+	resp := storageSQL(t, s, token, "/v1/query", map[string]any{"sql": `select * from missing`})
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("missing table = %d, want 500", resp.StatusCode)
+	}
+	body := storageErrorOf(t, resp)
+	if body.Code != "internal" {
+		t.Errorf("error = %+v", body)
+	}
+}
+
+func TestStorageSQLiteErrorMapping(t *testing.T) {
+	for _, tc := range []struct {
+		code             int
+		status           int
+		name, constraint string
+	}{
+		{sqlite3.SQLITE_CONSTRAINT_CHECK, http.StatusConflict, "constraint", "CHECK"},
+		{sqlite3.SQLITE_CONSTRAINT_FOREIGNKEY, http.StatusConflict, "constraint", "FOREIGN KEY"},
+		{sqlite3.SQLITE_CONSTRAINT_NOTNULL, http.StatusConflict, "constraint", "NOT NULL"},
+		{sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY, http.StatusConflict, "constraint", "PRIMARY KEY"},
+		{sqlite3.SQLITE_CONSTRAINT_TRIGGER, http.StatusConflict, "constraint", "TRIGGER"},
+		{sqlite3.SQLITE_CONSTRAINT_UNIQUE, http.StatusConflict, "constraint", "UNIQUE"},
+		{sqlite3.SQLITE_BUSY, http.StatusServiceUnavailable, "busy", ""},
+		{sqlite3.SQLITE_LOCKED, http.StatusServiceUnavailable, "busy", ""},
+		{sqlite3.SQLITE_FULL, http.StatusInsufficientStorage, "disk_full", ""},
+		{sqlite3.SQLITE_READONLY, http.StatusForbidden, "readonly", ""},
+		{sqlite3.SQLITE_AUTH, http.StatusForbidden, "denied", ""},
+		{sqlite3.SQLITE_PERM, http.StatusForbidden, "denied", ""},
+		{sqlite3.SQLITE_TOOBIG, http.StatusBadRequest, "invalid", ""},
+		{sqlite3.SQLITE_RANGE, http.StatusBadRequest, "invalid", ""},
+		{sqlite3.SQLITE_MISMATCH, http.StatusBadRequest, "invalid", ""},
+		{sqlite3.SQLITE_ERROR, http.StatusInternalServerError, "internal", ""},
+	} {
+		status, name, constraint := storageSQLiteError(tc.code)
+		if status != tc.status || name != tc.name || constraint != tc.constraint {
+			t.Errorf("code %d = (%d, %q, %q), want (%d, %q, %q)", tc.code, status, name, constraint, tc.status, tc.name, tc.constraint)
+		}
+	}
+}
+
+func TestStorageAuthorizerPolicy(t *testing.T) {
+	write := storageAuthorizer(false)
+	for _, action := range []sqlite.AuthorizerActionCode{
+		sqlite.AuthAttach, sqlite.AuthDetach, sqlite.AuthPragma, sqlite.AuthTransaction, sqlite.AuthSavepoint,
+	} {
+		if got := write(action, "", "", "", ""); got != sqlite.AuthorizerDeny {
+			t.Errorf("write action %d = %d, want deny", action, got)
+		}
+	}
+	if got := write(sqlite.AuthFunction, "", "LOAD_EXTENSION", "", ""); got != sqlite.AuthorizerDeny {
+		t.Errorf("load_extension = %d, want deny", got)
+	}
+	for _, name := range []string{"readfile", "writefile", "edit"} {
+		if got := write(sqlite.AuthFunction, "", name, "", ""); got != sqlite.AuthorizerDeny {
+			t.Errorf("%s = %d, want deny", name, got)
+		}
+	}
+	if got := write(sqlite.AuthCreateVTable, "docs", "fts5", "", ""); got != sqlite.AuthorizerOK {
+		t.Errorf("fts5 create = %d, want allow", got)
+	}
+	if got := write(sqlite.AuthCreateVTable, "evil", "evil_module", "", ""); got != sqlite.AuthorizerDeny {
+		t.Errorf("unknown vtable = %d, want deny", got)
+	}
+	for _, action := range []sqlite.AuthorizerActionCode{sqlite.AuthInsert, sqlite.AuthUpdate, sqlite.AuthDelete, sqlite.AuthCreateTable} {
+		if got := write(action, "", "", "", ""); got != sqlite.AuthorizerOK {
+			t.Errorf("write action %d = %d, want allow", action, got)
+		}
+	}
+
+	read := storageAuthorizer(true)
+	for _, action := range []sqlite.AuthorizerActionCode{
+		sqlite.AuthInsert, sqlite.AuthUpdate, sqlite.AuthDelete,
+		sqlite.AuthCreateTable, sqlite.AuthCreateIndex, sqlite.AuthCreateTrigger, sqlite.AuthCreateView,
+		sqlite.AuthCreateVTable, sqlite.AuthDropTable, sqlite.AuthAlterTable, sqlite.AuthReindex, sqlite.AuthAnalyze,
+	} {
+		if got := read(action, "", "", "", ""); got != sqlite.AuthorizerDeny {
+			t.Errorf("read action %d = %d, want deny", action, got)
+		}
+	}
+	for _, action := range []sqlite.AuthorizerActionCode{sqlite.AuthRead, sqlite.AuthSelect, sqlite.AuthRecursive} {
+		if got := read(action, "", "", "", ""); got != sqlite.AuthorizerOK {
+			t.Errorf("read action %d = %d, want allow", action, got)
+		}
+	}
+	// A table-valued pragma function is allowed, but a real writable PRAGMA statement is not, even after a pragma_ read.
+	if got := read(sqlite.AuthRead, "pragma_table_info", "", "", ""); got != sqlite.AuthorizerOK {
+		t.Errorf("pragma_table_info read = %d, want allow", got)
+	}
+	if got := read(sqlite.AuthPragma, "table_info", "t", "", ""); got != sqlite.AuthorizerOK {
+		t.Errorf("table_info function = %d, want allow", got)
+	}
+	if got := read(sqlite.AuthRead, "pragma_user_version", "", "", ""); got != sqlite.AuthorizerOK {
+		t.Errorf("pragma_user_version read = %d, want allow", got)
+	}
+	if got := read(sqlite.AuthPragma, "writable_schema", "1", "", ""); got != sqlite.AuthorizerDeny {
+		t.Errorf("writable_schema = %d, want deny", got)
+	}
+	if got := read(sqlite.AuthPragma, "data_version", "", "", ""); got != sqlite.AuthorizerOK {
+		t.Errorf("data_version = %d, want allow", got)
+	}
+}
+
+func TestStorageAuthorizerFailsClosed(t *testing.T) {
+	if err := registerStorageAuthorizer(struct{}{}, nil); !errors.Is(err, errStorageAuthorizerUnsupported) {
+		t.Fatalf("unsupported driver error = %v, want %v", err, errStorageAuthorizerUnsupported)
+	}
 }

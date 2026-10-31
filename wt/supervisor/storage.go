@@ -13,6 +13,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,6 +34,7 @@ const (
 	maxStorageColumns    = 256
 	maxStorageResult     = 8 << 20
 	maxStorageSessions   = 8
+	maxStorageReadConns  = 4
 	storageTimeout       = 5 * time.Second
 	storageSessionLease  = 30 * time.Second
 	// maxStorageConcurrentQueries bounds all apps' storage work together, so many tenants cannot exhaust the supervisor.
@@ -40,7 +42,10 @@ const (
 	storageQueueTimeout         = 5 * time.Second
 )
 
-var errStorageUnavailable = errors.New("storage unavailable")
+var (
+	errStorageUnavailable = errors.New("storage unavailable")
+	errStorageInvalid     = errors.New("invalid storage request")
+)
 
 // storageServer is a tiny per-app SQLite API. It listens on loopback and authenticates apps with a token, so app processes never touch the database files directly.
 type storageServer struct {
@@ -53,6 +58,8 @@ type storageServer struct {
 	opMu   sync.RWMutex
 	tokens map[string]string // token -> app name
 	dbs    map[string]*sql.DB
+	// readDBs are query-only pools. They let /v1/query run without any write capability, even a mistaken one.
+	readDBs map[string]*sql.DB
 
 	sessionMu      sync.Mutex
 	sessionCond    *sync.Cond
@@ -106,6 +113,7 @@ func newStorageServer(dir, listen string) (*storageServer, error) {
 		baseURL:     "http://" + listener.Addr().String(),
 		tokens:      map[string]string{},
 		dbs:         map[string]*sql.DB{},
+		readDBs:     map[string]*sql.DB{},
 		sessions:    map[string]*storageSession{},
 		sessionStop: make(chan struct{}),
 		sessionDone: make(chan struct{}),
@@ -157,19 +165,27 @@ func (s *storageServer) close() {
 	for _, db := range s.dbs {
 		_ = db.Close()
 	}
+	for _, db := range s.readDBs {
+		_ = db.Close()
+	}
 }
 
 // drop closes an app's database and forgets its token, so its files can be removed.
 func (s *storageServer) drop(app string) {
 	s.mu.Lock()
 	db := s.dbs[app]
+	readDB := s.readDBs[app]
 	delete(s.dbs, app)
+	delete(s.readDBs, app)
 	for token, name := range s.tokens {
 		if name == app {
 			delete(s.tokens, token)
 		}
 	}
 	s.mu.Unlock()
+	if readDB != nil {
+		_ = readDB.Close()
+	}
 	if db != nil {
 		_ = db.Close()
 	}
@@ -238,6 +254,42 @@ func (s *storageServer) dbFor(app string) (*sql.DB, error) {
 		}
 	}
 	s.dbs[app] = db
+	return db, nil
+}
+
+// readDBFor opens a second pool in SQLite's query_only mode. /v1/query uses it so a bug in the authorizer still cannot write through the read path.
+func (s *storageServer) readDBFor(app string) (*sql.DB, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if db := s.readDBs[app]; db != nil {
+		return db, nil
+	}
+
+	dir := filepath.Join(s.dir, app)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("app storage dir: %w", err)
+	}
+	dsn := url.URL{Scheme: "file", Path: filepath.Join(dir, "storage.db")}
+	query := dsn.Query()
+	query.Set("_pragma", "query_only(1)")
+	dsn.RawQuery = query.Encode()
+
+	db, err := sql.Open("sqlite", dsn.String())
+	if err != nil {
+		return nil, fmt.Errorf("open read storage: %w", err)
+	}
+	db.SetMaxOpenConns(maxStorageReadConns)
+	db.SetMaxIdleConns(maxStorageReadConns)
+	db.SetConnMaxLifetime(0)
+	db.SetConnMaxIdleTime(0)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("open read storage: %w", err)
+	}
+	s.readDBs[app] = db
 	return db, nil
 }
 
@@ -362,6 +414,25 @@ func (s *storageServer) withConnUnlocked(ctx context.Context, app string, fn fun
 	return fn(conn)
 }
 
+// withReadConn runs a read on the query-only pool. It takes the same restore lock as the write pool, so replacing a database file waits for in-flight reads.
+func (s *storageServer) withReadConn(ctx context.Context, app string, fn func(*sql.Conn) error) error {
+	s.opMu.RLock()
+	defer s.opMu.RUnlock()
+	db, err := s.readDBFor(app)
+	if err != nil {
+		return fmt.Errorf("%w: %v", errStorageUnavailable, err)
+	}
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("%w: %v", errStorageUnavailable, err)
+	}
+	defer conn.Close()
+	if err := configureStorageConn(ctx, conn); err != nil {
+		return fmt.Errorf("%w: %v", errStorageUnavailable, err)
+	}
+	return fn(conn)
+}
+
 // backupTo writes a consistent snapshot to dst while the app keeps reading and writing.
 func (s *storageServer) backupTo(ctx context.Context, app, dst string) error {
 	return s.withConn(ctx, app, func(conn *sql.Conn) error {
@@ -402,29 +473,18 @@ func readStorageJSON(w http.ResponseWriter, r *http.Request, out any) bool {
 			writeError(w, http.StatusRequestEntityTooLarge, "request body is too large")
 			return false
 		}
-		writeError(w, http.StatusBadRequest, "read body: "+err.Error())
+		writeStorageError(w, fmt.Errorf("%w: read body: %v", errStorageInvalid, err))
 		return false
 	}
 	if len(data) == 0 {
-		writeError(w, http.StatusBadRequest, "empty body")
+		writeStorageError(w, fmt.Errorf("%w: empty body", errStorageInvalid))
 		return false
 	}
 	if err := json.Unmarshal(data, out); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		writeStorageError(w, fmt.Errorf("%w: invalid JSON: %v", errStorageInvalid, err))
 		return false
 	}
 	return true
-}
-
-func writeStorageError(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, errStorageUnavailable):
-		writeError(w, http.StatusInternalServerError, err.Error())
-	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
-		writeError(w, http.StatusGatewayTimeout, "storage query timed out")
-	default:
-		writeError(w, http.StatusBadRequest, err.Error())
-	}
 }
 
 func (s *storageServer) exec(w http.ResponseWriter, r *http.Request, app string) {
@@ -433,12 +493,12 @@ func (s *storageServer) exec(w http.ResponseWriter, r *http.Request, app string)
 		return
 	}
 	if err := validateStorageSQL(req.SQL); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeStorageError(w, err)
 		return
 	}
 	params, err := decodeStorageParams(req.Params)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeStorageError(w, err)
 		return
 	}
 
@@ -449,6 +509,11 @@ func (s *storageServer) exec(w http.ResponseWriter, r *http.Request, app string)
 	var collector *rowChangeCollector
 	err = s.withWriteConn(ctx, app, func(conn *sql.Conn, changes *rowChangeCollector) error {
 		collector = changes
+		unregister, err := requireStorageAuthorizer(conn, false)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = unregister() }()
 		res, err := conn.ExecContext(ctx, req.SQL, params...)
 		if err != nil {
 			return err
@@ -484,22 +549,22 @@ func (s *storageServer) batch(w http.ResponseWriter, r *http.Request, app string
 		return
 	}
 	if len(req.Statements) == 0 {
-		writeError(w, http.StatusBadRequest, "at least one statement is required")
+		writeStorageError(w, fmt.Errorf("%w: at least one statement is required", errStorageInvalid))
 		return
 	}
 	if len(req.Statements) > maxStorageStatements {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("at most %d statements are allowed", maxStorageStatements))
+		writeStorageError(w, fmt.Errorf("%w: at most %d statements are allowed", errStorageInvalid, maxStorageStatements))
 		return
 	}
 	params := make([][]any, len(req.Statements))
 	for i, statement := range req.Statements {
 		if err := validateStorageSQL(statement.SQL); err != nil {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("statement %d: %v", i+1, err))
+			writeStorageError(w, fmt.Errorf("statement %d: %w", i+1, err))
 			return
 		}
 		decoded, err := decodeStorageParams(statement.Params)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("statement %d: %v", i+1, err))
+			writeStorageError(w, fmt.Errorf("statement %d: %w", i+1, err))
 			return
 		}
 		params[i] = decoded
@@ -520,6 +585,12 @@ func (s *storageServer) batch(w http.ResponseWriter, r *http.Request, app string
 		}
 		defer tx.Rollback()
 
+		unregister, err := requireStorageAuthorizer(conn, false)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = unregister() }()
+
 		for i, statement := range req.Statements {
 			starts[i] = len(rows.rows)
 			res, err := tx.ExecContext(ctx, statement.SQL, params[i]...)
@@ -530,6 +601,9 @@ func (s *storageServer) batch(w http.ResponseWriter, r *http.Request, app string
 			affected, _ := res.RowsAffected()
 			lastID, _ := res.LastInsertId()
 			results = append(results, storageResult{RowsAffected: affected, LastInsertID: lastID})
+		}
+		if err := unregister(); err != nil {
+			return err
 		}
 		return tx.Commit()
 	})
@@ -609,12 +683,12 @@ func (s *storageServer) query(w http.ResponseWriter, r *http.Request, app string
 		return
 	}
 	if err := validateStorageSQL(req.SQL); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeStorageError(w, err)
 		return
 	}
 	params, err := decodeStorageParams(req.Params)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeStorageError(w, err)
 		return
 	}
 	maxRows := req.MaxRows
@@ -626,7 +700,13 @@ func (s *storageServer) query(w http.ResponseWriter, r *http.Request, app string
 	defer cancel()
 
 	result := storageResult{Columns: []string{}, Rows: [][]any{}}
-	err = s.withConn(ctx, app, func(conn *sql.Conn) error {
+	err = s.withReadConn(ctx, app, func(conn *sql.Conn) error {
+		unregister, err := requireStorageAuthorizer(conn, true)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = unregister() }()
+
 		rows, err := conn.QueryContext(ctx, req.SQL, params...)
 		if err != nil {
 			return err
@@ -640,6 +720,75 @@ func (s *storageServer) query(w http.ResponseWriter, r *http.Request, app string
 		writeStorageError(w, err)
 		return
 	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// writeReturning runs a statement that both changes rows and returns them, such as INSERT ... RETURNING, and records the rows in the change log.
+func (s *storageServer) writeReturning(w http.ResponseWriter, r *http.Request, app string) {
+	var req storageRequest
+	if !readStorageJSON(w, r, &req) {
+		return
+	}
+	if err := validateStorageSQL(req.SQL); err != nil {
+		writeStorageError(w, err)
+		return
+	}
+	params, err := decodeStorageParams(req.Params)
+	if err != nil {
+		writeStorageError(w, err)
+		return
+	}
+	maxRows := req.MaxRows
+	if maxRows <= 0 || maxRows > maxStorageRows {
+		maxRows = maxStorageRows
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), storageTimeout)
+	defer cancel()
+
+	var collector *rowChangeCollector
+	result := storageResult{Columns: []string{}, Rows: [][]any{}}
+	err = s.withWriteConn(ctx, app, func(conn *sql.Conn, changes *rowChangeCollector) error {
+		collector = changes
+		unregister, err := requireStorageAuthorizer(conn, false)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = unregister() }()
+
+		rows, err := conn.QueryContext(ctx, req.SQL, params...)
+		if err != nil {
+			return err
+		}
+		result.Columns, result.Rows, result.Truncated, err = readStorageRows(rows, maxRows)
+		closeErr := rows.Close()
+		if err != nil {
+			return err
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		return conn.QueryRowContext(ctx, "select changes()").Scan(&result.RowsAffected)
+	})
+	if err != nil {
+		writeStorageError(w, err)
+		return
+	}
+
+	var rows []rowChange
+	truncated := false
+	if collector != nil {
+		rows = collector.rows
+		truncated = collector.omitted > 0
+	}
+	s.logChanges(app, []storageChange{{
+		Time:          time.Now().UTC(),
+		SQL:           req.SQL,
+		Params:        req.Params,
+		RowsAffected:  result.RowsAffected,
+		Rows:          rows,
+		RowsTruncated: truncated,
+	}})
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -706,6 +855,10 @@ func (s *storageServer) handle(w http.ResponseWriter, r *http.Request) {
 	case "/v1/exec":
 		s.handleSQL(w, r, func(w http.ResponseWriter, r *http.Request) {
 			s.exec(w, r, app)
+		})
+	case "/v1/write":
+		s.handleSQL(w, r, func(w http.ResponseWriter, r *http.Request) {
+			s.writeReturning(w, r, app)
 		})
 	case "/v1/batch":
 		s.handleSQL(w, r, func(w http.ResponseWriter, r *http.Request) {

@@ -31,22 +31,22 @@ func (s *storageServer) transaction(w http.ResponseWriter, r *http.Request, app 
 		return
 	}
 	if len(req.Statements) == 0 {
-		writeError(w, http.StatusBadRequest, "at least one statement is required")
+		writeStorageError(w, fmt.Errorf("%w: at least one statement is required", errStorageInvalid))
 		return
 	}
 	if len(req.Statements) > maxStorageStatements {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("at most %d statements are allowed", maxStorageStatements))
+		writeStorageError(w, fmt.Errorf("%w: at most %d statements are allowed", errStorageInvalid, maxStorageStatements))
 		return
 	}
 	params := make([][]any, len(req.Statements))
 	for i, statement := range req.Statements {
 		if err := validateStorageSQL(statement.SQL); err != nil {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("statement %d: %v", i+1, err))
+			writeStorageError(w, fmt.Errorf("statement %d: %w", i+1, err))
 			return
 		}
 		decoded, err := decodeStorageParams(statement.Params)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("statement %d: %v", i+1, err))
+			writeStorageError(w, fmt.Errorf("statement %d: %w", i+1, err))
 			return
 		}
 		params[i] = decoded
@@ -66,6 +66,12 @@ func (s *storageServer) transaction(w http.ResponseWriter, r *http.Request, app 
 			return err
 		}
 		defer tx.Rollback()
+
+		unregister, err := requireStorageAuthorizer(conn, false)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = unregister() }()
 
 		for i, statement := range req.Statements {
 			starts[i] = len(changes.rows)
@@ -93,6 +99,9 @@ func (s *storageServer) transaction(w http.ResponseWriter, r *http.Request, app 
 				results[i] = storageResult{RowsAffected: affected, LastInsertID: lastID}
 			}
 			ends[i] = len(changes.rows)
+		}
+		if err := unregister(); err != nil {
+			return err
 		}
 		return tx.Commit()
 	})

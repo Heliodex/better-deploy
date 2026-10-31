@@ -63,13 +63,13 @@ func decodeStorageValue(raw jsontext.Value) (any, error) {
 
 func decodeStorageParams(raw []jsontext.Value) ([]any, error) {
 	if len(raw) > maxStorageParams {
-		return nil, fmt.Errorf("too many parameters (max %d)", maxStorageParams)
+		return nil, fmt.Errorf("%w: too many parameters (max %d)", errStorageInvalid, maxStorageParams)
 	}
 	params := make([]any, len(raw))
 	for i, value := range raw {
 		decoded, err := decodeStorageValue(value)
 		if err != nil {
-			return nil, fmt.Errorf("parameter %d: %w", i+1, err)
+			return nil, fmt.Errorf("%w: parameter %d: %v", errStorageInvalid, i+1, err)
 		}
 		params[i] = decoded
 	}
