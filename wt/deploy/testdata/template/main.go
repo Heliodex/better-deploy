@@ -113,7 +113,7 @@ func init() {
 	mux.HandleFunc("GET /api/notes", handleListNotes)
 	mux.HandleFunc("POST /api/notes", handleCreateNote)
 
-	wasihttp.Handle(app.ServeStorage(storeErr, migrate, mux))
+	wasihttp.Handle(app.ServeStorage(storeErr, migrate, mux).ServeHTTP)
 }
 
 func main() {}

@@ -1,6 +1,6 @@
 {
 	"build": "cd web && bun install --frozen-lockfile && bun run build && cd .. && go generate ./contract/ && rm -rf static && cp -r web/build static && ../../packages/generate.sh && go tool componentize-go -d ../../packages/wit -w wt:app/app build",
-	"health": "/",
+	"health": "/healthz",
 	"host": "__APP_NAME__.localhost",
 	"memory_mb": 128,
 	"name": "__APP_NAME__"

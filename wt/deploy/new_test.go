@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json/v2"
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -94,6 +95,48 @@ func TestNewMatchesTemplate(t *testing.T) {
 		if !onDisk[rel] {
 			t.Errorf("embedded file %s is missing on disk", rel)
 		}
+	}
+}
+
+// TestTemplateHandlerUsesServeHTTP guards the wasihttp.Handle call against the template passing an http.Handler where a handler function is required.
+func TestTemplateHandlerUsesServeHTTP(t *testing.T) {
+	data, err := templateFS.ReadFile("testdata/template/main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := strings.ReplaceAll(string(data), newContractToken, "example.test/contract")
+	file, err := parser.ParseFile(token.NewFileSet(), "main.go", src, parser.AllErrors)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	found := false
+	ast.Inspect(file, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != "Handle" {
+			return true
+		}
+		pkg, ok := sel.X.(*ast.Ident)
+		if !ok || pkg.Name != "wasihttp" {
+			return true
+		}
+		found = true
+		if len(call.Args) != 1 {
+			t.Errorf("wasihttp.Handle has %d arguments, want 1", len(call.Args))
+			return true
+		}
+		arg, ok := call.Args[0].(*ast.SelectorExpr)
+		if !ok || arg.Sel.Name != "ServeHTTP" {
+			t.Errorf("wasihttp.Handle argument must be a .ServeHTTP method value")
+		}
+		return true
+	})
+	if !found {
+		t.Error("template has no wasihttp.Handle call")
 	}
 }
 
