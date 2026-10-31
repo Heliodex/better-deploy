@@ -304,13 +304,9 @@ func (s *supervisor) appRedactionValues(app string) []string {
 	return values
 }
 
-// redactAppText redacts stored secrets from supervisor-side text such as LastError.
+// redactAppText redacts stored secrets and the app's storage token from supervisor-side text such as LastError.
 func (s *supervisor) redactAppText(app, text string) string {
-	return redactSecrets(text, s.secretRedactionValues(app))
-}
-
-func (s *supervisor) secretRedactionValues(app string) []string {
-	return s.secrets.redactionValues(app)
+	return redactSecrets(text, s.appRedactionValues(app))
 }
 
 // redactSecrets replaces every non-empty secret value, longest first, with a fixed marker.
