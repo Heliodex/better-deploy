@@ -59,12 +59,26 @@ type TransactionResult struct {
 	Truncated                  bool
 }
 
+// QueryOptions tunes one query. MaxRows caps the rows the server returns; zero uses the server's default.
+type QueryOptions struct {
+	MaxRows int
+}
+
+// Page is an offset page of a result: up to Limit rows starting at Offset.
+//
+// This is offset pagination, not keyset pagination. A concurrent insert or delete can shift rows between pages, so give the query a stable ORDER BY. For a consistent snapshot, page inside a transaction or build keyset predicates on top of QueryPage.
+type Page struct {
+	Limit  int
+	Offset int
+}
+
 // Rows is the result of a Query.
 type Rows struct {
 	Columns   []string
 	Truncated bool
 	rows      [][]any
 	index     int
+	page      Page
 	err       error
 	closed    bool
 }

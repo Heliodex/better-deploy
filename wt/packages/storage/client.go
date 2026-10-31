@@ -115,8 +115,14 @@ func decodeResponseRows(resp response) ([][]any, error) {
 
 // Query runs one statement and returns all rows up to the server's row limit.
 func (c *Client) Query(ctx context.Context, query string, args ...any) (*Rows, error) {
+	return c.QueryOptions(ctx, query, QueryOptions{}, args...)
+}
+
+// QueryOptions runs one query with per-query options, such as a row cap sent to the server as max_rows.
+func (c *Client) QueryOptions(ctx context.Context, query string, opts QueryOptions, args ...any) (*Rows, error) {
 	var resp response
-	if err := c.post(ctx, "/v1/query", request{SQL: query, Params: encodeParams(args)}, &resp); err != nil {
+	req := request{SQL: query, Params: encodeParams(args), MaxRows: opts.MaxRows}
+	if err := c.post(ctx, "/v1/query", req, &resp); err != nil {
 		return nil, err
 	}
 	rows, err := decodeResponseRows(resp)
@@ -124,6 +130,37 @@ func (c *Client) Query(ctx context.Context, query string, args ...any) (*Rows, e
 		return nil, err
 	}
 	return &Rows{Columns: resp.Columns, Truncated: resp.Truncated, rows: rows}, nil
+}
+
+// QueryN runs one query and asks the server to return at most n rows. It is shorthand for QueryOptions with MaxRows set.
+func (c *Client) QueryN(ctx context.Context, n int, query string, args ...any) (*Rows, error) {
+	return c.QueryOptions(ctx, query, QueryOptions{MaxRows: n}, args...)
+}
+
+// QueryPage runs one query as an offset page. It wraps the query as select * from (<query>) limit ? offset ? and appends the limit and offset after the caller's arguments.
+//
+// The page is recorded on the returned rows, so NextPage can continue through the result. Paging is offset-based: a concurrent write can shift rows between pages, so give the query a stable ORDER BY. Build keyset pagination on top if a stable snapshot matters.
+func (c *Client) QueryPage(ctx context.Context, query string, page Page, args ...any) (*Rows, error) {
+	if page.Limit <= 0 {
+		return nil, fmt.Errorf("storage: page limit must be positive")
+	}
+	if page.Offset < 0 {
+		return nil, fmt.Errorf("storage: page offset must not be negative")
+	}
+	query = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(query), ";"))
+	pageArgs := make([]any, 0, len(args)+2)
+	pageArgs = append(pageArgs, args...)
+	pageArgs = append(pageArgs, page.Limit, page.Offset)
+	rows, err := c.QueryOptions(ctx, "select * from ("+query+") limit ? offset ?", QueryOptions{MaxRows: page.Limit}, pageArgs...)
+	if err != nil {
+		return nil, err
+	}
+	rows.page = page
+	// A full offset page may have more rows behind it; an exactly-full final page simply yields one empty follow-up page.
+	if len(rows.rows) >= page.Limit {
+		rows.Truncated = true
+	}
+	return rows, nil
 }
 
 // WriteReturning runs a write that returns rows, such as INSERT ... RETURNING. It is the write counterpart of Query: the change is captured in the change log, unlike an INSERT ... RETURNING sent to Query (which is rejected).

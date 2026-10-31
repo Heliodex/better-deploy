@@ -11,6 +11,18 @@ func (r *Rows) Next() bool {
 	return true
 }
 
+// NextPage returns the following offset page when the last page was truncated, and false at the end. It only applies to rows returned by QueryPage.
+//
+// Offset pagination is not stable under concurrent writes, so use a deterministic ORDER BY and expect rows to move between pages.
+func (r *Rows) NextPage() (Page, bool) {
+	if r == nil || !r.Truncated || r.page.Limit <= 0 {
+		return Page{}, false
+	}
+	next := r.page
+	next.Offset += r.page.Limit
+	return next, true
+}
+
 // Close releases the rows. It exists so callers can use defer rows.Close().
 func (r *Rows) Close() error {
 	r.closed = true

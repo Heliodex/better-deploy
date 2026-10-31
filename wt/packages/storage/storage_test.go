@@ -142,6 +142,131 @@ func TestClientQueryTruncated(t *testing.T) {
 	}
 }
 
+func paramInt(t *testing.T, value any) int {
+	t.Helper()
+	switch value := value.(type) {
+	case int:
+		return value
+	case int64:
+		return int(value)
+	case float64:
+		return int(value)
+	default:
+		t.Fatalf("param %v has unexpected type %T", value, value)
+		return 0
+	}
+}
+
+func TestClientQueryNSendsMaxRows(t *testing.T) {
+	var received request
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if err := json.UnmarshalRead(r.Body, &received); err != nil {
+			t.Errorf("body: %v", err)
+		}
+		_, _ = io.WriteString(w, `{"columns":["id"],"rows":[["a"]],"truncated":true}`)
+	})
+
+	rows, err := client.QueryN(context.Background(), 5, `select id from things`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	if received.MaxRows != 5 {
+		t.Errorf("max_rows = %d, want 5", received.MaxRows)
+	}
+	if !rows.Truncated {
+		t.Error("expected truncated rows")
+	}
+	if _, ok := rows.NextPage(); ok {
+		t.Error("NextPage advanced rows that were not returned by QueryPage")
+	}
+}
+
+func TestClientQueryDefaultSendsNoMaxRows(t *testing.T) {
+	var received request
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if err := json.UnmarshalRead(r.Body, &received); err != nil {
+			t.Errorf("body: %v", err)
+		}
+		_, _ = io.WriteString(w, `{"columns":["id"],"rows":[]}`)
+	})
+
+	if _, err := client.Query(context.Background(), `select id from things`); err != nil {
+		t.Fatal(err)
+	}
+	if received.MaxRows != 0 {
+		t.Errorf("max_rows = %d, want the server default", received.MaxRows)
+	}
+	if received.SQL != `select id from things` {
+		t.Errorf("sql = %q", received.SQL)
+	}
+}
+
+func TestClientQueryPageWrapsAndAdvances(t *testing.T) {
+	var received request
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if err := json.UnmarshalRead(r.Body, &received); err != nil {
+			t.Errorf("body: %v", err)
+		}
+		_, _ = io.WriteString(w, `{"columns":["id"],"rows":[["a"],["b"]]}`)
+	})
+
+	rows, err := client.QueryPage(context.Background(), `select id from things;`, Page{Limit: 2, Offset: 4}, "start")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	if received.SQL != `select * from (select id from things) limit ? offset ?` {
+		t.Errorf("sql = %q", received.SQL)
+	}
+	if len(received.Params) != 3 {
+		t.Fatalf("params = %v", received.Params)
+	}
+	if received.Params[0] != "start" || paramInt(t, received.Params[1]) != 2 || paramInt(t, received.Params[2]) != 4 {
+		t.Errorf("params = %v", received.Params)
+	}
+	if received.MaxRows != 2 {
+		t.Errorf("max_rows = %d, want 2", received.MaxRows)
+	}
+	if !rows.Truncated {
+		t.Error("a full page should be treated as truncated")
+	}
+	next, ok := rows.NextPage()
+	if !ok || next != (Page{Limit: 2, Offset: 6}) {
+		t.Errorf("next page = %+v, %v", next, ok)
+	}
+}
+
+func TestClientQueryPageStopsOnShortPage(t *testing.T) {
+	client := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"columns":["id"],"rows":[["a"]]}`)
+	})
+
+	rows, err := client.QueryPage(context.Background(), `select id from things`, Page{Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	if rows.Truncated {
+		t.Error("a short page should not be truncated")
+	}
+	if _, ok := rows.NextPage(); ok {
+		t.Error("NextPage advanced past the last page")
+	}
+}
+
+func TestClientQueryPageValidatesPage(t *testing.T) {
+	client := newTestClient(t, func(http.ResponseWriter, *http.Request) {
+		t.Error("invalid page reached the server")
+	})
+	if _, err := client.QueryPage(context.Background(), `select 1`, Page{}); err == nil {
+		t.Error("zero limit was accepted")
+	}
+	if _, err := client.QueryPage(context.Background(), `select 1`, Page{Limit: 1, Offset: -1}); err == nil {
+		t.Error("negative offset was accepted")
+	}
+}
+
 func TestClientQueryError(t *testing.T) {
 	client := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, `{"error":"no such table"}`, http.StatusBadRequest)
