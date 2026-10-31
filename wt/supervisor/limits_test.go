@@ -188,27 +188,36 @@ func TestSameRuntimeConfigIncludesHealthSettings(t *testing.T) {
 	}
 }
 
+func mustAppArgs(t testing.TB, s *supervisor, a *app, source string) (string, []string) {
+	t.Helper()
+	args, env, err := s.appArgs(a, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Join(args, " "), env
+}
+
 func TestAppArgsNetwork(t *testing.T) {
 	s := testSupervisor()
 	a := &app{name: "demo", port: 1, cfg: appConfig{Network: "inherit"}}
-	if args := strings.Join(s.appArgs(a, "main.cwasm"), " "); !strings.Contains(args, "-S inherit-network") {
+	if args, _ := mustAppArgs(t, s, a, "main.cwasm"); !strings.Contains(args, "-S inherit-network") {
 		t.Errorf("inherit args = %q", args)
 	}
 	a.cfg.Network = "none"
-	if args := strings.Join(s.appArgs(a, "main.cwasm"), " "); strings.Contains(args, "inherit-network") {
+	if args, _ := mustAppArgs(t, s, a, "main.cwasm"); strings.Contains(args, "inherit-network") {
 		t.Errorf("isolated args = %q", args)
 	}
 
 	a.cfg.requestTimeout = 30 * time.Second
 	a.wasmEpoch = true
-	args := strings.Join(s.appArgs(a, "main.cwasm"), " ")
+	args, _ := mustAppArgs(t, s, a, "main.cwasm")
 	for _, want := range []string{"epoch-interruption=y", "timeout=30s"} {
 		if !strings.Contains(args, want) {
 			t.Errorf("timeout args = %q, missing %q", args, want)
 		}
 	}
 	a.wasmEpoch = false
-	args = strings.Join(s.appArgs(a, "main.cwasm"), " ")
+	args, _ = mustAppArgs(t, s, a, "main.cwasm")
 	if strings.Contains(args, "timeout=") || strings.Contains(args, "epoch-interruption") {
 		t.Errorf("artifact without epoch got epoch args = %q", args)
 	}

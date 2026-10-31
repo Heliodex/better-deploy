@@ -122,6 +122,9 @@ func (s *supervisor) purgeAppState(name string) error {
 	if err := os.Remove(resource); err != nil && !os.IsNotExist(err) {
 		return err
 	}
+	if err := s.secrets.remove(name); err != nil {
+		return err
+	}
 	return nil
 }
 

@@ -41,6 +41,7 @@ type appConfigResponse struct {
 	Hosts              []string         `json:"hosts"`
 	Health             string           `json:"health"`
 	EnvKeys            []string         `json:"env_keys"`
+	SecretKeys         []string         `json:"secret_keys"`
 	MemoryMB           int              `json:"memory_mb"`
 	DiskMB             int              `json:"disk_mb"`
 	CPUMillicores      int              `json:"cpu_millicores"`
@@ -72,6 +73,7 @@ func configResponse(cfg appConfig) appConfigResponse {
 		Hosts:              hosts,
 		Health:             cfg.Health,
 		EnvKeys:            sortedKeys(cfg.Env),
+		SecretKeys:         []string{},
 		MemoryMB:           cfg.MemoryMB,
 		DiskMB:             cfg.DiskMB,
 		CPUMillicores:      cfg.CPUMillicores,
@@ -188,7 +190,9 @@ func (s *supervisor) handleAppConfig(w http.ResponseWriter, r *http.Request, nam
 		a.mu.Lock()
 		cfg := a.cfg
 		a.mu.Unlock()
-		writeJSON(w, http.StatusOK, configResponse(cfg))
+		response := configResponse(cfg)
+		response.SecretKeys = s.secrets.keys(name)
+		writeJSON(w, http.StatusOK, response)
 		return
 	}
 
@@ -266,6 +270,7 @@ func (s *supervisor) handleAppConfig(w http.ResponseWriter, r *http.Request, nam
 
 	s.broadcast()
 	response := configResponse(next)
+	response.SecretKeys = s.secrets.keys(name)
 	response.RestartRequired = restartRequired
 	writeJSON(w, http.StatusOK, response)
 }

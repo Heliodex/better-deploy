@@ -13,12 +13,13 @@ import (
 	"time"
 )
 
-func (s *supervisor) appArgs(a *app, source string) []string {
+// appArgs builds the wasmtime argv and the process environment separately. Only secret names go into argv, so values are not visible in /proc/<pid>/cmdline.
+func (s *supervisor) appArgs(a *app, source string) (args []string, env []string, err error) {
 	a.mu.Lock()
 	cfg := a.cfg
 	epoch := a.wasmEpoch
 	a.mu.Unlock()
-	args := []string{
+	args = []string{
 		"serve",
 		"-Scli",
 		"-Sp3",
@@ -38,19 +39,36 @@ func (s *supervisor) appArgs(a *app, source string) []string {
 	}
 	stateDir := filepath.Join(s.cfg.stateDir, a.name)
 	args = append(args, "--dir", stateDir+"::/data")
+
+	envIndex := map[string]int{}
+	setEnv := func(key, value string) {
+		if index, ok := envIndex[key]; ok {
+			env[index] = key + "=" + value
+			return
+		}
+		envIndex[key] = len(env)
+		args = append(args, "--env", key)
+		env = append(env, key+"="+value)
+	}
 	for _, key := range sortedKeys(cfg.Env) {
-		args = append(args, "--env", key+"="+cfg.Env[key])
+		value := cfg.Env[key]
+		if name, ok := strings.CutPrefix(value, secretRefPrefix); ok {
+			secret, found := s.secrets.get(a.name, name)
+			if !found {
+				return nil, nil, fmt.Errorf("env %s: secret %q is not set for app %s", key, name, a.name)
+			}
+			value = secret
+		}
+		setEnv(key, value)
 	}
 	if cfg.MemoryMB > 0 {
 		args = append(args, "-W", fmt.Sprintf("max-memory-size=%d", cfg.MemoryMB<<20))
 	}
 	if s.storage != nil {
-		args = append(args,
-			"--env", "WT_STORAGE_URL="+s.storage.url(),
-			"--env", "WT_STORAGE_TOKEN="+s.storage.tokenFor(a.name),
-		)
+		setEnv("WT_STORAGE_URL", s.storage.url())
+		setEnv("WT_STORAGE_TOKEN", s.storage.tokenFor(a.name))
 	}
-	return append(args, source)
+	return append(args, source), env, nil
 }
 
 // waitForPort waits for wasmtime to report the loopback port it bound.
@@ -279,6 +297,18 @@ func (s *supervisor) launch(a *app, source string) error {
 		a.mu.Unlock()
 	}()
 
+	// Resolve env references before creating a cgroup or process, so a missing secret aborts cleanly.
+	args, processEnv, err := s.appArgs(a, source)
+	if err != nil {
+		a.mu.Lock()
+		a.lastError = err.Error()
+		a.mu.Unlock()
+		return err
+	}
+	if a.logs != nil {
+		a.logs.setSecrets(s.appRedactionValues(a.name))
+	}
+
 	iso, err := s.prepareLaunch(a, cfg)
 	if err != nil {
 		a.mu.Lock()
@@ -295,8 +325,8 @@ func (s *supervisor) launch(a *app, source string) error {
 		writers = append(writers, a.logs)
 	}
 	out := io.MultiWriter(writers...)
-	cmd := exec.Command(s.cfg.wasmtime, s.appArgs(a, source)...)
-	cmd.Env = minimalEnv()
+	cmd := exec.Command(s.cfg.wasmtime, args...)
+	cmd.Env = append(minimalEnv(), processEnv...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGTERM}
 	if credential := appCredential(iso); credential != nil {
 		cmd.SysProcAttr.Credential = credential
@@ -425,6 +455,7 @@ func (s *supervisor) spawn(name, dir string, cfg appConfig) (*app, error) {
 	if err != nil {
 		return nil, fmt.Errorf("app logs: %w", err)
 	}
+	logs.setSecrets(s.appRedactionValues(name))
 	a := &app{
 		name:      name,
 		dir:       dir,
