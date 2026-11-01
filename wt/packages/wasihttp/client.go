@@ -5,16 +5,23 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	client "wt.packages/binding/imports/wasi_http_0_3_0_client"
 	wasi "wt.packages/binding/imports/wasi_http_0_3_0_types"
 )
 
+// defaultClientTimeout bounds one outbound request unless the caller sets its own deadline.
+const defaultClientTimeout = 30 * time.Second
+
 // Transport implements [http.RoundTripper] using wasi:http.
 type Transport struct{}
 
-// Send sends an HTTP request using wasi:http and returns the response.
+// Send sends an HTTP request using wasi:http and returns the response. The request context's deadline becomes transport timeouts, and a cancelled context stops the request before it is sent or returned.
 func Send(req *http.Request) (*http.Response, error) {
+	if err := req.Context().Err(); err != nil {
+		return nil, err
+	}
 	request, err := newOutgoingHttpRequest(req)
 	if err != nil {
 		return nil, err
@@ -22,6 +29,12 @@ func Send(req *http.Request) (*http.Response, error) {
 	defer request.Drop()
 
 	result := client.Send(request)
+	if err := req.Context().Err(); err != nil {
+		if result.IsOk() {
+			result.Ok().Drop()
+		}
+		return nil, err
+	}
 	if result.IsErr() {
 		return nil, fmt.Errorf("error sending request: %s", errorString(result.Err()))
 	}
@@ -72,10 +85,11 @@ func NewTransport() http.RoundTripper {
 	return &Transport{}
 }
 
-// NewClient returns a new HTTP client compatible with wasi:http.
+// NewClient returns a new HTTP client compatible with wasi:http. It has a default timeout so a stalled peer cannot hold the component forever; set Client.Timeout to zero to opt out.
 func NewClient() *http.Client {
 	return &http.Client{
 		Transport: &Transport{},
+		Timeout:   defaultClientTimeout,
 	}
 }
 

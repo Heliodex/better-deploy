@@ -1,6 +1,7 @@
 package wasihttp
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 
@@ -23,13 +24,16 @@ type responseWriter struct {
 	headers http.Header
 	// status code to send
 	statusCode int
+	// cancel stops the handler's request context when the client goes away.
+	cancel context.CancelFunc
 }
 
-func newHttpResponseWriter() *responseWriter {
+func newHttpResponseWriter(cancel context.CancelFunc) *responseWriter {
 	return &responseWriter{
 		channel:    make(chan wit.Result[*wasi.Response, wasi.ErrorCode]),
 		headers:    http.Header{},
 		statusCode: 200,
+		cancel:     cancel,
 	}
 }
 
@@ -90,6 +94,7 @@ func (w *responseWriter) Write(buf []byte) (int, error) {
 	count := w.stream.Write(buf)
 
 	if count == 0 && w.stream.ReaderDropped() {
+		w.stop()
 		return 0, w.takeError()
 	}
 
@@ -105,7 +110,16 @@ func (w *responseWriter) Flush() {
 	_ = w.send()
 }
 
+// stop cancels the request context once, so handlers see a disconnected client.
+func (w *responseWriter) stop() {
+	if w.cancel != nil {
+		w.cancel()
+		w.cancel = nil
+	}
+}
+
 func (w *responseWriter) close() {
+	w.stop()
 	if w.stream != nil {
 		w.stream.Drop()
 	}

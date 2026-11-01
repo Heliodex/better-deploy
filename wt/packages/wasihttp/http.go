@@ -2,6 +2,7 @@
 package wasihttp
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -29,6 +30,8 @@ const (
 	HeaderRawComponentRoot = "spin-raw-component-route"
 	// HeaderClientAddr is the client address for the request.
 	HeaderClientAddr = "spin-client-addr"
+	// HeaderRequestID carries a request identifier across proxied and outbound requests.
+	HeaderRequestID = "x-request-id"
 )
 
 // defaultHandler is a placeholder for returning a useful error to stderr when the handler is not set.
@@ -44,13 +47,20 @@ func Handle(fn func(http.ResponseWriter, *http.Request)) {
 	handlerFn = fn
 }
 
+// RequestID returns the request identifier set by the host or an empty string.
+func RequestID(r *http.Request) string {
+	return r.Header.Get(HeaderRequestID)
+}
+
 // handleErr is wit.Err instantiated for the handler result, so the call sites don't need explicit type arguments.
 var handleErr = wit.Err[*wasi.Response, wasi.ErrorCode]
 
 var wasiHandle = func(request *wasi.Request) wit.Result[*wasi.Response, wasi.ErrorCode] {
-	httpRes := newHttpResponseWriter()
+	ctx, cancel := context.WithCancel(context.Background())
+	httpRes := newHttpResponseWriter(cancel)
 
 	go func() {
+		defer cancel()
 		defer httpRes.close()
 		defer func() {
 			recovered := recover()
@@ -67,7 +77,7 @@ var wasiHandle = func(request *wasi.Request) wit.Result[*wasi.Response, wasi.Err
 		}()
 
 		// convert the incoming request to go's net/http type
-		httpReq, err := newHttpRequest(request)
+		httpReq, err := newHttpRequest(request, ctx)
 		if err != nil {
 			httpRes.channel <- handleErr(
 				wasi.MakeErrorCodeInternalError(wit.Some(fmt.Sprintf(

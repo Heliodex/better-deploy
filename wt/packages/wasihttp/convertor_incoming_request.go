@@ -1,11 +1,14 @@
 package wasihttp
 
 import (
+	"context"
+	"crypto/tls"
 	"fmt"
 	"net/http"
 
 	wit "go.bytecodealliance.org/pkg/wit/types"
 	wasi "wt.packages/binding/imports/wasi_http_0_3_0_types"
+	"wt.packages/httpmeta"
 )
 
 func methodToString(m wasi.Method) (string, error) {
@@ -43,8 +46,8 @@ func toHttpHeader(src []wit.Tuple2[string, []uint8], dest *http.Header) {
 	}
 }
 
-// newHttpRequest converts a wasi.Request to an http.Request.
-func newHttpRequest(ir *wasi.Request) (*http.Request, error) {
+// newHttpRequest converts a wasi.Request to an http.Request. The request uses the handler's context so a disconnect can cancel the app's work.
+func newHttpRequest(ir *wasi.Request, ctx context.Context) (*http.Request, error) {
 	defer ir.Drop()
 
 	method, err := methodToString(ir.GetMethod())
@@ -52,25 +55,41 @@ func newHttpRequest(ir *wasi.Request) (*http.Request, error) {
 		return nil, err
 	}
 
-	var url string
-	if pathWithQuery := ir.GetPathWithQuery(); pathWithQuery.IsSome() {
-		url = pathWithQuery.Some()
+	pathWithQuery := ""
+	if value := ir.GetPathWithQuery(); value.IsSome() {
+		pathWithQuery = value.Some()
 	}
 
 	headerResource := ir.GetHeaders()
-	headers := headerResource.CopyAll()
+	rawHeaders := headerResource.CopyAll()
 	headerResource.Drop()
+	headers := make(http.Header, len(rawHeaders))
+	toHttpHeader(rawHeaders, &headers)
 
 	rx, trailers := wasi.RequestConsumeBody(ir, unitFuture())
 	body := newReader(rx, trailers)
 
-	req, err := http.NewRequest(method, url, body)
+	scheme, host, requestPath, remote := httpmeta.IncomingTarget(pathWithQuery, headers)
+	rawURL := requestPath
+	if rawURL == "" {
+		rawURL = "/"
+	}
+	req, err := http.NewRequestWithContext(ctx, method, rawURL, body)
 	if err != nil {
 		body.Close()
 		return nil, err
 	}
 
-	toHttpHeader(headers, &req.Header)
+	req.Header = headers
+	req.Header.Del("Host")
+	req.URL.Scheme = scheme
+	req.URL.Host = host
+	req.Host = host
+	req.RequestURI = req.URL.RequestURI()
+	req.RemoteAddr = remote
+	if scheme == "https" && req.TLS == nil {
+		req.TLS = &tls.ConnectionState{}
+	}
 
 	return req, nil
 }

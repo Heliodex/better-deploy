@@ -1,9 +1,11 @@
 package wasihttp
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	wit "go.bytecodealliance.org/pkg/wit/types"
 	wasi "wt.packages/binding/imports/wasi_http_0_3_0_types"
@@ -34,7 +36,25 @@ func toWasiMethod(s string) wasi.Method {
 	}
 }
 
-// newOutgoingHttpRequest converts an http.Request to a wasi.Request.
+// outgoingRequestOptions turns the request context deadline into wasi:http transport timeouts. The caller keeps the context as the cancellation signal.
+func outgoingRequestOptions(ctx context.Context) wit.Option[*wasi.RequestOptions] {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return wit.None[*wasi.RequestOptions]()
+	}
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		remaining = time.Nanosecond
+	}
+	options := wasi.MakeRequestOptions()
+	duration := wit.Some(uint64(remaining))
+	options.SetConnectTimeout(duration)
+	options.SetFirstByteTimeout(duration)
+	options.SetBetweenBytesTimeout(duration)
+	return wit.Some(options)
+}
+
+// newOutgoingHttpRequest converts an http.Request to a wasi.Request. The body copier stops when the request context is cancelled.
 func newOutgoingHttpRequest(req *http.Request) (*wasi.Request, error) {
 	headers, err := toWasiHeaders(req.Header)
 	if err != nil {
@@ -42,6 +62,7 @@ func newOutgoingHttpRequest(req *http.Request) (*wasi.Request, error) {
 	}
 	defer headers.Drop()
 
+	ctx := req.Context()
 	var body wit.Option[*wit.StreamReader[uint8]]
 	if req.Body == nil {
 		body = wit.None[*wit.StreamReader[uint8]]()
@@ -54,6 +75,9 @@ func newOutgoingHttpRequest(req *http.Request) (*wasi.Request, error) {
 
 			buffer := make([]uint8, 16*1024)
 			for !tx.ReaderDropped() {
+				if ctx.Err() != nil {
+					return
+				}
 				count, err := req.Body.Read(buffer)
 				if err != nil {
 					if err != io.EOF {
@@ -69,8 +93,8 @@ func newOutgoingHttpRequest(req *http.Request) (*wasi.Request, error) {
 	request, send := wasi.RequestNew(
 		headers,
 		body,
-		trailersFuture(),                 // TODO: support trailers
-		wit.None[*wasi.RequestOptions](), // TODO: support options
+		trailersFuture(), // TODO: support trailers
+		outgoingRequestOptions(ctx),
 	)
 	send.Drop()
 	authority := req.Host
