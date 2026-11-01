@@ -46,14 +46,15 @@ func (s *supervisor) deploymentRun(app, id string) (*deploymentRun, bool) {
 }
 
 func (s *supervisor) deploymentLogf(app, id, format string, args ...any) {
-	line := time.Now().UTC().Format(logTimeFormat) + " " + fmt.Sprintf(format, args...) + "\n"
-	s.deployments.appendLog(app, id, []byte(line))
+	line := s.redactAppText(app, fmt.Sprintf(format, args...))
+	s.deployments.appendLog(app, id, []byte(time.Now().UTC().Format(logTimeFormat)+" "+line+"\n"))
 }
 
 func (s *supervisor) deploymentLog(app, id, text string) {
 	if text == "" {
 		return
 	}
+	text = s.redactAppText(app, text)
 	if !strings.HasSuffix(text, "\n") {
 		text += "\n"
 	}
