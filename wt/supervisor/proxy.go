@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
@@ -22,7 +24,22 @@ const (
 	proxyIdleConnTimeout = 90 * time.Second
 	proxyMaxIdlePerHost  = 16
 	proxyExpectContinue  = time.Second
+
+	requestIDHeader      = "X-Request-Id"
+	spinFullURLHeader    = "spin-full-url"
+	spinClientAddrHeader = "spin-client-addr"
+	spinBasePathHeader   = "spin-base-path"
+	spinPathInfoHeader   = "spin-path-info"
 )
+
+// newRequestID returns a short random identifier that ties a proxy, app and storage request together.
+func newRequestID() string {
+	var value [16]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(value[:])
+}
 
 func (s *supervisor) newProxy(a *app) *httputil.ReverseProxy {
 	target := &url.URL{Scheme: "http", Host: fmt.Sprintf("127.0.0.1:%d", a.port)}
@@ -50,6 +67,14 @@ func (s *supervisor) newProxy(a *app) *httputil.ReverseProxy {
 			r.Out.Host = host
 			r.Out.Header.Set("X-Forwarded-Host", host)
 			r.Out.Header.Set("X-Forwarded-Proto", proto)
+			// The Spin host headers give the component the standard net/http view of the original request.
+			r.Out.Header.Set(spinFullURLHeader, proto+"://"+host+r.In.URL.RequestURI())
+			r.Out.Header.Set(spinClientAddrHeader, r.In.RemoteAddr)
+			r.Out.Header.Set(spinPathInfoHeader, r.In.URL.RequestURI())
+			r.Out.Header.Set(spinBasePathHeader, "")
+			if requestID := r.In.Header.Get(requestIDHeader); requestID != "" {
+				r.Out.Header.Set(requestIDHeader, requestID)
+			}
 		},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
 			log.Printf("app %s: proxy: %v", a.name, err)
@@ -114,6 +139,17 @@ func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no app for this host", http.StatusNotFound)
 		return
 	}
+	s.serveApp(w, r, a)
+}
+
+// serveApp proxies one request to a resolved app. The public host proxy and the internal app fetch share it, so both get concurrency limits, readiness, static files and access logs.
+func (s *supervisor) serveApp(w http.ResponseWriter, r *http.Request, a *app) {
+	requestID := r.Header.Get(requestIDHeader)
+	if requestID == "" {
+		requestID = newRequestID()
+		r.Header.Set(requestIDHeader, requestID)
+	}
+	w.Header().Set(requestIDHeader, requestID)
 	started := time.Now()
 	if !a.beginRequest() {
 		w.Header().Set("Retry-After", "1")

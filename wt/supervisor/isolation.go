@@ -177,8 +177,9 @@ func (s *supervisor) applyEgress(a *app) error {
 	}
 	a.mu.Lock()
 	uid, port := a.uid, a.port
+	egress := append([]egressRule(nil), a.cfg.Egress...)
 	a.mu.Unlock()
-	return s.egress.add(a.name, uid, port)
+	return s.egress.add(a.name, uid, port, egress...)
 }
 
 // appCredential builds the SysProcAttr credential for an untrusted app. A nil result keeps the supervisor's own identity.

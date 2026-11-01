@@ -144,3 +144,62 @@ func TestAppConfigRejectsTakenHost(t *testing.T) {
 		t.Errorf("status = %d, want 409: %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestAppConfigPatchesCallersAndEgress(t *testing.T) {
+	dir := t.TempDir()
+	cfg, err := normalizeAppConfig(appConfig{Name: "demo", Host: "demo.localhost", Health: "/", Env: map[string]string{}}, "demo", "localhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := persistAppConfig(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	s := testSupervisor()
+	a := &app{name: "demo", dir: dir, cfg: cfg}
+	s.apps["demo"] = a
+	s.hosts[cfg.Host] = a
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(`{"allow_callers":["Frontend","frontend"]}`))
+	req.Header.Set("Authorization", "Bearer secret")
+	s.handleAppConfig(rec, req, "demo")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("callers patch = %d: %s", rec.Code, rec.Body.String())
+	}
+	var got appConfigResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.AllowCallers) != 1 || got.AllowCallers[0] != "frontend" || got.RestartRequired {
+		t.Errorf("callers patch response = %+v", got)
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(`{"egress":[{"cidr":"203.0.113.9/24","port":443}]}`))
+	req.Header.Set("Authorization", "Bearer secret")
+	s.handleAppConfig(rec, req, "demo")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("egress patch = %d: %s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Egress) != 1 || got.Egress[0].CIDR != "203.0.113.0/24" || got.Egress[0].Port != 443 || !got.RestartRequired {
+		t.Errorf("egress patch response = %+v", got)
+	}
+
+	for _, body := range []string{
+		`{"allow_callers":["bad/name"]}`,
+		`{"egress":[{"cidr":"not-a-cidr","port":443}]}`,
+		`{"egress":[{"cidr":"2001:db8::/32","port":443}]}`,
+		`{"egress":[{"cidr":"203.0.113.0/24","port":0}]}`,
+	} {
+		rec = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer secret")
+		s.handleAppConfig(rec, req, "demo")
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("invalid patch %s = %d, want 400", body, rec.Code)
+		}
+	}
+}

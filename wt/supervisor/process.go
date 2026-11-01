@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -65,8 +66,25 @@ func (s *supervisor) appArgs(a *app, source string) (args []string, env []string
 		args = append(args, "-W", fmt.Sprintf("max-memory-size=%d", cfg.MemoryMB<<20))
 	}
 	if s.storage != nil {
+		token := s.storage.tokenFor(a.name)
 		setEnv("WT_STORAGE_URL", s.storage.url())
-		setEnv("WT_STORAGE_TOKEN", s.storage.tokenFor(a.name))
+		setEnv("WT_STORAGE_TOKEN", token)
+		setEnv(appTokenEnv, token)
+	}
+	if s.fetch != nil {
+		setEnv(appNameEnv, a.name)
+		setEnv(appFetchURLEnv, s.fetch.url())
+		apps := s.allApps()
+		names := make([]string, 0, len(apps))
+		for _, other := range apps {
+			if other.name != a.name {
+				names = append(names, other.name)
+			}
+		}
+		slices.Sort(names)
+		for _, name := range names {
+			setEnv(appURLEnvName(name), s.fetch.appURL(name))
+		}
 	}
 	return append(args, source), env, nil
 }

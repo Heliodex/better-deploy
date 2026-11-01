@@ -28,6 +28,8 @@ type egressManager struct {
 	mu                 sync.Mutex
 	storageIP          string
 	storagePort        int
+	internalIP         string
+	internalPort       int
 	run4, run6         egressRun
 	ipv6               bool
 	chainReady, chain6 bool
@@ -83,13 +85,28 @@ func ensureChain(run egressRun, chain string, ready *bool) error {
 	return nil
 }
 
+// setInternal allows each app to reach the supervisor's internal fetch listener. It is called before any app launches.
+func (m *egressManager) setInternal(ip string, port int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.internalIP, m.internalPort = ip, port
+}
+
 // rulesFor is the complete allow-then-reject IPv4 rule set for one app. The reply rule is owner-scoped too.
-func (m *egressManager) rulesFor(uid, appPort int) [][]string {
-	return [][]string{
+func (m *egressManager) rulesFor(uid, appPort int, extra ...egressRule) [][]string {
+	rules := [][]string{
 		{"-m", "owner", "--uid-owner", strconv.Itoa(uid), "-d", m.storageIP, "-p", "tcp", "--dport", strconv.Itoa(m.storagePort), "-j", "ACCEPT"},
-		{"-m", "owner", "--uid-owner", strconv.Itoa(uid), "-d", "127.0.0.1", "-p", "tcp", "--sport", strconv.Itoa(appPort), "-j", "ACCEPT"},
-		{"-m", "owner", "--uid-owner", strconv.Itoa(uid), "-j", "REJECT"},
 	}
+	if m.internalIP != "" && m.internalPort > 0 {
+		rules = append(rules, []string{"-m", "owner", "--uid-owner", strconv.Itoa(uid), "-d", m.internalIP, "-p", "tcp", "--dport", strconv.Itoa(m.internalPort), "-j", "ACCEPT"})
+	}
+	for _, rule := range extra {
+		rules = append(rules, []string{"-m", "owner", "--uid-owner", strconv.Itoa(uid), "-d", rule.CIDR, "-p", "tcp", "--dport", strconv.Itoa(rule.Port), "-j", "ACCEPT"})
+	}
+	return append(rules,
+		[]string{"-m", "owner", "--uid-owner", strconv.Itoa(uid), "-d", "127.0.0.1", "-p", "tcp", "--sport", strconv.Itoa(appPort), "-j", "ACCEPT"},
+		[]string{"-m", "owner", "--uid-owner", strconv.Itoa(uid), "-j", "REJECT"},
+	)
 }
 
 // rules6For rejects every IPv6 packet from the app uid. Storage is IPv4 loopback only.
@@ -124,7 +141,7 @@ func appendRules(run egressRun, chain string, rules [][]string) ([][]string, err
 }
 
 // add installs the app's rules. Any previous rules for the app are removed first, because a restart gets a new port.
-func (m *egressManager) add(app string, uid, appPort int) error {
+func (m *egressManager) add(app string, uid, appPort int, extra ...egressRule) error {
 	if uid <= 0 {
 		return fmt.Errorf("egress rules need a non-zero app uid")
 	}
@@ -157,7 +174,7 @@ func (m *egressManager) add(app string, uid, appPort int) error {
 		delete(m.rules, app)
 	}
 
-	appended4, err := appendRules(m.run4, egressChain, m.rulesFor(uid, appPort))
+	appended4, err := appendRules(m.run4, egressChain, m.rulesFor(uid, appPort, extra...))
 	if err != nil {
 		return fmt.Errorf("add IPv4 egress rule for %s: %w", app, err)
 	}

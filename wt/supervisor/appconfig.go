@@ -6,6 +6,7 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"maps"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -36,6 +37,8 @@ const (
 	untrustedDefaultMemoryMB       = 256
 	untrustedDefaultDiskMB         = 256
 	untrustedDefaultNetwork        = "storage"
+	maxAllowCallers                = 128
+	maxEgressRules                 = 128
 )
 
 // untrusted reports whether apps are treated as hostile tenants that need enforced isolation.
@@ -115,6 +118,7 @@ func configFromEnv() config {
 		tlsKey:           os.Getenv("WT_TLS_KEY"),
 		tenantMode:       env("WT_TENANT_MODE", tenantTrusted),
 		adminListen:      os.Getenv("WT_ADMIN_LISTEN"),
+		appFetchListen:   env("WT_APP_FETCH_LISTEN", "127.0.0.1:0"),
 		cgroupRoot:       env("WT_CGROUP_ROOT", "/sys/fs/cgroup/wt"),
 		iptables:         env("WT_IPTABLES", "iptables"),
 		ip6tables:        env("WT_IP6TABLES", "ip6tables"),
@@ -153,7 +157,66 @@ func sameRuntimeConfig(a, b appConfig) bool {
 	if a.HealthFailures != b.HealthFailures || a.RestartOnUnhealthy != b.RestartOnUnhealthy {
 		return false
 	}
+	if !slices.Equal(a.Egress, b.Egress) {
+		return false
+	}
 	return slices.Equal(a.Schedule, b.Schedule)
+}
+
+// normalizeAllowCallers validates the target app's inbound app-to-app allowlist. Empty entries are ignored so a panel comma-separated field stays convenient.
+func normalizeAllowCallers(names []string) ([]string, error) {
+	if len(names) > maxAllowCallers {
+		return nil, fmt.Errorf("allow_callers must contain at most %d apps", maxAllowCallers)
+	}
+	out := make([]string, 0, len(names))
+	seen := map[string]struct{}{}
+	for _, name := range names {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name == "" {
+			continue
+		}
+		if !validName(name) {
+			return nil, fmt.Errorf("allow_callers: %q is not a valid app name", name)
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
+// normalizeEgress validates an explicit untrusted-mode outbound allowlist. CIDR rules are IPv4 only because the IPv6 chain remains deny-all.
+func normalizeEgress(rules []egressRule) ([]egressRule, error) {
+	if len(rules) > maxEgressRules {
+		return nil, fmt.Errorf("egress must contain at most %d rules", maxEgressRules)
+	}
+	out := make([]egressRule, 0, len(rules))
+	seen := map[egressRule]struct{}{}
+	for _, rule := range rules {
+		_, network, err := net.ParseCIDR(strings.TrimSpace(rule.CIDR))
+		if err != nil || network.IP.To4() == nil {
+			return nil, fmt.Errorf("egress %q: use an IPv4 CIDR such as 203.0.113.0/24", rule.CIDR)
+		}
+		if rule.Port < 1 || rule.Port > 65535 {
+			return nil, fmt.Errorf("egress %q: port must be between 1 and 65535", network)
+		}
+		next := egressRule{CIDR: network.String(), Port: rule.Port}
+		if _, ok := seen[next]; ok {
+			continue
+		}
+		seen[next] = struct{}{}
+		out = append(out, next)
+	}
+	slices.SortFunc(out, func(a, b egressRule) int {
+		if a.CIDR != b.CIDR {
+			return strings.Compare(a.CIDR, b.CIDR)
+		}
+		return a.Port - b.Port
+	})
+	return out, nil
 }
 
 func validName(name string) bool {
@@ -287,6 +350,16 @@ func normalizeAppConfig(cfg appConfig, name, domain string, modes ...string) (ap
 		return cfg, err
 	}
 	cfg.Hosts = hosts
+	callers, err := normalizeAllowCallers(cfg.AllowCallers)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.AllowCallers = callers
+	egress, err := normalizeEgress(cfg.Egress)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.Egress = egress
 	if cfg.Health == "" {
 		cfg.Health = defaultHealthPath
 	}

@@ -180,3 +180,24 @@ func TestEgressRejectsMissingIdentity(t *testing.T) {
 		t.Error("port 0 should be rejected")
 	}
 }
+
+func TestEgressAllowsInternalFetchAndConfiguredCIDR(t *testing.T) {
+	runner := &fakeRunner{}
+	manager := newEgressManager("iptables", "ip6tables", "127.0.0.1", 9999, runner.run)
+	manager.setInternal("127.0.0.1", 9500)
+	if err := manager.add("demo", 20001, 8081, egressRule{CIDR: "203.0.113.0/24", Port: 443}); err != nil {
+		t.Fatal(err)
+	}
+	commands := runner.joined()
+	for _, want := range []string{
+		"-w -A WT-EGRESS -m owner --uid-owner 20001 -d 127.0.0.1 -p tcp --dport 9500 -j ACCEPT",
+		"-w -A WT-EGRESS -m owner --uid-owner 20001 -d 203.0.113.0/24 -p tcp --dport 443 -j ACCEPT",
+	} {
+		if !containsCommand(commands, want) {
+			t.Errorf("missing %q in %v", want, commands)
+		}
+	}
+	if commands[len(commands)-1] != "-w -A WT-EGRESS6 -m owner --uid-owner 20001 -j REJECT" {
+		t.Errorf("configured egress rules do not precede the reject: %v", commands)
+	}
+}

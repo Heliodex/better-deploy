@@ -31,6 +31,8 @@ type appConfigPatch struct {
 	HealthFailures     *int               `json:"health_failures"`
 	RestartOnUnhealthy *bool              `json:"restart_on_unhealthy"`
 	Network            *string            `json:"network"`
+	AllowCallers       *[]string          `json:"allow_callers"`
+	Egress             *[]egressRule      `json:"egress"`
 	Schedule           *[]scheduleConfig  `json:"schedule"`
 }
 
@@ -54,6 +56,8 @@ type appConfigResponse struct {
 	HealthFailures     int              `json:"health_failures"`
 	RestartOnUnhealthy bool             `json:"restart_on_unhealthy"`
 	Network            string           `json:"network"`
+	AllowCallers       []string         `json:"allow_callers"`
+	Egress             []egressRule     `json:"egress"`
 	Schedule           []scheduleConfig `json:"schedule"`
 	RestartRequired    bool             `json:"restart_required,omitempty"`
 }
@@ -66,6 +70,14 @@ func configResponse(cfg appConfig) appConfigResponse {
 	hosts := cfg.Hosts
 	if hosts == nil {
 		hosts = []string{}
+	}
+	callers := cfg.AllowCallers
+	if callers == nil {
+		callers = []string{}
+	}
+	egress := cfg.Egress
+	if egress == nil {
+		egress = []egressRule{}
 	}
 	return appConfigResponse{
 		Name:               cfg.Name,
@@ -86,6 +98,8 @@ func configResponse(cfg appConfig) appConfigResponse {
 		HealthFailures:     cfg.HealthFailures,
 		RestartOnUnhealthy: cfg.RestartOnUnhealthy,
 		Network:            cfg.Network,
+		AllowCallers:       callers,
+		Egress:             egress,
 		Schedule:           schedule,
 	}
 }
@@ -135,6 +149,12 @@ func applyConfigPatch(cfg appConfig, patch appConfigPatch) appConfig {
 	}
 	if patch.Network != nil {
 		cfg.Network = *patch.Network
+	}
+	if patch.AllowCallers != nil {
+		cfg.AllowCallers = append([]string(nil), (*patch.AllowCallers)...)
+	}
+	if patch.Egress != nil {
+		cfg.Egress = append([]egressRule(nil), (*patch.Egress)...)
 	}
 	if patch.Schedule != nil {
 		cfg.Schedule = append([]scheduleConfig(nil), (*patch.Schedule)...)
@@ -257,7 +277,8 @@ func (s *supervisor) handleAppConfig(w http.ResponseWriter, r *http.Request, nam
 	restartRequired := !maps.Equal(cfg.Env, next.Env) || cfg.MemoryMB != next.MemoryMB ||
 		cfg.DiskMB != next.DiskMB || cfg.CPUMillicores != next.CPUMillicores || cfg.PidsMax != next.PidsMax ||
 		cfg.IOWeight != next.IOWeight || cfg.MaxConcurrent != next.MaxConcurrent ||
-		cfg.RequestTimeout != next.RequestTimeout || cfg.Network != next.Network
+		cfg.RequestTimeout != next.RequestTimeout || cfg.Network != next.Network ||
+		!slices.Equal(cfg.Egress, next.Egress)
 	if !slices.Equal(cfg.Schedule, next.Schedule) {
 		a.mu.Lock()
 		running := a.cmd != nil && !a.exited

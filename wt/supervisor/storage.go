@@ -221,17 +221,25 @@ func (s *storageServer) tokenFor(app string) string {
 	return token
 }
 
+// appForToken resolves an app from a bearer token.
+func (s *storageServer) appForToken(token string) (string, bool) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return "", false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	app, ok := s.tokens[token]
+	return app, ok
+}
+
 func (s *storageServer) appFor(r *http.Request) (string, bool) {
 	const prefix = "Bearer "
 	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), prefix)
 	if !ok {
 		return "", false
 	}
-	token = strings.TrimSpace(token)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	app, ok := s.tokens[token]
-	return app, ok
+	return s.appForToken(token)
 }
 
 // storageDSN applies the hardened pragmas to every physical connection through the driver DSN.

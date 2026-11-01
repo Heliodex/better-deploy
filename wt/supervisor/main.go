@@ -9,6 +9,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -42,6 +43,7 @@ type config struct {
 	wasmtime, wasmtimeCompiler, wasmtimeTarget                 string
 	token, tlsCert, tlsKey                                     string
 	tenantMode, adminListen                                    string
+	appFetchListen                                             string
 	cgroupRoot, iptables, ip6tables                            string
 	dataQuotaMode, setquota, findmnt, dataQuotaFS              string
 	appUIDBase                                                 int
@@ -70,11 +72,19 @@ type appConfig struct {
 	HealthFailures     int               `json:"health_failures,omitempty"`
 	RestartOnUnhealthy bool              `json:"restart_on_unhealthy,omitempty"`
 	Network            string            `json:"network,omitempty"`
+	AllowCallers       []string          `json:"allow_callers,omitempty"`
+	Egress             []egressRule      `json:"egress,omitempty"`
 	Schedule           []scheduleConfig  `json:"schedule,omitempty"`
 
 	requestTimeout time.Duration
 	startupTimeout time.Duration
 	healthInterval time.Duration
+}
+
+// egressRule allows one IPv4 CIDR and TCP port for an untrusted app. The app's uid still reaches only these destinations plus storage and the internal fetch listener.
+type egressRule struct {
+	CIDR string `json:"cidr"`
+	Port int    `json:"port"`
 }
 
 // scheduleConfig asks the supervisor to call an app endpoint on a timer. Components cannot run their own background loops under `wasmtime serve`, so time is driven from the host.
@@ -128,6 +138,7 @@ type supervisor struct {
 	cfg         config
 	storage     *storageServer
 	backups     *backupManager
+	fetch       *appFetchServer
 	events      *hub
 	deployments *deploymentManager
 	secrets     *secretStore
@@ -431,6 +442,22 @@ func loopbackListen(addr string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// validateAppFetchListen keeps the internal app-to-app endpoint on loopback, where apps reach it through their egress allow rules.
+func validateAppFetchListen(value string) error {
+	host, _, err := net.SplitHostPort(value)
+	if err != nil {
+		return fmt.Errorf("app fetch listen %q: use a loopback address such as 127.0.0.1:0", value)
+	}
+	if strings.EqualFold(host, "localhost") {
+		return nil
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsLoopback() {
+		return fmt.Errorf("app fetch listen %q must be loopback", value)
+	}
+	return nil
+}
+
 // parseConfig reads flags and environment, then prepares the runtime directories.
 func parseConfig() config {
 	cfg := configFromEnv()
@@ -451,6 +478,7 @@ func parseConfig() config {
 	flag.StringVar(&cfg.tlsKey, "tls-key", cfg.tlsKey, "TLS private key (with --tls-cert)")
 	flag.StringVar(&cfg.tenantMode, "tenant-mode", cfg.tenantMode, "tenant trust model: trusted or untrusted")
 	flag.StringVar(&cfg.adminListen, "admin-listen", cfg.adminListen, "separate admin listener (TCP address or unix:/path)")
+	flag.StringVar(&cfg.appFetchListen, "app-fetch-listen", cfg.appFetchListen, "internal app-to-app fetch listener (loopback TCP address)")
 	flag.StringVar(&cfg.cgroupRoot, "cgroup-root", cfg.cgroupRoot, "cgroup v2 root for per-app limits")
 	flag.StringVar(&cfg.iptables, "iptables", cfg.iptables, "iptables binary for per-app IPv4 egress rules")
 	flag.StringVar(&cfg.ip6tables, "ip6tables", cfg.ip6tables, "ip6tables binary for per-app IPv6 egress rules")
@@ -472,6 +500,9 @@ func parseConfig() config {
 	}
 	cfg.tenantMode = strings.ToLower(strings.TrimSpace(cfg.tenantMode))
 	if err := validateTenantConfig(cfg); err != nil {
+		log.Fatalf("%v", err)
+	}
+	if err := validateAppFetchListen(cfg.appFetchListen); err != nil {
 		log.Fatalf("%v", err)
 	}
 	if err := validateDataQuotaConfig(&cfg); err != nil {
@@ -556,6 +587,11 @@ func startSupervisor(cfg config) *supervisor {
 		apps:        map[string]*app{},
 		hosts:       map[string]*app{},
 	}
+	fetch, err := newAppFetchServer(cfg.appFetchListen, s)
+	if err != nil {
+		log.Fatalf("app fetch: %v", err)
+	}
+	s.fetch = fetch
 	if cfg.untrusted() {
 		uids, err := newUIDAllocator(filepath.Join(cfg.stateDir, ".uids.json"), cfg.appUIDBase)
 		if err != nil {
@@ -566,6 +602,11 @@ func startSupervisor(cfg config) *supervisor {
 		s.cgroups = newCgroupManager(cfg.cgroupRoot)
 		s.egress = newEgressManager(cfg.iptables, cfg.ip6tables, storageIP, storagePort, nil)
 		s.egress.ipv6 = cfg.ipv6Egress
+		fetchIP, fetchPort := fetch.endpoint()
+		if ip := net.ParseIP(fetchIP); ip == nil || ip.To4() == nil {
+			log.Fatalf("app fetch listener %s must use IPv4 in untrusted mode", fetchIP)
+		}
+		s.egress.setInternal(fetchIP, fetchPort)
 		s.quota = newDataQuota(cfg.dataQuotaMode, cfg.dataQuotaFS, cfg.stateDir, cfg.setquota, cfg.findmnt, nil)
 	}
 	if err := recoverRollbacks(cfg.stateDir, s.backups); err != nil {
@@ -680,6 +721,7 @@ func serve(s *supervisor) {
 		s.cgroups.close()
 	}
 	s.persistResources()
+	s.fetch.close()
 	s.storage.close()
 	if adminCleanup != nil {
 		adminCleanup()
