@@ -164,8 +164,6 @@ type supervisor struct {
 
 	deployLocks     appLocks
 	artifactCacheMu sync.Mutex
-	deployReplayMu  sync.Mutex
-	deployReplay    map[string]deployReplayEntry
 	loginMu         sync.Mutex
 	login           *loginLimiter
 	stopping        atomic.Bool

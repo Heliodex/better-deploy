@@ -372,10 +372,10 @@ func bundleDigest(dir string) string {
 }
 
 type deployReplayEntry struct {
-	status int
-	header http.Header
-	body   []byte
-	at     time.Time
+	Status int         `json:"status"`
+	Header http.Header `json:"header,omitempty"`
+	Body   []byte      `json:"body,omitempty"`
+	At     time.Time   `json:"at"`
 }
 
 type deployRecorder struct {
@@ -411,51 +411,44 @@ func (r *deployRecorder) Unwrap() http.ResponseWriter {
 	return r.ResponseWriter
 }
 
-func (s *supervisor) replayKey(name, key string) string {
-	return name + "\x00" + key
-}
-
+// replayDeploy reads a persisted deploy response for an idempotency key.
+// The record lives beside the app's deployment history, so it survives a supervisor restart.
 func (s *supervisor) replayDeploy(name, key string, now time.Time) (deployReplayEntry, bool) {
-	if key == "" {
+	if key == "" || s.deployments == nil {
 		return deployReplayEntry{}, false
 	}
-	s.deployReplayMu.Lock()
-	defer s.deployReplayMu.Unlock()
-	entry, ok := s.deployReplay[s.replayKey(name, key)]
-	if !ok || now.Sub(entry.at) > 24*time.Hour {
-		return deployReplayEntry{}, false
-	}
-	return entry, true
+	return s.deployments.replay(name, key, now)
 }
 
+// storeDeployReplay saves the response beside the deployment history. A failed write is logged; the deploy itself already succeeded.
 func (s *supervisor) storeDeployReplay(name, key string, recorder *deployRecorder) {
-	if key == "" {
+	if key == "" || s.deployments == nil {
 		return
 	}
 	status := recorder.status
 	if status == 0 {
 		status = http.StatusOK
 	}
-	s.deployReplayMu.Lock()
-	if s.deployReplay == nil {
-		s.deployReplay = map[string]deployReplayEntry{}
+	entry := deployReplayEntry{
+		Status: status,
+		Header: recorder.Header().Clone(),
+		Body:   append([]byte(nil), recorder.body.Bytes()...),
+		At:     time.Now().UTC(),
 	}
-	if len(s.deployReplay) >= 512 {
-		s.deployReplay = map[string]deployReplayEntry{}
+	if err := s.deployments.storeReplay(name, key, entry); err != nil {
+		log.Printf("deploy replay %s: %v", name, err)
 	}
-	s.deployReplay[s.replayKey(name, key)] = deployReplayEntry{status: status, header: recorder.Header().Clone(), body: append([]byte(nil), recorder.body.Bytes()...), at: time.Now()}
-	s.deployReplayMu.Unlock()
 }
 
 func (s *supervisor) replayDeployResponse(w http.ResponseWriter, entry deployReplayEntry) {
-	for key, values := range entry.header {
+	for key, values := range entry.Header {
 		for _, value := range values {
 			w.Header().Add(key, value)
 		}
 	}
 	w.Header().Set("Idempotency-Replayed", "true")
-	w.WriteHeader(entry.status)
-	_, _ = w.Write(entry.body)
+	w.WriteHeader(entry.Status)
+	_, _ = w.Write(entry.Body)
 }
 
 func (s *supervisor) deploy(w http.ResponseWriter, r *http.Request, name string) {

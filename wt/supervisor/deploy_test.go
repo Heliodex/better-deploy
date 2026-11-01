@@ -331,6 +331,25 @@ func TestDeployConditionalAndIdempotent(t *testing.T) {
 	if rec.Body.String() != first {
 		t.Error("idempotent replay returned a different body")
 	}
+
+	// A new supervisor with the same state must replay the response from disk.
+	restarted := testSupervisor()
+	restarted.cfg.stateDir = s.cfg.stateDir
+	restarted.deployments = newDeploymentManager(filepath.Join(s.cfg.stateDir, ".deployments"))
+	rec = deployArchiveHeaders(t, restarted, "demo", archive, "", map[string]string{"Idempotency-Key": "deploy-1"})
+	if rec.Code != http.StatusOK || rec.Header().Get("Idempotency-Replayed") != "true" {
+		t.Fatalf("replay after restart = %d, header %q: %s", rec.Code, rec.Header().Get("Idempotency-Replayed"), rec.Body.String())
+	}
+	if rec.Body.String() != first {
+		t.Error("replay after restart returned a different body")
+	}
+	info, err := os.Stat(filepath.Join(s.cfg.stateDir, ".deployments", "demo", deploymentReplayName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("idempotency file mode = %o, want 600", info.Mode().Perm())
+	}
 }
 
 func TestFailedDeployKeepsOldProcess(t *testing.T) {

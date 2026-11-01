@@ -18,8 +18,14 @@ const (
 	deploymentTimeLayout = "20060102T150405.000000000Z"
 	deploymentMetaName   = "meta.json"
 	deploymentBlobDir    = ".blobs"
-	deploymentStatusOK   = "success"
-	deploymentStatusFail = "failed"
+	deploymentReplayName = "idempotency.json"
+	// deploymentReplayKeep bounds one app's persisted idempotency responses.
+	deploymentReplayKeep = 64
+	// deploymentReplayTTL is how long a deploy response may be replayed.
+	deploymentReplayTTL     = 24 * time.Hour
+	deploymentReplayVersion = 1
+	deploymentStatusOK      = "success"
+	deploymentStatusFail    = "failed"
 	// deploymentErrorBytes caps the failure text kept in history.
 	deploymentErrorBytes = 4 << 10
 )
@@ -46,6 +52,12 @@ type deploymentInfo struct {
 	Status      string            `json:"status,omitempty"`
 	Error       string            `json:"error,omitempty"`
 	Current     bool              `json:"current,omitempty"`
+}
+
+// deploymentReplayFile is the on-disk form of one app's idempotency responses.
+type deploymentReplayFile struct {
+	Version int                          `json:"version"`
+	Entries map[string]deployReplayEntry `json:"entries"`
 }
 
 // deploymentManager keeps a bounded history of app bundles under the state directory.
@@ -87,6 +99,93 @@ func (m *deploymentManager) newID(app string) (string, time.Time, error) {
 		id = now.Format(deploymentTimeLayout)
 	}
 	return id, now, nil
+}
+
+// replayPath is the idempotency file beside the app's deployment history.
+func (m *deploymentManager) replayPath(app string) string {
+	return filepath.Join(m.appDir(app), deploymentReplayName)
+}
+
+func (m *deploymentManager) readReplayFile(app string) (deploymentReplayFile, error) {
+	var file deploymentReplayFile
+	data, err := os.ReadFile(m.replayPath(app))
+	if err != nil {
+		return file, err
+	}
+	if err := json.Unmarshal(data, &file); err != nil {
+		return deploymentReplayFile{}, err
+	}
+	if file.Entries == nil {
+		file.Entries = map[string]deployReplayEntry{}
+	}
+	return file, nil
+}
+
+func (m *deploymentManager) replay(app, key string, now time.Time) (deployReplayEntry, bool) {
+	if key == "" {
+		return deployReplayEntry{}, false
+	}
+	file, err := m.readReplayFile(app)
+	if err != nil {
+		return deployReplayEntry{}, false
+	}
+	entry, ok := file.Entries[key]
+	if !ok || now.Sub(entry.At) > deploymentReplayTTL {
+		return deployReplayEntry{}, false
+	}
+	return entry, true
+}
+
+func (m *deploymentManager) storeReplay(app, key string, entry deployReplayEntry) error {
+	if key == "" {
+		return nil
+	}
+	file, err := m.readReplayFile(app)
+	if err != nil {
+		file = deploymentReplayFile{Version: deploymentReplayVersion, Entries: map[string]deployReplayEntry{}}
+	}
+	if file.Entries == nil {
+		file.Entries = map[string]deployReplayEntry{}
+	}
+	file.Version = deploymentReplayVersion
+
+	now := time.Now()
+	for name, existing := range file.Entries {
+		if now.Sub(existing.At) > deploymentReplayTTL {
+			delete(file.Entries, name)
+		}
+	}
+	file.Entries[key] = entry
+	if len(file.Entries) > deploymentReplayKeep {
+		type agedEntry struct {
+			key string
+			at  time.Time
+		}
+		aged := make([]agedEntry, 0, len(file.Entries))
+		for name, existing := range file.Entries {
+			aged = append(aged, agedEntry{key: name, at: existing.At})
+		}
+		sort.Slice(aged, func(i, j int) bool { return aged[i].at.Before(aged[j].at) })
+		for _, item := range aged[:len(aged)-deploymentReplayKeep] {
+			delete(file.Entries, item.key)
+		}
+	}
+	data, err := json.Marshal(file)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(m.appDir(app), 0o755); err != nil {
+		return err
+	}
+	return writeFileAtomicMode(m.replayPath(app), append(data, '\n'), 0o600)
+}
+
+func (m *deploymentManager) clearReplay(app string) error {
+	err := os.Remove(m.replayPath(app))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
 }
 
 func (m *deploymentManager) ids(app string) ([]string, error) {

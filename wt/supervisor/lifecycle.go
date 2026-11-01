@@ -169,5 +169,10 @@ func (s *supervisor) handleDelete(w http.ResponseWriter, r *http.Request, name s
 			return
 		}
 	}
+	if s.deployments != nil {
+		if err := s.deployments.clearReplay(name); err != nil {
+			log.Printf("deploy replay %s: %v", name, err)
+		}
+	}
 	writeJSON(w, http.StatusOK, deleteAppResponse{Name: name, Purged: purge})
 }
