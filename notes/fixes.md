@@ -29,7 +29,7 @@ Prioritised as of 2026-10-31. This revision folds in the architectural review an
 
 ## P0: correctness, security and the deploy model
 
-1. [x] **Make the wasm the deploy artifact, not the cwasm.** The current bundle is tied to wasmtime v50, a target triple and, indirectly, CPU features. Keeping `main.wasm` and rebuilding is halfway there; finish the move. Make `main.wasm`, `app.json` and `static/` the content-addressed artifact, and store `.cwasm` as a cache keyed by `(sha256(wasm), wasmtime version, target, CPU features)`. The CLI may upload a precompiled hint, but the server must not depend on it.
+1. [x] **Make the wasm the deploy artifact, not the cwasm.** The current bundle is tied to wasmtime v50 and a target triple whose baseline CPU features it depends on. Keeping `main.wasm` and rebuilding is halfway there; finish the move. Make `main.wasm`, `app.json` and `static/` the content-addressed artifact, and store `.cwasm` as a cache keyed by `(sha256(wasm), wasmtime version, target, CPU feature policy, epoch)`. Compilation always passes `--target`, so the policy is the target's baseline feature set; a native build must record its own fingerprint. The CLI may upload a precompiled hint, but the server must not depend on it.
    - [x] Portable rollback across runtime upgrades.
    - [x] Deploys from CI on any architecture.
    - [x] A digest and `If-None-Match`/idempotency key so an unchanged deploy does not restart the app.

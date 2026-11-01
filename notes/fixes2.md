@@ -15,6 +15,8 @@ The short assessment: the spine is right and unusually well executed for a proto
 - [x] **WAL and temp accounting.** Write connections set a quota-scaled `journal_size_limit` and `wal_autocheckpoint`. SQLite temp files go to a dedicated `WT_STORAGE_TMP_DIR`, and a global `WT_STORAGE_TEMP_BUDGET_MB` monitor rejects new storage requests with `507 temp_budget` while the shared directory is over budget. Stale `etilqs_*` files are removed at startup.
 - [x] **Invisible supervisor upgrades.** Apps are now children of one app-runner process with a liveness pipe. `SIGHUP` execs the supervisor binary in place while inheriting the storage and app-fetch listeners and the runner FD; the new supervisor reconnects, restores app tokens and adopts the running PIDs and ports. A real handover test verifies the app PID is unchanged.
 - [x] **Access-log defaults.** `WT_ACCESS_LOG` and `WT_ACCESS_LOG_EVERY` now populate `configFromEnv`; the previous zero default made `parseConfig` reject every normal startup with `access-log-every must be between 1 and 10000`.
+- [x] **App-to-app body signatures.** The supervisor signs the body's SHA-256 with the target token in `X-WT-App-Signature-V2`, and `app.Caller` verifies and restores the buffered body. Trusted mode still sends the legacy metadata-only signature for older targets; untrusted mode sends v2 only.
+- [x] **Artifact cache CPU policy.** `artifactKey`, `artifactInfo` and `wt-deploy` artifacts now record the baseline CPU feature policy, so the cache digest changes with it and a future native compile cannot silently share a baseline entry. Legacy artifacts without the field still match.
 
 ## Do not regress
 
@@ -88,9 +90,18 @@ These are the choices that make this worth continuing. Keep them unless a replac
    - [x] Tests cover runner start, output, port discovery, snapshot reconnect, liveness shutdown, supervisor launch through the runner, adoption, inherited listeners, and an opt-in real `SIGHUP` handover that checks the app PID is unchanged (`WT_HANDOVER_TEST=1`).
    - [ ] Add a pre-flight new-binary check or a keeper so a failed `exec` cannot take the service down. The public and admin listeners still have a short accept gap, and in-flight requests on them and on the old storage server are dropped during handover.
 
-10. [ ] **Cover the app-to-app body.** The HMAC covers caller, method, path and timestamp, not the body. Fine for trusted apps, not for untrusted ones. Either sign the body or stop advertising the header as an integrity boundary.
+10. [x] **Cover the app-to-app body.** The HMAC covered caller, method, path and timestamp, not the body. That was acceptable for trusted apps, not for untrusted ones.
+   - [x] Add `X-WT-App-Signature-V2`, an HMAC over the caller, method, path, timestamp and the body's SHA-256, plus `X-WT-App-Body-SHA256`.
+   - [x] The supervisor reads and caps the body at 8 MiB before signing and restores it for the target; `app.Caller` reads and restores the body while verifying the digest and signature.
+   - [x] Send the legacy metadata-only `X-WT-App-Signature` only in trusted mode; untrusted mode sends v2 only.
+   - [x] Test v2 verification, tampered bodies, legacy fallback, stale signatures, missing headers and the untrusted header set.
+   - [ ] Stream large bodies through a body digest without buffering the whole request if apps ever need more than 8 MiB.
 
-11. [ ] **Reconcile `artifactKey` with the notes.** `notes/fixes.md` says the cwasm cache is keyed by CPU features; `artifactKey` in `wt/supervisor/artifact.go` keys on wasm digest, wasmtime version, target and epoch. It may be safe because `--target` selects a baseline, but nothing in the key enforces that. Add the feature set to the key or remove the claim.
+11. [x] **Reconcile `artifactKey` with the notes.** `notes/fixes.md` said the cwasm cache was keyed by CPU features; `artifactKey` only had wasm digest, wasmtime version, target and epoch.
+   - [x] Add a CPU feature policy to `artifactKey`, `artifactInfo` and the uploaded `artifact.json`, set to `baseline` because both compilers always pass `--target`.
+   - [x] Include it in the cache digest, reject a mismatch in `artifactMatches`, and accept legacy artifacts that have no CPU field.
+   - [x] Record the baseline policy in `wt-deploy`, test that the key changes with the policy, and test legacy acceptance and mismatch rejection.
+   - [x] Correct `notes/fixes.md` and the README to describe the target's baseline CPU features rather than an unrecorded feature set.
 
 ## P2: missing APIs
 
@@ -139,10 +150,9 @@ These are the choices that make this worth continuing. Keep them unless a replac
 
 20. [ ] **Accept the static-only boundary explicitly.** `adapter-static` and `prerender` mean no SSR, no `+server.ts`, no form actions and no server load. Either state that in the README as the supported SvelteKit mode, or plan a JS component runtime for SSR once the host path can support it.
 
-21. [ ] **Split the docs and test the claims.** The README is 87KB and `notes/fixes.md` is 60KB, and small claims are already drifting: CPU features in the cache key and `wt` versus `wt-deploy` in usage strings.
+21. [ ] **Split the docs and test the claims.** The README is 87KB and `notes/fixes.md` is 60KB, and small claims are already drifting, such as `wt` versus `wt-deploy` in usage strings.
    - [ ] Move rationale into `docs/` and keep the README to install, run, deploy and limits.
-   - [x] Add cheap assertions for the idempotency TTL and per-app replay cap.
-   - [ ] Add an assertion for the artifact cache key contents.
+   - [x] Add cheap assertions for the idempotency TTL, per-app replay cap and artifact cache key contents.
    - [ ] Fix the CLI naming: the binary is `wt-deploy` and the usage string says `wt`.
 
 ## If I picked the next five
