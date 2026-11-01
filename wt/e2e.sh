@@ -145,7 +145,7 @@ if [ "${WT_E2E_EXAMPLES:-0}" = "1" ]; then
 	"$work/wt-deploy" new --dir "$work/scaffolded"
 	"$work/wt-deploy" bundle --dir "$work/scaffolded" --out "$work/scaffolded.tar.gz" --wasmtime "$wasmtime" --target "$target"
 	api -X POST -F "artifact=@$work/scaffolded.tar.gz" "http://127.0.0.1:$port/apps/scaffolded" >/dev/null
-	curl -fsS -H "Host: scaffolded.localhost" "http://127.0.0.1:$port/" | grep -q "scaffolded"
+	curl -fsS -H "Host: scaffolded.localhost" "http://127.0.0.1:$port/" | grep -q "A tiny notes app"
 
 	echo "e2e: bundling and deploying the guestbook"
 	"$work/wt-deploy" bundle --dir "$root/wt/example/guestbook" --out "$work/guestbook.tar.gz" --wasmtime "$wasmtime" --target "$target"
