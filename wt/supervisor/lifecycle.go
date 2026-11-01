@@ -98,10 +98,10 @@ func (s *supervisor) handleStart(w http.ResponseWriter, r *http.Request, name st
 
 // purgeAppState removes an app's database, snapshots, logs, resource history and /data files.
 func (s *supervisor) purgeAppState(name string) error {
-	// Hold the backup manager lock so a snapshot cannot start while its database and files disappear.
+	// Hold this app's backup lock so its snapshot cannot start while its database and files disappear.
 	if s.backups != nil {
-		s.backups.mu.Lock()
-		defer s.backups.mu.Unlock()
+		s.backups.lock(name)
+		defer s.backups.unlock(name)
 	}
 	if s.storage != nil {
 		s.storage.closeSessionsFor(name)

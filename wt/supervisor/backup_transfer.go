@@ -43,8 +43,8 @@ func (m *backupManager) exportSnapshot(app, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.lock(app)
+	defer m.unlock(app)
 
 	database := filepath.Join(m.appDir(app), name)
 	archive := m.dataPath(app, name)
@@ -102,8 +102,8 @@ func moveFile(src, dst string) error {
 
 // importSnapshot stores a snapshot from an export archive. It becomes a child of the current snapshot but does not become current until restored.
 func (m *backupManager) importSnapshot(app, src string) (backupInfo, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.lock(app)
+	defer m.unlock(app)
 
 	temp, err := os.MkdirTemp(m.dataDir, "."+app+".import-")
 	if err != nil {

@@ -150,8 +150,8 @@ func (m *backupManager) stageSnapshot(app, name string, withDB bool) (dataDir st
 	if err != nil {
 		return "", false, "", err
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.lock(app)
+	defer m.unlock(app)
 	database := filepath.Join(m.appDir(app), name)
 	hasDatabase := false
 	if info, err := os.Stat(database); err == nil && info.Mode().IsRegular() {
@@ -217,8 +217,8 @@ func (m *backupManager) stageData(app, name string) (string, bool, error) {
 
 // markCurrent makes a snapshot the branch future automatic snapshots continue from.
 func (m *backupManager) markCurrent(app, name string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.lock(app)
+	defer m.unlock(app)
 	return m.markCurrentLocked(app, name)
 }
 
@@ -238,8 +238,8 @@ func (m *backupManager) markCurrentLocked(app, name string) error {
 
 // installData replaces an app's /data directory with a staged snapshot.
 func (m *backupManager) installData(app, temp string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.lock(app)
+	defer m.unlock(app)
 	return replaceDir(temp, filepath.Join(m.dataDir, app))
 }
 
@@ -249,8 +249,8 @@ func (m *backupManager) restore(ctx context.Context, app, name string) error {
 	if err != nil {
 		return err
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.lock(app)
+	defer m.unlock(app)
 	path := filepath.Join(m.appDir(app), name)
 	hasDatabase := false
 	if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {

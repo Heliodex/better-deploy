@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"sort"
@@ -36,6 +37,10 @@ const (
 	maxBackupKeep      = 100
 	// backupCheckInterval is how often the manager looks for apps whose next snapshot is due. Intervals are stored as durations, so this only bounds how late a snapshot can be.
 	backupCheckInterval = time.Minute
+	// backupCheckJitter spreads the due check so several supervisors do not all archive at the same second.
+	backupCheckJitter = backupCheckInterval / 5
+	// backupWorkers bounds how many apps archive at once. Each app still has its own lock, so a large archive only delays that app's own backups.
+	backupWorkers = 2
 	// backupCheckTimeout bounds the integrity check on a snapshot before it is restored. It is longer than the query timeout because quick_check reads the whole database.
 	backupCheckTimeout = 30 * time.Second
 )
@@ -130,12 +135,36 @@ type backupManager struct {
 	dir, dataDir string
 	storage      *storageServer
 
-	// mu serialises snapshots, restores and settings changes. A restore must not race a snapshot of the same database, and the manager's work is small enough that one lock is simpler than per-app ones.
-	mu sync.Mutex
+	// locksMu guards locks. Each app has its own mutex, so a large /data archive, export or restore for one app does not block another app's backups.
+	locksMu sync.Mutex
+	locks   map[string]*sync.Mutex
 }
 
 func newBackupManager(dir string, storage *storageServer, dataDir string) *backupManager {
-	return &backupManager{dir: dir, dataDir: dataDir, storage: storage}
+	return &backupManager{dir: dir, dataDir: dataDir, storage: storage, locks: map[string]*sync.Mutex{}}
+}
+
+// appLock returns the mutex for one app, creating it on first use.
+func (m *backupManager) appLock(app string) *sync.Mutex {
+	m.locksMu.Lock()
+	defer m.locksMu.Unlock()
+	if m.locks == nil {
+		m.locks = map[string]*sync.Mutex{}
+	}
+	lock := m.locks[app]
+	if lock == nil {
+		lock = &sync.Mutex{}
+		m.locks[app] = lock
+	}
+	return lock
+}
+
+func (m *backupManager) lock(app string) {
+	m.appLock(app).Lock()
+}
+
+func (m *backupManager) unlock(app string) {
+	m.appLock(app).Unlock()
 }
 
 func (m *backupManager) appDir(app string) string {
@@ -289,15 +318,15 @@ func (m *backupManager) listLocked(app string) ([]backupInfo, error) {
 
 // list returns an app's snapshots, newest first.
 func (m *backupManager) list(app string) ([]backupInfo, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.lock(app)
+	defer m.unlock(app)
 	return m.listLocked(app)
 }
 
 // overview returns everything the panel shows for one app.
 func (m *backupManager) overview(app string) (backupsResponse, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.lock(app)
+	defer m.unlock(app)
 	settings, err := m.settings(app)
 	if err != nil {
 		return backupsResponse{}, err
@@ -338,21 +367,21 @@ func (m *backupManager) saveSettings(app string, settings backupSettings) error 
 	if err := settings.validate(); err != nil {
 		return err
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.lock(app)
+	defer m.unlock(app)
 	return m.saveSettingsLocked(app, settings)
 }
 
 // create takes a snapshot now even when automatic backups are disabled.
 func (m *backupManager) create(ctx context.Context, app string) (backupInfo, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.lock(app)
+	defer m.unlock(app)
 	return m.createLocked(ctx, app, backupKindManual)
 }
 
 func (m *backupManager) backupIfDue(ctx context.Context, app string, now time.Time) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.lock(app)
+	defer m.unlock(app)
 	settings, err := m.settings(app)
 	if err != nil {
 		return err
@@ -382,35 +411,77 @@ func (m *backupManager) backupIfDue(ctx context.Context, app string, now time.Ti
 	return err
 }
 
-// runDue snapshots every app whose policy is enabled and whose newest snapshot is older than its interval. An app without a database still gets a data-only snapshot of /data.
-func (m *backupManager) runDue(ctx context.Context, now time.Time) {
+// dueApps returns the app names the scheduler may snapshot. Apps live under the state directory, so this is the same set loadApps sees.
+func (m *backupManager) dueApps() []string {
 	entries, err := os.ReadDir(m.dataDir)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			log.Printf("backup: scan apps: %v", err)
 		}
-		return
+		return nil
 	}
+	names := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") || !validName(entry.Name()) {
 			continue
 		}
-		if err := m.backupIfDue(ctx, entry.Name(), now); err != nil {
-			log.Printf("backup %s: %v", entry.Name(), err)
+		names = append(names, entry.Name())
+	}
+	return names
+}
+
+// runDue snapshots every app whose policy is enabled and whose newest snapshot is older than its interval. An app without a database still gets a data-only snapshot of /data. A small worker pool bounds concurrent archives without letting one app's large /data delay every other app.
+func (m *backupManager) runDue(ctx context.Context, now time.Time) {
+	names := m.dueApps()
+	workers := min(backupWorkers, len(names))
+	if workers == 0 {
+		return
+	}
+	jobs := make(chan string)
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for name := range jobs {
+				if ctx.Err() != nil {
+					return
+				}
+				if err := m.backupIfDue(ctx, name, now); err != nil {
+					log.Printf("backup %s: %v", name, err)
+				}
+			}
+		}()
+	}
+	for _, name := range names {
+		select {
+		case jobs <- name:
+		case <-ctx.Done():
+			close(jobs)
+			wg.Wait()
+			return
 		}
 	}
+	close(jobs)
+	wg.Wait()
+}
+
+// backupCheckDelay returns the next due check interval with up to a fifth of the interval of jitter in either direction.
+func backupCheckDelay(draw func(int64) int64) time.Duration {
+	span := int64(backupCheckJitter)*2 + 1
+	return backupCheckInterval - backupCheckJitter + time.Duration(draw(span))
 }
 
 // loop runs the periodic snapshots until the context is cancelled.
 func (m *backupManager) loop(ctx context.Context) {
 	m.runDue(ctx, time.Now())
-	ticker := time.NewTicker(backupCheckInterval)
-	defer ticker.Stop()
 	for {
+		timer := time.NewTimer(backupCheckDelay(rand.Int64N))
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
-		case now := <-ticker.C:
+		case now := <-timer.C:
 			m.runDue(ctx, now)
 		}
 	}

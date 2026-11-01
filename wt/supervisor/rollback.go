@@ -396,9 +396,9 @@ func (s *supervisor) rollbackAtomic(w http.ResponseWriter, ctx context.Context, 
 	defer removeIfExists(plan.dataDir)
 	defer removeIfExists(plan.stagedDB)
 
-	// No snapshot may start between the swap and the new app's first request.
-	s.backups.mu.Lock()
-	defer s.backups.mu.Unlock()
+	// No snapshot of this app may start between the swap and the new app's first request. Other apps keep backing up.
+	s.backups.lock(name)
+	defer s.backups.unlock(name)
 
 	if plan.running {
 		s.drainAndStop(plan.old, "rollback")

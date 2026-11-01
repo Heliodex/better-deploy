@@ -518,6 +518,64 @@ func TestBackupManagerUsesBackupDirOutsideStorage(t *testing.T) {
 	}
 }
 
+func TestBackupLocksArePerApp(t *testing.T) {
+	_, backups := testBackupManager(t)
+	backups.lock("first")
+	unlocked := false
+	defer func() {
+		if !unlocked {
+			backups.unlock("first")
+		}
+	}()
+
+	other := make(chan error, 1)
+	go func() {
+		_, err := backups.list("second")
+		other <- err
+	}()
+	select {
+	case err := <-other:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("another app waited on the first app's backup lock")
+	}
+
+	same := make(chan error, 1)
+	go func() {
+		_, err := backups.list("first")
+		same <- err
+	}()
+	select {
+	case <-same:
+		t.Fatal("the same app ran two backup operations at once")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	backups.unlock("first")
+	unlocked = true
+	select {
+	case err := <-same:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("the same app stayed locked after its backup finished")
+	}
+}
+
+func TestBackupCheckDelayUsesBoundedJitter(t *testing.T) {
+	lowest := backupCheckInterval - backupCheckJitter
+	highest := backupCheckInterval + backupCheckJitter
+	if got := backupCheckDelay(func(int64) int64 { return 0 }); got != lowest {
+		t.Errorf("minimum delay = %s, want %s", got, lowest)
+	}
+	if got := backupCheckDelay(func(span int64) int64 { return span - 1 }); got != highest {
+		t.Errorf("maximum delay = %s, want %s", got, highest)
+	}
+}
+
 func TestBackupIncludesData(t *testing.T) {
 	storage, backups := testBackupManager(t)
 	token := storage.tokenFor("notes")
