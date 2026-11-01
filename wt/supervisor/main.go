@@ -162,12 +162,13 @@ type supervisor struct {
 	mu          sync.RWMutex
 	apps, hosts map[string]*app
 
-	deployMu       sync.Mutex
-	deployReplayMu sync.Mutex
-	deployReplay   map[string]deployReplayEntry
-	loginMu        sync.Mutex
-	login          *loginLimiter
-	stopping       atomic.Bool
+	deployLocks     appLocks
+	artifactCacheMu sync.Mutex
+	deployReplayMu  sync.Mutex
+	deployReplay    map[string]deployReplayEntry
+	loginMu         sync.Mutex
+	login           *loginLimiter
+	stopping        atomic.Bool
 
 	versionOnce sync.Once
 	version     string

@@ -33,8 +33,7 @@ func (s *supervisor) unregister(a *app) {
 
 // handleStop drains in-flight requests and stops an app without removing it; its host returns 503 until it is started again.
 func (s *supervisor) handleStop(w http.ResponseWriter, r *http.Request, name string) {
-	s.deployMu.Lock()
-	defer s.deployMu.Unlock()
+	defer s.lockApp(name)()
 	a, ok := s.requireApp(w, r, name)
 	if !ok {
 		return
@@ -77,8 +76,7 @@ func (s *supervisor) startStopped(a *app) error {
 
 // handleStart relaunches a stopped app from its existing main.cwasm.
 func (s *supervisor) handleStart(w http.ResponseWriter, r *http.Request, name string) {
-	s.deployMu.Lock()
-	defer s.deployMu.Unlock()
+	defer s.lockApp(name)()
 	a, ok := s.requireApp(w, r, name)
 	if !ok {
 		return
@@ -139,8 +137,7 @@ func (s *supervisor) purgeAppState(name string) error {
 
 // handleDelete removes an app's code and process. State is kept unless ?purge=1 is set.
 func (s *supervisor) handleDelete(w http.ResponseWriter, r *http.Request, name string) {
-	s.deployMu.Lock()
-	defer s.deployMu.Unlock()
+	defer s.lockApp(name)()
 	a, ok := s.requireApp(w, r, name)
 	if !ok {
 		return

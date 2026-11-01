@@ -302,6 +302,10 @@ func (s *supervisor) pruneArtifactCache(keep string) {
 // Bundles keep main.wasm and artifact.json so an upgraded wasmtime can rebuild the artifact instead of failing to load it.
 // requireEpoch asks for instrumentation that supports a per-request wasmtime timeout; the returned bool reports whether the artifact has it.
 func (s *supervisor) ensureArtifact(dir string, requireEpoch bool) (bool, error) {
+	// The cache is shared by every app, so a per-app deploy lock is not enough to protect lookups, installs and pruning.
+	s.artifactCacheMu.Lock()
+	defer s.artifactCacheMu.Unlock()
+
 	cwasm := filepath.Join(dir, "main.cwasm")
 	wasm := filepath.Join(dir, "main.wasm")
 	digest, size, err := wasmFileInfo(dir)

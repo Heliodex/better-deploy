@@ -187,3 +187,113 @@ func TestServeStorageRetriesFailedMigration(t *testing.T) {
 		t.Errorf("attempts = %d, want 2", got)
 	}
 }
+
+func TestServeStorageMigrateEndpoint(t *testing.T) {
+	var migrations atomic.Int64
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("next should not run for the migrate endpoint")
+	})
+	handler := ServeStorage(nil, func(context.Context) error {
+		migrations.Add(1)
+		return nil
+	}, next)
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, MigratePath, nil))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("migrate status = %d, want 204", rec.Code)
+	}
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, HealthPath, nil))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("health status = %d, want 204", rec.Code)
+	}
+	if got := migrations.Load(); got != 1 {
+		t.Errorf("migrations = %d, want 1", got)
+	}
+}
+
+func TestServeStorageMigrateEndpointFailureThenRetry(t *testing.T) {
+	var attempts atomic.Int64
+	handler := ServeStorage(nil, func(context.Context) error {
+		if attempts.Add(1) == 1 {
+			return errors.New("schema is broken")
+		}
+		return nil
+	}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("next should not run for the migrate endpoint")
+	}))
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, MigratePath, nil))
+	if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), "schema is broken") {
+		t.Fatalf("first migrate = %d %q", rec.Code, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, MigratePath, nil))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("retry status = %d, want 204", rec.Code)
+	}
+	if got := attempts.Load(); got != 2 {
+		t.Errorf("attempts = %d, want 2", got)
+	}
+}
+
+func TestServeStorageMigrateEndpointUnavailable(t *testing.T) {
+	handler := ServeStorage(errors.New("down"), func(context.Context) error {
+		t.Error("migration should not run without storage")
+		return nil
+	}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("next should not run")
+	}))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, MigratePath, nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503", rec.Code)
+	}
+}
+
+func TestServeStorageMigrateEndpointRequiresPost(t *testing.T) {
+	handler := ServeStorage(nil, func(context.Context) error {
+		t.Error("migration should not run for a GET")
+		return nil
+	}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("next should not run")
+	}))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, MigratePath, nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d, want 405", rec.Code)
+	}
+	if got := rec.Header().Get("Allow"); got != http.MethodPost {
+		t.Errorf("Allow = %q, want POST", got)
+	}
+}
+
+func TestServeStorageMigrationSurvivesRequestCancellation(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	migrate := func(ctx context.Context) error {
+		close(started)
+		<-release
+		return ctx.Err()
+	}
+	handler := ServeStorage(nil, migrate, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("next should not run for the migrate endpoint")
+	}))
+
+	requestContext, cancel := context.WithCancel(context.Background())
+	rec := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, MigratePath, nil).WithContext(requestContext))
+		close(done)
+	}()
+	<-started
+	cancel()
+	close(release)
+	<-done
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("status = %d, want 204 after the request context was canceled", rec.Code)
+	}
+}

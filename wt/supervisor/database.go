@@ -308,8 +308,7 @@ func (s *supervisor) handleDatabaseImport(w http.ResponseWriter, r *http.Request
 	if !s.requireStorage(w, r, name) {
 		return
 	}
-	s.deployMu.Lock()
-	defer s.deployMu.Unlock()
+	defer s.lockApp(name)()
 	if s.rejectOverBudget(w) {
 		return
 	}

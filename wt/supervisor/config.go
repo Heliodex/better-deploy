@@ -248,8 +248,7 @@ func (s *supervisor) handleAppConfig(w http.ResponseWriter, r *http.Request, nam
 		return
 	}
 
-	s.deployMu.Lock()
-	defer s.deployMu.Unlock()
+	defer s.lockApp(name)()
 	a, ok := s.requireApp(w, r, name)
 	if !ok {
 		return

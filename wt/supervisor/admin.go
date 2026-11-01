@@ -146,8 +146,7 @@ func (s *supervisor) handleEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *supervisor) handleRestart(w http.ResponseWriter, _ *http.Request, a *app) {
-	s.deployMu.Lock()
-	defer s.deployMu.Unlock()
+	defer s.lockApp(a.name)()
 	if s.lookup(a.name) != a {
 		http.Error(w, "app not found", http.StatusNotFound)
 		return
@@ -235,7 +234,7 @@ func (s *supervisor) handleBackups(w http.ResponseWriter, r *http.Request, name 
 	}
 }
 
-// restoreBackupLocked restores one snapshot while the caller holds deployMu. It writes its own error response and reports success.
+// restoreBackupLocked restores one snapshot while the caller holds the app lock. It writes its own error response and reports success.
 func (s *supervisor) restoreBackupLocked(w http.ResponseWriter, ctx context.Context, name, file string) bool {
 	// Legacy snapshots have no data archive; restore their database online without stopping the app.
 	temp, hasData, err := s.backups.stageData(name, file)
@@ -287,8 +286,7 @@ func (s *supervisor) handleBackupRestore(w http.ResponseWriter, r *http.Request,
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	s.deployMu.Lock()
-	defer s.deployMu.Unlock()
+	defer s.lockApp(name)()
 	if _, ok := s.requireApp(w, r, name); !ok {
 		return
 	}

@@ -40,25 +40,50 @@ func WriteError(w http.ResponseWriter, status int, message string) {
 // HealthPath is the reserved readiness path the supervisor probes.
 const HealthPath = "/healthz"
 
+// MigratePath is the reserved endpoint the supervisor calls before it probes health.
+// It runs the same migration as the first request, so a slow schema change does not race the supervisor's startup timeout or probe timeout.
+const MigratePath = "/_wt/migrate"
+
 // ServeStorage runs next behind the storage service. It answers 503 while the storage client is unavailable, and 500 until the migration succeeds; a failed migration is retried on the next request, a successful one runs only once.
 func ServeStorage(storeErr error, migrate func(context.Context) error, next http.Handler) http.Handler {
 	var mu sync.Mutex
 	ready := false
+	ensureReady := func(ctx context.Context) error {
+		mu.Lock()
+		defer mu.Unlock()
+		if ready {
+			return nil
+		}
+		// A probe or migrate request may disconnect while the schema change is running.
+		// Keep the context values but not its cancellation, and let the storage service enforce its own migration timeout.
+		if err := migrate(context.WithoutCancel(ctx)); err != nil {
+			return err
+		}
+		ready = true
+		return nil
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if storeErr != nil {
 			http.Error(w, "storage unavailable: "+storeErr.Error(), http.StatusServiceUnavailable)
 			return
 		}
-		mu.Lock()
-		if !ready {
-			if err := migrate(r.Context()); err != nil {
-				mu.Unlock()
+		if r.URL.Path == MigratePath {
+			if r.Method != http.MethodPost {
+				w.Header().Set("Allow", "POST")
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			if err := ensureReady(r.Context()); err != nil {
 				http.Error(w, "storage schema: "+err.Error(), http.StatusInternalServerError)
 				return
 			}
-			ready = true
+			w.WriteHeader(http.StatusNoContent)
+			return
 		}
-		mu.Unlock()
+		if err := ensureReady(r.Context()); err != nil {
+			http.Error(w, "storage schema: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 		// The supervisor readiness probe answers after migrations have run, so it never reports ready against an unmigrated store.
 		if r.URL.Path == HealthPath && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
 			w.WriteHeader(http.StatusNoContent)

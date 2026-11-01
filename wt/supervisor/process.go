@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -133,7 +135,6 @@ func (s *supervisor) waitReady(a *app, done <-chan struct{}) error {
 }
 
 func (s *supervisor) waitReadyUntil(a *app, done <-chan struct{}, deadline time.Time) error {
-	client := &http.Client{Timeout: 500 * time.Millisecond}
 	a.mu.Lock()
 	health := a.cfg.Health
 	port := a.port
@@ -149,14 +150,22 @@ func (s *supervisor) waitReadyUntil(a *app, done <-chan struct{}, deadline time.
 			return fmt.Errorf("wasmtime exited before %s answered", target)
 		default:
 		}
-		resp, err := client.Get(target)
+		timeout := min(healthCheckTimeout, max(time.Until(deadline), time.Millisecond))
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+		if err != nil {
+			cancel()
+			return err
+		}
+		response, err := healthClient.Do(request)
+		cancel()
 		if err == nil {
-			body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-			_ = resp.Body.Close()
-			if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+			body, _ := io.ReadAll(io.LimitReader(response.Body, 512))
+			_ = response.Body.Close()
+			if response.StatusCode >= http.StatusOK && response.StatusCode < http.StatusMultipleChoices {
 				return nil
 			}
-			lastFailure = fmt.Sprintf("status %s: %s", resp.Status, strings.TrimSpace(string(body)))
+			lastFailure = fmt.Sprintf("status %s: %s", response.Status, strings.TrimSpace(string(body)))
 		} else {
 			lastFailure = err.Error()
 		}
@@ -291,8 +300,7 @@ func (s *supervisor) scheduleRetry(a *app) {
 }
 
 func (s *supervisor) restart(a *app) {
-	s.deployMu.Lock()
-	defer s.deployMu.Unlock()
+	defer s.lockApp(a.name)()
 	a.mu.Lock()
 	if a.retired || s.stopping.Load() || a.cmd != nil {
 		a.mu.Unlock()
@@ -542,7 +550,20 @@ func (s *supervisor) launch(a *app, source string) error {
 			log.Printf("app %s: network storage in trusted mode has no per-app uid, so inherit-network stays unrestricted", a.name)
 		}
 	}
-	if err := s.waitReadyUntil(a, done, deadline); err != nil {
+	// Run the explicit migration phase before readiness, so a slow schema change is not bounded by startup_timeout.
+	if cfg.Network != "none" {
+		a.mu.Lock()
+		port := a.port
+		a.mu.Unlock()
+		if err := s.migrateApp(a, port, done); err != nil {
+			if errors.Is(err, errNoMigrateEndpoint) {
+				log.Printf("app %s: no %s endpoint; using health readiness", a.name, migratePath)
+			} else {
+				return fail(withLaunchLog(source, recent, fmt.Errorf("storage migration: %w", err)))
+			}
+		}
+	}
+	if err := s.waitReady(a, done); err != nil {
 		return fail(withLaunchLog(source, recent, err))
 	}
 	proxy := s.newProxy(a)

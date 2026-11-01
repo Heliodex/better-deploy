@@ -459,8 +459,7 @@ func (s *supervisor) replayDeployResponse(w http.ResponseWriter, entry deployRep
 }
 
 func (s *supervisor) deploy(w http.ResponseWriter, r *http.Request, name string) {
-	s.deployMu.Lock()
-	defer s.deployMu.Unlock()
+	defer s.lockApp(name)()
 
 	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 	if len(idempotencyKey) > 128 {

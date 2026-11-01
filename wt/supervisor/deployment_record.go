@@ -388,8 +388,7 @@ func (s *supervisor) handleDeploymentInfo(w http.ResponseWriter, r *http.Request
 }
 
 func (s *supervisor) handleRollback(w http.ResponseWriter, r *http.Request, name, id string) {
-	s.deployMu.Lock()
-	defer s.deployMu.Unlock()
+	defer s.lockApp(name)()
 	if _, ok := s.requireApp(w, r, name); !ok {
 		return
 	}
