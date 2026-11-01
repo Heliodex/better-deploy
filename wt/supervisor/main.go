@@ -309,6 +309,11 @@ type appInfo struct {
 }
 
 func (s *supervisor) stopAll() {
+	s.deployRunsMu.Lock()
+	for _, run := range s.deployRuns {
+		run.cancel()
+	}
+	s.deployRunsMu.Unlock()
 	apps := s.allApps()
 
 	var wg sync.WaitGroup
