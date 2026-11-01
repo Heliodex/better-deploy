@@ -245,7 +245,7 @@ curl -H 'Host: notes.localhost' http://127.0.0.1:8080/notes
 
 ## Lifecycle and configuration
 
-The admin token also guards the lifecycle and config endpoints:
+The bootstrap operator token and admin-scoped tokens guard the lifecycle and config endpoints; deploy and read tokens follow the role restrictions described above:
 
 ```text
 GET    /usage                  measured disk usage and the global budget
