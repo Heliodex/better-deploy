@@ -44,6 +44,11 @@ func newRequestID() string {
 func (s *supervisor) newProxy(a *app) *httputil.ReverseProxy {
 	target := &url.URL{Scheme: "http", Host: fmt.Sprintf("127.0.0.1:%d", a.port)}
 	proxy := &httputil.ReverseProxy{
+		// JSON responses are compressed by the supervisor, so the transport asks the app for identity and every response is a normal Go body.
+		ModifyResponse: func(res *http.Response) error {
+			accept, _ := res.Request.Context().Value(acceptEncodingKey{}).(string)
+			return compressJSONResponse(res, accept)
+		},
 		// A hung app must not hold client connections forever: header and dial deadlines bound the wait before the response starts.
 		Transport: &http.Transport{
 			DialContext:           (&net.Dialer{Timeout: proxyDialTimeout, KeepAlive: 30 * time.Second}).DialContext,
@@ -66,6 +71,8 @@ func (s *supervisor) newProxy(a *app) *httputil.ReverseProxy {
 			r.Out.Header.Set("X-Forwarded-Proto", info.Proto)
 			r.Out.Header.Del("Forwarded")
 			r.Out.Host = info.Authority
+			r.Out = r.Out.WithContext(context.WithValue(r.Out.Context(), acceptEncodingKey{}, r.In.Header.Get("Accept-Encoding")))
+			r.Out.Header.Set("Accept-Encoding", "identity")
 			// The Spin host headers give the component the standard net/http view of the original request.
 			r.Out.Header.Set(spinFullURLHeader, info.Proto+"://"+info.Authority+r.In.URL.RequestURI())
 			r.Out.Header.Set(spinClientAddrHeader, info.ClientIP)

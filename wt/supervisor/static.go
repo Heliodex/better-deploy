@@ -1,9 +1,11 @@
 package main
 
 import (
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -34,11 +36,67 @@ func staticFile(dir, requestPath string) (string, bool) {
 	return path, true
 }
 
-func serveStaticFile(w http.ResponseWriter, r *http.Request, path, requestPath string) {
+// acceptsEncoding reports whether an Accept-Encoding value permits one coding, including q=0 rejection.
+func acceptsEncoding(header, encoding string) bool {
+	for _, item := range strings.Split(header, ",") {
+		fields := strings.Split(strings.TrimSpace(item), ";")
+		name := strings.ToLower(strings.TrimSpace(fields[0]))
+		if name != encoding && name != "*" {
+			continue
+		}
+		quality := 1.0
+		for _, parameter := range fields[1:] {
+			key, value, ok := strings.Cut(strings.TrimSpace(parameter), "=")
+			if ok && strings.EqualFold(strings.TrimSpace(key), "q") {
+				if parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64); err == nil {
+					quality = parsed
+				}
+			}
+		}
+		return quality > 0
+	}
+	return false
+}
+
+// staticVariant picks a precompressed .br or .gz sidecar when the client accepts it. The original file must exist so a stray compressed file is never exposed on its own.
+func staticVariant(dir, requestPath, acceptEncoding string) (path, original, encoding string, hasVariants, ok bool) {
+	original, ok = staticFile(dir, requestPath)
+	if !ok {
+		return "", "", "", false, false
+	}
+	for _, sidecar := range []struct {
+		encoding, suffix string
+	}{{"br", ".br"}, {"gzip", ".gz"}} {
+		candidate := original + sidecar.suffix
+		if info, err := os.Stat(candidate); err == nil && info.Mode().IsRegular() {
+			hasVariants = true
+			if encoding == "" && acceptsEncoding(acceptEncoding, sidecar.encoding) {
+				path, encoding = candidate, sidecar.encoding
+			}
+		}
+	}
+	if path == "" {
+		path = original
+	}
+	return path, original, encoding, hasVariants, true
+}
+
+func serveStaticFile(w http.ResponseWriter, r *http.Request, path, original, requestPath, encoding string, hasVariants bool) {
 	if strings.HasPrefix(requestPath, "/_app/immutable/") {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	} else {
 		w.Header().Set("Cache-Control", "no-cache")
+	}
+	if hasVariants {
+		addVary(w.Header(), "Accept-Encoding")
+	}
+	if encoding != "" {
+		w.Header().Set("Content-Encoding", encoding)
+		contentType := mime.TypeByExtension(filepath.Ext(original))
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		w.Header().Set("Content-Type", contentType)
 	}
 	http.ServeFile(w, r, path)
 }
@@ -52,17 +110,16 @@ func (a *app) serveStatic(w http.ResponseWriter, r *http.Request) bool {
 	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 		return false
 	}
-	if path, ok := staticFile(dir, r.URL.Path); ok {
-		serveStaticFile(w, r, path, r.URL.Path)
+	if path, original, encoding, hasVariants, ok := staticVariant(dir, r.URL.Path, r.Header.Get("Accept-Encoding")); ok {
+		serveStaticFile(w, r, path, original, r.URL.Path, encoding, hasVariants)
 		return true
 	}
 	if !strings.Contains(strings.ToLower(r.Header.Get("Accept")), "text/html") {
 		return false
 	}
-	index := filepath.Join(dir, "index.html")
-	if info, err := os.Stat(index); err != nil || !info.Mode().IsRegular() {
-		return false
+	if path, original, encoding, hasVariants, ok := staticVariant(dir, "/index.html", r.Header.Get("Accept-Encoding")); ok {
+		serveStaticFile(w, r, path, original, "/", encoding, hasVariants)
+		return true
 	}
-	serveStaticFile(w, r, index, "/")
-	return true
+	return false
 }

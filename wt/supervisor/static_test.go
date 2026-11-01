@@ -109,3 +109,39 @@ func TestStaticFileRejectsTraversal(t *testing.T) {
 		}
 	}
 }
+
+func TestServePrecompressedStatic(t *testing.T) {
+	a := staticTestApp(t)
+	dir := a.staticDir()
+	files := map[string]string{
+		"_app/immutable/app.js.br": "br-app",
+		"_app/immutable/app.js.gz": "gz-app",
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, test := range []struct{ accept, body, encoding string }{
+		{"br, gzip", "br-app", "br"},
+		{"gzip", "gz-app", "gzip"},
+		{"gzip;q=0, br;q=1", "br-app", "br"},
+		{"identity", "console.log('app')", ""},
+	} {
+		req := httptest.NewRequest(http.MethodGet, "http://demo.localhost/_app/immutable/app.js", nil)
+		req.Header.Set("Accept-Encoding", test.accept)
+		rec := httptest.NewRecorder()
+		if !a.serveStatic(rec, req) {
+			t.Fatalf("%s was not served", test.accept)
+		}
+		if rec.Body.String() != test.body || rec.Header().Get("Content-Encoding") != test.encoding {
+			t.Errorf("%s = encoding %q body %q, want %q %q", test.accept, rec.Header().Get("Content-Encoding"), rec.Body.String(), test.encoding, test.body)
+		}
+		if rec.Header().Get("Content-Type") == "" {
+			t.Errorf("%s has no content type", test.accept)
+		}
+		if !strings.Contains(rec.Header().Get("Vary"), "Accept-Encoding") {
+			t.Errorf("%s Vary = %q", test.accept, rec.Header().Get("Vary"))
+		}
+	}
+}
