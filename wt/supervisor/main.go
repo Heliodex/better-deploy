@@ -83,10 +83,22 @@ type appConfig struct {
 	AllowCallers       []string          `json:"allow_callers,omitempty"`
 	Egress             []egressRule      `json:"egress,omitempty"`
 	Schedule           []scheduleConfig  `json:"schedule,omitempty"`
+	Dev                *appDevConfig     `json:"dev,omitempty"`
 
 	requestTimeout time.Duration
 	startupTimeout time.Duration
 	healthInterval time.Duration
+}
+
+// appDevConfig is the optional SvelteKit dev loop configuration carried in app.json.
+// The supervisor does not use it, but keeps it so a config PATCH does not drop it.
+type appDevConfig struct {
+	Web     string   `json:"web,omitempty"`
+	Command string   `json:"command,omitempty"`
+	Build   string   `json:"build,omitempty"`
+	Proxy   []string `json:"proxy,omitempty"`
+	Watch   []string `json:"watch,omitempty"`
+	Port    int      `json:"port,omitempty"`
 }
 
 // egressRule allows one IPv4 CIDR and TCP port for an untrusted app. The app's uid still reaches only these destinations plus storage and the internal fetch listener.

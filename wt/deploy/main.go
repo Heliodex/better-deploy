@@ -33,6 +33,23 @@ type manifest struct {
 	RequestTimeout string            `json:"request_timeout,omitempty"`
 	Network        string            `json:"network,omitempty"`
 	Schedule       []schedule        `json:"schedule,omitempty"`
+	Dev            *appDevConfig     `json:"dev,omitempty"`
+}
+
+// appDevConfig selects the optional SvelteKit development loop for an app.
+type appDevConfig struct {
+	// Web is the frontend directory relative to the app; default web.
+	Web string `json:"web,omitempty"`
+	// Command starts the frontend dev server; default bun run dev.
+	Command string `json:"command,omitempty"`
+	// Build rebuilds only the component; default app.json build.
+	Build string `json:"build,omitempty"`
+	// Proxy lists path prefixes forwarded to the wasm app; default /api.
+	Proxy []string `json:"proxy,omitempty"`
+	// Watch lists extra files or directories that trigger a component rebuild.
+	Watch []string `json:"watch,omitempty"`
+	// Port fixes the frontend dev port; default is a free port.
+	Port int `json:"port,omitempty"`
 }
 
 // schedule is carried through the bundle so the supervisor can call the app on a timer.
@@ -64,6 +81,7 @@ const (
 
 type deployConfig struct {
 	dir, app, host, token, wasmtime, target, appHost, out   string
+	buildCommand                                            string
 	skipBuild, skipCompile, jsonOut, forceBuild, staticOnly bool
 }
 
@@ -143,7 +161,47 @@ func readManifest(dir string) (manifest, error) {
 			return m, fmt.Errorf("schedule[%d]: every %q must be a duration between %s and %s", i, entry.Every, minScheduleInterval, maxScheduleInterval)
 		}
 	}
+	if m.Dev != nil {
+		if err := normalizeDevConfig(m.Dev); err != nil {
+			return m, err
+		}
+	}
 	return m, nil
+}
+
+// validAppRelative keeps dev paths inside the app directory.
+func validAppRelative(value string) bool {
+	if value == "" {
+		return true
+	}
+	if filepath.IsAbs(value) {
+		return false
+	}
+	clean := filepath.Clean(value)
+	return clean != ".." && !strings.HasPrefix(clean, ".."+string(filepath.Separator))
+}
+
+func normalizeDevConfig(dev *appDevConfig) error {
+	if !validAppRelative(dev.Web) {
+		return fmt.Errorf("dev.web %q must stay inside the app directory", dev.Web)
+	}
+	for _, path := range dev.Watch {
+		if !validAppRelative(path) {
+			return fmt.Errorf("dev.watch %q must stay inside the app directory", path)
+		}
+	}
+	if len(dev.Proxy) == 0 {
+		dev.Proxy = []string{"/api"}
+	}
+	for _, prefix := range dev.Proxy {
+		if !strings.HasPrefix(prefix, "/") || strings.Contains(prefix, "..") {
+			return fmt.Errorf("dev.proxy %q must be an absolute path prefix such as /api", prefix)
+		}
+	}
+	if dev.Port < 0 || dev.Port > 65535 {
+		return fmt.Errorf("dev.port must be between 1 and 65535, or 0 for a free port")
+	}
+	return nil
 }
 
 func resolveConfig(args []string) (*deployConfig, error) {
@@ -205,10 +263,14 @@ func runBuild(cfg *deployConfig, m manifest) error {
 	if cfg.skipBuild {
 		return nil
 	}
-	if strings.TrimSpace(m.Build) == "" {
+	build := cfg.buildCommand
+	if strings.TrimSpace(build) == "" {
+		build = m.Build
+	}
+	if strings.TrimSpace(build) == "" {
 		return fmt.Errorf("app.json has no build command; set one or pass --skip-build")
 	}
-	cmd := exec.Command("sh", "-c", m.Build)
+	cmd := exec.Command("sh", "-c", build)
 	cmd.Dir = cfg.dir
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr

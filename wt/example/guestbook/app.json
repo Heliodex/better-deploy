@@ -1,5 +1,11 @@
 {
 	"build": "cd web && bun install --frozen-lockfile && bun run build && cd .. && go generate ./contract/ && rm -rf static && cp -r web/build static && ../../packages/generate.sh && go tool componentize-go -d ../../packages/wit -w wt:app/app build",
+	"dev": {
+		"build": "go generate ./contract/ && ../../packages/generate.sh && go tool componentize-go -d ../../packages/wit -w wt:app/app build",
+		"command": "bun run dev",
+		"proxy": ["/api"],
+		"watch": ["web/src/lib/contract.ts"]
+	},
 	"health": "/healthz",
 	"host": "guestbook.localhost",
 	"memory_mb": 128,

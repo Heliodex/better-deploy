@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"maps"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -20,7 +21,7 @@ import (
 type devConfig struct {
 	dir, workspace, wasmtime, target, supervisor, appHost string
 	port, adminPort                                       int
-	skipBuild, skipCompile, watch                         bool
+	skipBuild, skipCompile, watch, vite                   bool
 }
 
 func resolveDevConfig(args []string) (*devConfig, error) {
@@ -41,7 +42,8 @@ func resolveDevConfig(args []string) (*devConfig, error) {
 	appHost := flags.String("app-host", appHostDefault, "override the app host (default: <app>.localhost)")
 	skipBuild := flags.Bool("skip-build", false, "skip running app.json's build command")
 	skipCompile := flags.Bool("skip-compile", false, "reuse an existing main.cwasm")
-	watch := flags.Bool("watch", true, "rebuild and redeploy when source files change")
+	watch := flags.Bool("watch", true, "rebuild and redeploy the component when its inputs change")
+	vite := flags.Bool("vite", true, "run the SvelteKit dev server with HMR when a web directory exists")
 	if err := flags.Parse(args); err != nil {
 		return nil, err
 	}
@@ -81,6 +83,7 @@ func resolveDevConfig(args []string) (*devConfig, error) {
 		skipBuild:   *skipBuild,
 		skipCompile: *skipCompile,
 		watch:       *watch,
+		vite:        *vite,
 	}, nil
 }
 
@@ -238,6 +241,163 @@ func workspaceAppDirs(dir string) ([]string, error) {
 	return dirs, nil
 }
 
+// viteDev is the frontend dev server configuration for one app.
+type viteDev struct {
+	appDir, webDir   string
+	command, build   string
+	watch, proxy     []string
+	port             int
+	host, configPath string
+}
+
+func freeLocalPort() (int, error) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, err
+	}
+	defer listener.Close()
+	address, ok := listener.Addr().(*net.TCPAddr)
+	if !ok {
+		return 0, fmt.Errorf("unexpected listener address %s", listener.Addr())
+	}
+	return address.Port, nil
+}
+
+// resolveViteDev finds the optional web dev loop. A web/package.json is enough; app.json dev fields override the defaults.
+func resolveViteDev(appDir string, m manifest, host string) (*viteDev, bool, error) {
+	dev := m.Dev
+	if dev == nil {
+		dev = &appDevConfig{}
+	}
+	web := dev.Web
+	if web == "" {
+		web = "web"
+	}
+	webDir := filepath.Join(appDir, web)
+	info, err := os.Stat(filepath.Join(webDir, "package.json"))
+	if err != nil || !info.Mode().IsRegular() {
+		return nil, false, nil
+	}
+	command := dev.Command
+	if strings.TrimSpace(command) == "" {
+		command = "bun run dev"
+	}
+	port := dev.Port
+	if port == 0 {
+		port, err = freeLocalPort()
+		if err != nil {
+			return nil, false, fmt.Errorf("find vite port: %w", err)
+		}
+	}
+	proxy := append([]string(nil), dev.Proxy...)
+	if len(proxy) == 0 {
+		proxy = []string{"/api"}
+	}
+	return &viteDev{
+		appDir:  appDir,
+		webDir:  webDir,
+		command: command,
+		build:   dev.Build,
+		watch:   append([]string(nil), dev.Watch...),
+		proxy:   proxy,
+		port:    port,
+		host:    host,
+	}, true, nil
+}
+
+// writeViteDevConfig writes a config that keeps the app's own Vite config and adds the API proxy.
+func writeViteDevConfig(dev *viteDev, supervisorPort int) error {
+	baseImport := ""
+	for _, name := range []string{"vite.config.ts", "vite.config.mts", "vite.config.js", "vite.config.mjs"} {
+		if info, err := os.Stat(filepath.Join(dev.webDir, name)); err == nil && info.Mode().IsRegular() {
+			baseImport = "./" + name
+			break
+		}
+	}
+	var content strings.Builder
+	if baseImport != "" {
+		fmt.Fprintf(&content, "import base from %q\n\n", baseImport)
+	} else {
+		content.WriteString("const base: any = {}\n\n")
+	}
+	target := "http://127.0.0.1:" + strconv.Itoa(supervisorPort)
+	content.WriteString("const proxy = {\n")
+	for _, prefix := range dev.proxy {
+		fmt.Fprintf(&content, "  %s: {\n    target: %s,\n    changeOrigin: false,\n    headers: { Host: %s },\n  },\n",
+			strconv.Quote(prefix), strconv.Quote(target), strconv.Quote(dev.host))
+	}
+	content.WriteString("}\n\n")
+	content.WriteString("export default async (env: any) => {\n")
+	content.WriteString("  const config = (typeof base === \"function\" ? await base(env) : base) ?? {}\n")
+	content.WriteString("  return {\n")
+	content.WriteString("    ...config,\n")
+	content.WriteString("    server: {\n")
+	content.WriteString("      ...config.server,\n")
+	content.WriteString("      host: \"127.0.0.1\",\n")
+	content.WriteString("      port: " + strconv.Itoa(dev.port) + ",\n")
+	content.WriteString("      strictPort: true,\n")
+	content.WriteString("      proxy: {\n")
+	content.WriteString("        ...config.server?.proxy,\n")
+	content.WriteString("        ...proxy,\n")
+	content.WriteString("      },\n")
+	content.WriteString("    },\n")
+	content.WriteString("  }\n")
+	content.WriteString("}\n")
+
+	dev.configPath = filepath.Join(dev.webDir, ".wt-dev.vite.config.ts")
+	if err := os.WriteFile(dev.configPath, []byte(content.String()), 0o644); err != nil {
+		return fmt.Errorf("write vite dev config: %w", err)
+	}
+	return nil
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+}
+
+func startVite(dev *viteDev) (*exec.Cmd, error) {
+	command := dev.command
+	if strings.Contains(command, "vite") {
+		command += " --config " + shellQuote(dev.configPath)
+	} else {
+		command += " -- --config " + shellQuote(dev.configPath)
+	}
+	cmd := exec.Command("sh", "-c", command)
+	cmd.Dir = dev.webDir
+	cmd.Env = append(os.Environ(), "WT_DEV=1")
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("start vite: %w", err)
+	}
+	return cmd, nil
+}
+
+// signalViteGroup stops the shell and the bun/vite child it started.
+func signalViteGroup(cmd *exec.Cmd, signal syscall.Signal) {
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	_ = syscall.Kill(-cmd.Process.Pid, signal)
+}
+
+func ensureWebDeps(webDir string) error {
+	info, err := os.Stat(filepath.Join(webDir, "node_modules"))
+	if err == nil && info.IsDir() {
+		return nil
+	}
+	fmt.Fprintln(os.Stderr, "dev: installing web dependencies in", webDir)
+	cmd := exec.Command("bun", "install")
+	cmd.Dir = webDir
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("bun install: %w", err)
+	}
+	return nil
+}
+
 func runDev(args []string) error {
 	cfg, err := resolveDevConfig(args)
 	if err != nil {
@@ -260,6 +420,32 @@ func runDev(args []string) error {
 			return fmt.Errorf("workspace has two apps named %q", m.Name)
 		}
 		seen[m.Name] = struct{}{}
+	}
+	var vite *viteDev
+	if cfg.vite && len(dirs) == 1 {
+		m, err := readManifest(dirs[0])
+		if err != nil {
+			return err
+		}
+		host := cfg.appHost
+		if host == "" {
+			host = m.Name + ".localhost"
+		}
+		vite, _, err = resolveViteDev(dirs[0], m, host)
+		if err != nil {
+			return err
+		}
+		if vite != nil {
+			fmt.Fprintf(os.Stderr, "dev: vite frontend in %s on 127.0.0.1:%d\n", vite.webDir, vite.port)
+		}
+	}
+	if cfg.vite && len(dirs) > 1 {
+		fmt.Fprintln(os.Stderr, "dev: --vite is single-app; workspace mode uses the component rebuild loop")
+	}
+	if vite != nil {
+		if err := ensureWebDeps(vite.webDir); err != nil {
+			return err
+		}
 	}
 
 	workName := "app"
@@ -309,6 +495,7 @@ func runDev(args []string) error {
 	}
 
 	configs := make([]*deployConfig, 0, len(dirs))
+	var viteDCfg *deployConfig
 	for _, dir := range dirs {
 		m, err := readManifest(dir)
 		if err != nil {
@@ -328,6 +515,10 @@ func runDev(args []string) error {
 			skipBuild:   cfg.skipBuild,
 			skipCompile: cfg.skipCompile,
 		}
+		if vite != nil && dir == vite.appDir {
+			dcfg.buildCommand = vite.build
+			viteDCfg = dcfg
+		}
 		m, data, err := buildBundle(dcfg)
 		if err != nil {
 			return err
@@ -336,21 +527,54 @@ func runDev(args []string) error {
 			return err
 		}
 		configs = append(configs, dcfg)
-		fmt.Printf("dev: %s at http://%s:%d/\n", m.Name, host, cfg.port)
+		if vite != nil {
+			fmt.Printf("dev: %s API at http://%s:%d/\n", m.Name, host, cfg.port)
+		} else {
+			fmt.Printf("dev: %s at http://%s:%d/\n", m.Name, host, cfg.port)
+		}
 	}
 	fmt.Printf("dev: admin at http://%s/admin/ (token: dev)\n", adminAddr)
 
 	done := make(chan struct{})
+	defer close(done)
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	if vite != nil && viteDCfg != nil {
+		if vite.build == "" {
+			fmt.Fprintln(os.Stderr, "dev: no dev.build; component rebuilds will run the full app.json build")
+		}
+		if err := writeViteDevConfig(vite, cfg.port); err != nil {
+			return err
+		}
+		defer os.Remove(vite.configPath)
+		viteCmd, err := startVite(vite)
+		if err != nil {
+			return err
+		}
+		defer func() { signalViteGroup(viteCmd, syscall.SIGTERM) }()
+		fmt.Printf("dev: vite at http://127.0.0.1:%d/ (HMR)\n", vite.port)
+		if cfg.watch {
+			go watchComponent(viteDCfg, vite.watch, done)
+			fmt.Fprintln(os.Stderr, "dev: watching component inputs")
+		}
+		viteDone := make(chan error, 1)
+		go func() { viteDone <- viteCmd.Wait() }()
+		select {
+		case <-stop:
+			fmt.Fprintln(os.Stderr, "\ndev: stopping")
+		case err := <-viteDone:
+			if err != nil {
+				return fmt.Errorf("vite dev exited: %w", err)
+			}
+		}
+		return nil
+	}
 	if cfg.watch {
-		defer close(done)
 		for _, dcfg := range configs {
 			go watchDev(dcfg, done)
 		}
 		fmt.Fprintln(os.Stderr, "dev: watching for changes")
 	}
-
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
 	fmt.Fprintln(os.Stderr, "\ndev: stopping")
 	return nil

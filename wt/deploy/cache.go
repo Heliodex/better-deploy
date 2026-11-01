@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json/v2"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -113,7 +114,43 @@ func writeBuildCache(dir, componentHash, wasmDigest string) {
 }
 
 // prepareComponent skips the build and compile when the component inputs are unchanged and main.wasm is present.
+// checkStaticSvelteKit rejects server-only SvelteKit files: the production artifact is adapter-static output.
+func checkStaticSvelteKit(dir string, m manifest) error {
+	web := "web"
+	if m.Dev != nil && m.Dev.Web != "" {
+		web = m.Dev.Web
+	}
+	src := filepath.Join(dir, web, "src")
+	if info, err := os.Stat(src); err != nil || !info.IsDir() {
+		return nil
+	}
+	var found []string
+	err := filepath.WalkDir(src, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return nil
+		}
+		name := entry.Name()
+		rel, _ := filepath.Rel(dir, path)
+		serverFile := strings.HasSuffix(name, ".server.ts") || strings.HasSuffix(name, ".server.js") || strings.HasSuffix(name, ".server.mjs") || strings.HasPrefix(name, "+server.")
+		serverDir := strings.Contains(filepath.ToSlash(rel), "/lib/server/")
+		if serverFile || serverDir {
+			found = append(found, filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("check SvelteKit routes: %w", err)
+	}
+	if len(found) > 0 {
+		return fmt.Errorf("SvelteKit apps are static-only; remove server-only files or move the logic into the Go component: %s", strings.Join(found, ", "))
+	}
+	return nil
+}
+
 func prepareComponent(cfg *deployConfig, m manifest) (bool, error) {
+	if err := checkStaticSvelteKit(cfg.dir, m); err != nil {
+		return false, err
+	}
 	if cfg.skipBuild {
 		if err := runBuild(cfg, m); err != nil {
 			return false, err
@@ -123,7 +160,11 @@ func prepareComponent(cfg *deployConfig, m manifest) (bool, error) {
 		}
 		return false, nil
 	}
-	hash, err := componentInputHash(cfg.dir, m.Build)
+	build := m.Build
+	if strings.TrimSpace(cfg.buildCommand) != "" {
+		build = cfg.buildCommand
+	}
+	hash, err := componentInputHash(cfg.dir, build)
 	if err != nil {
 		return false, err
 	}
