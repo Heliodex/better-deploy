@@ -4,6 +4,12 @@ Architecture and API review, 2026-11-01. Open work only: no code changed in this
 
 The short assessment: the spine is right and unusually well executed for a prototype. Wasm as the deploy artifact, cwasm as a cache, blue/green with draining, the storage authorizer, sessions, checksummed migrations, secrets, scoped tokens, backups, jobs, metrics, and the test suite are all in good shape. The criticisms below are about the layer above the code: what the platform API is, how authority reaches an app, and what the developer experiences daily.
 
+## Fixed in this pass
+
+- [x] **Untrusted app namespaces and seccomp.** Untrusted launches now use user, PID, mount, IPC and UTS namespaces, a minimal root, a PID 1 signal-forwarding helper, a capability drop and a seccomp denylist. Both boundaries are mandatory in untrusted mode. The network namespace remains open.
+- [x] **Environment merge.** `mergeEnv` deduplicates the minimal environment and the app environment so an app's `PATH`, `HOME` or `TMPDIR` actually overrides the supervisor's values; the previous concatenation left the first duplicate in place for libc `getenv`.
+- [x] **Tests and docs.** Unit tests cover the namespace plan, argument rewriting, sysproc attributes, the seccomp filter and the mandatory-config check. `WT_NS_TEST=1` and `WT_SECCOMP_TEST=1` run the opt-in integration tests. The README documents the boundary, the kernel and container requirements, and the remaining network gap.
+
 ## Do not regress
 
 These are the choices that make this worth continuing. Keep them unless a replacement is strictly better.
@@ -28,9 +34,14 @@ These are the choices that make this worth continuing. Keep them unless a replac
    - [ ] Benchmark idle RSS per app, supervisor boot time at N apps, and requests/s at N apps, for N = 1, 10, 50.
    - [ ] Add the result to the README so "no container per app" is a measured claim rather than an assumption.
 
-3. [ ] **Close the untrusted-isolation gap.** Untrusted mode has no PID, mount, user or network namespace and no seccomp; it has a UID, cgroups and iptables. For hostile code that is still behind a container, not ahead of one.
-   - [ ] Either deliver the embedded host with per-store isolation, or add namespaces and seccomp to the process-per-app path.
-   - [ ] Document the actual boundary honestly in the README and in `app.json` validation errors.
+3. [ ] **Close the untrusted-isolation gap.** Untrusted mode now has user, PID, mount, IPC and UTS namespaces plus seccomp, but still shares the host network namespace and depends on the iptables owner rules. For hostile code that is still behind a container on the network path, and the seccomp filter is a denylist rather than an allowlist.
+   - [x] Add user, PID, mount, IPC and UTS namespaces with a minimal tmpfs root that exposes only the bundle, `/data`, `/proc`, `/tmp` and the runtime's files; pivot into it, map container uid/gid 0 to the app uid, drop capabilities and clear supplementary groups.
+   - [x] Add a PID 1 re-exec helper that forwards signals and reaps the wasmtime child, and report the child's host pid so app info and resource charts still describe wasmtime.
+   - [x] Add a seccomp denylist that rejects ptrace, bpf, perf_event_open, userfaultfd, key management, mount/umount/pivot_root, setns/unshare, module and kexec loading, reboot, swap, syslog, quota and clock changes, the new mount API and replacing the filter through prctl.
+   - [x] Make both boundaries mandatory in untrusted mode, add `WT_APP_NAMESPACES`/`WT_APP_SECCOMP` and their flags, and document the boundary, the kernel requirements and the remaining network gap in the README.
+   - [ ] Add a network namespace with a veth pair, addresses, routes and an in-namespace egress policy, or move the app listener into the embedded host so the proxy does not need a route into the namespace.
+   - [ ] Replace the seccomp denylist with an allowlist derived from a traced wasmtime workload, or keep the denylist and prove it covers the runtime on each upgrade.
+   - [ ] Add an integration test that runs a real wasm component in the full untrusted path, including the per-app cgroup, iptables rules and seccomp.
 
 ## P1: correctness and operations
 
