@@ -81,7 +81,7 @@ func (s *supervisor) loginGuard() *loginLimiter {
 
 // setAuthCookie writes the token as an HttpOnly cookie so event streams authenticate without JavaScript access.
 func (s *supervisor) setAuthCookie(w http.ResponseWriter, r *http.Request, token string, maxAge int) {
-	secure := r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+	secure := s.forwardedInfo(r).Proto == "https"
 	http.SetCookie(w, &http.Cookie{
 		Name:     "wt_token",
 		Value:    token,
@@ -96,7 +96,10 @@ func (s *supervisor) setAuthCookie(w http.ResponseWriter, r *http.Request, token
 // handleLogin checks the token or scoped credential and issues the admin cookie. The panel still sends a bearer token for its own requests, but EventSource can only use the cookie.
 func (s *supervisor) handleLogin(w http.ResponseWriter, r *http.Request) {
 	limiter := s.loginGuard()
-	key := remoteHost(r)
+	key := s.forwardedInfo(r).ClientIP
+	if key == "" {
+		key = remoteHost(r)
+	}
 	now := time.Now()
 	if allowed, wait := limiter.allow(key, now); !allowed {
 		seconds := int(wait.Seconds())

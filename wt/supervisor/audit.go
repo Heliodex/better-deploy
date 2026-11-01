@@ -219,6 +219,10 @@ func (s *supervisor) appendAudit(identity authIdentity, r *http.Request, action,
 	if app != "" {
 		cause = s.redactAppText(app, cause)
 	}
+	remote := remoteHost(r)
+	if client := s.forwardedInfo(r).ClientIP; client != "" {
+		remote = client
+	}
 	entry := auditEntry{
 		Time:      time.Now().UTC(),
 		Actor:     identity.Name,
@@ -228,7 +232,7 @@ func (s *supervisor) appendAudit(identity authIdentity, r *http.Request, action,
 		Status:    status,
 		OK:        status < http.StatusBadRequest,
 		Error:     cause,
-		Remote:    remoteHost(r),
+		Remote:    remote,
 		RequestID: r.Header.Get(requestIDHeader),
 	}
 	if err := s.audit.append(entry); err != nil {

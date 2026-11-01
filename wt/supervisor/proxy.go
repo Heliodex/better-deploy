@@ -53,23 +53,22 @@ func (s *supervisor) newProxy(a *app) *httputil.ReverseProxy {
 			ExpectContinueTimeout: proxyExpectContinue,
 		},
 		Rewrite: func(r *httputil.ProxyRequest) {
-			host := r.In.Host
-			proto := r.In.Header.Get("X-Forwarded-Proto")
-			if proto == "" {
-				proto = "http"
-				if r.In.TLS != nil {
-					proto = "https"
-				}
-			}
+			info := s.forwardedInfo(r.In)
 			r.SetURL(target)
-			r.Out.Header["X-Forwarded-For"] = r.In.Header["X-Forwarded-For"]
-			r.SetXForwarded()
-			r.Out.Host = host
-			r.Out.Header.Set("X-Forwarded-Host", host)
-			r.Out.Header.Set("X-Forwarded-Proto", proto)
+			// Replace the whole inbound chain, so a client cannot prepend a spoofed address. When a trusted proxy supplied X-Forwarded-For, the first entry is the resolved client and the last is the immediate proxy.
+			chain := info.ClientIP
+			if remote := remoteIP(r.In.RemoteAddr); info.Trusted && remote != "" && remote != info.ClientIP {
+				chain += ", " + remote
+			}
+			r.Out.Header.Set("X-Forwarded-For", chain)
+			r.Out.Header.Set("X-Real-IP", info.ClientIP)
+			r.Out.Header.Set("X-Forwarded-Host", info.Authority)
+			r.Out.Header.Set("X-Forwarded-Proto", info.Proto)
+			r.Out.Header.Del("Forwarded")
+			r.Out.Host = info.Authority
 			// The Spin host headers give the component the standard net/http view of the original request.
-			r.Out.Header.Set(spinFullURLHeader, proto+"://"+host+r.In.URL.RequestURI())
-			r.Out.Header.Set(spinClientAddrHeader, r.In.RemoteAddr)
+			r.Out.Header.Set(spinFullURLHeader, info.Proto+"://"+info.Authority+r.In.URL.RequestURI())
+			r.Out.Header.Set(spinClientAddrHeader, info.ClientIP)
 			r.Out.Header.Set(spinPathInfoHeader, r.In.URL.RequestURI())
 			r.Out.Header.Set(spinBasePathHeader, "")
 			if requestID := r.In.Header.Get(requestIDHeader); requestID != "" {
@@ -133,7 +132,7 @@ func (s *supervisor) appForHost(host string) *app {
 }
 
 func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
-	host := requestHost(r)
+	host := s.effectiveHost(r)
 	a := s.appForHost(host)
 	if a == nil {
 		http.Error(w, "no app for this host", http.StatusNotFound)
@@ -249,7 +248,7 @@ func (s *supervisor) adminHandler() http.Handler {
 // publicHandler serves app hosts and the health check only. Admin routes live on the separate listener.
 func (s *supervisor) publicHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		host := requestHost(r)
+		host := s.effectiveHost(r)
 		if !s.reservedHost(host) && s.isAppHost(host) {
 			s.handleProxy(w, r)
 			return
@@ -267,7 +266,7 @@ func (s *supervisor) handler() http.Handler {
 	mux := s.adminMux()
 	mux.HandleFunc("/", s.handleProxy)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		host := requestHost(r)
+		host := s.effectiveHost(r)
 		if s.reservedHost(host) {
 			mux.ServeHTTP(w, r)
 			return

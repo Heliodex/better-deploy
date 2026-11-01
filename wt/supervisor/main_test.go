@@ -171,7 +171,7 @@ func TestProxyRewrite(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s := &supervisor{}
+	s := &supervisor{cfg: config{trustedProxies: mustTrustedProxies(t, "192.0.2.0/24")}}
 	proxy := s.newProxy(&app{name: "test", port: port})
 	req := httptest.NewRequest(http.MethodGet, "http://app.example/hello?x=1", nil)
 	req.Host = "app.example"

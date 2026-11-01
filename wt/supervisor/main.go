@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/netip"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -43,6 +44,8 @@ type config struct {
 	token, tlsCert, tlsKey                                     string
 	tenantMode, adminListen, appFetchListen                    string
 	authFile                                                   string
+	trustedProxiesValue                                        string
+	trustedProxies                                             []netip.Prefix
 	cgroupRoot, iptables, ip6tables                            string
 	dataQuotaMode, setquota, findmnt, dataQuotaFS              string
 	appUIDBase                                                 int
@@ -489,6 +492,7 @@ func parseConfig() config {
 	flag.StringVar(&cfg.adminListen, "admin-listen", cfg.adminListen, "separate admin listener (TCP address or unix:/path)")
 	flag.StringVar(&cfg.appFetchListen, "app-fetch-listen", cfg.appFetchListen, "internal app-to-app fetch listener (loopback TCP address)")
 	flag.StringVar(&cfg.authFile, "auth-file", cfg.authFile, "scoped token store (default WT_STATE_DIR/.auth/tokens.json)")
+	flag.StringVar(&cfg.trustedProxiesValue, "trusted-proxies", cfg.trustedProxiesValue, "comma-separated proxy IPs or CIDRs whose X-Forwarded-* headers are trusted")
 	flag.StringVar(&cfg.cgroupRoot, "cgroup-root", cfg.cgroupRoot, "cgroup v2 root for per-app limits")
 	flag.StringVar(&cfg.iptables, "iptables", cfg.iptables, "iptables binary for per-app IPv4 egress rules")
 	flag.StringVar(&cfg.ip6tables, "ip6tables", cfg.ip6tables, "ip6tables binary for per-app IPv6 egress rules")
@@ -515,6 +519,11 @@ func parseConfig() config {
 	if err := validateAppFetchListen(cfg.appFetchListen); err != nil {
 		log.Fatalf("%v", err)
 	}
+	trustedProxies, err := parseTrustedProxies(cfg.trustedProxiesValue)
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
+	cfg.trustedProxies = trustedProxies
 	if err := validateDataQuotaConfig(&cfg); err != nil {
 		log.Fatalf("%v", err)
 	}

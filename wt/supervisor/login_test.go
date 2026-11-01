@@ -9,9 +9,11 @@ import (
 
 func TestLoginSetsHttpOnlyCookie(t *testing.T) {
 	s := testSupervisor()
+	s.cfg.trustedProxies = mustTrustedProxies(t, "127.0.0.1/32")
 	handler := s.handler()
 
 	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"token":"secret"}`))
+	req.RemoteAddr = "127.0.0.1:1234"
 	req.Header.Set("X-Forwarded-Proto", "https")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -61,5 +63,21 @@ func TestLogoutClearsCookie(t *testing.T) {
 	cookies := rec.Result().Cookies()
 	if len(cookies) != 1 || cookies[0].MaxAge >= 0 {
 		t.Errorf("logout cookies = %+v", cookies)
+	}
+}
+
+func TestLoginIgnoresForwardedProtoFromUntrustedPeer(t *testing.T) {
+	s := testSupervisor()
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"token":"secret"}`))
+	req.RemoteAddr = "198.51.100.7:1234"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	rec := httptest.NewRecorder()
+	s.handleLogin(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("login = %d: %s", rec.Code, rec.Body.String())
+	}
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Secure {
+		t.Errorf("untrusted forwarded proto set Secure: %+v", cookies)
 	}
 }
