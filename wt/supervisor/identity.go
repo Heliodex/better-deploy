@@ -153,6 +153,9 @@ func (s *identityStore) loadUsers() error {
 	if err != nil {
 		return fmt.Errorf("read users: %w", err)
 	}
+	if err := os.Chmod(s.usersPath(), 0o600); err != nil {
+		return fmt.Errorf("users permissions: %w", err)
+	}
 	var file identityUserFile
 	if err := json.Unmarshal(data, &file); err != nil {
 		return fmt.Errorf("users file: %w", err)
@@ -184,6 +187,9 @@ func (s *identityStore) loadSessions() error {
 	}
 	if err != nil {
 		return fmt.Errorf("read sessions: %w", err)
+	}
+	if err := os.Chmod(s.sessionsPath(), 0o600); err != nil {
+		return fmt.Errorf("sessions permissions: %w", err)
 	}
 	var file identitySessionFile
 	if err := json.Unmarshal(data, &file); err != nil {
