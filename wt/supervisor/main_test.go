@@ -247,11 +247,11 @@ func TestHandleProxyLogsRequest(t *testing.T) {
 	if len(entries) != 2 {
 		t.Fatalf("logged %d requests, want 2: %+v", len(entries), entries)
 	}
-	if entries[0].Level != "info" || entries[0].Source != "supervisor" || !strings.HasPrefix(entries[0].Message, "GET 200 ") || !strings.HasSuffix(entries[0].Message, " /hello?x=1") {
-		t.Errorf("first entry = %+v, want a structured supervisor access line for GET 200 /hello?x=1", entries[0])
+	if entries[0].Level != "info" || entries[0].Source != "supervisor" || !strings.HasPrefix(entries[0].Message, "GET 200 ") || !strings.Contains(entries[0].Message, " /hello?x=1") || !strings.Contains(entries[0].Message, "request=") {
+		t.Errorf("first entry = %+v, want a structured supervisor access line for GET 200 /hello?x=1 with a request id", entries[0])
 	}
-	if entries[1].Level != "info" || entries[1].Source != "supervisor" || !strings.HasPrefix(entries[1].Message, "GET 404 ") || !strings.HasSuffix(entries[1].Message, " /missing") {
-		t.Errorf("second entry = %+v, want a structured supervisor access line for GET 404 /missing", entries[1])
+	if entries[1].Level != "info" || entries[1].Source != "supervisor" || !strings.HasPrefix(entries[1].Message, "GET 404 ") || !strings.Contains(entries[1].Message, " /missing") || !strings.Contains(entries[1].Message, "request=") {
+		t.Errorf("second entry = %+v, want a structured supervisor access line for GET 404 /missing with a request id", entries[1])
 	}
 }
 
@@ -273,17 +273,17 @@ func TestFormatProxyDuration(t *testing.T) {
 
 func TestFormatAccessLog(t *testing.T) {
 	cases := []struct {
-		method    string
-		status    int
-		elapsed   time.Duration
-		uri, want string
+		method               string
+		status               int
+		elapsed              time.Duration
+		uri, requestID, want string
 	}{
-		{"GET", 200, 1500 * time.Microsecond, "/hello?x=1", "GET 200 1.5ms /hello?x=1"},
-		{"POST", 201, 2500 * time.Millisecond, "/notes", "POST 201 2.50s /notes"},
-		{"GET", 404, 719 * time.Microsecond, "/missing", "GET 404 719µs /missing"},
+		{"GET", 200, 1500 * time.Microsecond, "/hello?x=1", "", "GET 200 1.5ms /hello?x=1"},
+		{"POST", 201, 2500 * time.Millisecond, "/notes", "req-1", "POST 201 2.50s /notes request=req-1"},
+		{"GET", 404, 719 * time.Microsecond, "/missing", "", "GET 404 719µs /missing"},
 	}
 	for _, tc := range cases {
-		if got := formatAccessLog(tc.method, tc.status, tc.elapsed, tc.uri); got != tc.want {
+		if got := formatAccessLog(tc.method, tc.status, tc.elapsed, tc.uri, tc.requestID); got != tc.want {
 			t.Errorf("formatAccessLog(%s, %d, %s, %s) = %q, want %q", tc.method, tc.status, tc.elapsed, tc.uri, got, tc.want)
 		}
 	}

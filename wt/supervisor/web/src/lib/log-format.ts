@@ -5,17 +5,18 @@ export interface AccessLine {
 	duration: string
 	method: string
 	path: string
+	request?: string
 	status: number
 }
 
-const accessLinePattern = /^([A-Za-z]+) (\d{3}) (\S+) (.+)$/
+const accessLinePattern = /^([A-Za-z]+) (\d{3}) (\S+) (.+?)(?: request=(\S+))?$/
 
 export function parseAccessLine(message: string): AccessLine | null {
 	const match = accessLinePattern.exec(message)
 	if (!match) return null
-	const [, method, status, duration, path] = match
+	const [, method, status, duration, path, request] = match
 	if (!method || !status || !duration || !path) return null
-	return { duration, method, path, status: Number(status) }
+	return { duration, method, path, request, status: Number(status) }
 }
 
 export function accessStatusClass(status: number): string {

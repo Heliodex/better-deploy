@@ -548,3 +548,27 @@ func TestDeploymentHistoryKeepsStaticFiles(t *testing.T) {
 		t.Error("bundle bytes do not include static files")
 	}
 }
+
+func TestDeploymentInfoEndpoint(t *testing.T) {
+	s := testSupervisor()
+	s.deployments = newDeploymentManager(t.TempDir())
+	recorded, err := s.deployments.record("demo", writeDeploymentSource(t, "demo.localhost"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.apps["demo"] = &app{name: "demo", digest: recorded.Digest}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/apps/demo/deployments/"+recorded.ID, nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	s.handleApp(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("deployment info = %d: %s", rec.Code, rec.Body.String())
+	}
+	var info deploymentInfo
+	if err := json.Unmarshal(rec.Body.Bytes(), &info); err != nil {
+		t.Fatal(err)
+	}
+	if info.ID != recorded.ID || !info.Current || info.Status != deploymentStatusOK {
+		t.Errorf("deployment info = %+v", info)
+	}
+}

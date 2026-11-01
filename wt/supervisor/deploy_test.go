@@ -13,6 +13,11 @@ import (
 
 func deployArchive(t *testing.T, s *supervisor, name, archive string, query string) *httptest.ResponseRecorder {
 	t.Helper()
+	return deployArchiveHeaders(t, s, name, archive, query, nil)
+}
+
+func deployArchiveHeaders(t *testing.T, s *supervisor, name, archive string, query string, headers map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
 	data, err := os.ReadFile(archive)
 	if err != nil {
 		t.Fatal(err)
@@ -34,6 +39,9 @@ func deployArchive(t *testing.T, s *supervisor, name, archive string, query stri
 	req := httptest.NewRequest(http.MethodPost, "/apps/"+name+query, &body)
 	req.Header.Set("Content-Type", form.FormDataContentType())
 	req.Header.Set("Authorization", "Bearer secret")
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
 	rec := httptest.NewRecorder()
 	s.handleApp(rec, req)
 	return rec
@@ -249,5 +257,63 @@ func TestLegacyCwasmOnlyBundleStarts(t *testing.T) {
 	}
 	if a.digest == "" {
 		t.Error("legacy app has no current digest")
+	}
+}
+
+func TestDeployConditionalAndIdempotent(t *testing.T) {
+	s := newLifecycleSupervisor(t)
+	s.cfg.domain = "localhost"
+	s.cfg.wasmtime = os.Args[0]
+	s.cfg.wasmtimeTarget = "x86_64-test"
+	s.cfg.cacheDir = t.TempDir()
+	s.cfg.cacheMaxBytes = defaultCacheMaxBytes
+	counter := filepath.Join(t.TempDir(), "compiles")
+	s.cfg.wasmtimeCompiler = writeCompilerWithCounter(t, "wasmtime-cli 51.0.0", "compiled", counter, false)
+	s.deployments = newDeploymentManager(filepath.Join(s.cfg.stateDir, ".deployments"))
+	t.Cleanup(func() {
+		if a := s.lookup("demo"); a != nil {
+			s.stop(a)
+		}
+	})
+
+	archive := writeTarGz(t, map[string]string{
+		"app.json":  `{"name":"demo","host":"demo.localhost"}`,
+		"main.wasm": "wasm-conditional",
+	})
+	rec := deployArchive(t, s, "demo", archive, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("first deploy = %d: %s", rec.Code, rec.Body.String())
+	}
+	etag := rec.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("deploy has no ETag")
+	}
+	rec = deployArchiveHeaders(t, s, "demo", archive, "", map[string]string{"If-None-Match": etag})
+	if rec.Code != http.StatusNotModified {
+		t.Fatalf("conditional deploy = %d: %s", rec.Code, rec.Body.String())
+	}
+	history, err := s.deployments.list("demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 1 {
+		t.Errorf("conditional deploy added history: %d entries", len(history))
+	}
+
+	other := writeTarGz(t, map[string]string{
+		"app.json":  `{"name":"demo","host":"demo.localhost"}`,
+		"main.wasm": "wasm-idempotent",
+	})
+	rec = deployArchiveHeaders(t, s, "demo", other, "", map[string]string{"Idempotency-Key": "deploy-1"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("idempotent first deploy = %d: %s", rec.Code, rec.Body.String())
+	}
+	first := rec.Body.String()
+	rec = deployArchiveHeaders(t, s, "demo", archive, "", map[string]string{"Idempotency-Key": "deploy-1"})
+	if rec.Code != http.StatusOK || rec.Header().Get("Idempotency-Replayed") != "true" {
+		t.Fatalf("idempotent replay = %d, header %q: %s", rec.Code, rec.Header().Get("Idempotency-Replayed"), rec.Body.String())
+	}
+	if rec.Body.String() != first {
+		t.Error("idempotent replay returned a different body")
 	}
 }

@@ -223,9 +223,11 @@ func (s *supervisor) handleBackups(w http.ResponseWriter, r *http.Request, name 
 		}
 		info, err := s.backups.create(r.Context(), name)
 		if err != nil && !errors.Is(err, errBackupUnchanged) {
+			s.metrics.observeBackup(name, "create", "failed")
 			writeBackupError(w, err)
 			return
 		}
+		s.metrics.observeBackup(name, "create", "success")
 		s.writeBackups(w, name, info.Name)
 	default:
 		w.Header().Set("Allow", "GET, POST")
@@ -295,8 +297,10 @@ func (s *supervisor) handleBackupRestore(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	if !s.restoreBackupLocked(w, r.Context(), name, file) {
+		s.metrics.observeBackup(name, "restore", "failed")
 		return
 	}
+	s.metrics.observeBackup(name, "restore", "success")
 	s.writeBackups(w, name, "")
 }
 
@@ -384,9 +388,11 @@ func (s *supervisor) handleBackupImport(w http.ResponseWriter, r *http.Request, 
 
 	info, err := s.backups.importSnapshot(name, archive)
 	if err != nil {
+		s.metrics.observeBackup(name, "import", "failed")
 		writeError(w, http.StatusBadRequest, "import snapshot: "+err.Error())
 		return
 	}
+	s.metrics.observeBackup(name, "import", "success")
 	s.writeBackups(w, name, info.Name)
 }
 

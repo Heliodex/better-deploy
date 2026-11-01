@@ -299,10 +299,39 @@ func parseLogLine(line string) logEntry {
 	return parseSourcedLogLine(line, "app")
 }
 
-// tail returns the last n log lines from both the app and the supervisor, oldest first.
-func (l *appLog) tail(n int) ([]logEntry, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+// logFilter narrows a log tail or export by level, source, text and time.
+type logFilter struct {
+	level, source, query string
+	since, until         time.Time
+}
+
+func (f logFilter) matches(entry logEntry) bool {
+	if f.level != "" && entry.Level != f.level {
+		return false
+	}
+	if f.source != "" && entry.Source != f.source {
+		return false
+	}
+	if f.query != "" && !strings.Contains(strings.ToLower(entry.Message), f.query) {
+		return false
+	}
+	if !f.since.IsZero() || !f.until.IsZero() {
+		stamp, err := time.Parse(time.RFC3339Nano, entry.Time)
+		if err != nil {
+			return false
+		}
+		if !f.since.IsZero() && stamp.Before(f.since) {
+			return false
+		}
+		if !f.until.IsZero() && stamp.After(f.until) {
+			return false
+		}
+	}
+	return true
+}
+
+// readLocked reads every retained line from both sources, oldest first.
+func (l *appLog) readLocked() ([]logEntry, error) {
 	files := []struct {
 		backup, path, source string
 	}{
@@ -330,8 +359,47 @@ func (l *appLog) tail(n int) ([]logEntry, error) {
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Time < out[j].Time })
+	return out, nil
+}
+
+// tailFiltered returns the last n matching lines from both the app and the supervisor, oldest first.
+func (l *appLog) tailFiltered(n int, filter logFilter) ([]logEntry, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	all, err := l.readLocked()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]logEntry, 0, min(n, len(all)))
+	for _, entry := range all {
+		if filter.matches(entry) {
+			out = append(out, entry)
+		}
+	}
 	if len(out) > n {
 		out = out[len(out)-n:]
+	}
+	return out, nil
+}
+
+// tail returns the last n log lines from both the app and the supervisor, oldest first.
+func (l *appLog) tail(n int) ([]logEntry, error) {
+	return l.tailFiltered(n, logFilter{})
+}
+
+// allFiltered returns every retained matching line, for export. The retained files are capped, so this is bounded too.
+func (l *appLog) allFiltered(filter logFilter) ([]logEntry, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	all, err := l.readLocked()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]logEntry, 0, len(all))
+	for _, entry := range all {
+		if filter.matches(entry) {
+			out = append(out, entry)
+		}
 	}
 	return out, nil
 }
@@ -354,21 +422,105 @@ func logTailParam(w http.ResponseWriter, r *http.Request) (int, bool) {
 	return parsed, true
 }
 
+func logFilterParam(w http.ResponseWriter, r *http.Request) (logFilter, bool) {
+	filter := logFilter{
+		level:  strings.ToLower(strings.TrimSpace(r.URL.Query().Get("level"))),
+		source: strings.ToLower(strings.TrimSpace(r.URL.Query().Get("source"))),
+		query:  strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q"))),
+	}
+	if filter.source != "" && filter.source != "app" && filter.source != "supervisor" {
+		writeError(w, http.StatusBadRequest, "source must be app or supervisor")
+		return filter, false
+	}
+	if filter.level != "" {
+		switch filter.level {
+		case "trace", "debug", "info", "warn", "error", "fatal":
+		default:
+			writeError(w, http.StatusBadRequest, "unknown log level")
+			return filter, false
+		}
+	}
+	for _, value := range []struct {
+		name string
+		dest *time.Time
+	}{{"since", &filter.since}, {"until", &filter.until}} {
+		if raw := r.URL.Query().Get(value.name); raw != "" {
+			parsed, err := time.Parse(time.RFC3339, raw)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, value.name+" must be RFC3339")
+				return filter, false
+			}
+			*value.dest = parsed
+		}
+	}
+	return filter, true
+}
+
 func (s *supervisor) handleLogs(w http.ResponseWriter, r *http.Request, a *app) {
 	tail, ok := logTailParam(w, r)
+	if !ok {
+		return
+	}
+	filter, ok := logFilterParam(w, r)
 	if !ok {
 		return
 	}
 	logs := []logEntry{}
 	if a.logs != nil {
 		var err error
-		logs, err = a.logs.tail(tail)
+		logs, err = a.logs.tailFiltered(tail, filter)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	}
 	writeJSON(w, http.StatusOK, logsResponse{Logs: logs})
+}
+
+// handleLogExport downloads every retained matching line as text or JSON lines.
+func (s *supervisor) handleLogExport(w http.ResponseWriter, r *http.Request, a *app) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	filter, ok := logFilterParam(w, r)
+	if !ok {
+		return
+	}
+	format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
+	if format == "" {
+		format = "text"
+	}
+	if format != "text" && format != "jsonl" {
+		writeError(w, http.StatusBadRequest, "format must be text or jsonl")
+		return
+	}
+	entries := []logEntry{}
+	if a.logs != nil {
+		var err error
+		entries, err = a.logs.allFiltered(filter)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	if format == "jsonl" {
+		w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
+		w.Header().Set("Content-Disposition", `attachment; filename="`+a.name+`.log.jsonl"`)
+		for _, entry := range entries {
+			data, err := json.Marshal(entry)
+			if err != nil {
+				continue
+			}
+			_, _ = w.Write(append(data, '\n'))
+		}
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+a.name+`.log"`)
+	for _, entry := range entries {
+		_, _ = fmt.Fprintf(w, "%s %s %s %s\n", entry.Time, entry.Level, entry.Source, entry.Message)
+	}
 }
 
 // logStreamMessage is one SSE frame: the backlog on connect, then single lines.
@@ -411,11 +563,15 @@ func (s *supervisor) handleLogStream(w http.ResponseWriter, r *http.Request, a *
 		return true
 	}
 
+	filter, ok := logFilterParam(w, r)
+	if !ok {
+		return
+	}
 	backlog := []logEntry{}
 	var messages chan logEntry
 	if a.logs != nil {
 		var err error
-		backlog, err = a.logs.tail(tail)
+		backlog, err = a.logs.tailFiltered(tail, filter)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -432,6 +588,9 @@ func (s *supervisor) handleLogStream(w http.ResponseWriter, r *http.Request, a *
 	for {
 		select {
 		case entry := <-messages:
+			if !filter.matches(entry) {
+				continue
+			}
 			if !send(logStreamMessage{Type: "line", Log: &entry}) {
 				return
 			}

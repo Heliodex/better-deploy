@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json/v2"
 	"fmt"
 	"maps"
@@ -8,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -31,6 +34,7 @@ type appConfigPatch struct {
 	HealthFailures     *int               `json:"health_failures"`
 	RestartOnUnhealthy *bool              `json:"restart_on_unhealthy"`
 	Network            *string            `json:"network"`
+	JobConcurrency     *int               `json:"job_concurrency"`
 	AllowCallers       *[]string          `json:"allow_callers"`
 	Egress             *[]egressRule      `json:"egress"`
 	Schedule           *[]scheduleConfig  `json:"schedule"`
@@ -56,10 +60,28 @@ type appConfigResponse struct {
 	HealthFailures     int              `json:"health_failures"`
 	RestartOnUnhealthy bool             `json:"restart_on_unhealthy"`
 	Network            string           `json:"network"`
+	JobConcurrency     int              `json:"job_concurrency"`
 	AllowCallers       []string         `json:"allow_callers"`
 	Egress             []egressRule     `json:"egress"`
 	Schedule           []scheduleConfig `json:"schedule"`
 	RestartRequired    bool             `json:"restart_required,omitempty"`
+}
+
+// configETag fingerprints the runtime config for conditional reads and writes.
+func configETag(cfg appConfig) string {
+	data, _ := json.Marshal(cfg)
+	sum := sha256.Sum256(data)
+	return `"` + hex.EncodeToString(sum[:]) + `"`
+}
+
+func etagMatches(header, etag string) bool {
+	for _, candidate := range strings.Split(header, ",") {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "*" || candidate == etag || strings.Trim(candidate, `"`) == strings.Trim(etag, `"`) {
+			return true
+		}
+	}
+	return false
 }
 
 func configResponse(cfg appConfig) appConfigResponse {
@@ -98,6 +120,7 @@ func configResponse(cfg appConfig) appConfigResponse {
 		HealthFailures:     cfg.HealthFailures,
 		RestartOnUnhealthy: cfg.RestartOnUnhealthy,
 		Network:            cfg.Network,
+		JobConcurrency:     cfg.JobConcurrency,
 		AllowCallers:       callers,
 		Egress:             egress,
 		Schedule:           schedule,
@@ -149,6 +172,9 @@ func applyConfigPatch(cfg appConfig, patch appConfigPatch) appConfig {
 	}
 	if patch.Network != nil {
 		cfg.Network = *patch.Network
+	}
+	if patch.JobConcurrency != nil {
+		cfg.JobConcurrency = *patch.JobConcurrency
 	}
 	if patch.AllowCallers != nil {
 		cfg.AllowCallers = append([]string(nil), (*patch.AllowCallers)...)
@@ -210,6 +236,12 @@ func (s *supervisor) handleAppConfig(w http.ResponseWriter, r *http.Request, nam
 		a.mu.Lock()
 		cfg := a.cfg
 		a.mu.Unlock()
+		etag := configETag(cfg)
+		w.Header().Set("ETag", etag)
+		if ifNoneMatch := r.Header.Get("If-None-Match"); ifNoneMatch != "" && etagMatches(ifNoneMatch, etag) {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
 		response := configResponse(cfg)
 		response.SecretKeys = s.secrets.keys(name)
 		writeJSON(w, http.StatusOK, response)
@@ -233,6 +265,11 @@ func (s *supervisor) handleAppConfig(w http.ResponseWriter, r *http.Request, nam
 	a.mu.Lock()
 	cfg := a.cfg
 	a.mu.Unlock()
+	currentETag := configETag(cfg)
+	if ifMatch := r.Header.Get("If-Match"); ifMatch != "" && !etagMatches(ifMatch, currentETag) {
+		writeError(w, http.StatusPreconditionFailed, "config has changed; reload and retry")
+		return
+	}
 	next, err := normalizeAppConfig(applyConfigPatch(cfg, patch), a.name, s.cfg.domain, s.cfg.tenantMode)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -273,6 +310,9 @@ func (s *supervisor) handleAppConfig(w http.ResponseWriter, r *http.Request, nam
 	if s.storage != nil && cfg.DiskMB != next.DiskMB {
 		s.storage.setQuota(a.name, int64(next.DiskMB)<<20)
 	}
+	if s.jobs != nil && cfg.JobConcurrency != next.JobConcurrency {
+		s.jobs.setConcurrency(a.name, next.JobConcurrency)
+	}
 
 	restartRequired := !maps.Equal(cfg.Env, next.Env) || cfg.MemoryMB != next.MemoryMB ||
 		cfg.DiskMB != next.DiskMB || cfg.CPUMillicores != next.CPUMillicores || cfg.PidsMax != next.PidsMax ||
@@ -290,6 +330,7 @@ func (s *supervisor) handleAppConfig(w http.ResponseWriter, r *http.Request, nam
 	}
 
 	s.broadcast()
+	w.Header().Set("ETag", configETag(next))
 	response := configResponse(next)
 	response.SecretKeys = s.secrets.keys(name)
 	response.RestartRequired = restartRequired

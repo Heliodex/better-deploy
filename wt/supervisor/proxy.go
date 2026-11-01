@@ -103,9 +103,13 @@ func formatProxyDuration(d time.Duration) string {
 	return fmt.Sprintf("%.2fs", d.Seconds())
 }
 
-// formatAccessLog renders a supervisor access line as METHOD status duration path, so the panel can recognise and structure it.
-func formatAccessLog(method string, status int, duration time.Duration, uri string) string {
-	return fmt.Sprintf("%s %d %s %s", method, status, formatProxyDuration(duration), uri)
+// formatAccessLog renders a supervisor access line as METHOD status duration path, with a request id when one is available.
+func formatAccessLog(method string, status int, duration time.Duration, uri, requestID string) string {
+	line := fmt.Sprintf("%s %d %s %s", method, status, formatProxyDuration(duration), uri)
+	if requestID != "" {
+		line += " request=" + requestID
+	}
+	return line
 }
 
 // requestHost is the lower-case request host without a port, as used for app routing.
@@ -154,18 +158,24 @@ func (s *supervisor) serveApp(w http.ResponseWriter, r *http.Request, a *app) {
 		w.Header().Set("Retry-After", "1")
 		http.Error(w, "app is restarting", http.StatusServiceUnavailable)
 		if a.logs != nil {
-			a.logs.logSupervisor(formatAccessLog(r.Method, http.StatusServiceUnavailable, time.Since(started), r.URL.RequestURI()))
+			a.logs.logSupervisor(formatAccessLog(r.Method, http.StatusServiceUnavailable, time.Since(started), r.URL.RequestURI(), requestID))
 		}
 		return
 	}
 	defer a.requests.Done()
 	wrapped := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+	if s.metrics != nil {
+		s.metrics.beginRequest(a.name)
+		defer func() {
+			s.metrics.endRequest(a.name, r.Method, wrapped.status, time.Since(started))
+		}()
+	}
 	static, ready := a.servingState()
 
 	// Static files come from the bundle and do not consume the app's concurrency slots, but a stopped app does not serve them.
 	if static && a.serveStatic(wrapped, r) {
 		if a.logs != nil {
-			a.logs.logSupervisor(formatAccessLog(r.Method, wrapped.status, time.Since(started), r.URL.RequestURI()))
+			a.logs.logSupervisor(formatAccessLog(r.Method, wrapped.status, time.Since(started), r.URL.RequestURI(), requestID))
 		}
 		return
 	}
@@ -173,7 +183,7 @@ func (s *supervisor) serveApp(w http.ResponseWriter, r *http.Request, a *app) {
 		w.Header().Set("Retry-After", "1")
 		http.Error(w, "app not ready", http.StatusServiceUnavailable)
 		if a.logs != nil {
-			a.logs.logSupervisor(formatAccessLog(r.Method, http.StatusServiceUnavailable, time.Since(started), r.URL.RequestURI()))
+			a.logs.logSupervisor(formatAccessLog(r.Method, http.StatusServiceUnavailable, time.Since(started), r.URL.RequestURI(), requestID))
 		}
 		return
 	}
@@ -205,7 +215,7 @@ func (s *supervisor) serveApp(w http.ResponseWriter, r *http.Request, a *app) {
 
 	proxy.ServeHTTP(wrapped, r)
 	if a.logs != nil {
-		a.logs.logSupervisor(formatAccessLog(r.Method, wrapped.status, time.Since(started), r.URL.RequestURI()))
+		a.logs.logSupervisor(formatAccessLog(r.Method, wrapped.status, time.Since(started), r.URL.RequestURI(), requestID))
 	}
 }
 
@@ -229,6 +239,7 @@ func (s *supervisor) adminMux() *http.ServeMux {
 	})
 	mux.HandleFunc("GET /usage", s.handleUsage)
 	mux.HandleFunc("GET /audit", s.handleAudit)
+	mux.HandleFunc("GET /metrics", s.handleMetrics)
 	mux.HandleFunc("GET /events", s.handleEvents)
 	mux.HandleFunc("POST /login", s.handleLogin)
 	mux.HandleFunc("POST /logout", s.handleLogout)

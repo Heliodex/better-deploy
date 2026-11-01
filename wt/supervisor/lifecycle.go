@@ -25,6 +25,9 @@ func (s *supervisor) unregister(a *app) {
 	}
 	s.removeAppHostsLocked(a, a.cfg)
 	s.mu.Unlock()
+	if s.jobs != nil {
+		s.jobs.stop(a.name)
+	}
 	s.broadcast()
 }
 
@@ -63,6 +66,11 @@ func (s *supervisor) startStopped(a *app) error {
 		return err
 	}
 	s.startSchedule(a)
+	if s.jobs != nil {
+		if err := s.jobs.start(a.name, a.cfg.JobConcurrency); err != nil {
+			log.Printf("jobs %s: %v", a.name, err)
+		}
+	}
 	a.sampleResources(time.Now())
 	return nil
 }
@@ -113,6 +121,7 @@ func (s *supervisor) purgeAppState(name string) error {
 		filepath.Join(s.cfg.stateDir, ".storage", name),
 		filepath.Join(s.cfg.stateDir, ".backups", name),
 		filepath.Join(s.cfg.stateDir, ".deployments", name),
+		filepath.Join(s.cfg.stateDir, ".jobs", name+".json"),
 	} {
 		if err := os.RemoveAll(dir); err != nil {
 			return err

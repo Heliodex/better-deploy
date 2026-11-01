@@ -240,6 +240,11 @@ func (s *supervisor) register(a *app) {
 		s.hosts[host] = a
 	}
 	s.mu.Unlock()
+	if s.jobs != nil {
+		if err := s.jobs.start(a.name, a.cfg.JobConcurrency); err != nil {
+			log.Printf("jobs %s: %v", a.name, err)
+		}
+	}
 	s.broadcast()
 }
 

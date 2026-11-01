@@ -35,6 +35,7 @@ const (
 // storageChange is one successful write through the app-facing storage service.
 type storageChange struct {
 	Time          time.Time        `json:"time"`
+	RequestID     string           `json:"requestId,omitempty"`
 	SQL           string           `json:"sql"`
 	Params        []jsontext.Value `json:"params"`
 	RowsAffected  int64            `json:"rowsAffected"`

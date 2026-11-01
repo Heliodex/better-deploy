@@ -203,3 +203,59 @@ func TestAppConfigPatchesCallersAndEgress(t *testing.T) {
 		}
 	}
 }
+
+func TestAppConfigConditionalRequests(t *testing.T) {
+	dir := t.TempDir()
+	cfg, err := normalizeAppConfig(appConfig{Name: "demo", Host: "demo.localhost", Health: "/", Env: map[string]string{}}, "demo", "localhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := persistAppConfig(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	s := testSupervisor()
+	a := &app{name: "demo", dir: dir, cfg: cfg}
+	s.apps["demo"] = a
+	s.hosts[cfg.Host] = a
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/apps/demo/config", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	s.handleAppConfig(rec, req, "demo")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET config = %d: %s", rec.Code, rec.Body.String())
+	}
+	etag := rec.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("GET config has no ETag")
+	}
+	req = httptest.NewRequest(http.MethodGet, "/apps/demo/config", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set("If-None-Match", etag)
+	rec = httptest.NewRecorder()
+	s.handleAppConfig(rec, req, "demo")
+	if rec.Code != http.StatusNotModified {
+		t.Errorf("conditional GET = %d, want 304", rec.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(`{"memory_mb":256}`))
+	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set("If-Match", `"wrong"`)
+	rec = httptest.NewRecorder()
+	s.handleAppConfig(rec, req, "demo")
+	if rec.Code != http.StatusPreconditionFailed {
+		t.Errorf("stale PATCH = %d, want 412: %s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(`{"memory_mb":256}`))
+	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set("If-Match", etag)
+	rec = httptest.NewRecorder()
+	s.handleAppConfig(rec, req, "demo")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("conditional PATCH = %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("ETag") == "" || rec.Header().Get("ETag") == etag {
+		t.Errorf("PATCH ETag = %q, old %q", rec.Header().Get("ETag"), etag)
+	}
+}

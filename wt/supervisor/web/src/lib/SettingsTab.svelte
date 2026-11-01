@@ -41,6 +41,7 @@ let health = $state("/healthz")
 let memoryMB = $state(0)
 let diskMB = $state(0)
 let maxConcurrent = $state(0)
+let jobConcurrency = $state(1)
 let requestTimeout = $state("")
 let startupTimeout = $state("15s")
 let healthInterval = $state("10s")
@@ -67,6 +68,7 @@ $effect(() => {
 	memoryMB = current.memory_mb
 	diskMB = current.disk_mb
 	maxConcurrent = current.max_concurrency
+	jobConcurrency = current.job_concurrency
 	requestTimeout = current.request_timeout
 	startupTimeout = current.startup_timeout
 	healthInterval = current.health_interval
@@ -118,6 +120,7 @@ function save(event: SubmitEvent): void {
 		health_interval: healthInterval.trim(),
 		host: host.trim(),
 		hosts: parseHosts(hosts),
+		job_concurrency: jobConcurrency,
 		max_concurrency: maxConcurrent,
 		memory_mb: memoryMB,
 		network,
@@ -246,6 +249,17 @@ async function removeSecret(key: string): Promise<void> {
 					min="0"
 					bind:value={maxConcurrent}
 					type="number"
+				>
+			</label>
+			<label class="flex flex-col gap-1">
+				<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Job concurrency</span>
+				<input
+					aria-label="Job concurrency"
+					class="field"
+					max="16"
+					min="1"
+					type="number"
+					bind:value={jobConcurrency}
 				>
 			</label>
 			<label class="flex flex-col gap-1">

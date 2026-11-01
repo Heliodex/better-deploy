@@ -2,7 +2,10 @@ package main
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -333,9 +336,145 @@ func (s *supervisor) installBundle(w http.ResponseWriter, name string, cfg appCo
 	return next, "full", nil
 }
 
+// bundleDigest fingerprints the uploaded app.json, component and static files for conditional deploys.
+func bundleDigest(dir string) string {
+	hash := sha256.New()
+	for _, name := range []string{"main.wasm", "main.cwasm", "artifact.json", "app.json"} {
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			continue
+		}
+		_, _ = hash.Write([]byte(name + "\x00"))
+		_, _ = hash.Write(data)
+		_, _ = hash.Write([]byte{0})
+	}
+	root := filepath.Join(dir, "static")
+	_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || !entry.Type().IsRegular() {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return nil
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		_, _ = hash.Write([]byte(filepath.ToSlash(rel) + "\x00"))
+		_, _ = hash.Write(data)
+		_, _ = hash.Write([]byte{0})
+		return nil
+	})
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
+type deployReplayEntry struct {
+	status int
+	header http.Header
+	body   []byte
+	at     time.Time
+}
+
+type deployRecorder struct {
+	http.ResponseWriter
+	status int
+	body   bytes.Buffer
+}
+
+func (r *deployRecorder) WriteHeader(status int) {
+	if r.status == 0 {
+		r.status = status
+	}
+	r.ResponseWriter.WriteHeader(status)
+}
+
+func (r *deployRecorder) Write(data []byte) (int, error) {
+	if r.status == 0 {
+		r.status = http.StatusOK
+	}
+	if r.body.Len() < 64<<10 {
+		_, _ = r.body.Write(data[:min(len(data), 64<<10-r.body.Len())])
+	}
+	return r.ResponseWriter.Write(data)
+}
+
+func (r *deployRecorder) Flush() {
+	if flusher, ok := r.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func (r *deployRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
+}
+
+func (s *supervisor) replayKey(name, key string) string {
+	return name + "\x00" + key
+}
+
+func (s *supervisor) replayDeploy(name, key string, now time.Time) (deployReplayEntry, bool) {
+	if key == "" {
+		return deployReplayEntry{}, false
+	}
+	s.deployReplayMu.Lock()
+	defer s.deployReplayMu.Unlock()
+	entry, ok := s.deployReplay[s.replayKey(name, key)]
+	if !ok || now.Sub(entry.at) > 24*time.Hour {
+		return deployReplayEntry{}, false
+	}
+	return entry, true
+}
+
+func (s *supervisor) storeDeployReplay(name, key string, recorder *deployRecorder) {
+	if key == "" {
+		return
+	}
+	status := recorder.status
+	if status == 0 {
+		status = http.StatusOK
+	}
+	s.deployReplayMu.Lock()
+	if s.deployReplay == nil {
+		s.deployReplay = map[string]deployReplayEntry{}
+	}
+	if len(s.deployReplay) >= 512 {
+		s.deployReplay = map[string]deployReplayEntry{}
+	}
+	s.deployReplay[s.replayKey(name, key)] = deployReplayEntry{status: status, header: recorder.Header().Clone(), body: append([]byte(nil), recorder.body.Bytes()...), at: time.Now()}
+	s.deployReplayMu.Unlock()
+}
+
+func (s *supervisor) replayDeployResponse(w http.ResponseWriter, entry deployReplayEntry) {
+	for key, values := range entry.header {
+		for _, value := range values {
+			w.Header().Add(key, value)
+		}
+	}
+	w.Header().Set("Idempotency-Replayed", "true")
+	w.WriteHeader(entry.status)
+	_, _ = w.Write(entry.body)
+}
+
 func (s *supervisor) deploy(w http.ResponseWriter, r *http.Request, name string) {
 	s.deployMu.Lock()
 	defer s.deployMu.Unlock()
+
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if len(idempotencyKey) > 128 {
+		writeError(w, http.StatusBadRequest, "Idempotency-Key must be at most 128 bytes")
+		return
+	}
+	if entry, ok := s.replayDeploy(name, idempotencyKey, time.Now()); ok {
+		s.replayDeployResponse(w, entry)
+		return
+	}
+	var recorder *deployRecorder
+	if idempotencyKey != "" {
+		recorder = &deployRecorder{ResponseWriter: w}
+		w = recorder
+		defer func() { s.storeDeployReplay(name, idempotencyKey, recorder) }()
+	}
 
 	if s.rejectOverBudget(w) {
 		return
@@ -361,11 +500,20 @@ func (s *supervisor) deploy(w http.ResponseWriter, r *http.Request, name string)
 	}
 
 	digest := sourceDigest(tmpDir)
+	etag := `"` + bundleDigest(tmpDir) + `"`
+	w.Header().Set("ETag", etag)
+	if match := r.Header.Get("If-None-Match"); match != "" && etagMatches(match, etag) {
+		w.Header().Set("X-WT-Wasm-Digest", digest)
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
 	next, mode, err := s.installBundle(w, name, cfg, tmpDir, digest, "deployed")
 	if err != nil {
+		s.metrics.observeDeploy(name, "failed")
 		s.recordDeploymentFailure(name, digest, err)
 		return
 	}
+	s.metrics.observeDeploy(name, "success")
 	s.recordDeployment(name, next.dir)
 	w.Header().Set("X-WT-Wasm-Digest", next.digest)
 	w.Header().Set("X-WT-Deploy-Mode", mode)

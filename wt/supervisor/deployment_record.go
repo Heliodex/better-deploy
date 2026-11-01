@@ -364,6 +364,29 @@ func (s *supervisor) handleDeployments(w http.ResponseWriter, r *http.Request, n
 	writeJSON(w, http.StatusOK, list)
 }
 
+// handleDeploymentInfo serves one retained history entry.
+func (s *supervisor) handleDeploymentInfo(w http.ResponseWriter, r *http.Request, name, id string) {
+	if _, ok := s.requireApp(w, r, name); !ok {
+		return
+	}
+	if s.deployments == nil {
+		writeError(w, http.StatusServiceUnavailable, "deployment history unavailable")
+		return
+	}
+	info, err := s.deployments.info(name, id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if a := s.lookup(name); a != nil && info.Status != deploymentStatusFail {
+		a.mu.Lock()
+		running := a.digest
+		a.mu.Unlock()
+		info.Current = running != "" && info.Digest == running
+	}
+	writeJSON(w, http.StatusOK, info)
+}
+
 func (s *supervisor) handleRollback(w http.ResponseWriter, r *http.Request, name, id string) {
 	s.deployMu.Lock()
 	defer s.deployMu.Unlock()
@@ -415,9 +438,11 @@ func (s *supervisor) handleRollback(w http.ResponseWriter, r *http.Request, name
 	digest := sourceDigest(dir)
 	next, mode, err := s.installBundle(w, name, cfg, dir, digest, "rolled back")
 	if err != nil {
+		s.metrics.observeDeploy(name, "rollback-failed")
 		s.recordDeploymentFailure(name, digest, err)
 		return
 	}
+	s.metrics.observeDeploy(name, "rollback")
 	s.recordDeployment(name, next.dir)
 	w.Header().Set("X-WT-Wasm-Digest", next.digest)
 	w.Header().Set("X-WT-Deploy-Mode", mode)

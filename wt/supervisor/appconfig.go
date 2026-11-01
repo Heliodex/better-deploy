@@ -362,6 +362,12 @@ func normalizeAppConfig(cfg appConfig, name, domain string, modes ...string) (ap
 		return cfg, err
 	}
 	cfg.Egress = egress
+	if cfg.JobConcurrency == 0 {
+		cfg.JobConcurrency = jobDefaultConcurrency
+	}
+	if cfg.JobConcurrency < 1 || cfg.JobConcurrency > jobMaxConcurrency {
+		return cfg, fmt.Errorf("job_concurrency must be between 1 and %d", jobMaxConcurrency)
+	}
 	if cfg.Health == "" {
 		cfg.Health = defaultHealthPath
 	}

@@ -74,6 +74,7 @@ type appConfig struct {
 	HealthFailures     int               `json:"health_failures,omitempty"`
 	RestartOnUnhealthy bool              `json:"restart_on_unhealthy,omitempty"`
 	Network            string            `json:"network,omitempty"`
+	JobConcurrency     int               `json:"job_concurrency,omitempty"`
 	AllowCallers       []string          `json:"allow_callers,omitempty"`
 	Egress             []egressRule      `json:"egress,omitempty"`
 	Schedule           []scheduleConfig  `json:"schedule,omitempty"`
@@ -144,6 +145,8 @@ type supervisor struct {
 	events      *hub
 	deployments *deploymentManager
 	secrets     *secretStore
+	jobs        *jobManager
+	metrics     *metrics
 	auth        *authStore
 	audit       *auditStore
 	uids        *uidAllocator
@@ -154,10 +157,12 @@ type supervisor struct {
 	mu          sync.RWMutex
 	apps, hosts map[string]*app
 
-	deployMu sync.Mutex
-	loginMu  sync.Mutex
-	login    *loginLimiter
-	stopping atomic.Bool
+	deployMu       sync.Mutex
+	deployReplayMu sync.Mutex
+	deployReplay   map[string]deployReplayEntry
+	loginMu        sync.Mutex
+	login          *loginLimiter
+	stopping       atomic.Bool
 
 	versionOnce sync.Once
 	version     string
@@ -382,8 +387,27 @@ func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 
+	if action == "jobs" || strings.HasPrefix(action, "jobs/") {
+		s.handleAppJobs(w, r, name, action)
+		return
+	}
 	if action == "backups" || strings.HasPrefix(action, "backups/") {
 		s.handleBackupRoute(w, r, name, strings.TrimPrefix(action, "backups"))
+		return
+	}
+	if id, ok := strings.CutPrefix(action, "deployments/"); ok {
+		if !requireMethod(w, r, http.MethodGet) {
+			return
+		}
+		s.handleDeploymentInfo(w, r, name, id)
+		return
+	}
+	if action == "validate" {
+		if !requireMethod(w, r, http.MethodPost) {
+			return
+		}
+		r.URL.RawQuery = "dry_run=1"
+		s.deploy(w, r, name)
 		return
 	}
 	if id, ok := strings.CutPrefix(action, "rollback/"); ok {
@@ -422,6 +446,12 @@ func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
 		s.handleStart(w, r, name)
 	case "logs/stream", "logs":
 		s.handleAppLogs(w, r, name, action)
+	case "logs/export":
+		a, ok := s.requireAppMethod(w, r, name, http.MethodGet)
+		if !ok {
+			return
+		}
+		s.handleLogExport(w, r, a)
 	case "resources":
 		a, ok := s.requireAppMethod(w, r, name, http.MethodGet)
 		if !ok {
@@ -616,6 +646,9 @@ func startSupervisor(cfg config) *supervisor {
 		apps:        map[string]*app{},
 		hosts:       map[string]*app{},
 	}
+	s.jobs = newJobManager(filepath.Join(cfg.stateDir, ".jobs"), s)
+	s.metrics = newMetrics()
+	storage.metrics = s.metrics
 	fetch, err := newAppFetchServer(cfg.appFetchListen, s)
 	if err != nil {
 		log.Fatalf("app fetch: %v", err)
@@ -750,6 +783,7 @@ func serve(s *supervisor) {
 		s.cgroups.close()
 	}
 	s.persistResources()
+	s.jobs.close()
 	s.fetch.close()
 	s.storage.close()
 	if adminCleanup != nil {

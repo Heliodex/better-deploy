@@ -376,6 +376,7 @@ const appConfigSchema = object({
 	health_failures: pipe(number(), minValue(1)),
 	health_interval: string(),
 	host: pipe(string(), minLength(1)),
+	job_concurrency: pipe(number(), minValue(1)),
 	hosts: array(string()),
 	max_concurrency: pipe(number(), minValue(0)),
 	memory_mb: pipe(number(), minValue(0)),
@@ -399,6 +400,7 @@ export interface AppConfigPatch {
 	health_interval?: string
 	host?: string
 	hosts?: string[]
+	job_concurrency?: number
 	max_concurrency?: number
 	memory_mb?: number
 	network?: "inherit" | "none" | "storage"

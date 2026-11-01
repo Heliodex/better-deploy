@@ -130,6 +130,21 @@ func (m *deploymentManager) list(app string) ([]deploymentInfo, error) {
 	return out, nil
 }
 
+func (m *deploymentManager) info(app, id string) (deploymentInfo, error) {
+	if err := validDeploymentID(id); err != nil {
+		return deploymentInfo{}, err
+	}
+	data, err := os.ReadFile(filepath.Join(m.appDir(app), id, deploymentMetaName))
+	if err != nil {
+		return deploymentInfo{}, errDeploymentNotFound
+	}
+	var info deploymentInfo
+	if err := json.Unmarshal(data, &info); err != nil {
+		return deploymentInfo{}, errDeploymentNotFound
+	}
+	return info, nil
+}
+
 func (m *deploymentManager) bundle(app, id string) (string, error) {
 	if err := validDeploymentID(id); err != nil {
 		return "", err

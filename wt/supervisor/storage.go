@@ -80,6 +80,8 @@ type storageServer struct {
 	migrationTimeout time.Duration
 
 	querySem chan struct{}
+
+	metrics *metrics
 }
 
 type storageRequest struct {
@@ -465,7 +467,13 @@ func (s *storageServer) withConn(ctx context.Context, app string, fn func(*sql.C
 	return s.withConnUnlocked(ctx, app, fn)
 }
 
-func (s *storageServer) withConnUnlocked(ctx context.Context, app string, fn func(*sql.Conn) error) error {
+func (s *storageServer) withConnUnlocked(ctx context.Context, app string, fn func(*sql.Conn) error) (err error) {
+	start := time.Now()
+	defer func() {
+		if s.metrics != nil {
+			s.metrics.observeStorage(app, "write", err, time.Since(start))
+		}
+	}()
 	db, err := s.dbFor(app)
 	if err != nil {
 		return fmt.Errorf("%w: %v", errStorageUnavailable, err)
@@ -482,7 +490,13 @@ func (s *storageServer) withConnUnlocked(ctx context.Context, app string, fn fun
 }
 
 // withReadConn runs a read on the query-only pool. It takes the same restore lock as the write pool, so replacing a database file waits for in-flight reads.
-func (s *storageServer) withReadConn(ctx context.Context, app string, fn func(*sql.Conn) error) error {
+func (s *storageServer) withReadConn(ctx context.Context, app string, fn func(*sql.Conn) error) (err error) {
+	start := time.Now()
+	defer func() {
+		if s.metrics != nil {
+			s.metrics.observeStorage(app, "read", err, time.Since(start))
+		}
+	}()
 	s.opMu.RLock()
 	defer s.opMu.RUnlock()
 	db, err := s.readDBFor(app)
@@ -601,6 +615,7 @@ func (s *storageServer) exec(w http.ResponseWriter, r *http.Request, app string)
 	}
 	s.logChanges(app, []storageChange{{
 		Time:          time.Now().UTC(),
+		RequestID:     r.Header.Get(requestIDHeader),
 		SQL:           req.SQL,
 		Params:        req.Params,
 		RowsAffected:  result.RowsAffected,
@@ -688,6 +703,7 @@ func (s *storageServer) batch(w http.ResponseWriter, r *http.Request, app string
 		}
 		changes[i] = storageChange{
 			Time:          time.Now().UTC(),
+			RequestID:     r.Header.Get(requestIDHeader),
 			SQL:           statement.SQL,
 			Params:        statement.Params,
 			RowsAffected:  results[i].RowsAffected,
@@ -850,6 +866,7 @@ func (s *storageServer) writeReturning(w http.ResponseWriter, r *http.Request, a
 	}
 	s.logChanges(app, []storageChange{{
 		Time:          time.Now().UTC(),
+		RequestID:     r.Header.Get(requestIDHeader),
 		SQL:           req.SQL,
 		Params:        req.Params,
 		RowsAffected:  result.RowsAffected,
