@@ -25,19 +25,27 @@ type artifactInfo struct {
 	Epoch      bool   `json:"epoch_interruption,omitempty"`
 	WasmSHA256 string `json:"wasm_sha256,omitempty"`
 	WasmBytes  int64  `json:"wasm_bytes,omitempty"`
+	// CPU records the CPU feature policy used for compilation.
+	// Both compilers pass --target, so this is the target's baseline feature set.
+	CPU string `json:"cpu,omitempty"`
 }
+
+// artifactCPUFeatures is the feature policy for a cwasm compiled with --target.
+// A native compile would need a real feature fingerprint here instead.
+const artifactCPUFeatures = "baseline"
 
 // artifactKey names a cached cwasm by the wasm content and the runtime that compiled it.
 type artifactKey struct {
 	WasmSHA256 string
 	Wasmtime   string
 	Target     string
+	CPU        string
 	Epoch      bool
 }
 
 func (k artifactKey) digest() string {
 	hash := sha256.New()
-	fmt.Fprintf(hash, "%s\n%s\n%s\n%t\n", k.WasmSHA256, k.Wasmtime, k.Target, k.Epoch)
+	fmt.Fprintf(hash, "%s\n%s\n%s\n%s\n%t\n", k.WasmSHA256, k.Wasmtime, k.Target, k.CPU, k.Epoch)
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
@@ -96,6 +104,9 @@ func (s *supervisor) wasmtimeVersion() string {
 // artifactMatches reports whether a recorded artifact was built for the current runtime, target and wasm.
 func artifactMatches(recorded, current artifactInfo) bool {
 	if recorded.Target != current.Target {
+		return false
+	}
+	if recorded.CPU != "" && current.CPU != "" && recorded.CPU != current.CPU {
 		return false
 	}
 	if current.Epoch && !recorded.Epoch {
@@ -206,6 +217,7 @@ func (s *supervisor) importCachedArtifact(src string, key artifactKey) (string, 
 }
 
 // compileCachedArtifact compiles main.wasm into the cache through a temporary file, never writing the live cwasm in place.
+// The explicit --target selects the target's baseline CPU features, which is what artifactCPUFeatures records.
 func (s *supervisor) compileCachedArtifact(dir, wasm string, key artifactKey) (string, error) {
 	dst := s.artifactCachePath(key)
 	cacheDir := filepath.Dir(dst)
@@ -319,8 +331,8 @@ func (s *supervisor) ensureArtifact(dir string, requireEpoch bool) (bool, error)
 		return false, fmt.Errorf("%w: no main.wasm or main.cwasm", errNoComponent)
 	}
 
-	current := artifactInfo{Wasmtime: s.wasmtimeVersion(), Target: s.cfg.wasmtimeTarget, Epoch: true, WasmSHA256: digest, WasmBytes: size}
-	key := artifactKey{WasmSHA256: digest, Wasmtime: current.Wasmtime, Target: current.Target, Epoch: true}
+	current := artifactInfo{Wasmtime: s.wasmtimeVersion(), Target: s.cfg.wasmtimeTarget, CPU: artifactCPUFeatures, Epoch: true, WasmSHA256: digest, WasmBytes: size}
+	key := artifactKey{WasmSHA256: digest, Wasmtime: current.Wasmtime, Target: current.Target, CPU: current.CPU, Epoch: true}
 	if path, modTime, ok := s.cachedArtifact(key); ok {
 		if err := installArtifact(path, cwasm); err != nil {
 			return false, fmt.Errorf("install cached main.cwasm: %w", err)

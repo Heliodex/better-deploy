@@ -198,7 +198,7 @@ func TestEnsureArtifactImportsLegacyCwasmWithoutDigest(t *testing.T) {
 	if artifact.WasmSHA256 != digestText("wasm") || artifact.WasmBytes != int64(len("wasm")) {
 		t.Errorf("artifact = %+v, want the wasm digest and size", artifact)
 	}
-	key := artifactKey{WasmSHA256: digestText("wasm"), Wasmtime: "wasmtime-cli 51.0.0", Target: "x86_64-test", Epoch: true}
+	key := artifactKey{WasmSHA256: digestText("wasm"), Wasmtime: "wasmtime-cli 51.0.0", Target: "x86_64-test", CPU: artifactCPUFeatures, Epoch: true}
 	if _, err := os.Stat(s.artifactCachePath(key)); err != nil {
 		t.Errorf("legacy cwasm was not imported into the cache: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestEnsureArtifactImportsLegacyCwasmWithoutDigest(t *testing.T) {
 func TestCachedArtifactIgnoresEmptyFile(t *testing.T) {
 	cache := t.TempDir()
 	s := artifactSupervisorWithCache(t, "wasmtime", cache)
-	key := artifactKey{WasmSHA256: digestText("wasm"), Wasmtime: "wasmtime-cli 51.0.0", Target: "x86_64-test", Epoch: true}
+	key := artifactKey{WasmSHA256: digestText("wasm"), Wasmtime: "wasmtime-cli 51.0.0", Target: "x86_64-test", CPU: artifactCPUFeatures, Epoch: true}
 	path := s.artifactCachePath(key)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
@@ -403,11 +403,37 @@ func TestEnsureArtifactCacheInvalidatesOnRuntimeAndTarget(t *testing.T) {
 }
 
 func TestArtifactKeyIncludesEpoch(t *testing.T) {
-	key := artifactKey{WasmSHA256: digestText("wasm"), Wasmtime: "wasmtime-cli 51.0.0", Target: "x86_64-test", Epoch: true}
+	key := artifactKey{WasmSHA256: digestText("wasm"), Wasmtime: "wasmtime-cli 51.0.0", Target: "x86_64-test", CPU: artifactCPUFeatures, Epoch: true}
 	other := key
 	other.Epoch = false
 	if key.digest() == other.digest() {
 		t.Error("artifact key does not change with the epoch setting")
+	}
+}
+
+func TestArtifactKeyIncludesCPUFeatures(t *testing.T) {
+	key := artifactKey{WasmSHA256: digestText("wasm"), Wasmtime: "wasmtime-cli 51.0.0", Target: "x86_64-test", CPU: artifactCPUFeatures, Epoch: true}
+	other := key
+	other.CPU = "native-avx2"
+	if key.digest() == other.digest() {
+		t.Error("artifact key does not change with the CPU feature policy")
+	}
+}
+
+func TestArtifactMatchesCPU(t *testing.T) {
+	base := artifactInfo{Target: "x86_64-test", CPU: artifactCPUFeatures, Epoch: true, WasmSHA256: "wasm"}
+	if !artifactMatches(base, base) {
+		t.Error("identical artifacts did not match")
+	}
+	native := base
+	native.CPU = "native"
+	if artifactMatches(native, base) {
+		t.Error("a different CPU feature policy matched")
+	}
+	legacy := base
+	legacy.CPU = ""
+	if !artifactMatches(legacy, base) {
+		t.Error("a legacy artifact without a CPU field was rejected")
 	}
 }
 

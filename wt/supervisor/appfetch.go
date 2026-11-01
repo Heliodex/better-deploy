@@ -3,9 +3,11 @@
 package main
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -16,15 +18,17 @@ import (
 )
 
 const (
-	appFetchPathPrefix = "/apps/"
-	appCallerHeader    = "X-WT-App-Caller"
-	appTimestampHeader = "X-WT-App-Timestamp"
-	appSignatureHeader = "X-WT-App-Signature"
-	maxAppFetchBody    = 8 << 20
-	appFetchURLEnv     = "WT_APP_FETCH_URL"
-	appNameEnv         = "WT_APP_NAME"
-	appTokenEnv        = "WT_APP_TOKEN"
-	appURLEnvPrefix    = "WT_APP_URL_"
+	appFetchPathPrefix   = "/apps/"
+	appCallerHeader      = "X-WT-App-Caller"
+	appTimestampHeader   = "X-WT-App-Timestamp"
+	appSignatureHeader   = "X-WT-App-Signature"
+	appSignatureV2Header = "X-WT-App-Signature-V2"
+	appBodyHashHeader    = "X-WT-App-Body-SHA256"
+	maxAppFetchBody      = 8 << 20
+	appFetchURLEnv       = "WT_APP_FETCH_URL"
+	appNameEnv           = "WT_APP_NAME"
+	appTokenEnv          = "WT_APP_TOKEN"
+	appURLEnvPrefix      = "WT_APP_URL_"
 )
 
 // appFetchServer serves the internal app-to-app endpoint on loopback. It is separate from storage and the admin listener so an app never needs the admin surface.
@@ -126,11 +130,24 @@ func allowsAppCaller(allowed []string, caller string) bool {
 	return false
 }
 
-// appCallSignature binds the caller identity to one method, path and timestamp. The target's storage token is the key, so only the supervisor and that target can produce or verify it.
+// appCallSignature binds the caller identity to one method, path and timestamp.
+// It is the legacy signature sent to older targets in trusted mode and does not cover the body.
 func appCallSignature(key, caller, method, path, timestamp string) string {
 	mac := hmac.New(sha256.New, []byte(key))
 	_, _ = io.WriteString(mac, caller+"\n"+method+"\n"+path+"\n"+timestamp)
 	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// appCallSignatureV2 also binds the body digest, so a target can reject a changed body.
+func appCallSignatureV2(key, caller, method, path, timestamp, bodyHash string) string {
+	mac := hmac.New(sha256.New, []byte(key))
+	_, _ = io.WriteString(mac, caller+"\n"+method+"\n"+path+"\n"+timestamp+"\n"+bodyHash)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+func appBodySHA256(body []byte) string {
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])
 }
 
 // handle forwards one authenticated app-to-app request.
@@ -169,6 +186,18 @@ func (s *supervisor) handleAppFetch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxAppFetchBody)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, "app fetch body is too large")
+			return
+		}
+		writeError(w, http.StatusBadRequest, "read app fetch body: "+err.Error())
+		return
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	r.ContentLength = int64(len(body))
 	r.URL.Path = rest
 	r.URL.RawPath = ""
 	r.RequestURI = r.URL.RequestURI()
@@ -187,10 +216,19 @@ func (s *supervisor) handleAppFetch(w http.ResponseWriter, r *http.Request) {
 		r.Header.Set(requestIDHeader, newRequestID())
 	}
 	timestamp := time.Now().UTC().Format(time.RFC3339Nano)
-	signature := appCallSignature(s.storage.tokenFor(target), caller, r.Method, r.URL.RequestURI(), timestamp)
+	bodyHash := appBodySHA256(body)
+	targetToken := s.storage.tokenFor(target)
 	r.Header.Set(appCallerHeader, caller)
 	r.Header.Set(appTimestampHeader, timestamp)
-	r.Header.Set(appSignatureHeader, signature)
+	r.Header.Set(appBodyHashHeader, bodyHash)
+	r.Header.Set(appSignatureV2Header, appCallSignatureV2(targetToken, caller, r.Method, r.URL.RequestURI(), timestamp, bodyHash))
+	if s.cfg.untrusted() {
+		// Untrusted targets must not be offered the metadata-only signature.
+		r.Header.Del(appSignatureHeader)
+	} else {
+		// Older trusted targets still verify the legacy signature.
+		r.Header.Set(appSignatureHeader, appCallSignature(targetToken, caller, r.Method, r.URL.RequestURI(), timestamp))
+	}
 	s.serveApp(w, r, a)
 }
 

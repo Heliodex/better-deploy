@@ -1,16 +1,83 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
+func TestCallerVerifiesBodySignature(t *testing.T) {
+	t.Setenv("WT_APP_TOKEN", "key")
+	body := []byte(`{"value":"one"}`)
+	timestamp := time.Now().UTC().Format(time.RFC3339Nano)
+	bodyHash := appBodySHA256(body)
+
+	request := httptest.NewRequest(http.MethodPost, "http://target.localhost/v1/items?limit=1", bytes.NewReader(body))
+	request.Header.Set(AppCallerHeader, "caller")
+	request.Header.Set(AppTimestampHeader, timestamp)
+	request.Header.Set(AppBodyHashHeader, bodyHash)
+	request.Header.Set(AppSignatureV2Header, appCallSignatureV2("key", "caller", request.Method, request.URL.RequestURI(), timestamp, bodyHash))
+	caller, ok := Caller(request)
+	if !ok || caller != "caller" {
+		t.Fatalf("Caller = %q, %t", caller, ok)
+	}
+	restored, _ := io.ReadAll(request.Body)
+	if !bytes.Equal(restored, body) {
+		t.Errorf("restored body = %q, want %q", restored, body)
+	}
+
+	tampered := httptest.NewRequest(http.MethodPost, "http://target.localhost/v1/items?limit=1", bytes.NewReader([]byte(`{"value":"two"}`)))
+	tampered.Header = request.Header.Clone()
+	if caller, ok := Caller(tampered); ok {
+		t.Errorf("tampered body accepted as %q", caller)
+	}
+}
+
+func TestCallerAcceptsLegacySignature(t *testing.T) {
+	t.Setenv("WT_APP_TOKEN", "key")
+	body := []byte(`legacy`)
+	timestamp := time.Now().UTC().Format(time.RFC3339Nano)
+	request := httptest.NewRequest(http.MethodPost, "http://target.localhost/v1/items", bytes.NewReader(body))
+	request.Header.Set(AppCallerHeader, "caller")
+	request.Header.Set(AppTimestampHeader, timestamp)
+	request.Header.Set(AppSignatureHeader, appCallSignature("key", "caller", request.Method, request.URL.RequestURI(), timestamp))
+	caller, ok := Caller(request)
+	if !ok || caller != "caller" {
+		t.Fatalf("Caller = %q, %t", caller, ok)
+	}
+	restored, _ := io.ReadAll(request.Body)
+	if !bytes.Equal(restored, body) {
+		t.Errorf("restored body = %q, want %q", restored, body)
+	}
+}
+
+func TestCallerRejectsStaleAndMissingSignatures(t *testing.T) {
+	t.Setenv("WT_APP_TOKEN", "key")
+	stale := time.Now().Add(-10 * time.Minute).UTC().Format(time.RFC3339Nano)
+	body := []byte("body")
+	bodyHash := appBodySHA256(body)
+	request := httptest.NewRequest(http.MethodPost, "http://target.localhost/v1/items", bytes.NewReader(body))
+	request.Header.Set(AppCallerHeader, "caller")
+	request.Header.Set(AppTimestampHeader, stale)
+	request.Header.Set(AppBodyHashHeader, bodyHash)
+	request.Header.Set(AppSignatureV2Header, appCallSignatureV2("key", "caller", request.Method, request.URL.RequestURI(), stale, bodyHash))
+	if _, ok := Caller(request); ok {
+		t.Error("stale signature accepted")
+	}
+
+	missing := httptest.NewRequest(http.MethodGet, "http://target.localhost/", nil)
+	if _, ok := Caller(missing); ok {
+		t.Error("missing signature accepted")
+	}
+}
 func TestNewID(t *testing.T) {
 	seen := map[string]bool{}
 	for range 100 {

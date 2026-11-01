@@ -137,7 +137,7 @@ func TestImportCachedArtifactMakesCacheReadable(t *testing.T) {
 	s := &supervisor{cfg: config{stateDir: t.TempDir()}}
 	src := filepath.Join(t.TempDir(), "uploaded.cwasm")
 	writeModeFile(t, src, 0o600)
-	key := artifactKey{WasmSHA256: "digest", Wasmtime: "wasmtime 50", Target: "x86_64", Epoch: true}
+	key := artifactKey{WasmSHA256: "digest", Wasmtime: "wasmtime 50", Target: "x86_64", CPU: artifactCPUFeatures, Epoch: true}
 	dst, err := s.importCachedArtifact(src, key)
 	if err != nil {
 		t.Fatal(err)

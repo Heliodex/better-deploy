@@ -53,6 +53,8 @@ type artifact struct {
 	Epoch      bool   `json:"epoch_interruption,omitempty"`
 	WasmSHA256 string `json:"wasm_sha256,omitempty"`
 	WasmBytes  int64  `json:"wasm_bytes,omitempty"`
+	// CPU records the feature policy; compile always passes --target, so it is the baseline set.
+	CPU string `json:"cpu,omitempty"`
 }
 
 const (
@@ -248,7 +250,7 @@ func writeArtifact(cfg *deployConfig, epoch bool) error {
 	if err != nil {
 		return fmt.Errorf("digest main.wasm: %w", err)
 	}
-	record := artifact{Target: cfg.target, CompiledAt: time.Now().UTC(), Epoch: epoch, WasmSHA256: digest, WasmBytes: info.Size()}
+	record := artifact{Target: cfg.target, CPU: "baseline", CompiledAt: time.Now().UTC(), Epoch: epoch, WasmSHA256: digest, WasmBytes: info.Size()}
 	version, err := wasmtimeVersion(cfg.wasmtime)
 	if err != nil {
 		// Without a version the supervisor can still key and rebuild the artifact from main.wasm.
@@ -276,6 +278,7 @@ func readArtifactFile(dir string) (artifact, error) {
 }
 
 // runCompile compiles main.wasm through a temporary file, so a failed compile leaves any previous cwasm intact.
+// It always passes --target, so the cwasm uses the target's baseline CPU feature set rather than native CPU features.
 func runCompile(cfg *deployConfig) error {
 	wasm := filepath.Join(cfg.dir, "main.wasm")
 	if _, err := os.Stat(wasm); err != nil {

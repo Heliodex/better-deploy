@@ -46,6 +46,14 @@ func TestAppFetchSignsCallerAndForwards(t *testing.T) {
 			t.Error("caller-supplied identity survived")
 		}
 		timestamp := r.Header.Get(appTimestampHeader)
+		body, _ := io.ReadAll(r.Body)
+		bodyHash := appBodySHA256(body)
+		if got := r.Header.Get(appBodyHashHeader); got != bodyHash {
+			t.Errorf("body hash = %q, want %q", got, bodyHash)
+		}
+		if want := appCallSignatureV2(targetToken, "caller", r.Method, r.URL.RequestURI(), timestamp, bodyHash); r.Header.Get(appSignatureV2Header) != want {
+			t.Errorf("v2 signature = %q, want %q", r.Header.Get(appSignatureV2Header), want)
+		}
 		if want := appCallSignature(targetToken, "caller", r.Method, r.URL.RequestURI(), timestamp); r.Header.Get(appSignatureHeader) != want {
 			t.Errorf("signature = %q, want %q", r.Header.Get(appSignatureHeader), want)
 		}
@@ -58,7 +66,6 @@ func TestAppFetchSignsCallerAndForwards(t *testing.T) {
 		if r.Header.Get(spinClientAddrHeader) == "" {
 			t.Error("spin-client-addr is empty")
 		}
-		body, _ := io.ReadAll(r.Body)
 		if string(body) != `{"value":"one"}` {
 			t.Errorf("body = %q", body)
 		}
@@ -80,6 +87,40 @@ func TestAppFetchSignsCallerAndForwards(t *testing.T) {
 	}
 	if rec.Body.String() != `{"ok":true}` {
 		t.Errorf("response = %q", rec.Body.String())
+	}
+}
+
+func TestAppFetchUntrustedOmitsLegacySignature(t *testing.T) {
+	s := testSupervisor()
+	s.cfg.tenantMode = tenantUntrusted
+	target, storage, targetToken := appFetchTarget(t, s, "target", []string{"caller"})
+	callerToken := storage.tokenFor("caller")
+
+	targetServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get(appSignatureHeader); got != "" {
+			t.Errorf("untrusted fetch sent a legacy signature: %q", got)
+		}
+		body, _ := io.ReadAll(r.Body)
+		bodyHash := appBodySHA256(body)
+		if got := r.Header.Get(appBodyHashHeader); got != bodyHash {
+			t.Errorf("body hash = %q, want %q", got, bodyHash)
+		}
+		timestamp := r.Header.Get(appTimestampHeader)
+		if want := appCallSignatureV2(targetToken, "caller", r.Method, r.URL.RequestURI(), timestamp, bodyHash); r.Header.Get(appSignatureV2Header) != want {
+			t.Errorf("v2 signature = %q, want %q", r.Header.Get(appSignatureV2Header), want)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer targetServer.Close()
+	target.port = targetServer.Listener.Addr().(*net.TCPAddr).Port
+	target.proxy = s.newProxy(target)
+
+	req := httptest.NewRequest(http.MethodPost, "/apps/target/v1/items", strings.NewReader(`{"value":"one"}`))
+	req.Header.Set("Authorization", "Bearer "+callerToken)
+	rec := httptest.NewRecorder()
+	s.handleAppFetch(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("fetch = %d: %s", rec.Code, rec.Body.String())
 	}
 }
 

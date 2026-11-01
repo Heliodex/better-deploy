@@ -3,6 +3,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -20,8 +21,12 @@ const (
 	AppCallerHeader = "X-WT-App-Caller"
 	// AppTimestampHeader carries the signature timestamp.
 	AppTimestampHeader = "X-WT-App-Timestamp"
-	// AppSignatureHeader carries the HMAC over caller, method, path and timestamp.
+	// AppSignatureHeader carries the legacy HMAC over caller, method, path and timestamp.
 	AppSignatureHeader = "X-WT-App-Signature"
+	// AppSignatureV2Header carries the HMAC over the caller, method, path, timestamp and body digest.
+	AppSignatureV2Header = "X-WT-App-Signature-V2"
+	// AppBodyHashHeader carries the SHA-256 of the forwarded body.
+	AppBodyHashHeader = "X-WT-App-Body-SHA256"
 	// RequestIDHeader carries a request identifier across proxied and outgoing requests.
 	RequestIDHeader = "X-Request-Id"
 
@@ -30,6 +35,8 @@ const (
 	appTokenEnv     = "WT_APP_TOKEN"
 	appURLEnvPrefix = "WT_APP_URL_"
 	appCallMaxSkew  = 5 * time.Minute
+	// maxAppCallBody matches the supervisor's app-fetch body cap.
+	maxAppCallBody = 8 << 20
 )
 
 // AppName returns the current app's name as set by the supervisor.
@@ -75,11 +82,13 @@ func NewAppRequest(ctx context.Context, method, target, path string, body io.Rea
 }
 
 // Caller verifies the supervisor's signature and returns the calling app. It rejects missing, stale or tampered identity headers.
+// The request body is read to verify the v2 body digest and then restored for the handler, so call it before reading the body.
 func Caller(r *http.Request) (string, bool) {
 	caller := r.Header.Get(AppCallerHeader)
 	timestamp := r.Header.Get(AppTimestampHeader)
-	signature := r.Header.Get(AppSignatureHeader)
-	if caller == "" || timestamp == "" || signature == "" {
+	legacy := r.Header.Get(AppSignatureHeader)
+	v2 := r.Header.Get(AppSignatureV2Header)
+	if caller == "" || timestamp == "" || (legacy == "" && v2 == "") {
 		return "", false
 	}
 	stamp, err := time.Parse(time.RFC3339Nano, timestamp)
@@ -93,14 +102,41 @@ func Caller(r *http.Request) (string, bool) {
 	if key == "" {
 		return "", false
 	}
+	var body []byte
+	if r.Body != nil {
+		body, err = io.ReadAll(io.LimitReader(r.Body, maxAppCallBody+1))
+		if err != nil || len(body) > maxAppCallBody {
+			return "", false
+		}
+		r.Body = io.NopCloser(bytes.NewReader(body))
+	}
+	bodyHash := appBodySHA256(body)
+	if v2 != "" {
+		if !hmac.Equal([]byte(r.Header.Get(AppBodyHashHeader)), []byte(bodyHash)) {
+			return "", false
+		}
+		expected := appCallSignatureV2(key, caller, r.Method, r.URL.RequestURI(), timestamp, bodyHash)
+		return caller, hmac.Equal([]byte(v2), []byte(expected))
+	}
 	expected := appCallSignature(key, caller, r.Method, r.URL.RequestURI(), timestamp)
-	return caller, hmac.Equal([]byte(signature), []byte(expected))
+	return caller, hmac.Equal([]byte(legacy), []byte(expected))
 }
 
 func appCallSignature(key, caller, method, path, timestamp string) string {
 	mac := hmac.New(sha256.New, []byte(key))
 	_, _ = io.WriteString(mac, caller+"\n"+method+"\n"+path+"\n"+timestamp)
 	return hex.EncodeToString(mac.Sum(nil))
+}
+
+func appCallSignatureV2(key, caller, method, path, timestamp, bodyHash string) string {
+	mac := hmac.New(sha256.New, []byte(key))
+	_, _ = io.WriteString(mac, caller+"\n"+method+"\n"+path+"\n"+timestamp+"\n"+bodyHash)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+func appBodySHA256(body []byte) string {
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])
 }
 
 func appURLEnvName(name string) string {
