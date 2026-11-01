@@ -141,7 +141,7 @@ func (s *supervisor) handleAppFetch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	caller, ok := s.storage.appForToken(bearerToken(r))
-	if !ok {
+	if !ok || s.lookup(caller) == nil {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="wt-app-fetch"`)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return

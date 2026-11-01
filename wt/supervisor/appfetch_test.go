@@ -15,6 +15,7 @@ func appFetchTarget(t *testing.T, s *supervisor, name string, allow []string) (*
 	storage := &storageServer{tokens: map[string]string{}}
 	s.storage = storage
 	token := storage.tokenFor(name)
+	s.apps["caller"] = &app{name: "caller"}
 	a := &app{
 		name:  name,
 		cfg:   appConfig{Host: name + ".localhost", AllowCallers: allow},
