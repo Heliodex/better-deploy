@@ -5,6 +5,12 @@ import (
 	"testing"
 )
 
+func TestIdentitySignatureVector(t *testing.T) {
+	if got := identitySignature("identity-secret", "usr_1", "ada@example.com", "Ada", "admins,beta"); got != "4eb999754e66af1d072d352fd3504b1fb6f404e7bfa414a0aec935fd5eebea49" {
+		t.Errorf("identity signature = %s", got)
+	}
+}
+
 func TestUserFromRequest(t *testing.T) {
 	t.Setenv(identitySecretEnv, "identity-secret")
 	groups := "admins,beta"

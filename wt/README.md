@@ -178,6 +178,17 @@ POST /_wt/identity/password              app host: {"currentPassword","newPasswo
 
 On every proxied request to a platform app, the supervisor strips any client-supplied `X-WT-User-*` headers and the `wt_user` cookie, then injects `X-WT-User-Id`, `X-WT-User-Email`, `X-WT-User-Name`, `X-WT-User-Groups` and a `X-WT-User-Signature` HMAC. The app verifies them with `app.UserFromRequest(r)` using `WT_IDENTITY_SECRET`; the key is derived per app, so one app cannot forge another app's user headers. Apps that do not opt in receive neither the user headers nor the session cookie.
 
+```go
+user, ok := app.UserFromRequest(r)
+if !ok {
+    app.WriteError(w, http.StatusUnauthorized, "sign in required")
+    return
+}
+// user.ID, user.Email, user.Name and user.Groups are verified.
+```
+
+The browser signs in with `POST /v1/login`, reads `GET /v1/me` for the current user and CSRF token, and sends `X-CSRF-Token` on logout and password change. Static SvelteKit pages should fetch `GET /v1/me` after hydration and keep the user in client state; there is no server-side load.
+
 ## Observability
 
 `GET /metrics` (admin only) returns hand-written Prometheus text: `wt_requests_total{app,method,status}`, request duration sum/count, `wt_inflight_requests`, storage operation counts and duration by read/write pool and result, deploy/backup/job outcome counters, and per-app `wt_app_cpu_percent`, `wt_app_memory_bytes`, `wt_app_ready` and `wt_app_disk_bytes`. It has no background scrape goroutine and opens no network listener beyond the admin API.

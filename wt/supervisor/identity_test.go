@@ -222,6 +222,12 @@ func TestIdentityAdminUsers(t *testing.T) {
 	}
 }
 
+func TestIdentitySignatureVector(t *testing.T) {
+	if got := identityUserSignature("identity-secret", "usr_1", "ada@example.com", "Ada", "admins,beta"); got != "4eb999754e66af1d072d352fd3504b1fb6f404e7bfa414a0aec935fd5eebea49" {
+		t.Errorf("identity signature = %s", got)
+	}
+}
+
 func TestIdentityProxyRouting(t *testing.T) {
 	s, _, _ := testIdentitySupervisor(t)
 	req := httptest.NewRequest(http.MethodPost, "http://demo.localhost/_wt/identity/login", strings.NewReader(`{"email":"ada@example.com","password":"correct horse battery"}`))
