@@ -77,6 +77,43 @@ func minimalEnv() []string {
 	return env
 }
 
+// mergeEnv combines base and override with override winning for duplicate keys.
+// execve keeps duplicate entries, and libc getenv returns the first one, so passing minimalEnv and the app env as two slices would silently ignore an app's attempt to override PATH, HOME or TMPDIR.
+func mergeEnv(base, override []string) []string {
+	values := make(map[string]string, len(base)+len(override))
+	for _, pair := range base {
+		if key, value, ok := strings.Cut(pair, "="); ok {
+			values[key] = value
+		}
+	}
+	for _, pair := range override {
+		if key, value, ok := strings.Cut(pair, "="); ok {
+			values[key] = value
+		}
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	merged := make([]string, 0, len(keys))
+	for _, key := range keys {
+		merged = append(merged, key+"="+values[key])
+	}
+	return merged
+}
+
+// stripEnv removes one key, used for the internal namespace plan before the app environment reaches wasmtime.
+func stripEnv(env []string, key string) []string {
+	out := env[:0]
+	for _, pair := range env {
+		if !strings.HasPrefix(pair, key+"=") {
+			out = append(out, pair)
+		}
+	}
+	return out
+}
+
 func sortedKeys(values map[string]string) []string {
 	keys := make([]string, 0, len(values))
 	for key := range values {

@@ -50,6 +50,7 @@ type config struct {
 	dataQuotaMode, setquota, findmnt, dataQuotaFS              string
 	appUIDBase                                                 int
 	ipv6Egress                                                 bool
+	appNamespaces, appSeccomp                                  bool
 	cacheMaxBytes                                              int64
 	diskBudgetBytes                                            int64
 	accessLog                                                  bool
@@ -132,6 +133,7 @@ type app struct {
 
 	slots          chan struct{}
 	wasmEpoch      bool
+	workPID        int
 	healthOK       bool
 	ready          bool
 	healthFailures int
@@ -210,6 +212,9 @@ func (s *supervisor) info(a *app) appInfo {
 	info.UID = a.uid
 	if a.cmd != nil && a.cmd.Process != nil && !a.exited {
 		info.PID = a.cmd.Process.Pid
+		if a.workPID > 0 {
+			info.PID = a.workPID
+		}
 	}
 	a.mu.Unlock()
 	info.LastError = s.redactAppText(a.name, lastError)
@@ -537,6 +542,8 @@ func parseConfig() config {
 	flag.StringVar(&cfg.dataQuotaFS, "data-quota-fs", cfg.dataQuotaFS, "filesystem or mount point for per-uid quotas (default: resolve WT_STATE_DIR with findmnt)")
 	flag.BoolVar(&cfg.ipv6Egress, "ipv6-egress", cfg.ipv6Egress, "reject IPv6 egress from untrusted app uids")
 	flag.IntVar(&cfg.appUIDBase, "app-uid-base", cfg.appUIDBase, "first allocated uid/gid for apps in untrusted mode")
+	flag.BoolVar(&cfg.appNamespaces, "app-namespaces", cfg.appNamespaces, "run apps in user, PID, mount, IPC and UTS namespaces (default on in untrusted mode)")
+	flag.BoolVar(&cfg.appSeccomp, "app-seccomp", cfg.appSeccomp, "install the app seccomp filter (default on in untrusted mode)")
 	flag.Parse()
 
 	if cfg.storageMigrationTimeout < minStorageMigrationTimeout || cfg.storageMigrationTimeout > maxStorageMigrationTimeout {
@@ -550,6 +557,12 @@ func parseConfig() config {
 	cfg.tenantMode = strings.ToLower(strings.TrimSpace(cfg.tenantMode))
 	if err := validateTenantConfig(cfg); err != nil {
 		log.Fatalf("%v", err)
+	}
+	if err := validateIsolationConfig(cfg); err != nil {
+		log.Fatalf("%v", err)
+	}
+	if cfg.appNamespaces && !cfg.untrusted() && os.Geteuid() == 0 {
+		log.Printf("warning: app namespaces in trusted mode need a non-root supervisor; launches will fail")
 	}
 	if err := validateAppFetchListen(cfg.appFetchListen); err != nil {
 		log.Fatalf("%v", err)
@@ -569,7 +582,7 @@ func parseConfig() config {
 		log.Printf("warning: WT_DATA_QUOTA_MODE=setquota is ignored in trusted mode; disk_mb stays a report")
 	}
 	if cfg.untrusted() {
-		log.Printf("untrusted tenant mode: per-app uid, cgroup and network isolation are required")
+		log.Printf("untrusted tenant mode: per-app uid, cgroup and network isolation are required (namespaces=%t seccomp=%t)", cfg.appNamespaces, cfg.appSeccomp)
 		if os.Geteuid() != 0 {
 			log.Printf("warning: untrusted tenant mode needs root; apps will refuse to launch")
 		}
@@ -681,6 +694,11 @@ func startSupervisor(cfg config) *supervisor {
 	}
 	if err := recoverRollbacks(cfg.stateDir, s.backups); err != nil {
 		log.Fatalf("rollback recovery: %v", err)
+	}
+	if cfg.appNamespaces {
+		if err := resetNamespaceRoots(cfg.stateDir, cfg.untrusted()); err != nil {
+			log.Fatalf("%v", err)
+		}
 	}
 	if err := s.loadApps(); err != nil {
 		log.Fatalf("load apps: %v", err)
@@ -803,6 +821,10 @@ func serve(s *supervisor) {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == nsInitArg {
+		nsInitMain(os.Args[2:])
+		return
+	}
 	log.SetFlags(log.LstdFlags | log.LUTC)
 	serve(startSupervisor(parseConfig()))
 }

@@ -61,6 +61,21 @@ func validateTenantConfig(cfg config) error {
 	}
 }
 
+// validateIsolationConfig makes the namespace and seccomp boundaries mandatory in untrusted mode.
+// They can be disabled only for trusted apps, where the operator has already accepted that the code is not hostile.
+func validateIsolationConfig(cfg config) error {
+	if !cfg.untrusted() {
+		return nil
+	}
+	if !cfg.appNamespaces {
+		return fmt.Errorf("WT_APP_NAMESPACES=off is not allowed in %s mode", tenantUntrusted)
+	}
+	if !cfg.appSeccomp {
+		return fmt.Errorf("WT_APP_SECCOMP=off is not allowed in %s mode", tenantUntrusted)
+	}
+	return nil
+}
+
 func env(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
@@ -102,6 +117,7 @@ func envStorageMigrationTimeout() time.Duration {
 }
 
 func configFromEnv() config {
+	untrusted := strings.EqualFold(strings.TrimSpace(env("WT_TENANT_MODE", tenantTrusted)), tenantUntrusted)
 	return config{
 		appsDir:             env("WT_APPS_DIR", "./apps"),
 		stateDir:            env("WT_STATE_DIR", "./state"),
@@ -130,6 +146,8 @@ func configFromEnv() config {
 		dataQuotaFS:         os.Getenv("WT_DATA_QUOTA_FS"),
 		appUIDBase:          int(envInt64("WT_APP_UID_BASE", 20000)),
 		ipv6Egress:          envBool("WT_IPV6_EGRESS", true),
+		appNamespaces:       envBool("WT_APP_NAMESPACES", untrusted),
+		appSeccomp:          envBool("WT_APP_SECCOMP", untrusted),
 		diskBudgetBytes:     envInt64("WT_DISK_BUDGET_MB", 0) << 20,
 
 		storageMigrationTimeout: envStorageMigrationTimeout(),

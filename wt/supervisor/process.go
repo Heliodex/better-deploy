@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"log"
@@ -14,8 +15,9 @@ import (
 	"time"
 )
 
-// appArgs builds the wasmtime argv and the process environment separately. Only secret names go into argv, so values are not visible in /proc/<pid>/cmdline.
-func (s *supervisor) appArgs(a *app, source string) (args []string, env []string, err error) {
+// appArgsFor rewrites the bundle, /data and tmp paths for a namespace launch.
+// The helper pivots into a root where the bundle is /app and the state dir is /data, so the host paths must not leak into wasmtime's argv.
+func (s *supervisor) appArgsFor(a *app, source string, namespaced bool) (args []string, env []string, err error) {
 	a.mu.Lock()
 	cfg := a.cfg
 	epoch := a.wasmEpoch
@@ -38,8 +40,11 @@ func (s *supervisor) appArgs(a *app, source string) (args []string, env []string
 			args = append(args, "-W", "timeout="+cfg.requestTimeout.String())
 		}
 	}
-	stateDir := filepath.Join(s.cfg.stateDir, a.name)
-	args = append(args, "--dir", stateDir+"::/data")
+	dirSpec := filepath.Join(s.cfg.stateDir, a.name) + "::/data"
+	if namespaced {
+		dirSpec = "/data::/data"
+	}
+	args = append(args, "--dir", dirSpec)
 
 	envIndex := map[string]int{}
 	setEnv := func(key, value string) {
@@ -50,6 +55,11 @@ func (s *supervisor) appArgs(a *app, source string) (args []string, env []string
 		envIndex[key] = len(env)
 		args = append(args, "--env", key)
 		env = append(env, key+"="+value)
+	}
+	if namespaced {
+		// These paths exist inside the minimal root. App config can override them through the loop below.
+		setEnv("TMPDIR", "/tmp")
+		setEnv("HOME", "/data")
 	}
 	for _, key := range sortedKeys(cfg.Env) {
 		value := cfg.Env[key]
@@ -86,7 +96,16 @@ func (s *supervisor) appArgs(a *app, source string) (args []string, env []string
 			setEnv(appURLEnvName(name), s.fetch.appURL(name))
 		}
 	}
+	if namespaced {
+		source = "/app/main.cwasm"
+	}
 	return append(args, source), env, nil
+}
+
+// appArgs builds the wasmtime argv and the process environment separately.
+// Only secret names go into argv, so values are not visible in /proc/<pid>/cmdline.
+func (s *supervisor) appArgs(a *app, source string) (args []string, env []string, err error) {
+	return s.appArgsFor(a, source, false)
 }
 
 // waitForPort waits for wasmtime to report the loopback port it bound.
@@ -321,7 +340,8 @@ func (s *supervisor) launch(a *app, source string) error {
 	}()
 
 	// Resolve env references before creating a cgroup or process, so a missing secret aborts cleanly.
-	args, processEnv, err := s.appArgs(a, source)
+	namespaced := s.cfg.appNamespaces
+	args, processEnv, err := s.appArgsFor(a, source, namespaced)
 	if err != nil {
 		a.mu.Lock()
 		a.lastError = err.Error()
@@ -340,6 +360,26 @@ func (s *supervisor) launch(a *app, source string) error {
 		return err
 	}
 
+	var ns *nsLaunch
+	var planEnv string
+	if namespaced {
+		ns, err = s.prepareNamespaces(a, iso)
+		if err != nil {
+			s.releaseIsolation(a, iso)
+			a.mu.Lock()
+			a.lastError = err.Error()
+			a.mu.Unlock()
+			return err
+		}
+		iso.nsRoot = ns.plan.Root
+		planData, marshalErr := json.Marshal(ns.plan)
+		if marshalErr != nil {
+			s.releaseIsolation(a, iso)
+			return fmt.Errorf("encode namespace plan: %w", marshalErr)
+		}
+		planEnv = nsPlanEnv + "=" + string(planData)
+	}
+
 	finder := newPortFinder()
 	logging := log.New(os.Stderr, "["+a.name+"] ", 0).Writer()
 	recent := newLogRing()
@@ -348,17 +388,56 @@ func (s *supervisor) launch(a *app, source string) error {
 		writers = append(writers, a.logs)
 	}
 	out := io.MultiWriter(writers...)
-	cmd := exec.Command(s.cfg.wasmtime, args...)
-	cmd.Env = append(minimalEnv(), processEnv...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGTERM}
-	if credential := appCredential(iso); credential != nil {
-		cmd.SysProcAttr.Credential = credential
+
+	var cmd *exec.Cmd
+	var pidReader, goWriter *os.File
+	if namespaced {
+		cmd = exec.Command("/proc/self/exe", append([]string{nsInitArg}, args...)...)
+		cmd.Env = append(stripEnv(mergeEnv(minimalEnv(), processEnv), nsPlanEnv), planEnv)
+		cmd.SysProcAttr = namespaceSysProcAttr(ns.hostID, ns.hostGID, ns.plan.ClearGroups)
+		var pidWriter, goReader *os.File
+		pidReader, pidWriter, err = os.Pipe()
+		if err != nil {
+			s.releaseIsolation(a, iso)
+			return fmt.Errorf("pid pipe: %w", err)
+		}
+		goReader, goWriter, err = os.Pipe()
+		if err != nil {
+			_ = pidReader.Close()
+			_ = pidWriter.Close()
+			s.releaseIsolation(a, iso)
+			return fmt.Errorf("start pipe: %w", err)
+		}
+		cmd.ExtraFiles = []*os.File{pidWriter, goReader}
+	} else {
+		cmd = exec.Command(s.cfg.wasmtime, args...)
+		cmd.Env = mergeEnv(minimalEnv(), processEnv)
+		cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGTERM}
+		if credential := appCredential(iso); credential != nil {
+			cmd.SysProcAttr.Credential = credential
+		}
 	}
 	cmd.Stdout = out
 	cmd.Stderr = out
 	if err := cmd.Start(); err != nil {
+		if pidReader != nil {
+			_ = pidReader.Close()
+		}
+		if goWriter != nil {
+			_ = goWriter.Close()
+		}
+		for _, file := range cmd.ExtraFiles {
+			_ = file.Close()
+		}
 		s.releaseIsolation(a, iso)
-		return fmt.Errorf("start wasmtime: %w", err)
+		return fmt.Errorf("start app: %w", err)
+	}
+	if len(cmd.ExtraFiles) > 0 {
+		for _, file := range cmd.ExtraFiles {
+			_ = file.Close()
+		}
+		cmd.ExtraFiles = nil
+		go watchNamespaceChild(a, cmd, pidReader)
 	}
 
 	done := make(chan struct{})
@@ -366,6 +445,7 @@ func (s *supervisor) launch(a *app, source string) error {
 	a.cmd = cmd
 	a.done = done
 	a.exited = false
+	a.workPID = 0
 	a.started = time.Now().UTC()
 	if a.timer != nil {
 		a.timer.Stop()
@@ -373,8 +453,15 @@ func (s *supervisor) launch(a *app, source string) error {
 	}
 	a.mu.Unlock()
 
+	nsRoot := ""
+	if ns != nil {
+		nsRoot = ns.plan.Root
+	}
 	go func() {
 		err := cmd.Wait()
+		if nsRoot != "" {
+			_ = os.RemoveAll(nsRoot)
+		}
 		a.mu.Lock()
 		if a.cmd != cmd {
 			a.mu.Unlock()
@@ -383,6 +470,7 @@ func (s *supervisor) launch(a *app, source string) error {
 		}
 		a.cmd = nil
 		a.exited = true
+		a.workPID = 0
 		a.healthOK = false
 		a.ready = false
 		if err != nil {
@@ -412,6 +500,10 @@ func (s *supervisor) launch(a *app, source string) error {
 
 	// A failed launch after the process started must leave no process, cgroup or firewall rule behind.
 	fail := func(err error) error {
+		if goWriter != nil {
+			_ = goWriter.Close()
+			goWriter = nil
+		}
 		a.mu.Lock()
 		a.lastError = err.Error()
 		a.mu.Unlock()
@@ -419,7 +511,7 @@ func (s *supervisor) launch(a *app, source string) error {
 		s.releaseIsolation(a, iso)
 		return err
 	}
-	if s.cfg.untrusted() {
+	if s.cfg.untrusted() && !namespaced {
 		if err := applyProcessLimits(cmd.Process.Pid, cfg); err != nil {
 			return fail(fmt.Errorf("apply rlimits: %w", err))
 		}
@@ -428,6 +520,14 @@ func (s *supervisor) launch(a *app, source string) error {
 		if err := s.cgroups.addPID(a.name, cmd.Process.Pid); err != nil {
 			return fail(err)
 		}
+	}
+	// The helper waits for this byte before it starts wasmtime, so the runtime inherits the cgroup at fork time.
+	if goWriter != nil {
+		if _, err := goWriter.Write([]byte{1}); err != nil {
+			return fail(fmt.Errorf("release app start: %w", err))
+		}
+		_ = goWriter.Close()
+		goWriter = nil
 	}
 	if err := s.waitForPort(a, finder, done, deadline); err != nil {
 		return fail(withLaunchLog(source, recent, err))

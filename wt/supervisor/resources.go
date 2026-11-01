@@ -242,6 +242,9 @@ func (a *app) sampleResources(now time.Time) {
 	started := a.started
 	if a.cmd != nil && a.cmd.Process != nil && !a.exited {
 		pid = a.cmd.Process.Pid
+		if a.workPID > 0 {
+			pid = a.workPID
+		}
 	}
 	a.mu.Unlock()
 

@@ -11,8 +11,8 @@ import (
 )
 
 type launchIsolation struct {
-	uid, gid int
-	cgroup   string
+	uid, gid       int
+	cgroup, nsRoot string
 }
 
 // prepareLaunch gives an untrusted app its identity and cgroup before the process starts.
@@ -140,6 +140,9 @@ func (s *supervisor) releaseIsolation(a *app, iso *launchIsolation) {
 	s.removeAppEgress(a)
 	if iso != nil && iso.cgroup != "" {
 		s.removeAppCgroup(a)
+	}
+	if iso != nil && iso.nsRoot != "" {
+		_ = os.RemoveAll(iso.nsRoot)
 	}
 }
 
