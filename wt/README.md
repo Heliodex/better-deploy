@@ -424,12 +424,28 @@ Jobs are stored one JSON file per app under `WT_STATE_DIR/.jobs/<app>.json` (`07
 ```sh
 podman build -f wt/Containerfile -t wt-demo .
 podman run -d --name wt-demo -p 127.0.0.1:8080:8080 \
-  -e WT_TOKEN=dev -v "$PWD/wt-state:/var/lib/wt" wt-demo
+  --user 10001:10001 --read-only --cap-drop=ALL \
+  --security-opt no-new-privileges:true \
+  -e WT_TOKEN=dev -v wt-data:/var/lib/wt wt-demo
 ```
 
-The image is built entirely by `wt/Containerfile`: a Rust stage compiles wasmtime from the v50.0.0 source with `--no-default-features` and only the serve/run, component-model-async, pooling, GC/threads and WASI HTTP features, then strips it. The build images are pinned (`golang:1.27.3-alpine`, `rust:1.97-slim`, `oven/bun:1.4.4-alpine`) and CI also runs `govulncheck` and a production-only `bun audit`. There is no Cranelift or Winch in the serving image because it only deserializes `.cwasm` files. The musl build is static and the final stage is `scratch`, so the image is about **33 MB** (down from 168 MB with the full release on Debian).
+The image defaults to the non-root `wt` user (`10001:10001`). This is enough for trusted mode: the supervisor only writes under `/var/lib/wt`, binds an unprivileged port and needs no capabilities. `/var/lib/wt` is a volume so the root filesystem can be read-only. A bind mount must be owned by `10001:10001`; a named volume inherits ownership from the image. The hardened defaults are also in `wt/compose.yaml`:
 
-The C API tarball is a shared library for embedding, not a server, and still contains the compiler, so it does not replace this runtime-only CLI. The image runs as root for the prototype; the volume at `/var/lib/wt` holds apps and state.
+```sh
+podman compose -f wt/compose.yaml up -d
+```
+
+Build for ARM with the matching platform; the Rust stage selects the wasmtime target from `TARGETARCH`, and the final image sets `WT_WASMTIME_TARGET` to the matching musl triple:
+
+```sh
+podman build --platform linux/arm64 -f wt/Containerfile -t wt-demo .
+```
+
+Untrusted tenant mode is the exception: it needs root to create per-app UIDs, cgroups and firewall rules. Run that mode with `--user 0:0`, the cgroup hierarchy mounted where `WT_CGROUP_ROOT` expects it, and the capabilities it needs (`SETUID`, `SETGID`, `NET_ADMIN`; some hosts also need `SYS_ADMIN` for cgroup delegation). Keep `no-new-privileges` and drop every capability you do not need there too.
+
+The image is built entirely by `wt/Containerfile`: a Rust stage compiles wasmtime from the v50.0.0 source with `--no-default-features` and only the serve/run, component-model-async, pooling, GC/threads and WASI HTTP features, then strips it. The build images are pinned (`golang:1.27.3-alpine`, `rust:1.97-slim`, `alpine:3.22.2`, `oven/bun:1.4.4-alpine`) and CI also runs `govulncheck` and a production-only `bun audit`. There is no Cranelift or Winch in the serving image because it only deserializes `.cwasm` files. The musl build is static and the final stage is `scratch`, so the image is about **33 MB** (down from 168 MB with the full release on Debian).
+
+The C API tarball is a shared library for embedding, not a server, and still contains the compiler, so it does not replace this runtime-only CLI. The final image carries only the static supervisor, wasmtime, CA certificates, `/etc/passwd` and `/etc/group`; the volume at `/var/lib/wt` holds apps and state.
 
 On Orchard, create a GitHub-built deployment from this repository with `dockerfilePath: wt/Containerfile`, `buildFromRoot: true`, port `8080`, and a `WT_TOKEN` environment variable. Mount a PVC at `/var/lib/wt` so apps and the storage databases survive a pod roll. Point one ingress at port `8080` for the supervisor host and, if you use wildcard app hosts, add a wildcard DNS name and certificate such as `*.apps.example.com` to the same ingress. Then deploy with `--host https://<ingress-host> --app-host <ingress-host>`, or add `host: "*.apps.example.com"`/`hosts` aliases in `app.json` so a new app does not need a new ingress. The supervisor routes by `Host`, so `/apps/...` (the deploy API) and `/` (the app) share the same ingress host; exact app hosts still need their own ingress unless a wildcard covers them.
 

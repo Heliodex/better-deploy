@@ -22,7 +22,10 @@ echo "e2e-image: building $image"
 podman build -f "$root/wt/Containerfile" -t "$image" "$root"
 
 echo "e2e-image: starting the container"
-container=$(podman run -d --rm -p "127.0.0.1:$port:8080" -e "WT_TOKEN=$token" "$image")
+container=$(podman run -d --rm -p "127.0.0.1:$port:8080" \
+	--read-only --cap-drop=ALL --security-opt no-new-privileges:true \
+	--tmpfs /var/lib/wt:rw,size=512m \
+	-e "WT_TOKEN=$token" "$image")
 i=0
 until curl -fsS "http://127.0.0.1:$port/healthz" >/dev/null 2>&1; do
 	i=$((i + 1))

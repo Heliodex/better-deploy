@@ -1,8 +1,12 @@
 # syntax=docker/dockerfile:1
 #
 # The wt runtime image: a runtime-only wasmtime and the supervisor. Apps are uploaded later; the image contains no applications.
+# TARGETARCH is supplied by BuildKit; amd64 and arm64 are supported.
+
+ARG TARGETARCH=amd64
 
 FROM golang:1.27.3-alpine AS supervisor
+ARG TARGETARCH=amd64
 WORKDIR /src
 RUN mkdir -p /out
 COPY --from=docker.io/oven/bun:1.4.4-alpine /usr/local/bin/bun /usr/local/bin/bun
@@ -10,29 +14,47 @@ RUN apk add --no-cache libstdc++ libgcc
 COPY wt/supervisor/go.mod wt/supervisor/go.sum ./
 RUN go mod download
 COPY wt/supervisor/ ./
-RUN go generate ./... && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+RUN go generate ./... && CGO_ENABLED=0 GOOS=linux GOARCH="${TARGETARCH}" \
     go build -trimpath -ldflags="-s -w" -o /out/wt-supervisor .
 
-# Build wasmtime without Cranelift/Winch: the serving side only deserializes the .cwasm files produced by wt-deploy. The musl build is fully static, so the final image can be scratch.
+# Build wasmtime without Cranelift/Winch: the serving side only deserializes the .cwasm files produced by wt-deploy.
+# The musl build is fully static, so the final image can be scratch. The Rust stage runs for the target platform,
+# so arm64 builds use the arm64 toolchain and wasmtime target.
 FROM rust:1.97-slim AS wasmtime
-
+ARG TARGETARCH=amd64
 ARG WASMTIME_VERSION=v50.0.0
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends build-essential cmake pkg-config curl ca-certificates xz-utils binutils musl-tools \
  && rm -rf /var/lib/apt/lists/*
-RUN rustup target add x86_64-unknown-linux-musl
+RUN case "${TARGETARCH}" in \
+      amd64) echo x86_64-unknown-linux-musl > /tmp/rust-target ;; \
+      arm64) echo aarch64-unknown-linux-musl > /tmp/rust-target ;; \
+      *) echo "unsupported TARGETARCH ${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+ && rustup target add "$(cat /tmp/rust-target)"
 
 WORKDIR /src
 RUN curl -fsSL "https://github.com/bytecodealliance/wasmtime/archive/refs/tags/${WASMTIME_VERSION}.tar.gz" | tar -xz
 WORKDIR /src/wasmtime-50.0.0
-RUN cargo build --release --locked --target x86_64-unknown-linux-musl --bin wasmtime --no-default-features \
-    --features "serve,run,component-model-async,pooling-allocator,threads,gc,gc-drc,gc-null,gc-copying,stack-switching,logging,clap/default,clap/wrap_help"
-RUN strip -s target/x86_64-unknown-linux-musl/release/wasmtime
+RUN target=$(cat /tmp/rust-target) \
+ && upper=$(echo "$target" | tr '[:lower:]-' '[:upper:]_') \
+ && env "CARGO_TARGET_${upper}_LINKER=musl-gcc" cargo build --release --locked --target "$target" --bin wasmtime --no-default-features \
+      --features "serve,run,component-model-async,pooling-allocator,threads,gc,gc-drc,gc-null,gc-copying,stack-switching,logging,clap/default,clap/wrap_help"
+RUN target=$(cat /tmp/rust-target) && strip -s "target/${target}/release/wasmtime" && mkdir -p /out && cp "target/${target}/release/wasmtime" /out/wasmtime
 
-FROM scratch
+# Create the default non-root account and writable state directories in a tiny stage so the scratch image can copy them with ownership.
+FROM alpine:3.22.2 AS runtime
+RUN addgroup -g 10001 -S wt \
+ && adduser -u 10001 -S -G wt -h /var/lib/wt wt \
+ && mkdir -p /var/lib/wt/apps /var/lib/wt/state \
+ && chown -R 10001:10001 /var/lib/wt
 
-COPY --from=wasmtime /src/wasmtime-50.0.0/target/x86_64-unknown-linux-musl/release/wasmtime /usr/local/bin/wasmtime
+FROM scratch AS common
+
+COPY --from=runtime /etc/passwd /etc/group /etc/
+COPY --from=runtime --chown=10001:10001 /var/lib/wt /var/lib/wt
+COPY --from=wasmtime /out/wasmtime /usr/local/bin/wasmtime
 COPY --from=wasmtime /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=supervisor /out/wt-supervisor /usr/local/bin/wt-supervisor
 
@@ -40,12 +62,20 @@ ENV WT_APPS_DIR=/var/lib/wt/apps \
     WT_STATE_DIR=/var/lib/wt/state \
     WT_LISTEN=0.0.0.0:8080 \
     WT_WASMTIME=/usr/local/bin/wasmtime \
-    WT_WASMTIME_TARGET=x86_64-unknown-linux-musl \
     WT_APPS_DOMAIN=localhost \
     TMPDIR=/var/lib/wt
 
 WORKDIR /var/lib/wt
 EXPOSE 8080
 VOLUME ["/var/lib/wt"]
+USER 10001:10001
 
 ENTRYPOINT ["/usr/local/bin/wt-supervisor"]
+
+FROM common AS runtime-amd64
+ENV WT_WASMTIME_TARGET=x86_64-unknown-linux-musl
+
+FROM common AS runtime-arm64
+ENV WT_WASMTIME_TARGET=aarch64-unknown-linux-musl
+
+FROM runtime-${TARGETARCH}
