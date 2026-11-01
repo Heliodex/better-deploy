@@ -1,0 +1,383 @@
+openapi: 3.1.0
+info:
+  title: wt supervisor API
+  version: "0.1.0"
+  description: >
+    Hand-maintained OpenAPI document for the supervisor's admin and app APIs.
+    Newer resources use camelCase. Legacy config, backup and job-enqueue request
+    fields still use the snake_case spellings shown here.
+servers:
+  - url: http://127.0.0.1:8080
+security:
+  - bearerAuth: []
+paths:
+  /apps:
+    get:
+      summary: List visible apps
+      responses:
+        "200":
+          description: Apps visible to the token
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AppInfo"
+  /apps/{name}:
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+    get:
+      summary: Read one app
+      responses:
+        "200":
+          description: App info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppInfo"
+    post:
+      summary: Deploy a bundle synchronously
+      parameters:
+        - name: If-None-Match
+          in: header
+          schema: { type: string }
+        - name: Idempotency-Key
+          in: header
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [artifact]
+              properties:
+                artifact:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: Deployed app info
+          headers:
+            ETag:
+              schema: { type: string }
+        "304":
+          description: Bundle already matches If-None-Match
+    delete:
+      summary: Remove an app, optionally purging state
+      parameters:
+        - name: purge
+          in: query
+          schema: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Removed
+  /apps/{name}/validate:
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+    post:
+      summary: Validate a bundle without installing it
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [artifact]
+              properties:
+                artifact:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: Validation result
+  /apps/{name}/config:
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+    get:
+      summary: Read runtime config
+      parameters:
+        - name: If-None-Match
+          in: header
+          schema: { type: string }
+      responses:
+        "200":
+          description: Runtime config
+          headers:
+            ETag:
+              schema: { type: string }
+        "304":
+          description: Config matches If-None-Match
+    patch:
+      summary: Patch runtime config
+      parameters:
+        - name: If-Match
+          in: header
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Updated config
+        "412":
+          description: ETag did not match
+  /apps/{name}/deployments:
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+    get:
+      summary: List deployment history
+      responses:
+        "200":
+          description: Deployment entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Deployment"
+  /apps/{name}/deployments/{id}:
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      summary: Read one deployment entry
+      responses:
+        "200":
+          description: Deployment entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Deployment"
+  /apps/{name}/jobs:
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+    get:
+      summary: List jobs
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, running, succeeded, failed, dead, canceled]
+      responses:
+        "200":
+          description: Jobs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Job"
+    post:
+      summary: Enqueue a durable job
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JobRequest"
+      responses:
+        "201":
+          description: Created job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+  /apps/{name}/jobs/{id}:
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      summary: Read one job
+      responses:
+        "200":
+          description: Job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+  /apps/{name}/jobs/{id}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      summary: Cancel a job
+      responses:
+        "200":
+          description: Canceled job
+  /apps/{name}/jobs/{id}/retry:
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      summary: Retry a failed, dead or canceled job
+      responses:
+        "200":
+          description: Requeued job
+  /apps/{name}/logs:
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+    get:
+      summary: Read a filtered log tail
+      parameters:
+        - $ref: "#/components/parameters/LogLevel"
+        - $ref: "#/components/parameters/LogSource"
+        - $ref: "#/components/parameters/LogQuery"
+      responses:
+        "200":
+          description: Matching lines
+  /apps/{name}/logs/export:
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+    get:
+      summary: Download all retained matching lines
+      parameters:
+        - $ref: "#/components/parameters/LogLevel"
+        - $ref: "#/components/parameters/LogSource"
+        - $ref: "#/components/parameters/LogQuery"
+        - name: format
+          in: query
+          schema: { type: string, enum: [text, jsonl], default: text }
+      responses:
+        "200":
+          description: Log export
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      responses:
+        "200":
+          description: Prometheus text
+          content:
+            text/plain:
+              schema: { type: string }
+  /auth/tokens:
+    get:
+      summary: List scoped token metadata
+      responses:
+        "200":
+          description: Tokens
+    post:
+      summary: Create a scoped token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, role]
+              properties:
+                name: { type: string }
+                role: { type: string, enum: [admin, deploy, read] }
+                apps:
+                  type: array
+                  items: { type: string }
+                expires_in: { type: string, examples: ["720h"] }
+      responses:
+        "201":
+          description: Created token; the bearer appears only here
+  /auth/tokens/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      summary: Revoke a scoped token
+      responses:
+        "204":
+          description: Revoked
+  /audit:
+    get:
+      summary: Read the audit log
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 200 }
+      responses:
+        "200":
+          description: Audit entries
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    AppName:
+      name: name
+      in: path
+      required: true
+      schema: { type: string }
+    LogLevel:
+      name: level
+      in: query
+      schema: { type: string, enum: [trace, debug, info, warn, error, fatal] }
+    LogSource:
+      name: source
+      in: query
+      schema: { type: string, enum: [app, supervisor] }
+    LogQuery:
+      name: q
+      in: query
+      schema: { type: string }
+  schemas:
+    AppInfo:
+      type: object
+      properties:
+        name: { type: string }
+        host: { type: string }
+        status: { type: string }
+        ready: { type: boolean }
+        currentDigest: { type: string }
+        lastError: { type: string }
+    Deployment:
+      type: object
+      properties:
+        id: { type: string }
+        digest: { type: string }
+        status: { type: string, enum: [success, failed] }
+        error: { type: string }
+        current: { type: boolean }
+        deployedAt: { type: string, format: date-time }
+    JobRequest:
+      type: object
+      required: [path]
+      properties:
+        path: { type: string, pattern: "^/" }
+        method: { type: string, enum: [GET, POST, PUT, PATCH, DELETE], default: POST }
+        body: { type: string }
+        headers:
+          type: object
+          additionalProperties: { type: string }
+        runAt: { type: string, format: date-time }
+        maxAttempts: { type: integer, minimum: 1, maximum: 20, default: 3 }
+        idempotencyKey: { type: string }
+    Job:
+      type: object
+      properties:
+        id: { type: string }
+        path: { type: string }
+        method: { type: string }
+        status: { type: string }
+        attempts: { type: integer }
+        maxAttempts: { type: integer }
+        runAt: { type: string, format: date-time }
+        lastError: { type: string }
+        statusCode: { type: integer }
