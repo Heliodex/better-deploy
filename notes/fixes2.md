@@ -13,6 +13,8 @@ The short assessment: the spine is right and unusually well executed for a proto
 - [x] **Per-app operation locks.** Deploy, config, lifecycle, backup restore, rollback and database import now serialize per app instead of globally. The shared artifact cache keeps its own mutex so concurrent per-app deploys cannot race its lookup, compile, install and prune steps.
 - [x] **Persistent deploy idempotency.** The 24-hour `Idempotency-Key` replay now lives beside the app's deployment history, survives restarts, keeps the newest 64 keys per app, and is cleared on delete. The in-memory map and its wholesale 512-entry clear are gone.
 - [x] **WAL and temp accounting.** Write connections set a quota-scaled `journal_size_limit` and `wal_autocheckpoint`. SQLite temp files go to a dedicated `WT_STORAGE_TMP_DIR`, and a global `WT_STORAGE_TEMP_BUDGET_MB` monitor rejects new storage requests with `507 temp_budget` while the shared directory is over budget. Stale `etilqs_*` files are removed at startup.
+- [x] **Invisible supervisor upgrades.** Apps are now children of one app-runner process with a liveness pipe. `SIGHUP` execs the supervisor binary in place while inheriting the storage and app-fetch listeners and the runner FD; the new supervisor reconnects, restores app tokens and adopts the running PIDs and ports. A real handover test verifies the app PID is unchanged.
+- [x] **Access-log defaults.** `WT_ACCESS_LOG` and `WT_ACCESS_LOG_EVERY` now populate `configFromEnv`; the previous zero default made `parseConfig` reject every normal startup with `access-log-every must be between 1 and 10000`.
 
 ## Do not regress
 
@@ -79,8 +81,12 @@ These are the choices that make this worth continuing. Keep them unless a replac
    - [x] Document that temp files are shared globally, are not part of a per-app `disk_mb`, and that one app's spill can block storage for all apps until the monitor clears the flag.
    - [ ] If true per-app temp attribution is needed, move SQLite into a separate process; in-process SQLite has one process-wide temp directory.
 
-9. [ ] **Make supervisor upgrades invisible.** `Pdeathsig` plus no adoption means every supervisor upgrade restarts the whole fleet. That is the weakest availability property in the platform.
-   - [ ] Try `exec` handover with inherited listeners, children kept alive, and a port/state file the new process reads to adopt them.
+9. [x] **Make supervisor upgrades invisible.** `Pdeathsig` plus no adoption meant every supervisor upgrade restarted the whole fleet.
+   - [x] Add one app-runner process that owns every wasmtime child, its log pipe and a liveness pipe. The supervisor connects over a Unix socket; the runner survives an `exec` and replays its app snapshot to the new supervisor.
+   - [x] Self-exec on `SIGHUP` with the storage and app-fetch listener FDs and the runner liveness FD in the environment. The public and admin listeners rebind in the new process.
+   - [x] Adopt running apps from the runner snapshot in `loadApps`, restoring the effective config, directory, port, child and work PIDs, UID, log file and storage/app-fetch token.
+   - [x] Tests cover runner start, output, port discovery, snapshot reconnect, liveness shutdown, supervisor launch through the runner, adoption, inherited listeners, and an opt-in real `SIGHUP` handover that checks the app PID is unchanged (`WT_HANDOVER_TEST=1`).
+   - [ ] Add a pre-flight new-binary check or a keeper so a failed `exec` cannot take the service down. The public and admin listeners still have a short accept gap, and in-flight requests on them and on the old storage server are dropped during handover.
 
 10. [ ] **Cover the app-to-app body.** The HMAC covers caller, method, path and timestamp, not the body. Fine for trusted apps, not for untrusted ones. Either sign the body or stop advertising the header as an integrity boundary.
 
