@@ -21,6 +21,22 @@ import (
 
 // TestMain doubles as a fake wasmtime: tests launch the test binary itself, and it serves health checks instead of running tests.
 func TestMain(m *testing.M) {
+	if len(os.Args) > 1 && os.Args[1] == runnerArg {
+		runnerMain()
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == nsInitArg {
+		nsInitMain(os.Args[2:])
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "--version" {
+		fmt.Println("wasmtime 99.0.0")
+		return
+	}
+	if os.Getenv("WT_TEST_SUPERVISOR") == "1" {
+		main()
+		return
+	}
 	for i, arg := range os.Args {
 		if arg != "--addr" || i+1 >= len(os.Args) {
 			continue

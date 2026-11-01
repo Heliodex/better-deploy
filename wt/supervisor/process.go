@@ -329,6 +329,134 @@ func (s *supervisor) restart(a *app) {
 	}
 }
 
+// launchRunner starts an app through the runner and then performs the same readiness, egress and migration checks as a directly launched process.
+func (s *supervisor) launchRunner(a *app, cfg appConfig, source string, iso *launchIsolation, ns *nsLaunch, args, processEnv []string, deadline time.Time) error {
+	namespaced := s.cfg.appNamespaces
+	finder := newPortFinder()
+	logging := log.New(os.Stderr, "["+a.name+"] ", 0).Writer()
+	recent := newLogRing()
+	writers := []io.Writer{finder, logging, recent}
+	if a.logs != nil {
+		writers = append(writers, a.logs)
+	}
+	out := io.MultiWriter(writers...)
+
+	configData, _ := json.Marshal(cfg)
+	request := runnerStartRequest{
+		Name:       a.name,
+		Dir:        a.dir,
+		Path:       s.cfg.wasmtime,
+		Args:       args,
+		Env:        mergeEnv(minimalEnv(), processEnv),
+		Config:     configData,
+		Namespaced: namespaced,
+		UID:        iso.uid,
+	}
+	if s.storage != nil {
+		request.StorageToken = s.storage.tokenFor(a.name)
+	}
+	if namespaced {
+		planData, err := json.Marshal(ns.plan)
+		if err != nil {
+			s.releaseIsolation(a, iso)
+			return fmt.Errorf("encode namespace plan: %w", err)
+		}
+		request.Plan = planData
+		request.HostID = ns.hostID
+		request.HostGID = ns.hostGID
+		request.AllowSetgroups = ns.plan.ClearGroups
+	}
+
+	stream, started, err := s.runner.Start(request)
+	if err != nil {
+		s.releaseIsolation(a, iso)
+		a.mu.Lock()
+		a.lastError = err.Error()
+		a.mu.Unlock()
+		return err
+	}
+	cmd := &exec.Cmd{Process: &os.Process{Pid: started.PID}}
+	done := make(chan struct{})
+	a.mu.Lock()
+	a.cmd = cmd
+	a.done = done
+	a.exited = false
+	a.workPID = started.WorkPID
+	a.port = 0
+	a.started = time.Now().UTC()
+	if a.timer != nil {
+		a.timer.Stop()
+		a.timer = nil
+	}
+	a.mu.Unlock()
+
+	nsRoot := ""
+	if ns != nil {
+		nsRoot = ns.plan.Root
+	}
+	go s.consumeRunnerStream(a, cmd, done, stream, out, nsRoot)
+
+	fail := func(err error) error {
+		a.mu.Lock()
+		a.lastError = err.Error()
+		a.mu.Unlock()
+		s.kill(a)
+		s.releaseIsolation(a, iso)
+		return err
+	}
+	if iso.cgroup != "" && s.cgroups != nil {
+		if err := s.cgroups.addPID(a.name, cmd.Process.Pid); err != nil {
+			return fail(err)
+		}
+	}
+	if namespaced {
+		if err := s.runner.Go(a.name); err != nil {
+			return fail(fmt.Errorf("release app start: %w", err))
+		}
+	}
+	if err := s.waitForPort(a, finder, done, deadline); err != nil {
+		return fail(withLaunchLog(source, recent, err))
+	}
+	if cfg.Network == "storage" {
+		if s.cfg.untrusted() {
+			if err := s.applyEgress(a); err != nil {
+				return fail(fmt.Errorf("egress rules: %w", err))
+			}
+		} else {
+			log.Printf("app %s: network storage in trusted mode has no per-app uid, so inherit-network stays unrestricted", a.name)
+		}
+	}
+	if cfg.Network != "none" {
+		a.mu.Lock()
+		port := a.port
+		a.mu.Unlock()
+		if err := s.migrateApp(a, port, done); err != nil {
+			if errors.Is(err, errNoMigrateEndpoint) {
+				log.Printf("app %s: no %s endpoint; using health readiness", a.name, migratePath)
+			} else {
+				return fail(withLaunchLog(source, recent, fmt.Errorf("storage migration: %w", err)))
+			}
+		}
+	}
+	if err := s.waitReady(a, done); err != nil {
+		return fail(withLaunchLog(source, recent, err))
+	}
+	proxy := s.newProxy(a)
+	a.mu.Lock()
+	host := a.cfg.Host
+	a.proxy = proxy
+	a.healthOK = true
+	a.ready = true
+	a.healthFailures = 0
+	a.nextHealth = time.Now().Add(a.cfg.probeInterval())
+	a.lastHealthy = time.Now().UTC()
+	a.lastError = ""
+	a.mu.Unlock()
+	log.Printf("app %s started on 127.0.0.1:%d (%s)", a.name, a.port, host)
+	s.broadcast()
+	return nil
+}
+
 func (s *supervisor) launch(a *app, source string) error {
 	a.mu.Lock()
 	a.starting = true
@@ -386,6 +514,10 @@ func (s *supervisor) launch(a *app, source string) error {
 			return fmt.Errorf("encode namespace plan: %w", marshalErr)
 		}
 		planEnv = nsPlanEnv + "=" + string(planData)
+	}
+
+	if s.runner != nil {
+		return s.launchRunner(a, cfg, source, iso, ns, args, processEnv, deadline)
 	}
 
 	finder := newPortFinder()
@@ -620,6 +752,130 @@ func (s *supervisor) spawn(name, dir string, cfg appConfig) (*app, error) {
 	return a, nil
 }
 
+// finishRunnerExit runs the same bookkeeping as a directly waited process, but the exit comes from the runner after it reaps the app.
+func (s *supervisor) finishRunnerExit(a *app, cmd *exec.Cmd, done chan struct{}, nsRoot string, exitErr error) {
+	if nsRoot != "" {
+		_ = os.RemoveAll(nsRoot)
+	}
+	a.mu.Lock()
+	if a.cmd != cmd {
+		a.mu.Unlock()
+		close(done)
+		return
+	}
+	a.cmd = nil
+	a.exited = true
+	a.workPID = 0
+	a.healthOK = false
+	a.ready = false
+	if exitErr != nil {
+		a.lastError = exitErr.Error()
+	}
+	ran := time.Since(a.started)
+	if ran > 30*time.Second {
+		a.delay = time.Second
+	} else {
+		a.delay = min(max(a.delay*2, time.Second), 30*time.Second)
+	}
+	retired := a.retired
+	delay := a.delay
+	a.mu.Unlock()
+	close(done)
+	s.broadcast()
+
+	if exitErr != nil {
+		log.Printf("app %s: exited: %v", a.name, exitErr)
+	}
+	if retired || s.stopping.Load() {
+		return
+	}
+	log.Printf("app %s: restarting in %s", a.name, delay)
+	s.scheduleRestart(a, delay)
+}
+
+// consumeRunnerStream feeds one app's output into its log writers and turns the runner's exit event into the normal restart bookkeeping.
+func (s *supervisor) consumeRunnerStream(a *app, cmd *exec.Cmd, done chan struct{}, stream *runnerStream, out io.Writer, nsRoot string) {
+	for event := range stream.events {
+		switch event.Op {
+		case "output":
+			if len(event.Data) > 0 {
+				_, _ = out.Write(event.Data)
+			}
+		case "work":
+			a.mu.Lock()
+			a.workPID = event.WorkPID
+			a.mu.Unlock()
+		case "port":
+			a.mu.Lock()
+			if a.port == 0 {
+				a.port = event.Port
+			}
+			a.mu.Unlock()
+		case "exited":
+			var exitErr error
+			if event.Error != "" {
+				exitErr = errors.New(event.Error)
+			} else if event.Code != 0 {
+				exitErr = fmt.Errorf("exited with code %d", event.Code)
+			}
+			s.finishRunnerExit(a, cmd, done, nsRoot, exitErr)
+			return
+		}
+	}
+}
+
+// adoptApp rebuilds the in-memory app around a process the runner already owns.
+func (s *supervisor) adoptApp(name, dir string, cfg appConfig, info runnerAppInfo) (*app, error) {
+	if s.storage != nil {
+		s.storage.setQuota(name, int64(cfg.DiskMB)<<20)
+		s.storage.restoreToken(name, info.StorageToken)
+	}
+	logs, err := newAppLog(filepath.Join(s.cfg.stateDir, ".logs", name))
+	if err != nil {
+		return nil, fmt.Errorf("app logs: %w", err)
+	}
+	logs.setSecrets(s.appRedactionValues(name))
+	epoch := false
+	if artifact, err := readArtifact(dir); err == nil {
+		epoch = artifact.Epoch
+	}
+	a := &app{
+		name:      name,
+		dir:       dir,
+		digest:    sourceDigest(dir),
+		cfg:       cfg,
+		logs:      logs,
+		done:      make(chan struct{}),
+		started:   info.Started,
+		delay:     time.Second,
+		wasmEpoch: epoch,
+		uid:       info.UID,
+		port:      info.Port,
+		workPID:   info.WorkPID,
+		ready:     true,
+		healthOK:  true,
+	}
+	if a.started.IsZero() {
+		a.started = time.Now().UTC()
+	}
+	a.lastHealthy = time.Now().UTC()
+	a.nextHealth = time.Now().Add(cfg.probeInterval())
+	if cfg.MaxConcurrent > 0 {
+		a.slots = make(chan struct{}, cfg.MaxConcurrent)
+	}
+	cmd := &exec.Cmd{Process: &os.Process{Pid: info.PID}}
+	a.cmd = cmd
+	a.exited = false
+	s.loadResourceHistory(a)
+
+	stream := s.runner.Stream(name)
+	logging := log.New(os.Stderr, "["+name+"] ", 0).Writer()
+	go s.consumeRunnerStream(a, cmd, a.done, stream, io.MultiWriter(a.logs, logging), "")
+	a.proxy = s.newProxy(a)
+	s.startSchedule(a)
+	return a, nil
+}
+
 func (s *supervisor) loadApps() error {
 	entries, err := os.ReadDir(s.cfg.appsDir)
 	if os.IsNotExist(err) {
@@ -628,6 +884,10 @@ func (s *supervisor) loadApps() error {
 	if err != nil {
 		return err
 	}
+	snapshot := map[string]runnerAppInfo{}
+	for _, info := range s.runnerSnapshot {
+		snapshot[info.Name] = info
+	}
 
 	for _, entry := range entries {
 		name := entry.Name()
@@ -635,13 +895,35 @@ func (s *supervisor) loadApps() error {
 			continue
 		}
 		dir := filepath.Join(s.cfg.appsDir, name)
+		if info, ok := snapshot[name]; ok && info.Dir != "" {
+			dir = info.Dir
+		}
 		cfg, err := readAppConfig(dir, name, s.cfg.domain, s.cfg.tenantMode)
 		if err != nil {
 			log.Printf("app %s: %v (skipped)", name, err)
 			continue
 		}
+		if info, ok := snapshot[name]; ok && len(info.Config) > 0 {
+			var stored appConfig
+			if err := json.Unmarshal(info.Config, &stored); err == nil {
+				if normalized, err := normalizeAppConfig(stored, name, s.cfg.domain, s.cfg.tenantMode); err == nil {
+					cfg = normalized
+				}
+			}
+		}
 		if err := s.hostConflictError(cfg, name); err != nil {
 			log.Printf("app %s: %v; skipped", name, err)
+			continue
+		}
+		if info, ok := snapshot[name]; ok {
+			a, err := s.adoptApp(name, dir, cfg, info)
+			delete(snapshot, name)
+			if err != nil {
+				log.Printf("app %s: adopt: %v (skipped)", name, err)
+				_ = s.runner.Stop(name)
+				continue
+			}
+			s.register(a)
 			continue
 		}
 		a, err := s.spawn(name, dir, cfg)
@@ -650,6 +932,11 @@ func (s *supervisor) loadApps() error {
 			continue
 		}
 		s.register(a)
+	}
+
+	for name := range snapshot {
+		log.Printf("app %s: running without an app directory; stopping it", name)
+		_ = s.runner.Stop(name)
 	}
 	return nil
 }

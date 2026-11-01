@@ -145,21 +145,24 @@ type app struct {
 }
 
 type supervisor struct {
-	cfg         config
-	storage     *storageServer
-	backups     *backupManager
-	fetch       *appFetchServer
-	events      *hub
-	deployments *deploymentManager
-	secrets     *secretStore
-	jobs        *jobManager
-	metrics     *metrics
-	auth        *authStore
-	audit       *auditStore
-	uids        *uidAllocator
-	cgroups     *cgroupManager
-	egress      *egressManager
-	quota       *dataQuota
+	cfg            config
+	storage        *storageServer
+	backups        *backupManager
+	fetch          *appFetchServer
+	events         *hub
+	deployments    *deploymentManager
+	secrets        *secretStore
+	jobs           *jobManager
+	metrics        *metrics
+	auth           *authStore
+	audit          *auditStore
+	uids           *uidAllocator
+	cgroups        *cgroupManager
+	egress         *egressManager
+	quota          *dataQuota
+	runner         *runnerClient
+	runnerLiveness *os.File
+	runnerSnapshot []runnerAppInfo
 
 	mu          sync.RWMutex
 	apps, hosts map[string]*app
@@ -659,7 +662,16 @@ func parseConfig() config {
 
 // startSupervisor builds the storage service, recovers interrupted rollbacks and loads every app.
 func startSupervisor(cfg config) *supervisor {
-	storage, err := newStorageServer(filepath.Join(cfg.stateDir, ".storage"), cfg.storageListen)
+	storageDir := filepath.Join(cfg.stateDir, ".storage")
+	var storage *storageServer
+	var err error
+	if listener, ok, listenErr := inheritedListener(storageFDEnv); listenErr != nil {
+		log.Fatalf("storage listener: %v", listenErr)
+	} else if ok {
+		storage, err = newStorageServerOn(storageDir, listener)
+	} else {
+		storage, err = newStorageServer(storageDir, cfg.storageListen)
+	}
 	if err != nil {
 		log.Fatalf("storage: %v", err)
 	}
@@ -696,11 +708,24 @@ func startSupervisor(cfg config) *supervisor {
 	s.jobs = newJobManager(filepath.Join(cfg.stateDir, ".jobs"), s)
 	s.metrics = newMetrics()
 	storage.metrics = s.metrics
-	fetch, err := newAppFetchServer(cfg.appFetchListen, s)
+	var fetch *appFetchServer
+	if listener, ok, listenErr := inheritedListener(fetchFDEnv); listenErr != nil {
+		log.Fatalf("app fetch listener: %v", listenErr)
+	} else if ok {
+		fetch, err = newAppFetchServerOn(listener, s)
+	} else {
+		fetch, err = newAppFetchServer(cfg.appFetchListen, s)
+	}
 	if err != nil {
 		log.Fatalf("app fetch: %v", err)
 	}
 	s.fetch = fetch
+	if err := s.startRunner(); err != nil {
+		log.Fatalf("runner: %v", err)
+	}
+	for _, info := range s.runnerSnapshot {
+		s.storage.restoreToken(info.Name, info.StorageToken)
+	}
 	if cfg.untrusted() {
 		uids, err := newUIDAllocator(filepath.Join(cfg.stateDir, ".uids.json"), cfg.appUIDBase)
 		if err != nil {
@@ -798,18 +823,27 @@ func serve(s *supervisor) {
 	}
 
 	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	go func() {
-		<-stop
-		s.stopping.Store(true)
-		log.Printf("shutting down")
-		if adminServer != nil {
-			if err := shutdownServer(adminServer, shutdownTimeout); err != nil {
-				log.Printf("graceful admin shutdown: %v", err)
+		for sig := range stop {
+			if sig == syscall.SIGHUP {
+				if err := s.handover(); err != nil {
+					s.stopping.Store(false)
+					log.Printf("handover: %v", err)
+				}
+				continue
 			}
-		}
-		if err := shutdownServer(server, shutdownTimeout); err != nil {
-			log.Printf("graceful shutdown: %v", err)
+			s.stopping.Store(true)
+			log.Printf("shutting down")
+			if adminServer != nil {
+				if err := shutdownServer(adminServer, shutdownTimeout); err != nil {
+					log.Printf("graceful admin shutdown: %v", err)
+				}
+			}
+			if err := shutdownServer(server, shutdownTimeout); err != nil {
+				log.Printf("graceful shutdown: %v", err)
+			}
+			return
 		}
 	}()
 
@@ -827,6 +861,13 @@ func serve(s *supervisor) {
 		_ = shutdownServer(adminServer, shutdownTimeout)
 	}
 	s.stopAll()
+	if s.runnerLiveness != nil {
+		_ = s.runnerLiveness.Close()
+		s.runnerLiveness = nil
+	}
+	if s.runner != nil {
+		s.runner.Close()
+	}
 	if s.egress != nil {
 		if err := s.egress.shutdown(); err != nil {
 			log.Printf("egress shutdown: %v", err)
@@ -848,6 +889,10 @@ func serve(s *supervisor) {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == runnerArg {
+		runnerMain()
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == nsInitArg {
 		nsInitMain(os.Args[2:])
 		return

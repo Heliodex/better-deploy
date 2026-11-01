@@ -129,12 +129,16 @@ type storageBatchResponse struct {
 }
 
 func newStorageServer(dir, listen string) (*storageServer, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, fmt.Errorf("storage dir: %w", err)
-	}
 	listener, err := net.Listen("tcp", listen)
 	if err != nil {
 		return nil, fmt.Errorf("storage listen: %w", err)
+	}
+	return newStorageServerOn(dir, listener)
+}
+
+func newStorageServerOn(dir string, listener net.Listener) (*storageServer, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("storage dir: %w", err)
 	}
 
 	s := &storageServer{
@@ -351,6 +355,17 @@ func (s *storageServer) tokenFor(app string) string {
 	token := hex.EncodeToString(b[:])
 	s.tokens[token] = app
 	return token
+}
+
+// restoreToken carries an app's storage token across a supervisor handover.
+// The running app's env already contains it, so the new storage service must accept the same value.
+func (s *storageServer) restoreToken(app, token string) {
+	if token == "" {
+		return
+	}
+	s.mu.Lock()
+	s.tokens[token] = app
+	s.mu.Unlock()
 }
 
 // appForToken resolves an app from a bearer token.

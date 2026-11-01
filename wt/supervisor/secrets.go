@@ -287,7 +287,10 @@ func (s *secretStore) writeLocked(app string, values map[string]string) error {
 
 // appRedactionValues returns stored secret values plus the app's storage token for log redaction.
 func (s *supervisor) appRedactionValues(app string) []string {
-	values := s.secrets.redactionValues(app)
+	var values []string
+	if s.secrets != nil {
+		values = s.secrets.redactionValues(app)
+	}
 	if s.storage != nil {
 		if token := s.storage.tokenFor(app); token != "" {
 			values = append(values, token)

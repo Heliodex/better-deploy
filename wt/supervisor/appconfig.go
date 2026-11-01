@@ -167,6 +167,8 @@ func configFromEnv() config {
 		ipv6Egress:          envBool("WT_IPV6_EGRESS", true),
 		appNamespaces:       envBool("WT_APP_NAMESPACES", untrusted),
 		appSeccomp:          envBool("WT_APP_SECCOMP", untrusted),
+		accessLog:           envBool("WT_ACCESS_LOG", true),
+		accessLogEvery:      int(envInt64("WT_ACCESS_LOG_EVERY", 1)),
 		diskBudgetBytes:     envInt64("WT_DISK_BUDGET_MB", 0) << 20,
 
 		storageMigrationTimeout: envStorageMigrationTimeout(),

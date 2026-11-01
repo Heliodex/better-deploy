@@ -10,6 +10,21 @@ import (
 	"testing"
 )
 
+func TestStorageRestoreToken(t *testing.T) {
+	s, err := newStorageServer(t.TempDir(), "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.close()
+	s.restoreToken("demo", "token-from-before-handover")
+	if app, ok := s.appForToken("token-from-before-handover"); !ok || app != "demo" {
+		t.Errorf("appForToken = %q, %t", app, ok)
+	}
+	if got := s.tokenFor("demo"); got != "token-from-before-handover" {
+		t.Errorf("tokenFor = %q, want the restored token", got)
+	}
+}
+
 func TestStorageTempBudgetRejectsRequests(t *testing.T) {
 	s, err := newStorageServer(t.TempDir(), "127.0.0.1:0")
 	if err != nil {

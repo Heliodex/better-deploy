@@ -40,6 +40,10 @@ func newAppFetchServer(listen string, s *supervisor) (*appFetchServer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("app fetch listen: %w", err)
 	}
+	return newAppFetchServerOn(listener, s)
+}
+
+func newAppFetchServerOn(listener net.Listener, s *supervisor) (*appFetchServer, error) {
 	fetch := &appFetchServer{
 		listener:   listener,
 		baseURL:    "http://" + listener.Addr().String(),
