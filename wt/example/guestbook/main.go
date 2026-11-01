@@ -26,35 +26,6 @@ const (
 
 var errMessageNotFound = errors.New("message not found")
 
-type reactionCounts struct {
-	Rocket int64 `json:"rocket"`
-	Heart  int64 `json:"heart"`
-	Eyes   int64 `json:"eyes"`
-	Brain  int64 `json:"brain"`
-}
-
-type message struct {
-	ID        string         `json:"id"`
-	Name      string         `json:"name"`
-	Body      string         `json:"body"`
-	CreatedAt string         `json:"createdAt"`
-	Reactions reactionCounts `json:"reactions"`
-}
-
-type messagesResponse struct {
-	Messages []message `json:"messages"`
-}
-
-type statsResponse struct {
-	Messages  int64 `json:"messages"`
-	Reactions int64 `json:"reactions"`
-}
-
-type reactResponse struct {
-	Reaction string `json:"reaction"`
-	Count    int64  `json:"count"`
-}
-
 var (
 	store    *storage.Client
 	storeErr error
@@ -162,9 +133,9 @@ func handleListMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	out := []message{}
+	out := []contract.Message{}
 	for rows.Next() {
-		var item message
+		var item contract.Message
 		if err := rows.Scan(
 			&item.ID, &item.Name, &item.Body, &item.CreatedAt,
 			&item.Reactions.Rocket, &item.Reactions.Heart,
@@ -179,7 +150,7 @@ func handleListMessages(w http.ResponseWriter, r *http.Request) {
 		app.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	app.WriteJSON(w, http.StatusOK, messagesResponse{Messages: out})
+	app.WriteJSON(w, http.StatusOK, contract.MessagesResponse{Messages: out})
 }
 
 func handleCreateMessage(w http.ResponseWriter, r *http.Request) {
@@ -188,7 +159,7 @@ func handleCreateMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	item := message{
+	item := contract.Message{
 		ID:        app.NewID(),
 		Name:      strings.TrimSpace(request.Name),
 		Body:      strings.TrimSpace(request.Body),
@@ -214,7 +185,7 @@ func handleReact(w http.ResponseWriter, r *http.Request) {
 	}
 	reaction := string(request.Reaction)
 
-	var count int64
+	var count int
 	err := store.WithTx(r.Context(), func(tx *storage.Tx) error {
 		var exists int64
 		if err := tx.QueryRow(r.Context(), `select count(*) from messages where id = ?`, id).Scan(&exists); err != nil {
@@ -238,11 +209,11 @@ func handleReact(w http.ResponseWriter, r *http.Request) {
 		app.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	app.WriteJSON(w, http.StatusOK, reactResponse{Reaction: reaction, Count: count})
+	app.WriteJSON(w, http.StatusOK, contract.ReactResponse{Reaction: contract.ReactResponseReaction(reaction), Count: count})
 }
 
 func handleStats(w http.ResponseWriter, r *http.Request) {
-	var stats statsResponse
+	var stats contract.StatsResponse
 	err := store.QueryRow(r.Context(), `select
 		(select count(*) from messages),
 		(select coalesce(sum(count), 0) from reactions)`).Scan(&stats.Messages, &stats.Reactions)

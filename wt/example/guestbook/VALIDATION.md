@@ -84,12 +84,12 @@ Connect also drops unknown JSON fields silently and omits zero-valued proto fiel
 
 1. **Keep the HTTP JSON API.** Switching protocols would add a runtime, a code generator and a second error model before it added any validation.
 
-2. **Request validation is implemented in the client.** `createMessageSchema`, `reactMessageSchema` and `reactMessageInput` live in `web/src/lib/contract.ts`, run before `fetch`, and throw a `ValidationError` with per-field messages. The form shows them under each input and clears them on typing. The page chunk is 13.02 KB / 4.71 KB gzip, about 0.5 KB over the previous build. The server keeps its existing string error body; upgrading it to `{error:{code,field,message}}` would let the form show server-side field errors too.
+2. **Request and response validation are implemented in the client.** `createMessageSchema` and `reactMessageSchema` live in `web/src/lib/contract.ts`, run before `fetch`, and throw a `ValidationError` with per-field messages. The form shows them under each input and clears them on typing. The page chunk is 13.02 KB / 4.71 KB gzip, about 0.5 KB over the previous build. The same file exports `responseSchemas`, which `web/src/lib/api.ts` uses to validate every response, including the error body, and which `go generate` turns into the Go response structs returned by the handlers. The server keeps its existing string error body; upgrading it to `{error:{code,field,message}}` would let the form show server-side field errors too.
 
 3. **Share test vectors between the two sides.** A small JSON file of valid and invalid payloads, run against the Go handlers and against the Valibot schemas, catches drift without a framework. This is the cheapest way to keep the manual rules honest.
 
 4. **If you want one source of truth, choose one of these:**
-   - **Lean (implemented):** Valibot schemas to JSON Schema at build time, then `go-jsonschema` generated Go types and `UnmarshalJSON` validation. +0.6 MB wasm, no runtime schema library, client unchanged. `go generate ./contract/` runs as part of the app build; the generated JSON Schema and Go file are ignored.
+   - **Lean (implemented):** Valibot schemas for requests and responses to JSON Schema at build time, then `go-jsonschema` generated Go types and `UnmarshalJSON` validation. +0.6 MB wasm, no runtime schema library. `go generate ./contract/` runs as part of the app build; the generated JSON Schema and Go file are ignored. Registering a schema in both an item and an envelope makes the generator emit a `$ref`, so the Go side reuses one struct instead of a copy per endpoint.
    - **Full:** Huma on the server and Hey API with Valibot on the client. +2.2 MB wasm and +4.4 KB gzip, but validation, OpenAPI docs and the client SDK all come from the Go types. Best developer experience; most framework.
 
 The guestbook build pipeline is:
@@ -97,9 +97,9 @@ The guestbook build pipeline is:
 ```text
 web/src/lib/contract.ts
   -> bun run contract
-  -> contract/schemas/*.json
+  -> contract/schemas/*.json        (requests and responses; nested schemas become $ref files)
   -> go tool go-jsonschema
-  -> contract/contract.gen.go
+  -> contract/contract.gen.go       (request and response structs)
 ```
 
 `go generate ./contract/` runs the two steps above, and `app.json` calls it before componentizing. The generated Go code uses only the standard library, so no schema validator is linked into the Wasm component.

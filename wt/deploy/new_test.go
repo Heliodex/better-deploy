@@ -209,6 +209,24 @@ func TestRunNew(t *testing.T) {
 	if strings.Contains(string(script), "createNote") {
 		t.Errorf("contract script references a specific schema; keep it generic:\n%s", script)
 	}
+	for _, want := range []string{"requestSchemas", "responseSchemas", "$ref"} {
+		if !strings.Contains(string(script), want) {
+			t.Errorf("contract script is missing %q:\n%s", want, script)
+		}
+	}
+
+	contractSource, err := os.ReadFile(filepath.Join(dir, "web", "src", "lib", "contract.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"requestSchemas", "responseSchemas", `title("NotesResponse")`, `title("ErrorResponse")`} {
+		if !strings.Contains(string(contractSource), want) {
+			t.Errorf("contract.ts is missing %q:\n%s", want, contractSource)
+		}
+	}
+	if !strings.Contains(string(main), "contract.NotesResponse") {
+		t.Errorf("main.go does not return the generated response type:\n%s", main)
+	}
 
 	if err := runNew([]string{"--dir", dir}); err == nil {
 		t.Error("expected error scaffolding into a non-empty directory")

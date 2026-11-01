@@ -1,48 +1,15 @@
+import { type BaseIssue, type GenericSchema, type InferOutput, safeParse } from "valibot"
 import {
-	array,
-	type BaseIssue,
-	type GenericSchema,
-	type InferOutput,
-	integer,
-	minLength,
-	minValue,
-	number,
-	object,
-	pipe,
-	safeParse,
-	string,
-} from "valibot"
-import { createMessageSchema, type Reaction, reactionSchema, reactMessageInput } from "./contract"
-
-const countSchema = pipe(number(), integer(), minValue(0))
-
-const messageSchema = object({
-	body: pipe(string(), minLength(1)),
-	createdAt: pipe(string(), minLength(1)),
-	id: pipe(string(), minLength(1)),
-	name: pipe(string(), minLength(1)),
-	reactions: object({
-		brain: countSchema,
-		eyes: countSchema,
-		heart: countSchema,
-		rocket: countSchema,
-	}),
-})
+	createMessageSchema,
+	errorResponseSchema,
+	messageSchema,
+	messagesResponseSchema,
+	type Reaction,
+	reactMessageInput,
+	reactResponseSchema,
+} from "./contract"
 
 export type Message = InferOutput<typeof messageSchema>
-
-const messagesResponseSchema = object({
-	messages: array(messageSchema),
-})
-
-const reactResponseSchema = object({
-	count: countSchema,
-	reaction: reactionSchema,
-})
-
-const errorResponseSchema = object({
-	error: string(),
-})
 
 // ValidationError carries per-field messages so the form can show them next to the input that failed.
 export class ValidationError extends Error {
@@ -97,10 +64,7 @@ export async function createMessage(name: string, body: string): Promise<Message
 	return parseJSON(response, messageSchema)
 }
 
-interface ReactResult {
-	count: number
-	reaction: Reaction
-}
+type ReactResult = InferOutput<typeof reactResponseSchema>
 
 export async function reactToMessage(id: string, reaction: Reaction): Promise<ReactResult> {
 	const input = safeParse(reactMessageInput, { id, reaction })

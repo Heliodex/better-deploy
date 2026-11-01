@@ -1,4 +1,4 @@
-// Package contract holds the request types generated from the Valibot schemas. Regenerate them with go generate ./contract/ from the app directory.
+// Package contract holds the request and response types generated from the Valibot schemas. Regenerate them with go generate ./contract/ from the app directory.
 package contract
 
 //go:generate sh -c "cd ../web && bun run contract"

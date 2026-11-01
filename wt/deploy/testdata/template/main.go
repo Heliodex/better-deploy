@@ -19,16 +19,6 @@ const (
 	maxLimit     = 100
 )
 
-type note struct {
-	ID        string `json:"id"`
-	Text      string `json:"text"`
-	CreatedAt string `json:"createdAt"`
-}
-
-type notesResponse struct {
-	Notes []note `json:"notes"`
-}
-
 var (
 	store    *storage.Client
 	storeErr error
@@ -68,9 +58,9 @@ func handleListNotes(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	out := []note{}
+	out := []contract.Note{}
 	for rows.Next() {
-		var item note
+		var item contract.Note
 		if err := rows.Scan(&item.ID, &item.Text, &item.CreatedAt); err != nil {
 			app.WriteError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -81,7 +71,7 @@ func handleListNotes(w http.ResponseWriter, r *http.Request) {
 		app.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	app.WriteJSON(w, http.StatusOK, notesResponse{Notes: out})
+	app.WriteJSON(w, http.StatusOK, contract.NotesResponse{Notes: out})
 }
 
 func handleCreateNote(w http.ResponseWriter, r *http.Request) {
@@ -90,7 +80,7 @@ func handleCreateNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	item := note{
+	item := contract.Note{
 		ID:        app.NewID(),
 		Text:      strings.TrimSpace(request.Text),
 		CreatedAt: time.Now().UTC().Format(app.TimestampFormat),

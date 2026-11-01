@@ -19,6 +19,7 @@ The short assessment: the spine is right and unusually well executed for a proto
 - [x] **Artifact cache CPU policy.** `artifactKey`, `artifactInfo` and `wt-deploy` artifacts now record the baseline CPU feature policy, so the cache digest changes with it and a future native compile cannot silently share a baseline entry. Legacy artifacts without the field still match.
 - [x] **SvelteKit dev loop.** `wt dev` now runs Vite with HMR, proxies `dev.proxy` to the supervisor with the app Host, and rebuilds only the wasm component from `dev.build` on Go, WIT, contract or `dev.watch` changes. `--vite=false` keeps the single-tier loop.
 - [x] **Static SvelteKit boundary.** The README documents the supported adapter-static/prerender shape, and the build rejects server-only SvelteKit files instead of letting them fail only in production.
+- [x] **Response contracts.** The Valibot registries now cover responses as well as requests. Response schemas generate Go response structs, registered nested schemas become `$ref` files so envelopes reuse the item type, and the client validates responses through the same source-of-truth schemas.
 
 ## Do not regress
 
@@ -132,8 +133,8 @@ These are the choices that make this worth continuing. Keep them unless a replac
    - [ ] Add `depends_on` to gate routing until dependencies are ready.
    - [ ] Add an explicit maintenance mode that serves a supervisor page instead of proxying.
 
-17. [ ] **Contract tooling around SvelteKit.** The current pipeline generates request types only (TS → JSON Schema → Go). Response types are hand-written on both sides, so drift is still manual.
-   - [ ] Generate response types, or generate the TS client from Go handlers.
+17. [ ] **Contract tooling around SvelteKit.** The pipeline generates request and response types from the Valibot registries (TS → JSON Schema → Go). Response types used to be hand-written on both sides; they now come from the same source as requests, so a field rename fails to compile instead of drifting silently.
+   - [x] Add a `responseSchemas` registry, generate Go response structs with `go-jsonschema`, use them in the handlers, and validate every client response, including the error body, with the same schemas. Registered nested schemas become `$ref` files so an envelope reuses the generated item type.
    - [ ] Publish an `app.json` JSON Schema so editors and `wt validate` share one set of rules.
    - [ ] Add `wt db` (schema, query, export, import, maintenance) and `wt secrets` so the panel is not the only interface.
 

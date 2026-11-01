@@ -1,31 +1,7 @@
-import {
-	array,
-	type BaseIssue,
-	type GenericSchema,
-	type InferOutput,
-	minLength,
-	object,
-	pipe,
-	safeParse,
-	string,
-} from "valibot"
-import { createNoteSchema } from "./contract"
-
-const noteSchema = object({
-	createdAt: pipe(string(), minLength(1)),
-	id: pipe(string(), minLength(1)),
-	text: pipe(string(), minLength(1)),
-})
+import { type BaseIssue, type GenericSchema, type InferOutput, safeParse } from "valibot"
+import { createNoteSchema, errorResponseSchema, noteSchema, notesResponseSchema } from "./contract"
 
 export type Note = InferOutput<typeof noteSchema>
-
-const notesResponseSchema = object({
-	notes: array(noteSchema),
-})
-
-const errorResponseSchema = object({
-	error: string(),
-})
 
 // ValidationError carries per-field messages so the form can show them next to the input that failed.
 export class ValidationError extends Error {
