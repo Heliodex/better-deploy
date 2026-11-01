@@ -361,8 +361,15 @@ export const deleteApp = (token: string, name: string, purge: boolean): Promise<
 		deleteAppSchema,
 	).then(result => result.purged)
 
+const egressRuleSchema = object({
+	cidr: pipe(string(), minLength(1)),
+	port: pipe(number(), integer(), minValue(1)),
+})
+
 const appConfigSchema = object({
+	allow_callers: array(string()),
 	disk_mb: pipe(number(), minValue(0)),
+	egress: array(egressRuleSchema),
 	env_keys: array(string()),
 	secret_keys: optional(array(string())),
 	health: pipe(string(), minLength(1)),
@@ -373,7 +380,7 @@ const appConfigSchema = object({
 	max_concurrency: pipe(number(), minValue(0)),
 	memory_mb: pipe(number(), minValue(0)),
 	name: pipe(string(), minLength(1)),
-	network: picklist(["inherit", "none"]),
+	network: picklist(["inherit", "none", "storage"]),
 	request_timeout: string(),
 	restart_on_unhealthy: boolean(),
 	restart_required: optional(boolean()),
@@ -384,7 +391,9 @@ const appConfigSchema = object({
 export type AppConfig = InferOutput<typeof appConfigSchema>
 
 export interface AppConfigPatch {
+	allow_callers?: string[]
 	disk_mb?: number
+	egress?: { cidr: string; port: number }[]
 	health?: string
 	health_failures?: number
 	health_interval?: string
@@ -392,7 +401,7 @@ export interface AppConfigPatch {
 	hosts?: string[]
 	max_concurrency?: number
 	memory_mb?: number
-	network?: "inherit" | "none"
+	network?: "inherit" | "none" | "storage"
 	request_timeout?: string
 	restart_on_unhealthy?: boolean
 	startup_timeout?: string

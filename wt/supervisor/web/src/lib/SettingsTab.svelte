@@ -46,7 +46,9 @@ let startupTimeout = $state("15s")
 let healthInterval = $state("10s")
 let healthFailures = $state(2)
 let restartOnUnhealthy = $state(false)
-let network = $state<"inherit" | "none">("inherit")
+let network = $state<"inherit" | "none" | "storage">("inherit")
+let allowCallers = $state("")
+let egress = $state("")
 let confirmDelete = $state(false)
 let purge = $state(false)
 let secretKey = $state("")
@@ -71,7 +73,30 @@ $effect(() => {
 	healthFailures = current.health_failures
 	restartOnUnhealthy = current.restart_on_unhealthy
 	network = current.network
+	allowCallers = current.allow_callers.join(", ")
+	egress = current.egress.map((rule) => `${rule.cidr}:${rule.port}`).join(", ")
 })
+
+const parseNames = (value: string): string[] => [
+	...new Set(
+		value
+			.split(/[\s,]+/)
+			.map((entry) => entry.trim().toLowerCase())
+			.filter((entry) => entry.length > 0),
+	),
+]
+
+const parseEgress = (value: string): { cidr: string; port: number }[] => {
+	const rules: { cidr: string; port: number }[] = []
+	for (const entry of value.split(/[\s,]+/)) {
+		const separator = entry.lastIndexOf(":")
+		if (separator <= 0) continue
+		const cidr = entry.slice(0, separator).trim()
+		const port = Number(entry.slice(separator + 1))
+		if (cidr && Number.isInteger(port) && port > 0) rules.push({ cidr, port })
+	}
+	return rules
+}
 
 const parseHosts = (value: string): string[] => [
 	...new Set(
@@ -85,7 +110,9 @@ const parseHosts = (value: string): string[] => [
 function save(event: SubmitEvent): void {
 	event.preventDefault()
 	void onsave({
+		allow_callers: parseNames(allowCallers),
 		disk_mb: diskMB,
+		egress: parseEgress(egress),
 		health: health.trim(),
 		health_failures: healthFailures,
 		health_interval: healthInterval.trim(),
@@ -252,8 +279,27 @@ async function removeSecret(key: string): Promise<void> {
 				<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Network</span>
 				<select aria-label="Network access" class="field" bind:value={network}>
 					<option value="inherit">inherit (storage and outbound)</option>
+					<option value="storage">storage (storage and app fetch only)</option>
 					<option value="none">none (no sockets)</option>
 				</select>
+			</label>
+			<label class="flex flex-col gap-1">
+				<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Allowed callers</span>
+				<input
+					aria-label="Allowed app callers"
+					class="field"
+					placeholder="frontend, worker"
+					bind:value={allowCallers}
+				>
+			</label>
+			<label class="flex flex-col gap-1">
+				<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Egress allowlist</span>
+				<input
+					aria-label="Egress allowlist"
+					class="field"
+					placeholder="203.0.113.0/24:443"
+					bind:value={egress}
+				>
 			</label>
 			<label class="flex items-center gap-2 self-end pb-1 text-sm text-neutral-300">
 				<input class="accent-primary-500" type="checkbox" bind:checked={restartOnUnhealthy}>
@@ -270,9 +316,10 @@ async function removeSecret(key: string): Promise<void> {
 					{saving ? "Saving…" : "Save config"}
 				</button>
 				<p class="text-xs text-neutral-500">
-					Env values stay hidden. Memory, concurrency, timeout and network changes need a restart; host,
-					host aliases and health settings apply immediately. Use wildcard aliases such as
-					*.apps.example.com with a matching certificate.
+					Env values stay hidden. Memory, concurrency, timeout, network and egress changes need a restart;
+					host, host aliases, health settings and allowed callers apply immediately. Egress entries are
+					IPv4 CIDR:port pairs for explicit outbound access in untrusted mode. Use wildcard aliases such
+					as *.apps.example.com with a matching certificate.
 				</p>
 			</div>
 		</form>
