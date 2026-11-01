@@ -50,7 +50,8 @@ func (s *supervisor) migrateApp(a *app, port int, done <-chan struct{}) error {
 			switch {
 			case response.StatusCode == http.StatusNoContent || response.StatusCode == http.StatusOK:
 				return nil
-			case response.StatusCode == http.StatusNotFound || response.StatusCode == http.StatusMethodNotAllowed:
+			case response.StatusCode >= http.StatusMultipleChoices && response.StatusCode < http.StatusInternalServerError:
+				// 3xx and 4xx mean the app does not implement the reserved endpoint, for example a router redirect or an auth layer.
 				return errNoMigrateEndpoint
 			case response.StatusCode == http.StatusServiceUnavailable:
 				last = response.Status + ": " + trimMessage(body)

@@ -57,6 +57,16 @@ func TestMigrateAppNoEndpoint(t *testing.T) {
 	}
 }
 
+func TestMigrateAppRedirectFallsBack(t *testing.T) {
+	s, a, port := migrateTestTarget(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, migratePath+"/", http.StatusMovedPermanently)
+	}))
+	err := s.migrateApp(a, port, make(chan struct{}))
+	if !errors.Is(err, errNoMigrateEndpoint) {
+		t.Fatalf("error = %v, want errNoMigrateEndpoint for a router redirect", err)
+	}
+}
+
 func TestMigrateAppFailure(t *testing.T) {
 	s, a, port := migrateTestTarget(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "schema is broken", http.StatusInternalServerError)
