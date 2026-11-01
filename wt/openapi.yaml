@@ -403,6 +403,95 @@ paths:
             responses:
                 "200":
                     description: Audit entries
+    /_wt/blobs:
+        put:
+            summary: Upload a blob through a signed app-host URL
+            description: >
+                Served by the supervisor on an app host, not the admin listener.
+                The app creates the URL with app.BlobUploadURL.
+            parameters:
+                - name: exp
+                  in: query
+                  required: true
+                  schema: { type: integer }
+                - name: max
+                  in: query
+                  required: true
+                  schema: { type: integer }
+                - name: ct
+                  in: query
+                  schema: { type: string }
+                - name: sig
+                  in: query
+                  required: true
+                  schema: { type: string }
+            requestBody:
+                required: true
+                content:
+                    application/octet-stream:
+                        schema: { type: string, format: binary }
+            responses:
+                "200":
+                    description: Blob already existed
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/BlobUploadResponse"
+                "201":
+                    description: Blob stored
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/BlobUploadResponse"
+                "403":
+                    description: Invalid or expired signature
+                "413":
+                    description: Body exceeds max
+                "507":
+                    description: App or global disk quota exceeded
+    /_wt/blobs/{digest}:
+        parameters:
+            - name: digest
+              in: path
+              required: true
+              schema: { type: string, pattern: "^[0-9a-f]{64}$" }
+            - name: exp
+              in: query
+              required: true
+              schema: { type: integer }
+            - name: sig
+              in: query
+              required: true
+              schema: { type: string }
+        get:
+            summary: Download a blob through a signed app-host URL
+            responses:
+                "200":
+                    description: Blob body
+                    content:
+                        application/octet-stream:
+                            schema: { type: string, format: binary }
+                "206":
+                    description: Partial content when Range is used
+                "403":
+                    description: Invalid or expired signature
+                "404":
+                    description: Blob not found
+        head:
+            summary: Read blob headers
+            responses:
+                "200":
+                    description: Blob metadata in headers
+        delete:
+            summary: Delete a blob through a signed app-host URL
+            responses:
+                "204":
+                    description: Blob removed
+                "403":
+                    description: Invalid or expired signature
+                "404":
+                    description: Blob not found
+
 components:
     securitySchemes:
         bearerAuth:
@@ -437,6 +526,14 @@ components:
                 ready: { type: boolean }
                 currentDigest: { type: string }
                 lastError: { type: string }
+        BlobUploadResponse:
+            type: object
+            properties:
+                digest: { type: string }
+                size: { type: integer }
+                contentType: { type: string }
+                url: { type: string }
+                createdAt: { type: string, format: date-time }
         Deployment:
             type: object
             properties:

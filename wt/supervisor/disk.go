@@ -47,7 +47,7 @@ func walkSize(root string, total *int64) error {
 	})
 }
 
-// appDataUsage measures /data plus the app's SQLite database files, counting every non-root directory entry
+// appDataUsage measures /data, the app's SQLite database files and its blob store, counting every non-root directory entry
 // so empty files and directories still count against the inode quota.
 func (s *supervisor) appDataUsage(name string) (bytes, entries int64, err error) {
 	dataDir := filepath.Join(s.cfg.stateDir, name)
@@ -78,10 +78,7 @@ func (s *supervisor) appDataUsage(name string) (bytes, entries int64, err error)
 
 	storageDir := filepath.Join(s.cfg.stateDir, ".storage", name)
 	storageEntries, err := os.ReadDir(storageDir)
-	if os.IsNotExist(err) {
-		return bytes, entries, nil
-	}
-	if err != nil {
+	if err != nil && !os.IsNotExist(err) {
 		return bytes, entries, err
 	}
 	for _, entry := range storageEntries {
@@ -96,6 +93,33 @@ func (s *supervisor) appDataUsage(name string) (bytes, entries int64, err error)
 		bytes += info.Size()
 		entries++
 	}
+
+	blobDir := filepath.Join(s.cfg.stateDir, blobDirName, name)
+	if err := filepath.WalkDir(blobDir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if os.IsNotExist(walkErr) {
+				return nil
+			}
+			return walkErr
+		}
+		if path == blobDir {
+			return nil
+		}
+		entries++
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if info.Mode().IsRegular() {
+			bytes += info.Size()
+		}
+		return nil
+	}); err != nil {
+		return bytes, entries, err
+	}
 	return bytes, entries, nil
 }
 
@@ -105,7 +129,7 @@ func (s *supervisor) appDataBytes(name string) (int64, error) {
 	return bytes, err
 }
 
-// diskBytes returns cached app-data usage: /data plus the app's SQLite database files, excluding logs, backups and deployment history.
+// diskBytes returns cached app-data usage: /data, the app's SQLite database files and its blobs, excluding logs, backups and deployment history.
 func (s *supervisor) diskBytes(a *app) int64 {
 	now := time.Now()
 	a.disk.mu.Lock()

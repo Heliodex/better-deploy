@@ -119,6 +119,7 @@ func (s *supervisor) purgeAppState(name string) error {
 		filepath.Join(s.cfg.stateDir, ".storage", name),
 		filepath.Join(s.cfg.stateDir, ".backups", name),
 		filepath.Join(s.cfg.stateDir, ".deployments", name),
+		filepath.Join(s.cfg.stateDir, ".blobs", name),
 		filepath.Join(s.cfg.stateDir, ".jobs", name+".json"),
 	} {
 		if err := os.RemoveAll(dir); err != nil {

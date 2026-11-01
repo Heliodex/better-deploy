@@ -21,6 +21,7 @@ The short assessment: the spine is right and unusually well executed for a proto
 - [x] **Static SvelteKit boundary.** The README documents the supported adapter-static/prerender shape, and the build rejects server-only SvelteKit files instead of letting them fail only in production.
 - [x] **Response contracts.** The Valibot registries now cover responses as well as requests. Response schemas generate Go response structs, registered nested schemas become `$ref` files so envelopes reuse the item type, and the client validates responses through the same source-of-truth schemas.
 - [x] **Queued deployment resource.** `POST /apps/<name>/deployments` stages the upload, returns `202` with a `Location`, and runs install and readiness in the background. Entries report queued/running/success/failed/canceled, expose a plain-text log and an SSE stream, and can be canceled. `POST /apps/<name>` stays as the synchronous compatibility alias.
+- [x] **Signed blob store.** Each app has a content-addressed blob store at `WT_STATE_DIR/.blobs/<app>`, signed with a per-app HMAC key in `WT_BLOB_SECRET`. Uploads hash the body and enforce a declared maximum; downloads support `Range`, `HEAD`, `ETag` and `If-None-Match`; deletes are signed. Blob bytes count toward `disk_mb` and the global budget, and the wasm component never handles the file body.
 
 ## Do not regress
 
@@ -114,10 +115,10 @@ These are the choices that make this worth continuing. Keep them unless a replac
    - [ ] Reuse the panel's existing hub and the storage pre-update hooks.
    - [ ] Use it for app-to-app notifications as well as browser fan-out.
 
-13. [ ] **Blob and file uploads.** A user upload currently streams through the component and consumes a concurrency slot, while `/data` has no serving path.
-   - [ ] Add a content-addressed blob store with signed upload and download.
-   - [ ] Serve blobs from the supervisor with `Range` support and quota accounting.
-   - [ ] Keep large bodies out of the wasm request path.
+13. [x] **Blob and file uploads.** A user upload used to stream through the component and consume a concurrency slot, while `/data` had no serving path.
+   - [x] Add a content-addressed per-app blob store with signed upload, download and delete URLs under `/_wt/blobs`, using a per-app HMAC key and a same-origin SDK helper.
+   - [x] Serve blobs from the supervisor with `Range` support and quota accounting; blob bytes count toward `disk_mb` and the global disk budget.
+   - [x] Keep large bodies out of the wasm request path. The supervisor handles upload and download directly on the app host, and no automatic GC removes blobs the app still references.
 
 14. [ ] **End-user identity.** Operator auth is solved; user auth is not, so every app reimplements sessions, CSRF and password reset.
    - [ ] Cheap version: extend `WT_TRUSTED_PROXIES` to an allowlist of identity headers from a trusted proxy (`Remote-User`, `X-Forwarded-User`, groups), only accepted from that proxy, passed through with a signed marker.

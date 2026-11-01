@@ -83,6 +83,11 @@ func (s *supervisor) appArgsFor(a *app, source string, namespaced bool) (args []
 		setEnv("WT_STORAGE_TOKEN", token)
 		setEnv(appTokenEnv, token)
 	}
+	if s.blobs != nil {
+		setEnv(appNameEnv, a.name)
+		setEnv(blobSecretEnv, s.blobs.secretFor(a.name))
+		setEnv(blobPrefixEnv, blobPrefix)
+	}
 	if s.fetch != nil {
 		setEnv(appNameEnv, a.name)
 		setEnv(appFetchURLEnv, s.fetch.url())

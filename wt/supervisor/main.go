@@ -163,6 +163,7 @@ type supervisor struct {
 	fetch          *appFetchServer
 	events         *hub
 	deployments    *deploymentManager
+	blobs          *blobStore
 	secrets        *secretStore
 	jobs           *jobManager
 	metrics        *metrics
@@ -697,6 +698,10 @@ func startSupervisor(cfg config) *supervisor {
 	if cfg.storageMigrationTimeout > 0 {
 		storage.migrationTimeout = cfg.storageMigrationTimeout
 	}
+	blobs, err := newBlobStore(cfg.stateDir)
+	if err != nil {
+		log.Fatalf("blobs: %v", err)
+	}
 	secrets, err := newSecretStore(filepath.Join(cfg.stateDir, secretDirName))
 	if err != nil {
 		log.Fatalf("secrets: %v", err)
@@ -715,6 +720,7 @@ func startSupervisor(cfg config) *supervisor {
 		backups:     newBackupManager(filepath.Join(cfg.stateDir, ".backups"), storage, cfg.stateDir),
 		events:      newHub(),
 		deployments: newDeploymentManager(filepath.Join(cfg.stateDir, ".deployments")),
+		blobs:       blobs,
 		secrets:     secrets,
 		auth:        auth,
 		audit:       audit,

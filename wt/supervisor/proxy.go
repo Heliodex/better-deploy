@@ -149,6 +149,11 @@ func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no app for this host", http.StatusNotFound)
 		return
 	}
+	// Blob traffic belongs to the supervisor, not the wasm component, so large bodies never take an app slot.
+	if r.URL.Path == blobPrefix || strings.HasPrefix(r.URL.Path, blobPrefix+"/") {
+		s.handleBlobs(w, r, a)
+		return
+	}
 	s.serveApp(w, r, a)
 }
 
