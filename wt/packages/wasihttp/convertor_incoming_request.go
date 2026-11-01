@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	wit "go.bytecodealliance.org/pkg/wit/types"
 	wasi "wt.packages/binding/imports/wasi_http_0_3_0_types"
@@ -87,6 +88,11 @@ func newHttpRequest(ir *wasi.Request, ctx context.Context) (*http.Request, error
 	req.Host = host
 	req.RequestURI = req.URL.RequestURI()
 	req.RemoteAddr = remote
+	if value := req.Header.Get("Content-Length"); value != "" {
+		if length, err := strconv.ParseInt(value, 10, 64); err == nil {
+			req.ContentLength = length
+		}
+	}
 	if scheme == "https" && req.TLS == nil {
 		req.TLS = &tls.ConnectionState{}
 	}
