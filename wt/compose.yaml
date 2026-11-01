@@ -1,21 +1,21 @@
 services:
-  wt:
-    image: wt-demo
-    build:
-      context: ..
-      dockerfile: wt/Containerfile
-    user: "10001:10001"
-    ports:
-      - "127.0.0.1:8080:8080"
-    environment:
-      WT_TOKEN: change-me
-    volumes:
-      - wt-data:/var/lib/wt
-    read_only: true
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
+    wt:
+        image: wt-demo
+        build:
+            context: ..
+            dockerfile: wt/Containerfile
+        user: "10001:10001"
+        ports:
+            - "127.0.0.1:8080:8080"
+        environment:
+            WT_TOKEN: change-me
+        volumes:
+            - wt-data:/var/lib/wt
+        read_only: true
+        cap_drop:
+            - ALL
+        security_opt:
+            - no-new-privileges:true
 
 volumes:
-  wt-data:
+    wt-data:
