@@ -5,7 +5,6 @@ package main
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json/v2"
 	"errors"
 	"flag"
@@ -42,8 +41,8 @@ type config struct {
 	appsDir, stateDir, cacheDir, listen, storageListen, domain string
 	wasmtime, wasmtimeCompiler, wasmtimeTarget                 string
 	token, tlsCert, tlsKey                                     string
-	tenantMode, adminListen                                    string
-	appFetchListen                                             string
+	tenantMode, adminListen, appFetchListen                    string
+	authFile                                                   string
 	cgroupRoot, iptables, ip6tables                            string
 	dataQuotaMode, setquota, findmnt, dataQuotaFS              string
 	appUIDBase                                                 int
@@ -142,6 +141,8 @@ type supervisor struct {
 	events      *hub
 	deployments *deploymentManager
 	secrets     *secretStore
+	auth        *authStore
+	audit       *auditStore
 	uids        *uidAllocator
 	cgroups     *cgroupManager
 	egress      *egressManager
@@ -151,6 +152,8 @@ type supervisor struct {
 	apps, hosts map[string]*app
 
 	deployMu sync.Mutex
+	loginMu  sync.Mutex
+	login    *loginLimiter
 	stopping atomic.Bool
 
 	versionOnce sync.Once
@@ -159,34 +162,6 @@ type supervisor struct {
 
 func (s *supervisor) hostTaken(host, except string) bool {
 	return s.hostConflictError(appConfig{Host: host}, except) != nil
-}
-
-// authRequired reports whether admin and API requests must carry a token. Untrusted tenancy always does, even when the listener is loopback-only.
-func (s *supervisor) authRequired() bool {
-	return s.cfg.token != "" || s.cfg.untrusted()
-}
-
-func (s *supervisor) authorized(r *http.Request) bool {
-	if !s.authRequired() {
-		return true
-	}
-	if s.cfg.token == "" {
-		return false
-	}
-	const prefix = "Bearer "
-	header := r.Header.Get("Authorization")
-	if token, ok := strings.CutPrefix(header, prefix); ok {
-		got := strings.TrimSpace(token)
-		if subtle.ConstantTimeCompare([]byte(got), []byte(s.cfg.token)) == 1 {
-			return true
-		}
-	}
-	cookie, err := r.Cookie("wt_token")
-	if err != nil {
-		return false
-	}
-	got := strings.TrimSpace(cookie.Value)
-	return subtle.ConstantTimeCompare([]byte(got), []byte(s.cfg.token)) == 1
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -238,10 +213,21 @@ func (s *supervisor) handleApps(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	if !s.requireAuth(w, r) {
+	identity, ok := s.requireIdentity(w, r)
+	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, s.snapshot())
+	snapshot := s.snapshot()
+	if !identity.isAdmin() {
+		filtered := snapshot[:0]
+		for _, info := range snapshot {
+			if identity.canAccessApp(info.Name) {
+				filtered = append(filtered, info)
+			}
+		}
+		snapshot = filtered
+	}
+	writeJSON(w, http.StatusOK, snapshot)
 }
 
 // lookup returns the app with the given name, or nil.
@@ -363,11 +349,34 @@ func (s *supervisor) requireAppMethod(w http.ResponseWriter, r *http.Request, na
 }
 
 func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
+	identity, ok := s.requireIdentity(w, r)
+	if !ok {
+		return
+	}
 	rest := strings.TrimPrefix(r.URL.Path, "/apps/")
 	name, action, _ := strings.Cut(rest, "/")
 	if name == "" || !validName(name) {
 		http.Error(w, "invalid app name", http.StatusBadRequest)
 		return
+	}
+	if !identity.canAccessApp(name) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if !identity.canPerformAppAction(r, action) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if s.audit != nil && r.Method != http.MethodGet && r.Method != http.MethodHead {
+		recorder := &auditWriter{ResponseWriter: w}
+		w = recorder
+		defer func() {
+			status := recorder.status
+			if status == 0 {
+				status = http.StatusOK
+			}
+			s.appendAudit(identity, r, auditAction(r.Method, action), name, status, auditError(recorder.body.Bytes()))
+		}()
 	}
 
 	if action == "backups" || strings.HasPrefix(action, "backups/") {
@@ -479,6 +488,7 @@ func parseConfig() config {
 	flag.StringVar(&cfg.tenantMode, "tenant-mode", cfg.tenantMode, "tenant trust model: trusted or untrusted")
 	flag.StringVar(&cfg.adminListen, "admin-listen", cfg.adminListen, "separate admin listener (TCP address or unix:/path)")
 	flag.StringVar(&cfg.appFetchListen, "app-fetch-listen", cfg.appFetchListen, "internal app-to-app fetch listener (loopback TCP address)")
+	flag.StringVar(&cfg.authFile, "auth-file", cfg.authFile, "scoped token store (default WT_STATE_DIR/.auth/tokens.json)")
 	flag.StringVar(&cfg.cgroupRoot, "cgroup-root", cfg.cgroupRoot, "cgroup v2 root for per-app limits")
 	flag.StringVar(&cfg.iptables, "iptables", cfg.iptables, "iptables binary for per-app IPv4 egress rules")
 	flag.StringVar(&cfg.ip6tables, "ip6tables", cfg.ip6tables, "ip6tables binary for per-app IPv6 egress rules")
@@ -577,6 +587,14 @@ func startSupervisor(cfg config) *supervisor {
 	if err != nil {
 		log.Fatalf("secrets: %v", err)
 	}
+	auth, err := newAuthStore(tokenFilePath(cfg))
+	if err != nil {
+		log.Fatalf("auth: %v", err)
+	}
+	audit, err := newAuditStore(filepath.Join(cfg.stateDir, ".audit", "audit.log"))
+	if err != nil {
+		log.Fatalf("audit: %v", err)
+	}
 	s := &supervisor{
 		cfg:         cfg,
 		storage:     storage,
@@ -584,6 +602,8 @@ func startSupervisor(cfg config) *supervisor {
 		events:      newHub(),
 		deployments: newDeploymentManager(filepath.Join(cfg.stateDir, ".deployments")),
 		secrets:     secrets,
+		auth:        auth,
+		audit:       audit,
 		apps:        map[string]*app{},
 		hosts:       map[string]*app{},
 	}

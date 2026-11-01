@@ -118,6 +118,7 @@ func configFromEnv() config {
 		tlsKey:           os.Getenv("WT_TLS_KEY"),
 		tenantMode:       env("WT_TENANT_MODE", tenantTrusted),
 		adminListen:      os.Getenv("WT_ADMIN_LISTEN"),
+		authFile:         os.Getenv("WT_AUTH_FILE"),
 		appFetchListen:   env("WT_APP_FETCH_LISTEN", "127.0.0.1:0"),
 		cgroupRoot:       env("WT_CGROUP_ROOT", "/sys/fs/cgroup/wt"),
 		iptables:         env("WT_IPTABLES", "iptables"),

@@ -224,7 +224,12 @@ func (s *supervisor) adminMux() *http.ServeMux {
 	})
 	mux.HandleFunc("/apps", s.handleApps)
 	mux.HandleFunc("/apps/", s.handleApp)
+	mux.HandleFunc("/auth/tokens", s.handleAuthTokens)
+	mux.HandleFunc("/auth/tokens/", func(w http.ResponseWriter, r *http.Request) {
+		s.handleAuthToken(w, r, strings.TrimPrefix(r.URL.Path, "/auth/tokens/"))
+	})
 	mux.HandleFunc("GET /usage", s.handleUsage)
+	mux.HandleFunc("GET /audit", s.handleAudit)
 	mux.HandleFunc("GET /events", s.handleEvents)
 	mux.HandleFunc("POST /login", s.handleLogin)
 	mux.HandleFunc("POST /logout", s.handleLogout)

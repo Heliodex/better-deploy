@@ -99,9 +99,7 @@ func (s *supervisor) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	if !s.authorized(r) {
-		w.Header().Set("WWW-Authenticate", `Bearer realm="wt-supervisor"`)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	if _, ok := s.requireAdmin(w, r); !ok {
 		return
 	}
 	flusher, ok := w.(http.Flusher)
@@ -145,29 +143,6 @@ func (s *supervisor) handleEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-}
-
-// requireAuth writes 401 unless the request carries the deploy token.
-func (s *supervisor) requireAuth(w http.ResponseWriter, r *http.Request) bool {
-	if s.authorized(r) {
-		return true
-	}
-	w.Header().Set("WWW-Authenticate", `Bearer realm="wt-supervisor"`)
-	http.Error(w, "unauthorized", http.StatusUnauthorized)
-	return false
-}
-
-// requireApp authenticates the request and returns the named app, writing 401 or 404 when it cannot.
-func (s *supervisor) requireApp(w http.ResponseWriter, r *http.Request, name string) (*app, bool) {
-	if !s.requireAuth(w, r) {
-		return nil, false
-	}
-	a := s.lookup(name)
-	if a == nil {
-		http.Error(w, "app not found", http.StatusNotFound)
-		return nil, false
-	}
-	return a, true
 }
 
 func (s *supervisor) handleRestart(w http.ResponseWriter, _ *http.Request, a *app) {
