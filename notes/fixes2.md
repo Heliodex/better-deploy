@@ -12,6 +12,7 @@ The short assessment: the spine is right and unusually well executed for a proto
 - [x] **Migration phase before readiness.** `app.ServeStorage` exposes `POST /_wt/migrate`; the supervisor calls it after port discovery with `WT_STORAGE_MIGRATION_TIMEOUT`, then probes health with the normal 3-second timeout and a fresh `startup_timeout`. Migrations run with `context.WithoutCancel`, so a disconnected probe does not abort them. Bundles without the endpoint fall back to health-only readiness.
 - [x] **Per-app operation locks.** Deploy, config, lifecycle, backup restore, rollback and database import now serialize per app instead of globally. The shared artifact cache keeps its own mutex so concurrent per-app deploys cannot race its lookup, compile, install and prune steps.
 - [x] **Persistent deploy idempotency.** The 24-hour `Idempotency-Key` replay now lives beside the app's deployment history, survives restarts, keeps the newest 64 keys per app, and is cleared on delete. The in-memory map and its wholesale 512-entry clear are gone.
+- [x] **WAL and temp accounting.** Write connections set a quota-scaled `journal_size_limit` and `wal_autocheckpoint`. SQLite temp files go to a dedicated `WT_STORAGE_TMP_DIR`, and a global `WT_STORAGE_TEMP_BUDGET_MB` monitor rejects new storage requests with `507 temp_budget` while the shared directory is over budget. Stale `etilqs_*` files are removed at startup.
 
 ## Do not regress
 
@@ -71,9 +72,12 @@ These are the choices that make this worth continuing. Keep them unless a replac
    - [ ] Alternatively sign artifacts and verify the signature before import.
    - [ ] Keep the existing rule that the deploy endpoint is the trust boundary, but make the role split match it.
 
-8. [ ] **Account for WAL and temp files.** `max_page_count` caps the main database, not the WAL, and `journal_size_limit` and `wal_autocheckpoint` are unset. `temp_store=FILE` spills into the global `TMPDIR`, shared by every app and invisible to `disk_mb`.
-   - [ ] Set `journal_size_limit` and a deliberate `wal_autocheckpoint`.
-   - [ ] Decide where SQLite temp files go and attribute them per app, or bound them globally and document it.
+8. [x] **Account for WAL and temp files.** `max_page_count` caps the main database, not the WAL, and `journal_size_limit` and `wal_autocheckpoint` were unset. `temp_store=FILE` spilled into the global `TMPDIR`, shared by every app and invisible to `disk_mb`.
+   - [x] Set `journal_size_limit` to `disk_mb / 8`, bounded to 256 KiB through 64 MiB, and a quota-scaled `wal_autocheckpoint` from 16 to 1000 pages on write connections.
+   - [x] Point SQLite's process-wide `temp_store_directory` at `WT_STORAGE_TMP_DIR` (default `WT_STATE_DIR/.tmp`, created `0700`) through every connection's DSN.
+   - [x] Add `WT_STORAGE_TEMP_BUDGET_MB` (default 512, `0` unlimited), a ten-second monitor and a `507` `temp_budget` rejection for new storage requests while the shared directory is over budget; clean stale `etilqs_*` files at startup.
+   - [x] Document that temp files are shared globally, are not part of a per-app `disk_mb`, and that one app's spill can block storage for all apps until the monitor clears the flag.
+   - [ ] If true per-app temp attribution is needed, move SQLite into a separate process; in-process SQLite has one process-wide temp directory.
 
 9. [ ] **Make supervisor upgrades invisible.** `Pdeathsig` plus no adoption means every supervisor upgrade restarts the whole fleet. That is the weakest availability property in the platform.
    - [ ] Try `exec` handover with inherited listeners, children kept alive, and a port/state file the new process reads to adopt them.
