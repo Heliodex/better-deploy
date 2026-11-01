@@ -77,7 +77,7 @@ wt-deploy open notes
 wt-deploy completion bash
 ```
 
-`build` and its `bundle` alias run the app build, componentize it, precompile when wasmtime is available and write the upload tarball; they are the local build path for the pinned Containerfile. `logs --follow` consumes the same SSE stream as the panel, so it works through the proxy. `config show` prints the ETag on stderr. `open` launches the app host with the platform opener; `--print` prints the URL instead. `completion` emits a static bash, zsh or fish script.
+`build` and its `bundle` alias run the app build, componentize it, precompile when wasmtime is available and write the upload tarball; they are the local build path for the pinned Containerfile. `--force-build` bypasses the component-input cache, and deploys automatically use the static-only path when the server already runs the same wasm. `logs --follow` consumes the same SSE stream as the panel, so it works through the proxy. `config show` prints the ETag on stderr. `open` launches the app host with the platform opener; `--print` prints the URL instead. `completion` emits a static bash, zsh or fish script.
 
 ## Test
 
@@ -89,16 +89,17 @@ WT_WASMTIME=/path/to/wasmtime ./wt/e2e.sh
 
 Set `WT_E2E_TARGET` when the runtime uses a different target triple; the default is `x86_64-unknown-linux-gnu` to match the released wasmtime binary CI downloads. The script keeps its work directory on failure and prints the supervisor log.
 
-The supervisor has fuzz targets for tar extraction, the SQL guard and parameter decoding:
+The supervisor has fuzz targets for tar extraction, backup archives, the SQL guard and parameter decoding:
 
 ```sh
 cd wt/supervisor
 go test -run '^$' -fuzz FuzzExtractTarGz -fuzztime 30s
+go test -run '^$' -fuzz FuzzBackupArchive -fuzztime 30s
 go test -run '^$' -fuzz FuzzValidateStorageSQL -fuzztime 30s
 go test -run '^$' -fuzz FuzzDecodeStorageValue -fuzztime 30s
 ```
 
-`BenchmarkProxyLatency` measures the reverse proxy against a loopback backend, and `BenchmarkStorage*`/`BenchmarkSQLite*` cover the storage query path.
+`BenchmarkProxyLatency` measures the reverse proxy against a loopback backend, `BenchmarkStorage*`/`BenchmarkSQLite*` cover the storage query path, and `BenchmarkManyAppsSnapshot` covers roster snapshots with 200 apps. The e2e script also checks two apps, a host collision and supervisor restart; set `WT_E2E_EXAMPLES=1` to include the scaffolded app and guestbook, and run `wt/e2e-image.sh` against the musl Containerfile with podman.
 
 ## Run the supervisor
 
@@ -159,7 +160,7 @@ This is deliberately a single-operator model: there are no owners, namespaces or
 
 `GET /metrics` (admin only) returns hand-written Prometheus text: `wt_requests_total{app,method,status}`, request duration sum/count, `wt_inflight_requests`, storage operation counts and duration by read/write pool and result, deploy/backup/job outcome counters, and per-app `wt_app_cpu_percent`, `wt_app_memory_bytes`, `wt_app_ready` and `wt_app_disk_bytes`. It has no background scrape goroutine and opens no network listener beyond the admin API.
 
-Proxied requests get an `X-Request-Id` when the caller did not send one, and the supervisor access line appends `request=<id>`. The app receives the same header and can forward it to storage; the storage change log records it as `requestId` when present. App logs support server-side `level`, `source`, `q`, `since` and `until` filters on the tail and SSE stream. `GET /apps/<name>/logs/export` returns all retained matching lines as text or JSON lines. A `wt:log` WIT import, a full log index and sampling are still future work; log files remain capped and rotated.
+Proxied requests get an `X-Request-Id` when the caller did not send one, and the supervisor access line appends `request=<id>`. Access logging is controlled by `WT_ACCESS_LOG` (default on) and `WT_ACCESS_LOG_EVERY=N` (default 1); sampled lines are skipped but 5xx lines are always kept. The panel and SSE streams still work with access logging disabled. The app receives the same header and can forward it to storage; the storage change log records it as `requestId` when present. App logs support server-side `level`, `source`, `q`, `since` and `until` filters on the tail and SSE stream. `GET /apps/<name>/logs/export` returns all retained matching lines as text or JSON lines. A `wt:log` WIT import, a full log index and sampling are still future work; log files remain capped and rotated.
 
 ## Untrusted tenant mode
 
@@ -268,7 +269,7 @@ curl -H 'Host: hello.localhost' http://127.0.0.1:8080/hello
 # path=/hello
 ```
 
-`wt-deploy` reads `app.json`, runs its `build` command, precompiles `main.wasm` with `wasmtime compile` when available, and uploads `app.json`, `main.wasm`, `artifact.json`, `main.cwasm` when it exists, and any `static/` files as a gzipped tarball. `main.wasm` is the artifact; `main.cwasm` is a cache hint. `artifact.json` records the wasm digest and size, the wasmtime version, target triple and compile time. `--skip-compile` does not require a cwasm and warns when none is included, leaving the supervisor to compile from wasm if it has a compiler. `--app-host` overrides the host written into the uploaded `app.json`, which is useful when the supervisor sits behind a real ingress domain. A deploy with the same wasm digest and unchanged runtime config keeps the running process and replaces only `app.json` and `static/`, so a frontend-only change does not restart the app. Otherwise the supervisor starts the new version on a new loopback port while the old one serves, waits for a 2xx health response, swaps the host route, drains in-flight requests for up to ten seconds and then stops the old process. Responses include `X-WT-Wasm-Digest` and `X-WT-Deploy-Mode: full|static`. A deploy also returns an `ETag` over the bundle contents: send it back as `If-None-Match` to get `304 Not Modified` without installing, and send `Idempotency-Key` to replay the same response for 24 hours. `POST /apps/<name>/validate` is the explicit validation form of `?dry_run=1`, and `GET /apps/<name>/deployments/<id>` returns one history entry with its status, error and current marker. Deploy and rollback are still synchronous; there is no queued deploy or cancel operation yet.
+`wt-deploy` reads `app.json`, runs its `build` command, precompiles `main.wasm` with `wasmtime compile` when available, and uploads `app.json`, `main.wasm`, `artifact.json`, `main.cwasm` when it exists, and any `static/` files as a gzipped tarball. It records a component-input hash in `.wt-build.json`; when the hash and `main.wasm` are unchanged, the build and compile steps are skipped. If the running app already has that wasm digest, the client sends `X-WT-Static-Only: 1` with only `app.json` and `static/`, and the supervisor reuses its current component. `--force-build` overrides the cache, and uploads print a coarse progress percentage. `main.wasm` is the artifact; `main.cwasm` is a cache hint. `artifact.json` records the wasm digest and size, the wasmtime version, target triple and compile time. `--skip-compile` does not require a cwasm and warns when none is included, leaving the supervisor to compile from wasm if it has a compiler. `--app-host` overrides the host written into the uploaded `app.json`, which is useful when the supervisor sits behind a real ingress domain. A deploy with the same wasm digest and unchanged runtime config keeps the running process and replaces only `app.json` and `static/`, so a frontend-only change does not restart the app. Otherwise the supervisor starts the new version on a new loopback port while the old one serves, waits for a 2xx health response, swaps the host route, drains in-flight requests for up to ten seconds and then stops the old process. Responses include `X-WT-Wasm-Digest` and `X-WT-Deploy-Mode: full|static`. A deploy also returns an `ETag` over the bundle contents: send it back as `If-None-Match` to get `304 Not Modified` without installing, and send `Idempotency-Key` to replay the same response for 24 hours. `POST /apps/<name>/validate` is the explicit validation form of `?dry_run=1`, and `GET /apps/<name>/deployments/<id>` returns one history entry with its status, error and current marker. Deploy and rollback are still synchronous; there is no queued deploy or cancel operation yet.
 
 The notes example uses the per-app storage service:
 
@@ -350,7 +351,7 @@ curl -X PATCH -H "Authorization: Bearer $WT_TOKEN" \
 
 `wt new` scaffolds a notes app with the guestbook stack: a static SvelteKit frontend with Valibot request and response validation, a Go JSON API, the Valibot to JSON Schema to `go-jsonschema` contract pipeline, and per-app SQLite storage. Inside `wt/example` it keeps using the shared monorepo module. Anywhere else it writes a standalone module with a vendored `sdk/` tree (`app`, `storage`, `wasihttp`, `httpmeta`, WIT and `generate.sh`), `go.mod`/`go.sum`, and an `app.json` build command that uses `./sdk`. Pass `--module` to choose the Go module path and `--sdk /path/to/wt/packages` to copy a local SDK instead of the embedded one. The embedded copy is checked against `wt/packages` by `TestEmbeddedSDKMatchesPackages`.
 
-`wt dev` builds the app and serves it locally on loopback, with the SQLite database persisting in `/tmp/wt-dev/<name>` between runs. It watches source files and rebuilds and redeploys after a change, ignoring `static/`, `build`, `dist`, `target`, `node_modules`, `.svelte-kit` and the generated `main.wasm`/`main.cwasm` so a build does not retrigger itself. Pass `--watch=false` to deploy once.
+`wt dev` builds the app and serves it at `http://<name>.localhost:8080/`, while the admin panel moves to a separate listener at `http://127.0.0.1:8081/admin/` (override with `--admin-port`). This keeps `/admin` and `/apps` off the app host. Pass `--workspace DIR` to serve every immediate child directory with an `app.json` together; workspace apps use `<name>.localhost` and share one supervisor and state directory, so app-to-app fetch and storage work across them. `--app-host` is only valid for the single-app form. The SQLite database persists in `/tmp/wt-dev/<name>` between runs. It watches source files and rebuilds and redeploys after a change, ignoring `static/`, `build`, `dist`, `target`, `node_modules`, `.svelte-kit` and the generated `main.wasm`/`main.cwasm` so a build does not retrigger itself. Pass `--watch=false` to deploy once.
 
 ## What each app runs
 
