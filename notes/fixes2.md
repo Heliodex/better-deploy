@@ -22,6 +22,7 @@ The short assessment: the spine is right and unusually well executed for a proto
 - [x] **Response contracts.** The Valibot registries now cover responses as well as requests. Response schemas generate Go response structs, registered nested schemas become `$ref` files so envelopes reuse the item type, and the client validates responses through the same source-of-truth schemas.
 - [x] **Queued deployment resource.** `POST /apps/<name>/deployments` stages the upload, returns `202` with a `Location`, and runs install and readiness in the background. Entries report queued/running/success/failed/canceled, expose a plain-text log and an SSE stream, and can be canceled. `POST /apps/<name>` stays as the synchronous compatibility alias.
 - [x] **Signed blob store.** Each app has a content-addressed blob store at `WT_STATE_DIR/.blobs/<app>`, signed with a per-app HMAC key in `WT_BLOB_SECRET`. Uploads hash the body and enforce a declared maximum; downloads support `Range`, `HEAD`, `ETag` and `If-None-Match`; deletes are signed. Blob bytes count toward `disk_mb` and the global budget, and the wasm component never handles the file body.
+- [x] **Platform end-user identity.** Apps opt in with `identity: "platform"`. The supervisor stores users and sessions under `WT_STATE_DIR/.identity`, hashes passwords with PBKDF2-SHA256, and serves login, logout, `GET /v1/me` and password change on the app host with a `wt_user` cookie and CSRF token. Admin routes create, list, update, reset and delete users. Proxied requests get signed `X-WT-User-*` headers and `app.UserFromRequest` verifies them; client-supplied identity headers and the session cookie never reach the app.
 
 ## Do not regress
 
@@ -120,9 +121,10 @@ These are the choices that make this worth continuing. Keep them unless a replac
    - [x] Serve blobs from the supervisor with `Range` support and quota accounting; blob bytes count toward `disk_mb` and the global disk budget.
    - [x] Keep large bodies out of the wasm request path. The supervisor handles upload and download directly on the app host, and no automatic GC removes blobs the app still references.
 
-14. [ ] **End-user identity.** Operator auth is solved; user auth is not, so every app reimplements sessions, CSRF and password reset.
-   - [ ] Cheap version: extend `WT_TRUSTED_PROXIES` to an allowlist of identity headers from a trusted proxy (`Remote-User`, `X-Forwarded-User`, groups), only accepted from that proxy, passed through with a signed marker.
-   - [ ] Bigger version: a platform session and user table with `GET /v1/me`, opt-in per app.
+14. [x] **End-user identity.** Operator auth was solved; user auth was not, so every app reimplemented sessions, CSRF and password reset. The platform-user model now owns that surface.
+   - [ ] Cheap version: extend `WT_TRUSTED_PROXIES` to an allowlist of identity headers from a trusted proxy (`Remote-User`, `X-Forwarded-User`, groups), only accepted from that proxy, passed through with a signed marker. This remains an alternative for deployments that already have an IdP.
+   - [x] Bigger version: a platform user table, persisted sessions, login/logout, CSRF, password change, admin user management, `GET /v1/me` and opt-in per app via `identity: "platform"`. Password reset is an admin action; there is no email provider.
+   - [x] Inject signed `X-WT-User-*` headers only for opted-in apps, strip client-supplied identity headers and the supervisor session cookie, and expose `app.UserFromRequest` for verification.
 
 15. [ ] **A real deployment resource.** `POST /apps/<name>` was the only deploy entry point. It now has a queued resource beside it while the old route stays as a compatibility alias.
    - [x] `POST /apps/<name>/deployments` returns `202` with `Location: /apps/<name>/deployments/<id>`, and the entry reports `queued`, `running`, `success`, `failed` or `canceled` with queue/start/finish timestamps and mode.

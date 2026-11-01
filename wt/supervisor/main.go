@@ -79,6 +79,7 @@ type appConfig struct {
 	HealthFailures     int               `json:"health_failures,omitempty"`
 	RestartOnUnhealthy bool              `json:"restart_on_unhealthy,omitempty"`
 	Network            string            `json:"network,omitempty"`
+	Identity           string            `json:"identity,omitempty"`
 	JobConcurrency     int               `json:"job_concurrency,omitempty"`
 	AllowCallers       []string          `json:"allow_callers,omitempty"`
 	Egress             []egressRule      `json:"egress,omitempty"`
@@ -164,6 +165,7 @@ type supervisor struct {
 	events         *hub
 	deployments    *deploymentManager
 	blobs          *blobStore
+	identity       *identityStore
 	secrets        *secretStore
 	jobs           *jobManager
 	metrics        *metrics
@@ -186,6 +188,8 @@ type supervisor struct {
 	artifactCacheMu sync.Mutex
 	loginMu         sync.Mutex
 	login           *loginLimiter
+	identityLoginMu sync.Mutex
+	identityLogin   *loginLimiter
 	stopping        atomic.Bool
 
 	versionOnce sync.Once
@@ -702,6 +706,10 @@ func startSupervisor(cfg config) *supervisor {
 	if err != nil {
 		log.Fatalf("blobs: %v", err)
 	}
+	identity, err := newIdentityStore(cfg.stateDir)
+	if err != nil {
+		log.Fatalf("identity: %v", err)
+	}
 	secrets, err := newSecretStore(filepath.Join(cfg.stateDir, secretDirName))
 	if err != nil {
 		log.Fatalf("secrets: %v", err)
@@ -721,6 +729,7 @@ func startSupervisor(cfg config) *supervisor {
 		events:      newHub(),
 		deployments: newDeploymentManager(filepath.Join(cfg.stateDir, ".deployments")),
 		blobs:       blobs,
+		identity:    identity,
 		secrets:     secrets,
 		auth:        auth,
 		audit:       audit,

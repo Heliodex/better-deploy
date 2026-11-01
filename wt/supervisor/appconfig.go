@@ -471,6 +471,12 @@ func normalizeAppConfig(cfg appConfig, name, domain string, modes ...string) (ap
 	default:
 		return cfg, fmt.Errorf("network must be inherit, storage or none")
 	}
+	cfg.Identity = strings.ToLower(strings.TrimSpace(cfg.Identity))
+	switch cfg.Identity {
+	case "", identityModePlatform:
+	default:
+		return cfg, fmt.Errorf("identity must be empty or %s", identityModePlatform)
+	}
 	if mode == tenantUntrusted && cfg.Network == "inherit" {
 		return cfg, fmt.Errorf("network inherit is not allowed in untrusted mode; use storage or none")
 	}

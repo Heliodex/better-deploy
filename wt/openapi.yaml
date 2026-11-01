@@ -491,6 +491,173 @@ paths:
                     description: Invalid or expired signature
                 "404":
                     description: Blob not found
+    /identity/users:
+        get:
+            summary: List platform users (admin only)
+            responses:
+                "200":
+                    description: Users
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    users:
+                                        type: array
+                                        items:
+                                            $ref: "#/components/schemas/IdentityUser"
+        post:
+            summary: Create a platform user (admin only)
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            required: [email, name, password]
+                            properties:
+                                email: { type: string, format: email }
+                                name: { type: string }
+                                password: { type: string, minLength: 10 }
+                                groups:
+                                    type: array
+                                    items: { type: string }
+            responses:
+                "201":
+                    description: Created user
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/IdentityUser"
+    /identity/users/{id}:
+        parameters:
+            - name: id
+              in: path
+              required: true
+              schema: { type: string }
+        get:
+            summary: Read one platform user (admin only)
+            responses:
+                "200":
+                    description: User
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/IdentityUser"
+        patch:
+            summary: Update a platform user (admin only)
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                name: { type: string }
+                                groups:
+                                    type: array
+                                    items: { type: string }
+                                disabled: { type: boolean }
+            responses:
+                "200":
+                    description: Updated user
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/IdentityUser"
+        delete:
+            summary: Remove a platform user and sessions (admin only)
+            responses:
+                "204":
+                    description: Removed
+    /identity/users/{id}/password:
+        parameters:
+            - name: id
+              in: path
+              required: true
+              schema: { type: string }
+        post:
+            summary: Reset a platform user password (admin only)
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            required: [password]
+                            properties:
+                                password: { type: string, minLength: 10 }
+            responses:
+                "204":
+                    description: Password reset and sessions revoked
+    /_wt/identity/login:
+        post:
+            summary: Sign in a platform user on an app host
+            description: Available only when the app sets identity to platform.
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            required: [email, password]
+                            properties:
+                                email: { type: string, format: email }
+                                password: { type: string }
+            responses:
+                "200":
+                    description: Signed in; sets the wt_user cookie
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/IdentityMe"
+    /_wt/identity/logout:
+        post:
+            summary: Sign out a platform user
+            parameters:
+                - name: X-CSRF-Token
+                  in: header
+                  required: true
+                  schema: { type: string }
+            responses:
+                "204":
+                    description: Signed out
+    /_wt/identity/me:
+        get:
+            summary: Read the current platform user
+            responses:
+                "200":
+                    description: Current user and CSRF token
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/IdentityMe"
+                "401":
+                    description: Not signed in
+    /_wt/identity/password:
+        post:
+            summary: Change the current platform user password
+            parameters:
+                - name: X-CSRF-Token
+                  in: header
+                  required: true
+                  schema: { type: string }
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            required: [currentPassword, newPassword]
+                            properties:
+                                currentPassword: { type: string }
+                                newPassword: { type: string, minLength: 10 }
+            responses:
+                "200":
+                    description: Password changed and a new session issued
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/IdentityMe"
 
 components:
     securitySchemes:
@@ -526,6 +693,23 @@ components:
                 ready: { type: boolean }
                 currentDigest: { type: string }
                 lastError: { type: string }
+        IdentityUser:
+            type: object
+            properties:
+                id: { type: string }
+                email: { type: string, format: email }
+                name: { type: string }
+                groups:
+                    type: array
+                    items: { type: string }
+                disabled: { type: boolean }
+                createdAt: { type: string, format: date-time }
+        IdentityMe:
+            type: object
+            properties:
+                user:
+                    $ref: "#/components/schemas/IdentityUser"
+                csrfToken: { type: string }
         BlobUploadResponse:
             type: object
             properties:

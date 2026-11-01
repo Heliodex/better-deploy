@@ -88,6 +88,11 @@ func (s *supervisor) appArgsFor(a *app, source string, namespaced bool) (args []
 		setEnv(blobSecretEnv, s.blobs.secretFor(a.name))
 		setEnv(blobPrefixEnv, blobPrefix)
 	}
+	if cfg.Identity == identityModePlatform {
+		if secret := s.identitySecretFor(a.name); secret != "" {
+			setEnv(identitySecretEnv, secret)
+		}
+	}
 	if s.fetch != nil {
 		setEnv(appNameEnv, a.name)
 		setEnv(appFetchURLEnv, s.fetch.url())

@@ -149,6 +149,16 @@ func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no app for this host", http.StatusNotFound)
 		return
 	}
+	a.mu.Lock()
+	identityMode := a.cfg.Identity == identityModePlatform
+	a.mu.Unlock()
+	if identityMode {
+		if action, ok := identityAppAction(r.URL.Path); ok {
+			s.handleIdentityApp(w, r, a, action)
+			return
+		}
+	}
+	s.identityProxyHeaders(r, a.name, identityMode)
 	// Blob traffic belongs to the supervisor, not the wasm component, so large bodies never take an app slot.
 	if r.URL.Path == blobPrefix || strings.HasPrefix(r.URL.Path, blobPrefix+"/") {
 		s.handleBlobs(w, r, a)
@@ -263,6 +273,10 @@ func (s *supervisor) adminMux() *http.ServeMux {
 	mux.HandleFunc("/auth/tokens", s.handleAuthTokens)
 	mux.HandleFunc("/auth/tokens/", func(w http.ResponseWriter, r *http.Request) {
 		s.handleAuthToken(w, r, strings.TrimPrefix(r.URL.Path, "/auth/tokens/"))
+	})
+	mux.HandleFunc("/identity/users", s.handleIdentityUsers)
+	mux.HandleFunc("/identity/users/", func(w http.ResponseWriter, r *http.Request) {
+		s.handleIdentityUser(w, r, strings.TrimPrefix(r.URL.Path, "/identity/users/"))
 	})
 	mux.HandleFunc("GET /usage", s.handleUsage)
 	mux.HandleFunc("GET /audit", s.handleAudit)

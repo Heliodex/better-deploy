@@ -34,6 +34,7 @@ type appConfigPatch struct {
 	HealthFailures     *int               `json:"health_failures"`
 	RestartOnUnhealthy *bool              `json:"restart_on_unhealthy"`
 	Network            *string            `json:"network"`
+	Identity           *string            `json:"identity"`
 	JobConcurrency     *int               `json:"job_concurrency"`
 	AllowCallers       *[]string          `json:"allow_callers"`
 	Egress             *[]egressRule      `json:"egress"`
@@ -60,6 +61,7 @@ type appConfigResponse struct {
 	HealthFailures     int              `json:"health_failures"`
 	RestartOnUnhealthy bool             `json:"restart_on_unhealthy"`
 	Network            string           `json:"network"`
+	Identity           string           `json:"identity"`
 	JobConcurrency     int              `json:"job_concurrency"`
 	AllowCallers       []string         `json:"allow_callers"`
 	Egress             []egressRule     `json:"egress"`
@@ -120,6 +122,7 @@ func configResponse(cfg appConfig) appConfigResponse {
 		HealthFailures:     cfg.HealthFailures,
 		RestartOnUnhealthy: cfg.RestartOnUnhealthy,
 		Network:            cfg.Network,
+		Identity:           cfg.Identity,
 		JobConcurrency:     cfg.JobConcurrency,
 		AllowCallers:       callers,
 		Egress:             egress,
@@ -172,6 +175,9 @@ func applyConfigPatch(cfg appConfig, patch appConfigPatch) appConfig {
 	}
 	if patch.Network != nil {
 		cfg.Network = *patch.Network
+	}
+	if patch.Identity != nil {
+		cfg.Identity = *patch.Identity
 	}
 	if patch.JobConcurrency != nil {
 		cfg.JobConcurrency = *patch.JobConcurrency
