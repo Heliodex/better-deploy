@@ -47,6 +47,38 @@ cd wt/deploy && go build -o /tmp/wt-deploy .
 
 For the local loop, `wt/supervisor/dev.sh` rebuilds the admin panel and binary and restarts the supervisor, reusing the running instance's app and state directories so deployed apps, data and logs survive. `./dev.sh --skip-generate` skips the panel build for a Go-only change.
 
+## CLI
+
+The `wt-deploy` binary also acts as the operator CLI. Every command accepts `--host`, `--token` and `--config`, and most accept `--json` for raw output. Defaults come from environment variables and then an optional `~/.config/wt/config.json` (or `WT_CONFIG`):
+
+```json
+{
+  "host": "https://wt.example.com",
+  "token": "scoped-deploy-token",
+  "wasmtime": "/usr/local/bin/wasmtime",
+  "target": "x86_64-unknown-linux-musl"
+}
+```
+
+```sh
+wt-deploy apps
+wt-deploy logs notes --tail 200 --level warn --source app
+wt-deploy logs notes --follow
+wt-deploy deploy --dir ./notes --app-host notes.example.com
+wt-deploy build --dir ./notes --out notes.tar.gz
+wt-deploy rollback notes 20261101T120000.000000000Z
+wt-deploy backup list notes
+wt-deploy backup create notes
+wt-deploy backup restore notes storage-20261101T120000.000000000Z.db
+wt-deploy backup download notes storage-20261101T120000.000000000Z.db --out notes.tar.gz
+wt-deploy config show notes
+wt-deploy config set notes --data '{"memory_mb":256}' --if-match '"etag"'
+wt-deploy open notes
+wt-deploy completion bash
+```
+
+`build` and its `bundle` alias run the app build, componentize it, precompile when wasmtime is available and write the upload tarball; they are the local build path for the pinned Containerfile. `logs --follow` consumes the same SSE stream as the panel, so it works through the proxy. `config show` prints the ETag on stderr. `open` launches the app host with the platform opener; `--print` prints the URL instead. `completion` emits a static bash, zsh or fish script.
+
 ## Test
 
 CI runs unit tests for the supervisor, deploy tool and shared packages, vets the wasm guests, checks both Svelte frontends, and has a separate end-to-end job. `wt/e2e.sh` downloads nothing itself: point it at a real wasmtime with the compile and serve subcommands. It builds the hello component, starts a supervisor on `127.0.0.1:18080`, deploys the bundle, proxies a request, checks that a spinning `?spin=1` request is cut off while the app stays up, takes and restores a `/data` snapshot, and rolls back code and data together:
@@ -311,11 +343,14 @@ curl -X PATCH -H "Authorization: Bearer $WT_TOKEN" \
 
 ```sh
 /tmp/wt-deploy new --dir wt/example/myapp
-/tmp/wt-deploy dev --dir wt/example/myapp --wasmtime /path/to/wasmtime
+/tmp/wt-deploy new --dir ~/src/myapp --module example.com/myapp
+/tmp/wt-deploy dev --dir ~/src/myapp --wasmtime /path/to/wasmtime
 # myapp at http://127.0.0.1:8080/
 ```
 
-`wt new` scaffolds a notes app with the guestbook stack: a static SvelteKit frontend with Valibot request and response validation, a Go JSON API, the Valibot to JSON Schema to `go-jsonschema` contract pipeline, and per-app SQLite storage. New apps live under `wt/example/` so the shared module and the relative `../../packages` paths keep working. `wt dev` builds the app and serves it locally on loopback, with the SQLite database persisting in `/tmp/wt-dev/<name>` between runs. It watches source files and rebuilds and redeploys after a change, ignoring `static/`, `build`, `dist`, `target`, `node_modules`, `.svelte-kit` and the generated `main.wasm`/`main.cwasm` so a build does not retrigger itself. Pass `--watch=false` to deploy once.
+`wt new` scaffolds a notes app with the guestbook stack: a static SvelteKit frontend with Valibot request and response validation, a Go JSON API, the Valibot to JSON Schema to `go-jsonschema` contract pipeline, and per-app SQLite storage. Inside `wt/example` it keeps using the shared monorepo module. Anywhere else it writes a standalone module with a vendored `sdk/` tree (`app`, `storage`, `wasihttp`, `httpmeta`, WIT and `generate.sh`), `go.mod`/`go.sum`, and an `app.json` build command that uses `./sdk`. Pass `--module` to choose the Go module path and `--sdk /path/to/wt/packages` to copy a local SDK instead of the embedded one. The embedded copy is checked against `wt/packages` by `TestEmbeddedSDKMatchesPackages`.
+
+`wt dev` builds the app and serves it locally on loopback, with the SQLite database persisting in `/tmp/wt-dev/<name>` between runs. It watches source files and rebuilds and redeploys after a change, ignoring `static/`, `build`, `dist`, `target`, `node_modules`, `.svelte-kit` and the generated `main.wasm`/`main.cwasm` so a build does not retrigger itself. Pass `--watch=false` to deploy once.
 
 ## What each app runs
 
