@@ -17,6 +17,8 @@ The short assessment: the spine is right and unusually well executed for a proto
 - [x] **Access-log defaults.** `WT_ACCESS_LOG` and `WT_ACCESS_LOG_EVERY` now populate `configFromEnv`; the previous zero default made `parseConfig` reject every normal startup with `access-log-every must be between 1 and 10000`.
 - [x] **App-to-app body signatures.** The supervisor signs the body's SHA-256 with the target token in `X-WT-App-Signature-V2`, and `app.Caller` verifies and restores the buffered body. Trusted mode still sends the legacy metadata-only signature for older targets; untrusted mode sends v2 only.
 - [x] **Artifact cache CPU policy.** `artifactKey`, `artifactInfo` and `wt-deploy` artifacts now record the baseline CPU feature policy, so the cache digest changes with it and a future native compile cannot silently share a baseline entry. Legacy artifacts without the field still match.
+- [x] **SvelteKit dev loop.** `wt dev` now runs Vite with HMR, proxies `dev.proxy` to the supervisor with the app Host, and rebuilds only the wasm component from `dev.build` on Go, WIT, contract or `dev.watch` changes. `--vite=false` keeps the single-tier loop.
+- [x] **Static SvelteKit boundary.** The README documents the supported adapter-static/prerender shape, and the build rejects server-only SvelteKit files instead of letting them fail only in production.
 
 ## Do not regress
 
@@ -143,12 +145,18 @@ These are the choices that make this worth continuing. Keep them unless a replac
 
 ## P3: developer experience and docs
 
-19. [ ] **Give SvelteKit a real dev loop.** `wt dev --watch` rebuilds the whole bundle on any change: frontend build, contract generation, componentize, compile, upload and restart. There is no Vite HMR and no preserved browser state.
-   - [ ] Add a two-tier dev mode: run `vite dev` for HMR and proxy `/api` to the supervisor.
-   - [ ] Rebuild the component only when Go or WIT inputs change.
-   - [ ] Keep the single-tier wasm loop for component-only work and as the e2e path.
+19. [x] **Give SvelteKit a real dev loop.** `wt dev --watch` rebuilt the whole bundle on any change: frontend build, contract generation, componentize, compile, upload and restart, with no Vite HMR or preserved browser state.
+   - [x] Run `vite dev` on a free or configured port and proxy `dev.proxy` (default `/api`) to the supervisor with the app Host, so browser fetches reach the wasm component.
+   - [x] Rebuild only the component on Go, WIT, `app.json`, contract or `dev.watch` changes, using `dev.build` and leaving Vite running.
+   - [x] Generate and clean up `web/.wt-dev.vite.config.ts`, preserving the app's own Vite config, and ignore it in git.
+   - [x] Keep `--vite=false` and workspace mode on the single-tier loop for component-only work and e2e.
+   - [x] Test the Vite config generation, proxy target and Host header, component input filtering, dev manifest validation and the server-file check.
 
-20. [ ] **Accept the static-only boundary explicitly.** `adapter-static` and `prerender` mean no SSR, no `+server.ts`, no form actions and no server load. Either state that in the README as the supported SvelteKit mode, or plan a JS component runtime for SSR once the host path can support it.
+20. [x] **Accept the static-only boundary explicitly.** `adapter-static` and `prerender` mean no SSR, no `+server.ts`, no form actions and no server load.
+   - [x] Document the supported SvelteKit shape in the README, including client data loading, prerender entries, the contract pipeline and the absence of a Node server.
+   - [x] Reject `+page.server.*`, `+layout.server.*`, `+server.*`, `hooks.server.*` and `src/lib/server/` in the build with a clear error.
+   - [x] Annotate the scaffold and guestbook root layouts so the boundary is visible in the app.
+   - [ ] A JS component runtime for real SSR remains a future host feature.
 
 21. [ ] **Split the docs and test the claims.** The README is 87KB and `notes/fixes.md` is 60KB, and small claims are already drifting, such as `wt` versus `wt-deploy` in usage strings.
    - [ ] Move rationale into `docs/` and keep the README to install, run, deploy and limits.
@@ -158,7 +166,7 @@ These are the choices that make this worth continuing. Keep them unless a replac
 ## If I picked the next five
 
 1. [ ] Embedded host with typed WIT imports, and the density benchmark that justifies it.
-2. [ ] Vite HMR plus the two-tier dev loop.
+2. [x] Vite HMR plus the two-tier dev loop.
 3. [ ] Deployment resource: async deploys and immutable preview hosts; per-app locks and persisted idempotency are done.
 4. [ ] Host event bus and blob/uploads.
 5. [ ] Explicit migrate phase, dependency-aware readiness and maintenance mode.
