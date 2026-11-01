@@ -451,6 +451,55 @@ func (s *supervisor) replayDeployResponse(w http.ResponseWriter, entry deployRep
 	_, _ = w.Write(entry.Body)
 }
 
+// stagedDeploy is an uploaded bundle that has passed parsing and the static-only checks but is not installed yet.
+type stagedDeploy struct {
+	dir        string
+	cfg        appConfig
+	digest     string
+	etag       string
+	staticOnly bool
+	cleanup    func()
+}
+
+// stageDeploy parses the uploaded bundle and resolves the static-only and digest cases shared by the sync and async paths.
+func (s *supervisor) stageDeploy(w http.ResponseWriter, r *http.Request, name string) (*stagedDeploy, bool) {
+	staticOnly := r.URL.Query().Get("static_only") == "1" || strings.TrimSpace(r.Header.Get("X-WT-Static-Only")) == "1"
+	dir, cfg, cleanup, ok := s.receiveBundle(w, r, name, staticOnly)
+	if !ok {
+		return nil, false
+	}
+	staged := &stagedDeploy{dir: dir, cfg: cfg, staticOnly: staticOnly, cleanup: cleanup}
+	if staticOnly {
+		a := s.lookup(name)
+		if a == nil {
+			cleanup()
+			writeError(w, http.StatusNotFound, "app not found")
+			return nil, false
+		}
+		a.mu.Lock()
+		liveDir := a.dir
+		a.mu.Unlock()
+		for _, file := range []string{"main.wasm", "main.cwasm", artifactName} {
+			if exists(dir, file) {
+				continue
+			}
+			if err := copyOptional(liveDir, dir, file); err != nil {
+				cleanup()
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return nil, false
+			}
+		}
+	}
+	staged.digest = sourceDigest(dir)
+	if staged.digest == "" {
+		cleanup()
+		writeError(w, http.StatusBadRequest, "static-only deploy needs a running component")
+		return nil, false
+	}
+	staged.etag = `"` + bundleDigest(dir) + `"`
+	return staged, true
+}
+
 func (s *supervisor) deploy(w http.ResponseWriter, r *http.Request, name string) {
 	defer s.lockApp(name)()
 
@@ -473,35 +522,11 @@ func (s *supervisor) deploy(w http.ResponseWriter, r *http.Request, name string)
 	if s.rejectOverBudget(w) {
 		return
 	}
-	staticOnly := r.URL.Query().Get("static_only") == "1" || strings.TrimSpace(r.Header.Get("X-WT-Static-Only")) == "1"
-	tmpDir, cfg, cleanup, ok := s.receiveBundle(w, r, name, staticOnly)
-	defer cleanup()
+	staged, ok := s.stageDeploy(w, r, name)
 	if !ok {
 		return
 	}
-	if staticOnly {
-		a := s.lookup(name)
-		if a == nil {
-			writeError(w, http.StatusNotFound, "app not found")
-			return
-		}
-		a.mu.Lock()
-		dir := a.dir
-		a.mu.Unlock()
-		for _, file := range []string{"main.wasm", "main.cwasm", artifactName} {
-			if exists(tmpDir, file) {
-				continue
-			}
-			if err := copyOptional(dir, tmpDir, file); err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-		}
-		if sourceDigest(tmpDir) == "" {
-			writeError(w, http.StatusBadRequest, "static-only deploy needs a running component")
-			return
-		}
-	}
+	defer staged.cleanup()
 
 	if value := r.URL.Query().Get("dry_run"); value != "" {
 		dryRun, err := strconv.ParseBool(value)
@@ -510,22 +535,21 @@ func (s *supervisor) deploy(w http.ResponseWriter, r *http.Request, name string)
 			return
 		}
 		if dryRun {
-			digest := sourceDigest(tmpDir)
-			w.Header().Set("X-WT-Wasm-Digest", digest)
-			writeJSON(w, http.StatusOK, deployValidationResponse{Valid: true, Config: configResponse(cfg), Digest: digest})
+			w.Header().Set("X-WT-Wasm-Digest", staged.digest)
+			writeJSON(w, http.StatusOK, deployValidationResponse{Valid: true, Config: configResponse(staged.cfg), Digest: staged.digest})
 			return
 		}
 	}
 
-	digest := sourceDigest(tmpDir)
-	etag := `"` + bundleDigest(tmpDir) + `"`
+	digest := staged.digest
+	etag := staged.etag
 	w.Header().Set("ETag", etag)
 	if match := r.Header.Get("If-None-Match"); match != "" && etagMatches(match, etag) {
 		w.Header().Set("X-WT-Wasm-Digest", digest)
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
-	next, mode, err := s.installBundle(w, name, cfg, tmpDir, digest, "deployed")
+	next, mode, err := s.installBundle(w, name, staged.cfg, staged.dir, digest, "deployed")
 	if err != nil {
 		s.metrics.observeDeploy(name, "failed")
 		s.recordDeploymentFailure(name, digest, err)

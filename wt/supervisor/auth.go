@@ -71,7 +71,7 @@ func (i authIdentity) canPerformAppAction(r *http.Request, action string) bool {
 		return false
 	}
 	switch {
-	case action == "", strings.HasPrefix(action, "rollback/"):
+	case action == "", action == "deployments", strings.HasPrefix(action, "deployments/"), strings.HasPrefix(action, "rollback/"):
 		if r.URL.Query().Get("backup") != "" {
 			return false
 		}

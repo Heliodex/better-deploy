@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -22,12 +23,17 @@ const (
 	// deploymentReplayKeep bounds one app's persisted idempotency responses.
 	deploymentReplayKeep = 64
 	// deploymentReplayTTL is how long a deploy response may be replayed.
-	deploymentReplayTTL     = 24 * time.Hour
-	deploymentReplayVersion = 1
-	deploymentStatusOK      = "success"
-	deploymentStatusFail    = "failed"
+	deploymentReplayTTL      = 24 * time.Hour
+	deploymentReplayVersion  = 1
+	deploymentStatusOK       = "success"
+	deploymentStatusFail     = "failed"
+	deploymentStatusQueued   = "queued"
+	deploymentStatusRunning  = "running"
+	deploymentStatusCanceled = "canceled"
 	// deploymentErrorBytes caps the failure text kept in history.
 	deploymentErrorBytes = 4 << 10
+	deploymentLogName    = "deploy.log"
+	deploymentLogBytes   = 1 << 20
 )
 
 // deploymentMaxBytes bounds one app's retained history. Identical artifacts are shared, so this is generous.
@@ -39,6 +45,10 @@ var errDeploymentNotFound = errors.New("deployment not found")
 type deploymentInfo struct {
 	ID          string            `json:"id"`
 	DeployedAt  time.Time         `json:"deployedAt"`
+	QueuedAt    time.Time         `json:"queuedAt,omitempty"`
+	StartedAt   time.Time         `json:"startedAt,omitempty"`
+	FinishedAt  time.Time         `json:"finishedAt,omitempty"`
+	Mode        string            `json:"mode,omitempty"`
 	Digest      string            `json:"digest"`
 	Size        int64             `json:"size"`
 	WasmDigest  string            `json:"wasmDigest,omitempty"`
@@ -63,6 +73,7 @@ type deploymentReplayFile struct {
 // deploymentManager keeps a bounded history of app bundles under the state directory.
 type deploymentManager struct {
 	dir string
+	mu  sync.Mutex
 }
 
 func newDeploymentManager(dir string) *deploymentManager {
@@ -244,6 +255,89 @@ func (m *deploymentManager) info(app, id string) (deploymentInfo, error) {
 	return info, nil
 }
 
+// createRun reserves a deployment id before the install starts, so a caller can follow status and logs by URL.
+func (m *deploymentManager) createRun(app, digest string) (deploymentInfo, error) {
+	id, now, err := m.newID(app)
+	if err != nil {
+		return deploymentInfo{}, err
+	}
+	dir := filepath.Join(m.appDir(app), id)
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		return deploymentInfo{}, err
+	}
+	info := deploymentInfo{
+		ID:         id,
+		DeployedAt: now,
+		QueuedAt:   now,
+		Digest:     digest,
+		Status:     deploymentStatusQueued,
+	}
+	data, err := json.Marshal(info)
+	if err != nil {
+		_ = os.RemoveAll(dir)
+		return deploymentInfo{}, err
+	}
+	if err := os.WriteFile(filepath.Join(dir, deploymentMetaName), append(data, '\n'), 0o644); err != nil {
+		_ = os.RemoveAll(dir)
+		return deploymentInfo{}, err
+	}
+	if err := os.WriteFile(filepath.Join(dir, deploymentLogName), nil, 0o644); err != nil {
+		_ = os.RemoveAll(dir)
+		return deploymentInfo{}, err
+	}
+	return info, nil
+}
+
+// updateRun mutates one run's metadata atomically. The runner and a cancel request may both update it.
+func (m *deploymentManager) updateRun(app, id string, update func(*deploymentInfo)) (deploymentInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	info, err := m.info(app, id)
+	if err != nil {
+		return deploymentInfo{}, err
+	}
+	update(&info)
+	data, err := json.Marshal(info)
+	if err != nil {
+		return deploymentInfo{}, err
+	}
+	path := filepath.Join(m.appDir(app), id, deploymentMetaName)
+	if err := writeFileAtomicMode(path, append(data, '\n'), 0o644); err != nil {
+		return deploymentInfo{}, err
+	}
+	return info, nil
+}
+
+func (m *deploymentManager) logPath(app, id string) string {
+	return filepath.Join(m.appDir(app), id, deploymentLogName)
+}
+
+// appendLog keeps a deployment's log bounded and never lets logging fail the install.
+func (m *deploymentManager) appendLog(app, id string, data []byte) {
+	path := m.logPath(app, id)
+	info, err := os.Stat(path)
+	if err == nil && info.Size()+int64(len(data)) > deploymentLogBytes {
+		return
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	_, _ = file.Write(data)
+	_ = file.Close()
+}
+
+func (m *deploymentManager) readLog(app, id string) ([]byte, error) {
+	if err := validDeploymentID(id); err != nil {
+		return nil, errDeploymentNotFound
+	}
+	data, err := os.ReadFile(m.logPath(app, id))
+	if os.IsNotExist(err) {
+		return nil, errDeploymentNotFound
+	}
+	return data, err
+}
+
 func (m *deploymentManager) bundle(app, id string) (string, error) {
 	if err := validDeploymentID(id); err != nil {
 		return "", err
@@ -251,7 +345,7 @@ func (m *deploymentManager) bundle(app, id string) (string, error) {
 	dir := filepath.Join(m.appDir(app), id)
 	if data, err := os.ReadFile(filepath.Join(dir, deploymentMetaName)); err == nil {
 		var info deploymentInfo
-		if json.Unmarshal(data, &info) == nil && info.Status == deploymentStatusFail {
+		if json.Unmarshal(data, &info) == nil && info.Status != "" && info.Status != deploymentStatusOK {
 			return "", errDeploymentNotFound
 		}
 	}
@@ -413,11 +507,32 @@ func (m *deploymentManager) prune(app string) error {
 	if err != nil {
 		return err
 	}
+	// Never prune a deployment that is still queued or running; its status and log are live.
+	removeOldest := func() (bool, error) {
+		for i, id := range ids {
+			info, err := m.info(app, id)
+			if err != nil {
+				continue
+			}
+			if info.Status == deploymentStatusQueued || info.Status == deploymentStatusRunning {
+				continue
+			}
+			if err := os.RemoveAll(filepath.Join(m.appDir(app), id)); err != nil {
+				return false, err
+			}
+			ids = append(ids[:i], ids[i+1:]...)
+			return true, nil
+		}
+		return false, nil
+	}
 	for len(ids) > deploymentKeep {
-		if err := os.RemoveAll(filepath.Join(m.appDir(app), ids[0])); err != nil {
+		removed, err := removeOldest()
+		if err != nil {
 			return err
 		}
-		ids = ids[1:]
+		if !removed {
+			break
+		}
 	}
 	for len(ids) > 1 {
 		used, err := m.usage(app)
@@ -427,10 +542,13 @@ func (m *deploymentManager) prune(app string) error {
 		if used <= deploymentMaxBytes {
 			break
 		}
-		if err := os.RemoveAll(filepath.Join(m.appDir(app), ids[0])); err != nil {
+		removed, err := removeOldest()
+		if err != nil {
 			return err
 		}
-		ids = ids[1:]
+		if !removed {
+			break
+		}
 		if err := m.gcBlobs(app); err != nil {
 			return err
 		}

@@ -155,7 +155,14 @@ func (m *deploymentManager) record(app, source string) (deploymentInfo, error) {
 	if err != nil {
 		return deploymentInfo{}, err
 	}
+	return m.recordAt(app, id, deploymentInfo{QueuedAt: now}, source)
+}
 
+// recordAt materializes a successful bundle into an existing deployment id, keeping its log and queue timestamps.
+func (m *deploymentManager) recordAt(app, id string, previous deploymentInfo, source string) (deploymentInfo, error) {
+	if err := validDeploymentID(id); err != nil {
+		return deploymentInfo{}, err
+	}
 	temp, err := os.MkdirTemp(m.appDir(app), ".record-")
 	if err != nil {
 		return deploymentInfo{}, err
@@ -210,21 +217,34 @@ func (m *deploymentManager) record(app, source string) (deploymentInfo, error) {
 		}
 	}
 	total += staticBytes
-	recorded := deploymentInfo{
-		ID:          id,
-		DeployedAt:  now,
-		Digest:      digest,
-		Size:        size,
-		WasmDigest:  wasmDigest,
-		WasmBytes:   wasmSize,
-		Runtime:     artifact.Wasmtime,
-		Target:      artifact.Target,
-		Rebuildable: files["main.wasm"] != "",
-		Bytes:       total,
-		Blobs:       files,
-		Static:      static,
-		Status:      deploymentStatusOK,
+	if err := copyOptional(filepath.Join(m.appDir(app), id), temp, deploymentLogName); err != nil {
+		return deploymentInfo{}, err
 	}
+
+	now := time.Now().UTC()
+	if previous.QueuedAt.IsZero() {
+		previous.QueuedAt = now
+	}
+	if previous.StartedAt.IsZero() {
+		previous.StartedAt = now
+	}
+	previous.ID = id
+	previous.DeployedAt = now
+	previous.FinishedAt = now
+	previous.Digest = digest
+	previous.Size = size
+	previous.WasmDigest = wasmDigest
+	previous.WasmBytes = wasmSize
+	previous.Runtime = artifact.Wasmtime
+	previous.Target = artifact.Target
+	previous.Rebuildable = files["main.wasm"] != ""
+	previous.Bytes = total
+	previous.Blobs = files
+	previous.Static = static
+	previous.Status = deploymentStatusOK
+	previous.Error = ""
+	recorded := previous
+
 	meta, err := json.Marshal(recorded)
 	if err != nil {
 		return deploymentInfo{}, err
@@ -232,7 +252,7 @@ func (m *deploymentManager) record(app, source string) (deploymentInfo, error) {
 	if err := os.WriteFile(filepath.Join(temp, deploymentMetaName), append(meta, '\n'), 0o644); err != nil {
 		return deploymentInfo{}, err
 	}
-	if err := os.Rename(temp, filepath.Join(m.appDir(app), id)); err != nil {
+	if err := replaceDir(temp, filepath.Join(m.appDir(app), id)); err != nil {
 		return deploymentInfo{}, err
 	}
 	if err := m.prune(app); err != nil {
@@ -335,8 +355,11 @@ func (s *supervisor) recordDeploymentFailure(name, digest string, cause error) {
 }
 
 func (s *supervisor) handleDeployments(w http.ResponseWriter, r *http.Request, name string) {
-	if _, ok := s.requireApp(w, r, name); !ok {
-		return
+	if s.lookup(name) == nil {
+		if s.deployments == nil || !existsPath(s.deployments.appDir(name)) {
+			writeError(w, http.StatusNotFound, "app not found")
+			return
+		}
 	}
 	if s.deployments == nil {
 		writeError(w, http.StatusServiceUnavailable, "deployment history unavailable")
@@ -347,6 +370,10 @@ func (s *supervisor) handleDeployments(w http.ResponseWriter, r *http.Request, n
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if s.lookup(name) == nil && len(list) == 0 {
+		writeError(w, http.StatusNotFound, "app not found")
+		return
+	}
 	running := ""
 	if a := s.lookup(name); a != nil {
 		a.mu.Lock()
@@ -355,7 +382,10 @@ func (s *supervisor) handleDeployments(w http.ResponseWriter, r *http.Request, n
 	}
 	// list is newest first, so the first successful record matching the running digest is the current one.
 	for i := range list {
-		if list[i].Status == deploymentStatusFail || running == "" || list[i].Digest != running {
+		if list[i].Status != "" && list[i].Status != deploymentStatusOK {
+			continue
+		}
+		if running == "" || list[i].Digest != running {
 			continue
 		}
 		list[i].Current = true
@@ -366,9 +396,6 @@ func (s *supervisor) handleDeployments(w http.ResponseWriter, r *http.Request, n
 
 // handleDeploymentInfo serves one retained history entry.
 func (s *supervisor) handleDeploymentInfo(w http.ResponseWriter, r *http.Request, name, id string) {
-	if _, ok := s.requireApp(w, r, name); !ok {
-		return
-	}
 	if s.deployments == nil {
 		writeError(w, http.StatusServiceUnavailable, "deployment history unavailable")
 		return
@@ -378,7 +405,7 @@ func (s *supervisor) handleDeploymentInfo(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	if a := s.lookup(name); a != nil && info.Status != deploymentStatusFail {
+	if a := s.lookup(name); a != nil && (info.Status == "" || info.Status == deploymentStatusOK) {
 		a.mu.Lock()
 		running := a.digest
 		a.mu.Unlock()

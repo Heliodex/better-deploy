@@ -180,6 +180,8 @@ type supervisor struct {
 	apps, hosts map[string]*app
 
 	deployLocks     appLocks
+	deployRunsMu    sync.Mutex
+	deployRuns      map[string]*deploymentRun
 	artifactCacheMu sync.Mutex
 	loginMu         sync.Mutex
 	login           *loginLimiter
@@ -420,10 +422,7 @@ func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if id, ok := strings.CutPrefix(action, "deployments/"); ok {
-		if !requireMethod(w, r, http.MethodGet) {
-			return
-		}
-		s.handleDeploymentInfo(w, r, name, id)
+		s.handleDeploymentRoute(w, r, name, id)
 		return
 	}
 	if action == "validate" {
@@ -454,10 +453,15 @@ func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
 	case "secrets":
 		s.handleAppSecrets(w, r, name, "")
 	case "deployments":
-		if !requireMethod(w, r, http.MethodGet) {
-			return
+		switch r.Method {
+		case http.MethodGet:
+			s.handleDeployments(w, r, name)
+		case http.MethodPost:
+			s.handleDeploymentCreate(w, r, name)
+		default:
+			w.Header().Set("Allow", "GET, POST")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
-		s.handleDeployments(w, r, name)
 	case "stop":
 		if !requireMethod(w, r, http.MethodPost) {
 			return

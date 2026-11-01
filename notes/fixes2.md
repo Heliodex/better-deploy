@@ -20,6 +20,7 @@ The short assessment: the spine is right and unusually well executed for a proto
 - [x] **SvelteKit dev loop.** `wt dev` now runs Vite with HMR, proxies `dev.proxy` to the supervisor with the app Host, and rebuilds only the wasm component from `dev.build` on Go, WIT, contract or `dev.watch` changes. `--vite=false` keeps the single-tier loop.
 - [x] **Static SvelteKit boundary.** The README documents the supported adapter-static/prerender shape, and the build rejects server-only SvelteKit files instead of letting them fail only in production.
 - [x] **Response contracts.** The Valibot registries now cover responses as well as requests. Response schemas generate Go response structs, registered nested schemas become `$ref` files so envelopes reuse the item type, and the client validates responses through the same source-of-truth schemas.
+- [x] **Queued deployment resource.** `POST /apps/<name>/deployments` stages the upload, returns `202` with a `Location`, and runs install and readiness in the background. Entries report queued/running/success/failed/canceled, expose a plain-text log and an SSE stream, and can be canceled. `POST /apps/<name>` stays as the synchronous compatibility alias.
 
 ## Do not regress
 
@@ -122,11 +123,11 @@ These are the choices that make this worth continuing. Keep them unless a replac
    - [ ] Cheap version: extend `WT_TRUSTED_PROXIES` to an allowlist of identity headers from a trusted proxy (`Remote-User`, `X-Forwarded-User`, groups), only accepted from that proxy, passed through with a signed marker.
    - [ ] Bigger version: a platform session and user table with `GET /v1/me`, opt-in per app.
 
-15. [ ] **A real deployment resource.** `POST /apps/<name>` is not the resource for a deployment.
-   - [ ] `POST /apps/<name>/deployments` returns `202` and `Location: /apps/<name>/deployments/<id>`.
-   - [ ] Add cancel and an SSE log stream for one deployment.
+15. [ ] **A real deployment resource.** `POST /apps/<name>` was the only deploy entry point. It now has a queued resource beside it while the old route stays as a compatibility alias.
+   - [x] `POST /apps/<name>/deployments` returns `202` with `Location: /apps/<name>/deployments/<id>`, and the entry reports `queued`, `running`, `success`, `failed` or `canceled` with queue/start/finish timestamps and mode.
+   - [x] Add cancel and an SSE log stream for one deployment. Cancellation is best-effort for a running install; a queued run is canceled before install.
    - [ ] Give each retained bundle an immutable preview host such as `<short>--<name>.apps.example.com`; promotion flips the app alias.
-   - [ ] Keep `POST /apps/<name>` as a compatibility alias until the CLI and panel move.
+   - [x] Keep `POST /apps/<name>` as a compatibility alias until the CLI and panel move.
 
 16. [ ] **Readiness, dependencies and maintenance.** Startup ordering across a frontend, API and worker is implicit.
    - [ ] Add `GET /readyz`, distinct from liveness.

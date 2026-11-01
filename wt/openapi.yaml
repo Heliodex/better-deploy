@@ -36,7 +36,10 @@ paths:
                             schema:
                                 $ref: "#/components/schemas/AppInfo"
         post:
-            summary: Deploy a bundle synchronously
+            summary: Deploy a bundle synchronously (compatibility alias)
+            description: >
+                Use POST /apps/{name}/deployments for a queued deployment resource.
+                This route stays synchronous for older CLI and panel clients.
             parameters:
                 - name: If-None-Match
                   in: header
@@ -138,6 +141,38 @@ paths:
                                 type: array
                                 items:
                                     $ref: "#/components/schemas/Deployment"
+        post:
+            summary: Queue a deployment
+            description: >
+                Uploads and validates the bundle synchronously, then installs it in
+                the background. Follow Location for status, logs and cancel.
+            parameters:
+                - name: If-None-Match
+                  in: header
+                  schema: { type: string }
+            requestBody:
+                required: true
+                content:
+                    multipart/form-data:
+                        schema:
+                            type: object
+                            required: [artifact]
+                            properties:
+                                artifact:
+                                    type: string
+                                    format: binary
+            responses:
+                "202":
+                    description: Deployment queued
+                    headers:
+                        Location:
+                            schema: { type: string }
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/Deployment"
+                "304":
+                    description: Bundle already matches If-None-Match
     /apps/{name}/deployments/{id}:
         parameters:
             - $ref: "#/components/parameters/AppName"
@@ -154,6 +189,54 @@ paths:
                         application/json:
                             schema:
                                 $ref: "#/components/schemas/Deployment"
+    /apps/{name}/deployments/{id}/cancel:
+        parameters:
+            - $ref: "#/components/parameters/AppName"
+            - name: id
+              in: path
+              required: true
+              schema: { type: string }
+        post:
+            summary: Cancel a queued or running deployment
+            responses:
+                "202":
+                    description: Cancellation requested
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/Deployment"
+                "409":
+                    description: Deployment already finished
+    /apps/{name}/deployments/{id}/logs:
+        parameters:
+            - $ref: "#/components/parameters/AppName"
+            - name: id
+              in: path
+              required: true
+              schema: { type: string }
+        get:
+            summary: Read a deployment log
+            responses:
+                "200":
+                    description: Plain-text deployment log
+                    content:
+                        text/plain:
+                            schema: { type: string }
+    /apps/{name}/deployments/{id}/logs/stream:
+        parameters:
+            - $ref: "#/components/parameters/AppName"
+            - name: id
+              in: path
+              required: true
+              schema: { type: string }
+        get:
+            summary: Stream a deployment log with SSE
+            responses:
+                "200":
+                    description: Server-sent events; a final done event carries the terminal status
+                    content:
+                        text/event-stream:
+                            schema: { type: string }
     /apps/{name}/jobs:
         parameters:
             - $ref: "#/components/parameters/AppName"
@@ -359,10 +442,18 @@ components:
             properties:
                 id: { type: string }
                 digest: { type: string }
-                status: { type: string, enum: [success, failed] }
+                status:
+                    {
+                        type: string,
+                        enum: [queued, running, success, failed, canceled],
+                    }
                 error: { type: string }
                 current: { type: boolean }
+                mode: { type: string, enum: [full, static] }
                 deployedAt: { type: string, format: date-time }
+                queuedAt: { type: string, format: date-time }
+                startedAt: { type: string, format: date-time }
+                finishedAt: { type: string, format: date-time }
         JobRequest:
             type: object
             required: [path]
