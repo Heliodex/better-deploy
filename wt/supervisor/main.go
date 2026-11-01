@@ -56,6 +56,8 @@ type config struct {
 	accessLog                                                  bool
 	accessLogEvery                                             int
 	storageMigrationTimeout                                    time.Duration
+	storageTmpDir                                              string
+	storageTempBudgetBytes                                     int64
 }
 
 type appConfig struct {
@@ -511,6 +513,7 @@ func validateAppFetchListen(value string) error {
 func parseConfig() config {
 	cfg := configFromEnv()
 	diskBudgetMB := cfg.diskBudgetBytes >> 20
+	storageTempBudgetMB := cfg.storageTempBudgetBytes >> 20
 	flag.StringVar(&cfg.listen, "listen", cfg.listen, "public listen address")
 	flag.StringVar(&cfg.appsDir, "apps", cfg.appsDir, "directory containing one directory per app")
 	flag.StringVar(&cfg.stateDir, "state", cfg.stateDir, "per-app state directory")
@@ -520,6 +523,8 @@ func parseConfig() config {
 	flag.BoolVar(&cfg.accessLog, "access-log", cfg.accessLog, "write proxied request lines to each app's supervisor log")
 	flag.IntVar(&cfg.accessLogEvery, "access-log-every", cfg.accessLogEvery, "log one in N successful access lines (errors are always logged)")
 	flag.DurationVar(&cfg.storageMigrationTimeout, "storage-migration-timeout", cfg.storageMigrationTimeout, "timeout for one migration, between 1s and 1h (default 5m)")
+	flag.StringVar(&cfg.storageTmpDir, "storage-tmp-dir", cfg.storageTmpDir, "directory for SQLite temp files (default WT_STATE_DIR/.tmp)")
+	flag.Int64Var(&storageTempBudgetMB, "storage-temp-budget-mb", storageTempBudgetMB, "global SQLite temp directory budget in MiB (0 = unlimited)")
 	flag.StringVar(&cfg.domain, "domain", cfg.domain, "default app host suffix")
 	flag.StringVar(&cfg.wasmtime, "wasmtime", cfg.wasmtime, "wasmtime binary")
 	flag.StringVar(&cfg.wasmtimeCompiler, "wasmtime-compiler", cfg.wasmtimeCompiler, "wasmtime binary with the compile subcommand, used to rebuild stale artifacts")
@@ -547,6 +552,13 @@ func parseConfig() config {
 
 	if cfg.storageMigrationTimeout < minStorageMigrationTimeout || cfg.storageMigrationTimeout > maxStorageMigrationTimeout {
 		log.Fatalf("storage migration timeout %s must be between %s and %s", cfg.storageMigrationTimeout, minStorageMigrationTimeout, maxStorageMigrationTimeout)
+	}
+	if storageTempBudgetMB < 0 {
+		log.Fatalf("storage temp budget must be 0 or greater")
+	}
+	cfg.storageTempBudgetBytes = storageTempBudgetMB << 20
+	if cfg.storageTempBudgetBytes > 1<<40 {
+		log.Fatalf("storage temp budget must be at most 1 TiB")
 	}
 	if diskBudgetMB > 0 {
 		cfg.diskBudgetBytes = diskBudgetMB << 20
@@ -609,6 +621,18 @@ func parseConfig() config {
 		log.Fatalf("state dir: %v", err)
 	}
 	cfg.appsDir, cfg.stateDir = absoluteApps, absoluteState
+	if cfg.storageTmpDir == "" {
+		cfg.storageTmpDir = filepath.Join(cfg.stateDir, ".tmp")
+	} else {
+		absoluteTmp, err := filepath.Abs(cfg.storageTmpDir)
+		if err != nil {
+			log.Fatalf("storage temp dir: %v", err)
+		}
+		cfg.storageTmpDir = absoluteTmp
+	}
+	if err := validateStorageTempDir(cfg.storageTmpDir, cfg.stateDir, cfg.appsDir); err != nil {
+		log.Fatalf("%v", err)
+	}
 	if cfg.cacheDir == "" {
 		cfg.cacheDir = filepath.Join(cfg.stateDir, ".cache")
 	} else {
@@ -638,6 +662,9 @@ func startSupervisor(cfg config) *supervisor {
 	storage, err := newStorageServer(filepath.Join(cfg.stateDir, ".storage"), cfg.storageListen)
 	if err != nil {
 		log.Fatalf("storage: %v", err)
+	}
+	if err := storage.setTempDir(cfg.storageTmpDir, cfg.storageTempBudgetBytes); err != nil {
+		log.Fatalf("storage temp: %v", err)
 	}
 	if cfg.storageMigrationTimeout > 0 {
 		storage.migrationTimeout = cfg.storageMigrationTimeout
@@ -722,6 +749,7 @@ func serve(s *supervisor) {
 	backupCtx, stopBackups := context.WithCancel(context.Background())
 	defer stopBackups()
 	go s.backups.loop(backupCtx)
+	go s.storage.monitorTemp(backupCtx)
 	go s.monitorResources(resourceSampleInterval)
 	go s.monitorHealth()
 	go s.monitorDiskBudget()

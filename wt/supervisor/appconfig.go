@@ -76,6 +76,25 @@ func validateIsolationConfig(cfg config) error {
 	return nil
 }
 
+// validateStorageTempDir keeps the SQLite temp directory from being the state or apps root, or a parent of either.
+// The temp directory is cleaned of SQLite's etilqs_ files at startup and its size is counted, so pointing it at a shared or broad directory would be misleading.
+func validateStorageTempDir(tmp, state, apps string) error {
+	tmp = filepath.Clean(tmp)
+	state = filepath.Clean(state)
+	apps = filepath.Clean(apps)
+	if tmp == string(filepath.Separator) {
+		return fmt.Errorf("storage temp dir must not be the filesystem root")
+	}
+	if tmp == state || tmp == apps {
+		return fmt.Errorf("storage temp dir %s must be a dedicated directory, not the state or apps directory", tmp)
+	}
+	separator := string(filepath.Separator)
+	if strings.HasPrefix(state, tmp+separator) || strings.HasPrefix(apps, tmp+separator) {
+		return fmt.Errorf("storage temp dir %s must not be a parent of the state or apps directory", tmp)
+	}
+	return nil
+}
+
 func env(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
@@ -151,6 +170,8 @@ func configFromEnv() config {
 		diskBudgetBytes:     envInt64("WT_DISK_BUDGET_MB", 0) << 20,
 
 		storageMigrationTimeout: envStorageMigrationTimeout(),
+		storageTmpDir:           os.Getenv("WT_STORAGE_TMP_DIR"),
+		storageTempBudgetBytes:  envInt64("WT_STORAGE_TEMP_BUDGET_MB", defaultStorageTempBudgetMB) << 20,
 	}
 }
 

@@ -81,6 +81,8 @@ func storageErrorDetails(err error) (int, storageErrorResponse) {
 		return http.StatusBadRequest, storageErrorResponse{Error: errorMessage(err), Code: "invalid"}
 	case errors.Is(err, errStorageUnavailable):
 		return http.StatusInternalServerError, storageErrorResponse{Error: errorMessage(err), Code: "storage_unavailable"}
+	case errors.Is(err, errStorageTempBudget):
+		return http.StatusInsufficientStorage, storageErrorResponse{Error: errorMessage(err), Code: "temp_budget"}
 	case errors.Is(err, errStorageMigrationChecksum):
 		return http.StatusConflict, storageErrorResponse{Error: errorMessage(err), Code: "migration_checksum"}
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):

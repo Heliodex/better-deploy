@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"modernc.org/sqlite"
@@ -46,11 +47,21 @@ const (
 	storageQueueTimeout         = 5 * time.Second
 	// storagePageSize is SQLite's default page size for a new database. Per-app max_page_count is derived from it.
 	storagePageSize = 4096
+	// storageWALAutoCheckpoint checkpoints the WAL after this many pages, keeping the WAL near 4 MiB between checkpoints.
+	storageWALAutoCheckpoint = 1000
+	// journalSizeLimit bounds the WAL after a checkpoint. It is capped at 64 MiB and scaled down for small quotas.
+	defaultJournalSizeLimit = 64 << 20
+	minJournalSizeLimit     = 256 << 10
+	// storageTempMonitorInterval bounds how often the global SQLite temp directory is measured.
+	storageTempMonitorInterval = 10 * time.Second
+	// defaultStorageTempBudgetMB is the default global temp directory budget.
+	defaultStorageTempBudgetMB = 512
 )
 
 var (
 	errStorageUnavailable = errors.New("storage unavailable")
 	errStorageInvalid     = errors.New("invalid storage request")
+	errStorageTempBudget  = errors.New("storage temp budget exceeded")
 )
 
 // storageServer is a tiny per-app SQLite API. It listens on loopback and authenticates apps with a token, so app processes never touch the database files directly.
@@ -68,6 +79,12 @@ type storageServer struct {
 	dbs    map[string]*sql.DB
 	// readDBs are query-only pools. They let /v1/query run without any write capability, even a mistaken one.
 	readDBs map[string]*sql.DB
+
+	// tempDir is the process-wide SQLite temp directory; tempBudget is its byte budget, zero for unlimited.
+	// tempOver is set by the monitor and rejects new storage requests until usage falls back under the budget.
+	tempDir    string
+	tempBudget int64
+	tempOver   atomic.Bool
 
 	sessionMu      sync.Mutex
 	sessionCond    *sync.Cond
@@ -147,6 +164,119 @@ func newStorageServer(dir, listen string) (*storageServer, error) {
 	}()
 	go s.sessionLoop()
 	return s, nil
+}
+
+// cleanStorageTemp removes stale SQLite temp files from a previous crash, leaving unrelated files alone.
+func cleanStorageTemp(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), "etilqs_") {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(dir, entry.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// setTempDir points SQLite at a dedicated temp directory and records its global budget.
+// SQLite's temp directory is process-wide, so every app shares it; the per-app quota cannot attribute these files.
+func (s *storageServer) setTempDir(dir string, budget int64) error {
+	if dir == "" {
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("storage temp dir: %w", err)
+	}
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = resolved
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return fmt.Errorf("storage temp dir permissions: %w", err)
+	}
+	if err := cleanStorageTemp(dir); err != nil {
+		return fmt.Errorf("clean storage temp dir: %w", err)
+	}
+	s.mu.Lock()
+	s.tempDir = dir
+	s.tempBudget = max(budget, 0)
+	s.mu.Unlock()
+	s.tempOver.Store(false)
+	return nil
+}
+
+// dirSize sums the regular files in a directory without following links.
+func dirSize(dir string) (int64, error) {
+	var total int64
+	err := filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if info.Mode().IsRegular() {
+			total += info.Size()
+		}
+		return nil
+	})
+	if os.IsNotExist(err) {
+		return 0, nil
+	}
+	return total, err
+}
+
+// checkTemp updates the over-budget flag used to reject new storage requests. Existing queries finish under their own five-second deadline.
+func (s *storageServer) checkTemp() {
+	s.mu.Lock()
+	dir := s.tempDir
+	budget := s.tempBudget
+	s.mu.Unlock()
+	if dir == "" || budget <= 0 {
+		s.tempOver.Store(false)
+		return
+	}
+	size, err := dirSize(dir)
+	if err != nil {
+		log.Printf("storage temp: measure %s: %v", dir, err)
+		return
+	}
+	over := size > budget
+	if over != s.tempOver.Swap(over) {
+		if over {
+			log.Printf("storage temp: %s is over its %d-byte budget", dir, budget)
+		} else {
+			log.Printf("storage temp: %s is under its budget again", dir)
+		}
+	}
+}
+
+func (s *storageServer) monitorTemp(ctx context.Context) {
+	s.checkTemp()
+	ticker := time.NewTicker(storageTempMonitorInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.checkTemp()
+		}
+	}
 }
 
 func (s *storageServer) url() string {
@@ -247,7 +377,8 @@ func (s *storageServer) appFor(r *http.Request) (string, bool) {
 // storageDSN applies the hardened pragmas to every physical connection through the driver DSN.
 // The write pool owns WAL and starts every transaction with BEGIN IMMEDIATE, while both pools get busy_timeout, foreign keys and synchronous=NORMAL.
 // A positive quota becomes SQLite's per-database max_page_count, assuming the default 4096-byte page size.
-func storageDSN(path string, readOnly bool, quotaBytes int64) string {
+// tempDir sets SQLite's process-wide temp directory; all apps share it.
+func storageDSN(path string, readOnly bool, quotaBytes int64, tempDir string) string {
 	dsn := url.URL{Scheme: "file", Path: path}
 	query := url.Values{}
 	query.Set("_busy_timeout", "5000")
@@ -261,6 +392,14 @@ func storageDSN(path string, readOnly bool, quotaBytes int64) string {
 	query.Add("_pragma", "temp_store(FILE)")
 	query.Add("_pragma", "cache_size(-2048)")
 	query.Add("_pragma", "mmap_size(0)")
+	if tempDir != "" {
+		// temp_store_directory is deprecated but remains the only in-process way to choose SQLite's temp directory.
+		query.Add("_pragma", "temp_store_directory("+sqliteString(tempDir)+")")
+	}
+	if !readOnly {
+		query.Add("_pragma", fmt.Sprintf("journal_size_limit(%d)", journalSizeLimit(quotaBytes)))
+		query.Add("_pragma", fmt.Sprintf("wal_autocheckpoint(%d)", walAutoCheckpoint(quotaBytes)))
+	}
 	if quotaBytes > 0 {
 		pages := quotaBytes / storagePageSize
 		if pages < 1 {
@@ -273,6 +412,41 @@ func storageDSN(path string, readOnly bool, quotaBytes int64) string {
 	}
 	dsn.RawQuery = query.Encode()
 	return dsn.String()
+}
+
+// journalSizeLimit scales the WAL truncation limit with the app's database quota, capped at 64 MiB.
+func journalSizeLimit(quotaBytes int64) int64 {
+	if quotaBytes <= 0 {
+		return defaultJournalSizeLimit
+	}
+	limit := quotaBytes / 8
+	if limit < minJournalSizeLimit {
+		return minJournalSizeLimit
+	}
+	if limit > defaultJournalSizeLimit {
+		return defaultJournalSizeLimit
+	}
+	return limit
+}
+
+// walAutoCheckpoint keeps the WAL to about a quarter of a small quota, with a 16-page floor and the default 1000-page ceiling.
+func walAutoCheckpoint(quotaBytes int64) int {
+	if quotaBytes <= 0 {
+		return storageWALAutoCheckpoint
+	}
+	pages := quotaBytes / storagePageSize / 4
+	if pages < 16 {
+		return 16
+	}
+	if pages > storageWALAutoCheckpoint {
+		return storageWALAutoCheckpoint
+	}
+	return int(pages)
+}
+
+// sqliteString quotes a value for a pragma call in the DSN, doubling embedded single quotes.
+func sqliteString(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
 }
 
 // parseStorageMigrationTimeout validates the host-wide deadline for a migration. It defaults to five minutes and stays within one second and one hour.
@@ -331,7 +505,7 @@ func (s *storageServer) dbFor(app string) (*sql.DB, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("app storage dir: %w", err)
 	}
-	db, err := sql.Open("sqlite", storageDSN(filepath.Join(dir, "storage.db"), false, s.quotas[app]))
+	db, err := sql.Open("sqlite", storageDSN(filepath.Join(dir, "storage.db"), false, s.quotas[app], s.tempDir))
 	if err != nil {
 		return nil, fmt.Errorf("open storage: %w", err)
 	}
@@ -357,7 +531,7 @@ func (s *storageServer) readDBFor(app string) (*sql.DB, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("app storage dir: %w", err)
 	}
-	db, err := sql.Open("sqlite", storageDSN(filepath.Join(dir, "storage.db"), true, s.quotas[app]))
+	db, err := sql.Open("sqlite", storageDSN(filepath.Join(dir, "storage.db"), true, s.quotas[app], s.tempDir))
 	if err != nil {
 		return nil, fmt.Errorf("open read storage: %w", err)
 	}
@@ -900,6 +1074,10 @@ func (s *storageServer) handle(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="wt-storage"`)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if s.tempOver.Load() {
+		writeStorageError(w, errStorageTempBudget)
 		return
 	}
 	if !s.acquireQuery(w, r) {
