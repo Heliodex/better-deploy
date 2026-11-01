@@ -9,6 +9,8 @@ The short assessment: the spine is right and unusually well executed for a proto
 - [x] **Untrusted app namespaces and seccomp.** Untrusted launches now use user, PID, mount, IPC and UTS namespaces, a minimal root, a PID 1 signal-forwarding helper, a capability drop and a seccomp denylist. Both boundaries are mandatory in untrusted mode. The network namespace remains open.
 - [x] **Environment merge.** `mergeEnv` deduplicates the minimal environment and the app environment so an app's `PATH`, `HOME` or `TMPDIR` actually overrides the supervisor's values; the previous concatenation left the first duplicate in place for libc `getenv`.
 - [x] **Tests and docs.** Unit tests cover the namespace plan, argument rewriting, sysproc attributes, the seccomp filter and the mandatory-config check. `WT_NS_TEST=1` and `WT_SECCOMP_TEST=1` run the opt-in integration tests. The README documents the boundary, the kernel and container requirements, and the remaining network gap.
+- [x] **Migration phase before readiness.** `app.ServeStorage` exposes `POST /_wt/migrate`; the supervisor calls it after port discovery with `WT_STORAGE_MIGRATION_TIMEOUT`, then probes health with the normal 3-second timeout and a fresh `startup_timeout`. Migrations run with `context.WithoutCancel`, so a disconnected probe does not abort them. Bundles without the endpoint fall back to health-only readiness.
+- [x] **Per-app operation locks.** Deploy, config, lifecycle, backup restore, rollback and database import now serialize per app instead of globally. The shared artifact cache keeps its own mutex so concurrent per-app deploys cannot race its lookup, compile, install and prune steps.
 
 ## Do not regress
 
@@ -45,12 +47,17 @@ These are the choices that make this worth continuing. Keep them unless a replac
 
 ## P1: correctness and operations
 
-4. [ ] **Separate migration from readiness.** Launch uses `startup_timeout` (default 15s) as the readiness deadline, migrations can take 5m, and migrations run inside the first health request. A legitimate first migration over 15s fails the deploy, while the 500ms startup probe races a migration that takes longer than that.
-   - [ ] Add an explicit migrate phase between install and readiness: install, migrate, then probe health.
-   - [ ] Or give readiness a migration-aware budget and use the normal 3s probe timeout during startup.
-   - [ ] Add a test with a deliberately slow fake migration that exceeds `startup_timeout` and `healthCheckTimeout`.
+4. [x] **Separate migration from readiness.** Launch used `startup_timeout` (default 15s) as the readiness deadline, migrations can take 5m, and migrations ran inside the first health request. A legitimate first migration over 15s failed the deploy, while the 500ms startup probe raced a migration that took longer than that.
+   - [x] Add an explicit migrate phase between install and readiness: the supervisor calls the app's reserved `POST /_wt/migrate` endpoint after port discovery and before health, with `WT_STORAGE_MIGRATION_TIMEOUT` as its budget.
+   - [x] Run the SDK migration on `context.WithoutCancel`, so a disconnected probe or migrate client does not abort it.
+   - [x] Probe health with the normal 3-second timeout and a fresh `startup_timeout` deadline after migration; bundles without the endpoint fall back to health-only readiness.
+   - [x] Add SDK tests for the migrate endpoint, failure, unavailable storage, wrong method and client cancellation, and supervisor tests for success, 404 fallback, failure, 503 retry and a slow migration that exceeds `startup_timeout`.
+   - [ ] Exempt the migration request from the app's `request_timeout`, or run the migration in a separate process; today a migration longer than the guest request timeout can still be interrupted after it has committed.
 
-5. [ ] **Make the deploy lock per app.** `s.deployMu` in `wt/supervisor/deploy.go` serializes every app's deploy, including a 256MB upload and the readiness wait. One slow app currently blocks all deploys. Mirror the per-app backup locks.
+5. [x] **Make the deploy lock per app.** `s.deployMu` in `wt/supervisor/deploy.go` serialized every app's deploy, including a 256MB upload and the readiness wait. One slow app blocked all deploys.
+   - [x] Replace the global lock with one mutex per app for deploy, config, lifecycle, backup restore, rollback and database import.
+   - [x] Add a separate cache mutex for the shared artifact cache, because per-app concurrency would otherwise race cache lookup, compile, install and pruning.
+   - [x] Add tests that different apps acquire independent locks and the same app still serializes.
 
 6. [ ] **Persist deploy idempotency.** `deployReplay` is an in-memory map capped at 512 entries, cleared wholesale when full and lost on restart. "24h replay" is not what the code does. Store the key and response beside the deployment record.
 
