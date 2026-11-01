@@ -24,13 +24,22 @@ type devConfig struct {
 }
 
 func resolveDevConfig(args []string) (*devConfig, error) {
+	configPath := configArg(args)
+	fileCfg, err := loadFileConfig(configPath)
+	if err != nil {
+		return nil, err
+	}
 	flags := flag.NewFlagSet("dev", flag.ContinueOnError)
 	dir := flags.String("dir", ".", "app directory containing app.json")
 	port := flags.Int("port", 0, "loopback port for the dev supervisor (default 8080)")
-	wasmtime := flags.String("wasmtime", env("WT_WASMTIME", "wasmtime"), "wasmtime binary")
-	target := flags.String("target", env("WT_WASMTIME_TARGET", ""), "wasmtime compile target (default: match the local wasmtime)")
+	wasmtime := flags.String("wasmtime", firstNonEmpty(env("WT_WASMTIME", ""), fileCfg.Wasmtime, "wasmtime"), "wasmtime binary")
+	target := flags.String("target", firstNonEmpty(env("WT_WASMTIME_TARGET", ""), fileCfg.Target), "wasmtime compile target (default: match the local wasmtime)")
 	supervisor := flags.String("supervisor", env("WT_SUPERVISOR", ""), "supervisor binary (default: PATH, then build from ../../supervisor)")
-	appHost := flags.String("app-host", "127.0.0.1", "override the app host so http://127.0.0.1:port/ routes to the app")
+	appHostDefault := "127.0.0.1"
+	if fileCfg.AppHost != "" {
+		appHostDefault = fileCfg.AppHost
+	}
+	appHost := flags.String("app-host", appHostDefault, "override the app host so http://127.0.0.1:port/ routes to the app")
 	skipBuild := flags.Bool("skip-build", false, "skip running app.json's build command")
 	skipCompile := flags.Bool("skip-compile", false, "reuse an existing main.cwasm")
 	watch := flags.Bool("watch", true, "rebuild and redeploy when source files change")

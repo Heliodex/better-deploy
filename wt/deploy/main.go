@@ -62,7 +62,7 @@ const (
 
 type deployConfig struct {
 	dir, app, host, token, wasmtime, target, appHost, out string
-	skipBuild, skipCompile                                bool
+	skipBuild, skipCompile, jsonOut                       bool
 }
 
 func env(key, fallback string) string {
@@ -119,14 +119,21 @@ func readManifest(dir string) (manifest, error) {
 }
 
 func resolveConfig(args []string) (*deployConfig, error) {
+	configPath := configArg(args)
+	fileCfg, err := loadFileConfig(configPath)
+	if err != nil {
+		return nil, err
+	}
 	flags := flag.NewFlagSet("deploy", flag.ContinueOnError)
 	dir := flags.String("dir", ".", "app directory containing app.json")
 	app := flags.String("app", "", "app name (default: app.json name or directory name)")
-	host := flags.String("host", env("WT_DEPLOY_HOST", ""), "supervisor URL, e.g. http://127.0.0.1:8080")
-	token := flags.String("token", env("WT_TOKEN", ""), "deploy bearer token")
-	wasmtime := flags.String("wasmtime", env("WT_WASMTIME", "wasmtime"), "wasmtime binary")
-	target := flags.String("target", env("WT_WASMTIME_TARGET", "x86_64-unknown-linux-musl"), "wasmtime compile target")
-	appHost := flags.String("app-host", "", "override the app host in the uploaded app.json")
+	host := flags.String("host", firstNonEmpty(env("WT_DEPLOY_HOST", ""), fileCfg.Host), "supervisor URL, e.g. http://127.0.0.1:8080")
+	token := flags.String("token", firstNonEmpty(env("WT_TOKEN", ""), fileCfg.Token), "deploy bearer token")
+	wasmtime := flags.String("wasmtime", firstNonEmpty(env("WT_WASMTIME", ""), fileCfg.Wasmtime, "wasmtime"), "wasmtime binary")
+	target := flags.String("target", firstNonEmpty(env("WT_WASMTIME_TARGET", ""), fileCfg.Target, "x86_64-unknown-linux-musl"), "wasmtime compile target")
+	appHost := flags.String("app-host", fileCfg.AppHost, "override the app host in the uploaded app.json")
+	config := flags.String("config", configPath, "config file (default ~/.config/wt/config.json)")
+	jsonOut := flags.Bool("json", false, "print only the raw API response")
 	skipBuild := flags.Bool("skip-build", false, "skip running app.json's build command")
 	skipCompile := flags.Bool("skip-compile", false, "do not compile; include main.cwasm only if it already exists")
 	if err := flags.Parse(args); err != nil {
@@ -135,8 +142,20 @@ func resolveConfig(args []string) (*deployConfig, error) {
 	if flags.NArg() > 0 {
 		return nil, fmt.Errorf("unexpected argument %q", flags.Arg(0))
 	}
+	if *config != configPath {
+		fileCfg, err = loadFileConfig(*config)
+		if err != nil {
+			return nil, err
+		}
+		if *host == "" {
+			*host = fileCfg.Host
+		}
+		if *token == "" {
+			*token = fileCfg.Token
+		}
+	}
 	if *host == "" {
-		return nil, fmt.Errorf("set --host or WT_DEPLOY_HOST")
+		return nil, fmt.Errorf("set --host, WT_DEPLOY_HOST or host in the config file")
 	}
 	return &deployConfig{
 		dir:         *dir,
@@ -148,6 +167,7 @@ func resolveConfig(args []string) (*deployConfig, error) {
 		skipBuild:   *skipBuild,
 		skipCompile: *skipCompile,
 		appHost:     *appHost,
+		jsonOut:     *jsonOut,
 	}, nil
 }
 
@@ -424,6 +444,10 @@ func upload(cfg *deployConfig, m manifest, bundle []byte) error {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("deploy failed with status %s: %s", resp.Status, strings.TrimSpace(string(respBody)))
 	}
+	if cfg.jsonOut {
+		fmt.Println(strings.TrimSpace(string(respBody)))
+		return nil
+	}
 	fmt.Println(strings.TrimSpace(string(respBody)))
 	if digest := resp.Header.Get("X-WT-Wasm-Digest"); digest != "" {
 		fmt.Printf("digest: %s deploy mode: %s\n", digest, resp.Header.Get("X-WT-Deploy-Mode"))
@@ -472,10 +496,15 @@ func deploy(args []string) error {
 }
 
 func resolveBundleConfig(args []string) (*deployConfig, error) {
+	configPath := configArg(args)
+	fileCfg, err := loadFileConfig(configPath)
+	if err != nil {
+		return nil, err
+	}
 	flags := flag.NewFlagSet("bundle", flag.ContinueOnError)
 	dir := flags.String("dir", ".", "app directory containing app.json")
-	wasmtime := flags.String("wasmtime", env("WT_WASMTIME", "wasmtime"), "wasmtime binary")
-	target := flags.String("target", env("WT_WASMTIME_TARGET", "x86_64-unknown-linux-musl"), "wasmtime compile target")
+	wasmtime := flags.String("wasmtime", firstNonEmpty(env("WT_WASMTIME", ""), fileCfg.Wasmtime, "wasmtime"), "wasmtime binary")
+	target := flags.String("target", firstNonEmpty(env("WT_WASMTIME_TARGET", ""), fileCfg.Target, "x86_64-unknown-linux-musl"), "wasmtime compile target")
 	out := flags.String("out", "", "output file (default <name>.tar.gz)")
 	skipBuild := flags.Bool("skip-build", false, "skip running app.json's build command")
 	skipCompile := flags.Bool("skip-compile", false, "do not compile; include main.cwasm only if it already exists")
@@ -533,17 +562,39 @@ func main() {
 	switch command {
 	case "deploy":
 		err = deploy(args)
-	case "bundle":
+	case "bundle", "build":
 		err = runBundle(args)
 	case "dev":
 		err = runDev(args)
 	case "new":
 		err = runNew(args)
+	case "apps":
+		err = runApps(args)
+	case "logs":
+		err = runLogs(args)
+	case "rollback":
+		err = runRollback(args)
+	case "backup":
+		err = runBackup(args)
+	case "config":
+		err = runConfig(args)
+	case "open":
+		err = runOpen(args)
+	case "completion":
+		err = runCompletion(args)
 	case "help", "-h", "--help":
-		fmt.Println("usage: wt-deploy deploy [--dir DIR] [--host URL] [--token TOKEN] [--wasmtime PATH] [--skip-build] [--skip-compile]")
-		fmt.Println("       wt-deploy bundle --dir DIR --out app.tar.gz [--wasmtime PATH] [--skip-build] [--skip-compile]")
-		fmt.Println("       wt-deploy dev [--dir DIR] [--port 8080] [--wasmtime PATH] [--watch=false]")
-		fmt.Println("       wt-deploy new --dir wt/example/NAME")
+		fmt.Println("usage: wt <command> [flags]")
+		fmt.Println("       wt apps [--host URL] [--token TOKEN] [--json]")
+		fmt.Println("       wt logs <app> [--tail N] [--level LEVEL] [--source app|supervisor] [--q TEXT] [--follow]")
+		fmt.Println("       wt deploy [--dir DIR] [--host URL] [--token TOKEN] [--app-host HOST]")
+		fmt.Println("       wt rollback <app> <deployment-id> [--backup SNAPSHOT]")
+		fmt.Println("       wt backup <list|create|restore|download|import> <app> ...")
+		fmt.Println("       wt config <show|set> <app> ...")
+		fmt.Println("       wt open <app>")
+		fmt.Println("       wt build --dir DIR --out app.tar.gz")
+		fmt.Println("       wt dev [--dir DIR] [--port 8080] [--watch=false]")
+		fmt.Println("       wt new --dir PATH [--sdk PATH|embedded] [--module MODULE]")
+		fmt.Println("       wt completion <bash|zsh|fish>")
 	default:
 		err = fmt.Errorf("unknown command %q", command)
 	}

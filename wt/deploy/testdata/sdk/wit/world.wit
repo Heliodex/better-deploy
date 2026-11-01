@@ -1,0 +1,6 @@
+package wt:app;
+
+world app {
+  include wasi:cli/imports@0.3.0;
+  include wasi:http/service@0.3.0;
+}

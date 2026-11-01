@@ -1,0 +1,154 @@
+// Package wasihttp contains the helper functions for writing WASI HTTP components in Go, as well as for sending outbound HTTP requests.
+package wasihttp
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"os"
+	"runtime/debug"
+	"strings"
+
+	wit "go.bytecodealliance.org/pkg/wit/types"
+	handler "wt.packages/binding/exports/export_wasi_http_0_3_0_handler"
+	_ "wt.packages/binding/exports/wit_exports"
+	wasi "wt.packages/binding/imports/wasi_http_0_3_0_types"
+)
+
+const (
+	// HeaderBasePath is the application base path.
+	HeaderBasePath = "spin-base-path"
+	// HeaderComponentRoot is the component route pattern matched, excluding any wildcard indicator.
+	HeaderComponentRoot = "spin-component-route"
+	// HeaderFullUrl is the full URL of the request, including full host and scheme information.
+	HeaderFullUrl = "spin-full-url"
+	// HeaderMatchedRoute is the part of the request path that was matched by the route, including the base and wildcard indicator if present.
+	HeaderMatchedRoute = "spin-matched-route"
+	// HeaderPathInfo is the request path relative to the component route, including any base.
+	HeaderPathInfo = "spin-path-info"
+	// HeaderRawComponentRoot is the component route pattern matched, as written in the component manifest. It excludes the base but includes the wildcard indicator if present.
+	HeaderRawComponentRoot = "spin-raw-component-route"
+	// HeaderClientAddr is the client address for the request.
+	HeaderClientAddr = "spin-client-addr"
+	// HeaderRequestID carries a request identifier across proxied and outbound requests.
+	HeaderRequestID = "x-request-id"
+)
+
+// defaultHandler is a placeholder for returning a useful error to stderr when the handler is not set.
+var defaultHandler = func(http.ResponseWriter, *http.Request) {
+	fmt.Fprintln(os.Stderr, "http handler undefined")
+}
+
+// handlerFn is the function called by the HTTP trigger.
+var handlerFn = defaultHandler
+
+// Handle sets the handler function for the http trigger. It must be set in an init() function.
+func Handle(fn func(http.ResponseWriter, *http.Request)) {
+	handlerFn = fn
+}
+
+// RequestID returns the request identifier set by the host or an empty string.
+func RequestID(r *http.Request) string {
+	return r.Header.Get(HeaderRequestID)
+}
+
+// handleErr is wit.Err instantiated for the handler result, so the call sites don't need explicit type arguments.
+var handleErr = wit.Err[*wasi.Response, wasi.ErrorCode]
+
+var wasiHandle = func(request *wasi.Request) wit.Result[*wasi.Response, wasi.ErrorCode] {
+	ctx, cancel := context.WithCancel(context.Background())
+	httpRes := newHttpResponseWriter(cancel)
+
+	go func() {
+		defer cancel()
+		defer httpRes.close()
+		defer func() {
+			recovered := recover()
+			if recovered == nil {
+				return
+			}
+			fmt.Fprintf(os.Stderr, "http handler panic: %v\n%s", recovered, debug.Stack())
+			if httpRes.channel != nil {
+				httpRes.channel <- handleErr(
+					wasi.MakeErrorCodeInternalError(wit.Some(fmt.Sprintf("panic: %v", recovered))),
+				)
+				httpRes.channel = nil
+			}
+		}()
+
+		// convert the incoming request to go's net/http type
+		httpReq, err := newHttpRequest(request, ctx)
+		if err != nil {
+			httpRes.channel <- handleErr(
+				wasi.MakeErrorCodeInternalError(wit.Some(fmt.Sprintf(
+					"failed to convert WASI Request to http.Request: %v\n",
+					err,
+				))),
+			)
+			return
+		}
+		defer httpReq.Body.Close()
+
+		// run the user's handler
+		handlerFn(httpRes, httpReq)
+
+		// If the user's handler never sent a response, send a default one here.
+		if err := httpRes.send(); err != nil {
+			httpRes.channel <- handleErr(
+				wasi.MakeErrorCodeInternalError(wit.Some(fmt.Sprintf(
+					"failed to produce a response: %v\n",
+					err,
+				))),
+			)
+		}
+	}()
+
+	return (<-httpRes.channel)
+}
+
+func init() {
+	handler.Exports.Handle = wasiHandle
+}
+
+func toWasiHeaders(headers http.Header) (*wasi.Fields, error) {
+	fields := wasi.MakeFields()
+
+	for key, vals := range headers {
+		fieldVals := [][]uint8{}
+		for _, val := range vals {
+			fieldVals = append(fieldVals, []uint8(val))
+		}
+
+		if result := fields.Set(key, fieldVals); result.IsErr() {
+			fields.Drop()
+			switch result.Err().Tag() {
+			case wasi.HeaderErrorInvalidSyntax:
+				return nil, fmt.Errorf(
+					"failed to set header %s to [%s]: invalid syntax",
+					key,
+					strings.Join(vals, ","),
+				)
+			case wasi.HeaderErrorForbidden:
+				return nil, fmt.Errorf("failed to set forbidden header key %s", key)
+			case wasi.HeaderErrorImmutable:
+				return nil, fmt.Errorf("failed to set header on immutable header fields")
+			default:
+				return nil, fmt.Errorf("error setting header %s", key)
+			}
+		}
+	}
+
+	return fields, nil
+}
+
+func trailersFuture() *wit.FutureReader[wit.Result[wit.Option[*wasi.Fields], wasi.ErrorCode]] {
+	tx, rx := wasi.MakeFutureResultOptionFieldsErrorCode()
+	go tx.Write(wit.Ok[wit.Option[*wasi.Fields], wasi.ErrorCode](wit.None[*wasi.Fields]()))
+	return rx
+}
+
+func unitFuture() *wit.FutureReader[wit.Result[wit.Unit, wasi.ErrorCode]] {
+	tx, rx := wasi.MakeFutureResultUnitErrorCode()
+	go tx.Write(wit.Ok[wit.Unit, wasi.ErrorCode](wit.Unit{}))
+	return rx
+}
