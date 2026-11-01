@@ -36,7 +36,7 @@ async function rollback(id: string): Promise<void> {
 		</h3>
 		<span class="text-xs text-neutral-500">
 			{deployments.length}
-			{deployments.length === 1 ? "bundle" : "bundles"}
+			{deployments.length === 1 ? "entry" : "entries"}
 		</span>
 	</div>
 
@@ -58,27 +58,46 @@ async function rollback(id: string): Promise<void> {
 	{:else}
 		<ul class="flex flex-col">
 			{#each deployments as deployment (deployment.id)}
-				<li
-					class="flex flex-wrap items-center gap-3 border-t border-line-soft py-2 text-xs first:border-t-0 first:pt-0"
-				>
-					<time class="text-neutral-300" datetime={deployment.deployedAt}>
-						{formatTime(deployment.deployedAt)}
-					</time>
-					<code class="text-neutral-500">{deployment.digest.slice(0, 12)}</code>
-					<span class="text-neutral-500 tabular-nums">{formatSize(deployment.bytes)}</span>
-					<span class="flex-1"></span>
-					<button
-						class={confirming === deployment.id ? "btn btn-danger" : "btn"}
-						disabled={rollingBack !== null}
-						onclick={(): Promise<void> => rollback(deployment.id)}
-						type="button"
-					>
-						{rollingBack === deployment.id
-							? "Rolling back…"
-							: confirming === deployment.id
-								? "Click again to confirm"
-								: "Roll back"}
-					</button>
+				{@const failed = deployment.status === "failed"}
+				<li class="flex flex-col gap-1 border-t border-line-soft py-2 first:border-t-0 first:pt-0">
+					<div class="flex flex-wrap items-center gap-3 text-xs">
+						<time class="text-neutral-300" datetime={deployment.deployedAt}>
+							{formatTime(deployment.deployedAt)}
+						</time>
+						<code class="text-neutral-500">
+							{deployment.digest ? deployment.digest.slice(0, 12) : "no artifact"}
+						</code>
+						{#if deployment.current}
+							<span
+								class="border border-primary-500/40 bg-primary-500/10 px-1 text-[10px] tracking-wide text-primary-300 uppercase"
+							>
+								Current
+							</span>
+						{/if}
+						{#if failed}
+							<span class="text-red-400">Failed</span>
+						{:else}
+							<span class="text-neutral-500 tabular-nums">{formatSize(deployment.bytes)}</span>
+						{/if}
+						<span class="flex-1"></span>
+						{#if !failed}
+							<button
+								class={confirming === deployment.id ? "btn btn-danger" : "btn"}
+								disabled={rollingBack !== null}
+								onclick={(): Promise<void> => rollback(deployment.id)}
+								type="button"
+							>
+								{rollingBack === deployment.id
+									? "Rolling back…"
+									: confirming === deployment.id
+										? "Click again to confirm"
+										: "Roll back"}
+							</button>
+						{/if}
+					</div>
+					{#if deployment.error}
+						<p class="text-xs wrap-break-word text-red-300">{deployment.error}</p>
+					{/if}
 				</li>
 			{/each}
 		</ul>

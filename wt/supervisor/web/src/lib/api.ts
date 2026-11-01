@@ -20,6 +20,7 @@ import {
 
 const appInfoSchema = object({
 	cpuPercent: pipe(number(), minValue(0)),
+	currentDigest: optional(string()),
 	diskBytes: optional(pipe(number(), minValue(0))),
 	diskLimitBytes: optional(pipe(number(), minValue(0))),
 	historyBytes: pipe(number(), minValue(0)),
@@ -212,12 +213,15 @@ export type BackupsResult = InferOutput<typeof backupsResponseSchema>
 
 const deploymentInfoSchema = object({
 	bytes: pipe(number(), minValue(0)),
+	current: optional(boolean()),
 	deployedAt: pipe(string(), minLength(1)),
-	digest: pipe(string(), minLength(1)),
+	digest: string(),
+	error: optional(string()),
 	id: pipe(string(), minLength(1)),
 	rebuildable: boolean(),
 	runtime: optional(string()),
 	size: pipe(number(), minValue(0)),
+	status: optional(picklist(["success", "failed"])),
 	target: optional(string()),
 })
 

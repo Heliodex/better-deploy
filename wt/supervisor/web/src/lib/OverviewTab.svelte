@@ -34,6 +34,12 @@ let { actionMessage, deploying, detail, error, history, onupload, span = $bindab
 				<dd class="text-sm">{detail.status}</dd>
 			</div>
 			<div class="flex flex-col">
+				<dt class="text-xs tracking-wide text-neutral-500 uppercase">Running digest</dt>
+				<dd class="font-mono text-sm" title={detail.currentDigest ?? ""}>
+					{detail.currentDigest ? detail.currentDigest.slice(0, 12) : "–"}
+				</dd>
+			</div>
+			<div class="flex flex-col">
 				<dt class="text-xs tracking-wide text-neutral-500 uppercase">Ready</dt>
 				<dd class={detail.ready ? "text-sm text-primary-300" : "text-sm text-amber-400"}>
 					{detail.ready ? "yes" : "no"}

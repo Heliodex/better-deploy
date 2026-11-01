@@ -290,34 +290,34 @@ func (s *supervisor) installStatic(a *app, cfg appConfig, dir string) error {
 	return nil
 }
 
-// installBundle starts a version from dir, or updates static files in place when the wasm and runtime config are unchanged.
-func (s *supervisor) installBundle(w http.ResponseWriter, name string, cfg appConfig, dir, action string) (*app, string) {
+// installBundle starts a version from dir, or updates static files in place when the wasm and runtime config are unchanged. It writes its own error response and returns the error for history.
+func (s *supervisor) installBundle(w http.ResponseWriter, name string, cfg appConfig, dir, digest, action string) (*app, string, error) {
 	s.mu.RLock()
 	old := s.apps[name]
 	s.mu.RUnlock()
 
-	digest := sourceDigest(dir)
 	if canDeployStatic(old, digest, cfg) {
 		if err := s.installStatic(old, cfg, dir); err != nil {
 			log.Printf("%s %s: %v", action, name, err)
 			writeError(w, http.StatusInternalServerError, err.Error())
-			return nil, ""
+			return nil, "", err
 		}
-		return old, "static"
+		return old, "static", nil
 	}
 
 	next, err := s.spawn(name, dir, cfg)
 	if err != nil {
 		log.Printf("%s %s: %v", action, name, err)
-		writeError(w, http.StatusBadGateway, "new version did not start: "+err.Error())
-		return nil, ""
+		cause := fmt.Errorf("new version did not start: %w", err)
+		writeError(w, http.StatusBadGateway, cause.Error())
+		return nil, "", cause
 	}
 
 	finalDir := filepath.Join(s.cfg.appsDir, name)
 	if err := replaceDir(dir, finalDir); err != nil {
 		s.stop(next)
 		writeError(w, http.StatusInternalServerError, err.Error())
-		return nil, ""
+		return nil, "", err
 	}
 	next.dir = finalDir
 
@@ -330,7 +330,7 @@ func (s *supervisor) installBundle(w http.ResponseWriter, name string, cfg appCo
 	}
 
 	log.Printf("%s %s at %s (127.0.0.1:%d)", action, name, cfg.Host, next.port)
-	return next, "full"
+	return next, "full", nil
 }
 
 func (s *supervisor) deploy(w http.ResponseWriter, r *http.Request, name string) {
@@ -360,8 +360,10 @@ func (s *supervisor) deploy(w http.ResponseWriter, r *http.Request, name string)
 		}
 	}
 
-	next, mode := s.installBundle(w, name, cfg, tmpDir, "deployed")
-	if next == nil {
+	digest := sourceDigest(tmpDir)
+	next, mode, err := s.installBundle(w, name, cfg, tmpDir, digest, "deployed")
+	if err != nil {
+		s.recordDeploymentFailure(name, digest, err)
 		return
 	}
 	s.recordDeployment(name, next.dir)

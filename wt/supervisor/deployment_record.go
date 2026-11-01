@@ -151,14 +151,9 @@ func (m *deploymentManager) storeStatic(app, source, dst string) (map[string]str
 }
 
 func (m *deploymentManager) record(app, source string) (deploymentInfo, error) {
-	if err := os.MkdirAll(m.appDir(app), 0o755); err != nil {
-		return deploymentInfo{}, fmt.Errorf("deployment dir: %w", err)
-	}
-	now := time.Now().UTC()
-	id := now.Format(deploymentTimeLayout)
-	for exists(m.appDir(app), id) {
-		now = now.Add(time.Nanosecond)
-		id = now.Format(deploymentTimeLayout)
+	id, now, err := m.newID(app)
+	if err != nil {
+		return deploymentInfo{}, err
 	}
 
 	temp, err := os.MkdirTemp(m.appDir(app), ".record-")
@@ -228,6 +223,45 @@ func (m *deploymentManager) record(app, source string) (deploymentInfo, error) {
 		Bytes:       total,
 		Blobs:       files,
 		Static:      static,
+		Status:      deploymentStatusOK,
+	}
+	meta, err := json.Marshal(recorded)
+	if err != nil {
+		return deploymentInfo{}, err
+	}
+	if err := os.WriteFile(filepath.Join(temp, deploymentMetaName), append(meta, '\n'), 0o644); err != nil {
+		return deploymentInfo{}, err
+	}
+	if err := os.Rename(temp, filepath.Join(m.appDir(app), id)); err != nil {
+		return deploymentInfo{}, err
+	}
+	if err := m.prune(app); err != nil {
+		log.Printf("deploy history %s: prune: %v", app, err)
+	}
+	return recorded, nil
+}
+
+// recordFailure keeps a failed deploy attempt in history as metadata only. It has no bundle, so it can never be rolled back to, but the panel can show why the deploy did not replace the running version.
+func (m *deploymentManager) recordFailure(app, digest, message string) (deploymentInfo, error) {
+	if len(message) > deploymentErrorBytes {
+		message = message[:deploymentErrorBytes] + "…"
+	}
+	id, now, err := m.newID(app)
+	if err != nil {
+		return deploymentInfo{}, err
+	}
+	temp, err := os.MkdirTemp(m.appDir(app), ".failure-")
+	if err != nil {
+		return deploymentInfo{}, err
+	}
+	defer os.RemoveAll(temp)
+
+	recorded := deploymentInfo{
+		ID:         id,
+		DeployedAt: now,
+		Digest:     digest,
+		Status:     deploymentStatusFail,
+		Error:      message,
 	}
 	meta, err := json.Marshal(recorded)
 	if err != nil {
@@ -270,6 +304,14 @@ func (s *supervisor) historyBytes(a *app) int64 {
 	return bytes
 }
 
+func (s *supervisor) resetHistoryUsage(name string) {
+	if a := s.lookup(name); a != nil {
+		a.history.mu.Lock()
+		a.history.at = time.Time{}
+		a.history.mu.Unlock()
+	}
+}
+
 func (s *supervisor) recordDeployment(name, dir string) {
 	if s.deployments == nil {
 		return
@@ -277,11 +319,19 @@ func (s *supervisor) recordDeployment(name, dir string) {
 	if _, err := s.deployments.record(name, dir); err != nil {
 		log.Printf("deploy history %s: %v", name, err)
 	}
-	if a := s.lookup(name); a != nil {
-		a.history.mu.Lock()
-		a.history.at = time.Time{}
-		a.history.mu.Unlock()
+	s.resetHistoryUsage(name)
+}
+
+// recordDeploymentFailure adds a failed deploy attempt to history, with secrets redacted like the app's own errors.
+func (s *supervisor) recordDeploymentFailure(name, digest string, cause error) {
+	if s.deployments == nil || cause == nil {
+		return
 	}
+	message := s.redactAppText(name, cause.Error())
+	if _, err := s.deployments.recordFailure(name, digest, message); err != nil {
+		log.Printf("deploy history %s: %v", name, err)
+	}
+	s.resetHistoryUsage(name)
 }
 
 func (s *supervisor) handleDeployments(w http.ResponseWriter, r *http.Request, name string) {
@@ -296,6 +346,20 @@ func (s *supervisor) handleDeployments(w http.ResponseWriter, r *http.Request, n
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	running := ""
+	if a := s.lookup(name); a != nil {
+		a.mu.Lock()
+		running = a.digest
+		a.mu.Unlock()
+	}
+	// list is newest first, so the first successful record matching the running digest is the current one.
+	for i := range list {
+		if list[i].Status == deploymentStatusFail || running == "" || list[i].Digest != running {
+			continue
+		}
+		list[i].Current = true
+		break
 	}
 	writeJSON(w, http.StatusOK, list)
 }
@@ -348,8 +412,10 @@ func (s *supervisor) handleRollback(w http.ResponseWriter, r *http.Request, name
 		writeJSON(w, http.StatusOK, s.info(next))
 		return
 	}
-	next, mode := s.installBundle(w, name, cfg, dir, "rolled back")
-	if next == nil {
+	digest := sourceDigest(dir)
+	next, mode, err := s.installBundle(w, name, cfg, dir, digest, "rolled back")
+	if err != nil {
+		s.recordDeploymentFailure(name, digest, err)
 		return
 	}
 	s.recordDeployment(name, next.dir)

@@ -210,6 +210,37 @@ func TestDeploySameDigestKeepsProcessAndUpdatesStatic(t *testing.T) {
 	}
 }
 
+func TestDeployFailureIsRecorded(t *testing.T) {
+	s := newLifecycleSupervisor(t)
+	s.cfg.wasmtime = filepath.Join(t.TempDir(), "missing-wasmtime")
+	s.deployments = newDeploymentManager(filepath.Join(s.cfg.stateDir, ".deployments"))
+	archive := writeTarGz(t, map[string]string{
+		"app.json":   `{"name":"demo","host":"demo.localhost"}`,
+		"main.cwasm": "cwasm",
+	})
+	rec := deployArchive(t, s, "demo", archive, "")
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("failed deploy = %d: %s", rec.Code, rec.Body.String())
+	}
+	history, err := s.deployments.list("demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("history length = %d, want 1 failed attempt", len(history))
+	}
+	failed := history[0]
+	if failed.Status != deploymentStatusFail || failed.Error == "" || failed.Digest != digestText("cwasm") {
+		t.Errorf("failed record = %+v, want a failed attempt with its digest and error", failed)
+	}
+	if _, err := s.deployments.bundle("demo", failed.ID); err == nil {
+		t.Error("failed deploy became a rollback target")
+	}
+	if s.lookup("demo") != nil {
+		t.Error("failed deploy registered the app")
+	}
+}
+
 func TestLegacyCwasmOnlyBundleStarts(t *testing.T) {
 	s := newLifecycleSupervisor(t)
 	a := spawnTestApp(t, s, "legacy")

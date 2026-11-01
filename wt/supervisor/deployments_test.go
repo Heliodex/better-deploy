@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -75,6 +77,69 @@ func TestDeploymentHistoryRecordListAndPrune(t *testing.T) {
 	}
 	if _, err := manager.bundle("demo", "nope"); err == nil {
 		t.Error("invalid deployment id was accepted")
+	}
+}
+
+func TestDeploymentHistoryRecordsFailure(t *testing.T) {
+	manager := newDeploymentManager(t.TempDir())
+	digest := digestText("wasm")
+	info, err := manager.recordFailure("demo", digest, "new version did not start: boom")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Status != deploymentStatusFail || info.Error != "new version did not start: boom" || info.Digest != digest {
+		t.Errorf("failure record = %+v", info)
+	}
+	infos, err := manager.list("demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 1 || infos[0].Status != deploymentStatusFail || infos[0].Error == "" {
+		t.Fatalf("failure list = %+v", infos)
+	}
+	if _, err := manager.bundle("demo", info.ID); !errors.Is(err, errDeploymentNotFound) {
+		t.Errorf("failed deploy bundle = %v, want not found", err)
+	}
+}
+
+func TestDeploymentHistoryMarksRunningDigest(t *testing.T) {
+	s := testSupervisor()
+	s.deployments = newDeploymentManager(t.TempDir())
+	first, err := s.deployments.record("demo", writeDeploymentSource(t, "first.localhost"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.deployments.record("demo", writeDeploymentSource(t, "second.localhost"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.deployments.recordFailure("demo", second.Digest, "boom"); err != nil {
+		t.Fatal(err)
+	}
+	s.apps["demo"] = &app{name: "demo", digest: second.Digest}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/apps/demo/deployments", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	s.handleDeployments(rec, req, "demo")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("deployments = %d: %s", rec.Code, rec.Body.String())
+	}
+	var list []deploymentInfo
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 3 {
+		t.Fatalf("history length = %d, want 3", len(list))
+	}
+	if list[0].Status != deploymentStatusFail || list[0].Current {
+		t.Errorf("newest failure = %+v, want no current mark", list[0])
+	}
+	if !list[1].Current || list[1].Digest != second.Digest {
+		t.Errorf("current record = %+v, want %s", list[1], second.Digest)
+	}
+	if list[2].Current || list[2].Digest != first.Digest {
+		t.Errorf("older record = %+v, want the first digest", list[2])
 	}
 }
 

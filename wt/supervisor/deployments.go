@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json/v2"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -17,6 +18,10 @@ const (
 	deploymentTimeLayout = "20060102T150405.000000000Z"
 	deploymentMetaName   = "meta.json"
 	deploymentBlobDir    = ".blobs"
+	deploymentStatusOK   = "success"
+	deploymentStatusFail = "failed"
+	// deploymentErrorBytes caps the failure text kept in history.
+	deploymentErrorBytes = 4 << 10
 )
 
 // deploymentMaxBytes bounds one app's retained history. Identical artifacts are shared, so this is generous.
@@ -24,7 +29,7 @@ var deploymentMaxBytes int64 = 1 << 30
 
 var errDeploymentNotFound = errors.New("deployment not found")
 
-// deploymentInfo describes one retained bundle.
+// deploymentInfo describes one retained bundle. Failed deploy attempts are retained as metadata only, without a bundle to roll back to.
 type deploymentInfo struct {
 	ID          string            `json:"id"`
 	DeployedAt  time.Time         `json:"deployedAt"`
@@ -38,6 +43,9 @@ type deploymentInfo struct {
 	Bytes       int64             `json:"bytes"`
 	Blobs       map[string]string `json:"blobs,omitempty"`
 	Static      map[string]string `json:"static,omitempty"`
+	Status      string            `json:"status,omitempty"`
+	Error       string            `json:"error,omitempty"`
+	Current     bool              `json:"current,omitempty"`
 }
 
 // deploymentManager keeps a bounded history of app bundles under the state directory.
@@ -65,6 +73,20 @@ func validDeploymentID(id string) error {
 		return errDeploymentNotFound
 	}
 	return nil
+}
+
+// newID reserves an unused timestamp id for a new history entry.
+func (m *deploymentManager) newID(app string) (string, time.Time, error) {
+	if err := os.MkdirAll(m.appDir(app), 0o755); err != nil {
+		return "", time.Time{}, fmt.Errorf("deployment dir: %w", err)
+	}
+	now := time.Now().UTC()
+	id := now.Format(deploymentTimeLayout)
+	for exists(m.appDir(app), id) {
+		now = now.Add(time.Nanosecond)
+		id = now.Format(deploymentTimeLayout)
+	}
+	return id, now, nil
 }
 
 func (m *deploymentManager) ids(app string) ([]string, error) {
@@ -113,6 +135,12 @@ func (m *deploymentManager) bundle(app, id string) (string, error) {
 		return "", err
 	}
 	dir := filepath.Join(m.appDir(app), id)
+	if data, err := os.ReadFile(filepath.Join(dir, deploymentMetaName)); err == nil {
+		var info deploymentInfo
+		if json.Unmarshal(data, &info) == nil && info.Status == deploymentStatusFail {
+			return "", errDeploymentNotFound
+		}
+	}
 	if info, err := os.Stat(filepath.Join(dir, "app.json")); err != nil || !info.Mode().IsRegular() {
 		return "", errDeploymentNotFound
 	}
