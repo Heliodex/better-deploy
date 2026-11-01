@@ -155,7 +155,7 @@ func extractTarGz(src, dst string) error {
 }
 
 // receiveBundle parses an uploaded bundle into a temporary directory and returns its app config.
-func (s *supervisor) receiveBundle(w http.ResponseWriter, r *http.Request, name string) (dir string, cfg appConfig, cleanup func(), ok bool) {
+func (s *supervisor) receiveBundle(w http.ResponseWriter, r *http.Request, name string, allowMissingComponent bool) (dir string, cfg appConfig, cleanup func(), ok bool) {
 	cleanup = func() {}
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
 	if err := r.ParseMultipartForm(16 << 20); err != nil {
@@ -204,10 +204,12 @@ func (s *supervisor) receiveBundle(w http.ResponseWriter, r *http.Request, name 
 		writeError(w, http.StatusBadRequest, err.Error())
 		return "", appConfig{}, cleanup, false
 	}
-	if _, err := os.Stat(filepath.Join(dir, "main.cwasm")); err != nil {
-		if _, wasmErr := os.Stat(filepath.Join(dir, "main.wasm")); wasmErr != nil {
-			writeError(w, http.StatusBadRequest, "archive must contain main.cwasm or main.wasm")
-			return "", appConfig{}, cleanup, false
+	if !allowMissingComponent {
+		if _, err := os.Stat(filepath.Join(dir, "main.cwasm")); err != nil {
+			if _, wasmErr := os.Stat(filepath.Join(dir, "main.wasm")); wasmErr != nil {
+				writeError(w, http.StatusBadRequest, "archive must contain main.cwasm or main.wasm")
+				return "", appConfig{}, cleanup, false
+			}
 		}
 	}
 
@@ -479,10 +481,34 @@ func (s *supervisor) deploy(w http.ResponseWriter, r *http.Request, name string)
 	if s.rejectOverBudget(w) {
 		return
 	}
-	tmpDir, cfg, cleanup, ok := s.receiveBundle(w, r, name)
+	staticOnly := r.URL.Query().Get("static_only") == "1" || strings.TrimSpace(r.Header.Get("X-WT-Static-Only")) == "1"
+	tmpDir, cfg, cleanup, ok := s.receiveBundle(w, r, name, staticOnly)
 	defer cleanup()
 	if !ok {
 		return
+	}
+	if staticOnly {
+		a := s.lookup(name)
+		if a == nil {
+			writeError(w, http.StatusNotFound, "app not found")
+			return
+		}
+		a.mu.Lock()
+		dir := a.dir
+		a.mu.Unlock()
+		for _, file := range []string{"main.wasm", "main.cwasm", artifactName} {
+			if exists(tmpDir, file) {
+				continue
+			}
+			if err := copyOptional(dir, tmpDir, file); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
+		if sourceDigest(tmpDir) == "" {
+			writeError(w, http.StatusBadRequest, "static-only deploy needs a running component")
+			return
+		}
 	}
 
 	if value := r.URL.Query().Get("dry_run"); value != "" {

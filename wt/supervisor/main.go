@@ -52,6 +52,8 @@ type config struct {
 	ipv6Egress                                                 bool
 	cacheMaxBytes                                              int64
 	diskBudgetBytes                                            int64
+	accessLog                                                  bool
+	accessLogEvery                                             int
 	storageMigrationTimeout                                    time.Duration
 }
 
@@ -117,6 +119,7 @@ type app struct {
 	disk              diskUsageCache
 	history           diskUsageCache
 	requests          sync.WaitGroup // in-flight proxied requests, drained before a replaced version stops
+	accessLines       atomic.Uint64
 
 	mu               sync.Mutex
 	scheduleCancel   context.CancelFunc
@@ -510,6 +513,8 @@ func parseConfig() config {
 	flag.StringVar(&cfg.cacheDir, "cache-dir", cfg.cacheDir, "compiled cwasm cache (default WT_STATE_DIR/.cache)")
 	flag.Int64Var(&cfg.cacheMaxBytes, "cache-max-bytes", cfg.cacheMaxBytes, "compiled cwasm cache byte cap")
 	flag.Int64Var(&diskBudgetMB, "disk-budget-mb", diskBudgetMB, "global disk budget in MiB across apps and state (0 = unlimited)")
+	flag.BoolVar(&cfg.accessLog, "access-log", cfg.accessLog, "write proxied request lines to each app's supervisor log")
+	flag.IntVar(&cfg.accessLogEvery, "access-log-every", cfg.accessLogEvery, "log one in N successful access lines (errors are always logged)")
 	flag.DurationVar(&cfg.storageMigrationTimeout, "storage-migration-timeout", cfg.storageMigrationTimeout, "timeout for one migration, between 1s and 1h (default 5m)")
 	flag.StringVar(&cfg.domain, "domain", cfg.domain, "default app host suffix")
 	flag.StringVar(&cfg.wasmtime, "wasmtime", cfg.wasmtime, "wasmtime binary")
@@ -548,6 +553,9 @@ func parseConfig() config {
 	}
 	if err := validateAppFetchListen(cfg.appFetchListen); err != nil {
 		log.Fatalf("%v", err)
+	}
+	if cfg.accessLogEvery < 1 || cfg.accessLogEvery > 10000 {
+		log.Fatalf("access-log-every must be between 1 and 10000")
 	}
 	trustedProxies, err := parseTrustedProxies(cfg.trustedProxiesValue)
 	if err != nil {

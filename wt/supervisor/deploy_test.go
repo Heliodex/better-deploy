@@ -188,6 +188,21 @@ func TestDeploySameDigestKeepsProcessAndUpdatesStatic(t *testing.T) {
 		}
 	}
 
+	staticOnly := writeTarGz(t, map[string]string{
+		"app.json":          appJSON,
+		"static/index.html": "static-only",
+	})
+	rec = deployArchiveHeaders(t, s, "demo", staticOnly, "", map[string]string{"X-WT-Static-Only": "1"})
+	if rec.Code != http.StatusOK || rec.Header().Get("X-WT-Deploy-Mode") != "static" {
+		t.Fatalf("static-only deploy = %d mode %q: %s", rec.Code, rec.Header().Get("X-WT-Deploy-Mode"), rec.Body.String())
+	}
+	if got := appPID(s.lookup("demo")); got != pid {
+		t.Errorf("static-only deploy restarted the app: pid %d, want %d", got, pid)
+	}
+	if static, err := os.ReadFile(filepath.Join(s.cfg.appsDir, "demo", "static", "index.html")); err != nil || string(static) != "static-only" {
+		t.Errorf("static-only content = %q, %v", static, err)
+	}
+
 	old := s.lookup("demo")
 	third := writeTarGz(t, map[string]string{
 		"app.json":          appJSON,
@@ -315,5 +330,50 @@ func TestDeployConditionalAndIdempotent(t *testing.T) {
 	}
 	if rec.Body.String() != first {
 		t.Error("idempotent replay returned a different body")
+	}
+}
+
+func TestFailedDeployKeepsOldProcess(t *testing.T) {
+	s := newLifecycleSupervisor(t)
+	s.cfg.domain = "localhost"
+	s.cfg.wasmtime = os.Args[0]
+	s.cfg.wasmtimeTarget = "x86_64-test"
+	s.cfg.cacheDir = t.TempDir()
+	s.cfg.cacheMaxBytes = defaultCacheMaxBytes
+	counter := filepath.Join(t.TempDir(), "compiles")
+	s.cfg.wasmtimeCompiler = writeCompilerWithCounter(t, "wasmtime-cli 51.0.0", "compiled", counter, false)
+	s.deployments = newDeploymentManager(filepath.Join(s.cfg.stateDir, ".deployments"))
+	t.Cleanup(func() {
+		if a := s.lookup("demo"); a != nil {
+			s.stop(a)
+		}
+	})
+
+	first := writeTarGz(t, map[string]string{
+		"app.json":  `{"name":"demo","host":"demo.localhost"}`,
+		"main.wasm": "wasm-old",
+	})
+	if rec := deployArchive(t, s, "demo", first, ""); rec.Code != http.StatusOK {
+		t.Fatalf("first deploy = %d: %s", rec.Code, rec.Body.String())
+	}
+	old := s.lookup("demo")
+	oldPID := appPID(old)
+	if oldPID == 0 {
+		t.Fatal("first deploy did not start")
+	}
+
+	s.cfg.wasmtime = filepath.Join(t.TempDir(), "missing-wasmtime")
+	second := writeTarGz(t, map[string]string{
+		"app.json":  `{"name":"demo","host":"demo.localhost"}`,
+		"main.wasm": "wasm-new",
+	})
+	if rec := deployArchive(t, s, "demo", second, ""); rec.Code != http.StatusBadGateway {
+		t.Fatalf("failed deploy = %d: %s", rec.Code, rec.Body.String())
+	}
+	if next := s.lookup("demo"); next != old {
+		t.Errorf("failed deploy replaced the app: %v", next)
+	}
+	if got := appPID(old); got != oldPID {
+		t.Errorf("failed deploy changed the old pid: %d, want %d", got, oldPID)
 	}
 }

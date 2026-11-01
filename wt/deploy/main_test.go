@@ -36,7 +36,7 @@ func TestBundle(t *testing.T) {
 		}
 	}
 
-	data, err := bundle(dir, manifest{Name: "hello"})
+	data, err := bundle(dir, manifest{Name: "hello"}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestBundleOmitsMissingCwasm(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	data, err := bundle(dir, manifest{Name: "hello"})
+	data, err := bundle(dir, manifest{Name: "hello"}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestBundleRequiresWasm(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "main.cwasm"), []byte("cwasm"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := bundle(dir, manifest{Name: "hello"}); err == nil || !strings.Contains(err.Error(), "main.wasm") {
+	if _, err := bundle(dir, manifest{Name: "hello"}, true); err == nil || !strings.Contains(err.Error(), "main.wasm") {
 		t.Errorf("bundle error = %v, want a missing main.wasm error", err)
 	}
 }
@@ -335,8 +335,11 @@ func TestResolveDevConfig(t *testing.T) {
 	if cfg.dir != "guestbook" || cfg.port != 9000 {
 		t.Errorf("config = %+v, want dir guestbook port 9000", cfg)
 	}
-	if cfg.appHost != "127.0.0.1" {
-		t.Errorf("appHost = %q, want 127.0.0.1", cfg.appHost)
+	if cfg.appHost != "" {
+		t.Errorf("appHost = %q, want an app-specific default", cfg.appHost)
+	}
+	if cfg.adminPort != 9001 {
+		t.Errorf("adminPort = %d, want 9001", cfg.adminPort)
 	}
 	if !cfg.watch {
 		t.Error("watch should default to true")
@@ -393,7 +396,7 @@ func TestFindSupervisor(t *testing.T) {
 func TestDevEnv(t *testing.T) {
 	t.Setenv("WT_TOKEN", "prod-token")
 	t.Setenv("WT_TLS_CERT", "/tmp/cert")
-	env := devEnv("/apps", "/state", "127.0.0.1:8080", "/bin/wasmtime", "triple")
+	env := devEnv("/apps", "/state", "127.0.0.1:8080", "127.0.0.1:8081", "/bin/wasmtime", "triple")
 	got := map[string]string{}
 	for _, entry := range env {
 		key, value, _ := strings.Cut(entry, "=")
@@ -403,6 +406,8 @@ func TestDevEnv(t *testing.T) {
 		"WT_APPS_DIR":        "/apps",
 		"WT_STATE_DIR":       "/state",
 		"WT_LISTEN":          "127.0.0.1:8080",
+		"WT_ADMIN_LISTEN":    "127.0.0.1:8081",
+		"WT_APPS_DOMAIN":     "localhost",
 		"WT_WASMTIME":        "/bin/wasmtime",
 		"WT_WASMTIME_TARGET": "triple",
 		"WT_TOKEN":           "dev",
@@ -446,5 +451,30 @@ func TestReadManifestValidatesSchedule(t *testing.T) {
 		if _, err := readManifest(dir); err == nil {
 			t.Errorf("%s: expected an error", name)
 		}
+	}
+}
+
+func TestWorkspaceAppDirs(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"alpha", "beta", "not-an-app"} {
+		dir := filepath.Join(root, name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if name != "not-an-app" {
+			if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(`{"name":"`+name+`"}`), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	dirs, err := workspaceAppDirs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dirs) != 2 || filepath.Base(dirs[0]) != "alpha" || filepath.Base(dirs[1]) != "beta" {
+		t.Errorf("dirs = %v", dirs)
+	}
+	if _, err := workspaceAppDirs(filepath.Join(root, "not-an-app")); err == nil {
+		t.Error("empty workspace was accepted")
 	}
 }

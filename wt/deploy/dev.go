@@ -18,9 +18,9 @@ import (
 )
 
 type devConfig struct {
-	dir, wasmtime, target, supervisor, appHost string
-	port                                       int
-	skipBuild, skipCompile, watch              bool
+	dir, workspace, wasmtime, target, supervisor, appHost string
+	port, adminPort                                       int
+	skipBuild, skipCompile, watch                         bool
 }
 
 func resolveDevConfig(args []string) (*devConfig, error) {
@@ -31,15 +31,14 @@ func resolveDevConfig(args []string) (*devConfig, error) {
 	}
 	flags := flag.NewFlagSet("dev", flag.ContinueOnError)
 	dir := flags.String("dir", ".", "app directory containing app.json")
+	workspace := flags.String("workspace", "", "directory whose child apps are all served together")
 	port := flags.Int("port", 0, "loopback port for the dev supervisor (default 8080)")
+	adminPort := flags.Int("admin-port", 0, "separate admin port (default app port + 1)")
 	wasmtime := flags.String("wasmtime", firstNonEmpty(env("WT_WASMTIME", ""), fileCfg.Wasmtime, "wasmtime"), "wasmtime binary")
 	target := flags.String("target", firstNonEmpty(env("WT_WASMTIME_TARGET", ""), fileCfg.Target), "wasmtime compile target (default: match the local wasmtime)")
 	supervisor := flags.String("supervisor", env("WT_SUPERVISOR", ""), "supervisor binary (default: PATH, then build from ../../supervisor)")
-	appHostDefault := "127.0.0.1"
-	if fileCfg.AppHost != "" {
-		appHostDefault = fileCfg.AppHost
-	}
-	appHost := flags.String("app-host", appHostDefault, "override the app host so http://127.0.0.1:port/ routes to the app")
+	appHostDefault := fileCfg.AppHost
+	appHost := flags.String("app-host", appHostDefault, "override the app host (default: <app>.localhost)")
 	skipBuild := flags.Bool("skip-build", false, "skip running app.json's build command")
 	skipCompile := flags.Bool("skip-compile", false, "reuse an existing main.cwasm")
 	watch := flags.Bool("watch", true, "rebuild and redeploy when source files change")
@@ -60,9 +59,21 @@ func resolveDevConfig(args []string) (*devConfig, error) {
 			resolved = parsed
 		}
 	}
+	resolvedAdmin := *adminPort
+	if resolvedAdmin == 0 {
+		resolvedAdmin = resolved + 1
+	}
+	if resolvedAdmin < 1 || resolvedAdmin > 65535 || resolvedAdmin == resolved {
+		return nil, fmt.Errorf("admin port must be between 1 and 65535 and differ from the app port")
+	}
+	if *workspace != "" && *appHost != "" {
+		return nil, fmt.Errorf("--app-host is only used with a single --dir; workspace apps use <name>.localhost")
+	}
 	return &devConfig{
 		dir:         *dir,
+		workspace:   *workspace,
 		port:        resolved,
+		adminPort:   resolvedAdmin,
 		wasmtime:    *wasmtime,
 		target:      *target,
 		supervisor:  *supervisor,
@@ -178,11 +189,13 @@ func waitHealthy(url string, timeout time.Duration) error {
 }
 
 // devEnv overrides the supervisor settings for local development, keeping the rest of the environment.
-func devEnv(appsDir, stateDir, addr, wasmtime, target string) []string {
+func devEnv(appsDir, stateDir, addr, adminAddr, wasmtime, target string) []string {
 	values := map[string]string{
 		"WT_APPS_DIR":        appsDir,
 		"WT_STATE_DIR":       stateDir,
 		"WT_LISTEN":          addr,
+		"WT_ADMIN_LISTEN":    adminAddr,
+		"WT_APPS_DOMAIN":     "localhost",
 		"WT_WASMTIME":        wasmtime,
 		"WT_WASMTIME_TARGET": target,
 		"WT_TOKEN":           "dev",
@@ -203,16 +216,60 @@ func devEnv(appsDir, stateDir, addr, wasmtime, target string) []string {
 	return out
 }
 
+func workspaceAppDirs(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	dirs := []string{}
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		if info, err := os.Stat(filepath.Join(path, "app.json")); err == nil && info.Mode().IsRegular() {
+			dirs = append(dirs, path)
+		}
+	}
+	slices.Sort(dirs)
+	if len(dirs) == 0 {
+		return nil, fmt.Errorf("workspace %s has no child app directories with app.json", dir)
+	}
+	return dirs, nil
+}
+
 func runDev(args []string) error {
 	cfg, err := resolveDevConfig(args)
 	if err != nil {
 		return err
 	}
-	m, err := readManifest(cfg.dir)
-	if err != nil {
-		return err
+	dirs := []string{cfg.dir}
+	if cfg.workspace != "" {
+		dirs, err = workspaceAppDirs(cfg.workspace)
+		if err != nil {
+			return err
+		}
 	}
-	workDir := filepath.Join(os.TempDir(), "wt-dev", m.Name)
+	seen := map[string]struct{}{}
+	for _, dir := range dirs {
+		m, err := readManifest(dir)
+		if err != nil {
+			return err
+		}
+		if _, ok := seen[m.Name]; ok {
+			return fmt.Errorf("workspace has two apps named %q", m.Name)
+		}
+		seen[m.Name] = struct{}{}
+	}
+
+	workName := "app"
+	if len(dirs) == 1 {
+		m, _ := readManifest(dirs[0])
+		workName = m.Name
+	} else {
+		workName = "workspace-" + filepath.Base(filepath.Clean(cfg.workspace))
+	}
+	workDir := filepath.Join(os.TempDir(), "wt-dev", workName)
 	appsDir := filepath.Join(workDir, "apps")
 	stateDir := filepath.Join(workDir, "state")
 	for _, dir := range []string{appsDir, stateDir} {
@@ -235,8 +292,9 @@ func runDev(args []string) error {
 	}
 
 	addr := fmt.Sprintf("127.0.0.1:%d", cfg.port)
+	adminAddr := fmt.Sprintf("127.0.0.1:%d", cfg.adminPort)
 	cmd := exec.Command(supervisor)
-	cmd.Env = devEnv(appsDir, stateDir, addr, cfg.wasmtime, target)
+	cmd.Env = devEnv(appsDir, stateDir, addr, adminAddr, cfg.wasmtime, target)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
@@ -250,29 +308,44 @@ func runDev(args []string) error {
 		return err
 	}
 
-	dcfg := &deployConfig{
-		dir:         cfg.dir,
-		host:        "http://" + addr,
-		token:       "dev",
-		wasmtime:    cfg.wasmtime,
-		target:      target,
-		appHost:     cfg.appHost,
-		skipBuild:   cfg.skipBuild,
-		skipCompile: cfg.skipCompile,
+	configs := make([]*deployConfig, 0, len(dirs))
+	for _, dir := range dirs {
+		m, err := readManifest(dir)
+		if err != nil {
+			return err
+		}
+		host := cfg.appHost
+		if cfg.workspace != "" || host == "" {
+			host = m.Name + ".localhost"
+		}
+		dcfg := &deployConfig{
+			dir:         dir,
+			host:        "http://" + addr,
+			token:       "dev",
+			wasmtime:    cfg.wasmtime,
+			target:      target,
+			appHost:     host,
+			skipBuild:   cfg.skipBuild,
+			skipCompile: cfg.skipCompile,
+		}
+		m, data, err := buildBundle(dcfg)
+		if err != nil {
+			return err
+		}
+		if err := upload(dcfg, m, data); err != nil {
+			return err
+		}
+		configs = append(configs, dcfg)
+		fmt.Printf("dev: %s at http://%s:%d/\n", m.Name, host, cfg.port)
 	}
-	m, data, err := buildBundle(dcfg)
-	if err != nil {
-		return err
-	}
-	if err := upload(dcfg, m, data); err != nil {
-		return err
-	}
-	fmt.Printf("dev: %s at http://%s/ (Ctrl-C to stop)\n", m.Name, addr)
+	fmt.Printf("dev: admin at http://%s/admin/ (token: dev)\n", adminAddr)
 
 	done := make(chan struct{})
 	if cfg.watch {
 		defer close(done)
-		go watchDev(dcfg, done)
+		for _, dcfg := range configs {
+			go watchDev(dcfg, done)
+		}
 		fmt.Fprintln(os.Stderr, "dev: watching for changes")
 	}
 

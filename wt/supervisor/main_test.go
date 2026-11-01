@@ -530,3 +530,38 @@ func TestLoopbackListen(t *testing.T) {
 		}
 	}
 }
+
+func TestShouldLogAccessSamplesAndKeepsErrors(t *testing.T) {
+	s := testSupervisor()
+	s.cfg.accessLog = true
+	s.cfg.accessLogEvery = 3
+	a := &app{name: "demo"}
+	for index := 1; index <= 6; index++ {
+		want := index%3 == 0
+		if got := s.shouldLogAccess(a, 200); got != want {
+			t.Errorf("sample %d = %v, want %v", index, got, want)
+		}
+	}
+	if !s.shouldLogAccess(a, 500) {
+		t.Error("server error was suppressed")
+	}
+	s.cfg.accessLog = false
+	if s.shouldLogAccess(a, 200) {
+		t.Error("access log was disabled but a line was logged")
+	}
+	if !s.shouldLogAccess(a, 500) {
+		t.Error("access log off suppressed a server error")
+	}
+}
+
+func BenchmarkManyAppsSnapshot(b *testing.B) {
+	s := testSupervisor()
+	for index := range 200 {
+		name := fmt.Sprintf("app-%03d", index)
+		s.apps[name] = &app{name: name, cfg: appConfig{Host: name + ".localhost"}, cmd: &exec.Cmd{}, ready: true}
+	}
+	b.ResetTimer()
+	for range b.N {
+		_ = s.snapshot()
+	}
+}

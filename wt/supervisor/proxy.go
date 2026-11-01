@@ -164,7 +164,7 @@ func (s *supervisor) serveApp(w http.ResponseWriter, r *http.Request, a *app) {
 	if !a.beginRequest() {
 		w.Header().Set("Retry-After", "1")
 		http.Error(w, "app is restarting", http.StatusServiceUnavailable)
-		if a.logs != nil {
+		if a.logs != nil && s.shouldLogAccess(a, http.StatusServiceUnavailable) {
 			a.logs.logSupervisor(formatAccessLog(r.Method, http.StatusServiceUnavailable, time.Since(started), r.URL.RequestURI(), requestID))
 		}
 		return
@@ -181,7 +181,7 @@ func (s *supervisor) serveApp(w http.ResponseWriter, r *http.Request, a *app) {
 
 	// Static files come from the bundle and do not consume the app's concurrency slots, but a stopped app does not serve them.
 	if static && a.serveStatic(wrapped, r) {
-		if a.logs != nil {
+		if a.logs != nil && s.shouldLogAccess(a, wrapped.status) {
 			a.logs.logSupervisor(formatAccessLog(r.Method, wrapped.status, time.Since(started), r.URL.RequestURI(), requestID))
 		}
 		return
@@ -189,7 +189,7 @@ func (s *supervisor) serveApp(w http.ResponseWriter, r *http.Request, a *app) {
 	if !ready {
 		w.Header().Set("Retry-After", "1")
 		http.Error(w, "app not ready", http.StatusServiceUnavailable)
-		if a.logs != nil {
+		if a.logs != nil && s.shouldLogAccess(a, http.StatusServiceUnavailable) {
 			a.logs.logSupervisor(formatAccessLog(r.Method, http.StatusServiceUnavailable, time.Since(started), r.URL.RequestURI(), requestID))
 		}
 		return
@@ -221,9 +221,24 @@ func (s *supervisor) serveApp(w http.ResponseWriter, r *http.Request, a *app) {
 	}
 
 	proxy.ServeHTTP(wrapped, r)
-	if a.logs != nil {
+	if a.logs != nil && s.shouldLogAccess(a, wrapped.status) {
 		a.logs.logSupervisor(formatAccessLog(r.Method, wrapped.status, time.Since(started), r.URL.RequestURI(), requestID))
 	}
+}
+
+// shouldLogAccess samples successful access lines while always recording server errors. WT_ACCESS_LOG=off disables the sampled lines but keeps 5xx visible.
+func (s *supervisor) shouldLogAccess(a *app, status int) bool {
+	if status >= http.StatusInternalServerError {
+		return true
+	}
+	if !s.cfg.accessLog && s.cfg.accessLogEvery != 0 {
+		return false
+	}
+	every := s.cfg.accessLogEvery
+	if every <= 1 {
+		return true
+	}
+	return a.accessLines.Add(1)%uint64(every) == 0
 }
 
 // isAppHost reports whether host belongs to an app, which owns every path on its host.

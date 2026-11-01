@@ -61,8 +61,34 @@ const (
 )
 
 type deployConfig struct {
-	dir, app, host, token, wasmtime, target, appHost, out string
-	skipBuild, skipCompile, jsonOut                       bool
+	dir, app, host, token, wasmtime, target, appHost, out   string
+	skipBuild, skipCompile, jsonOut, forceBuild, staticOnly bool
+}
+
+// uploadProgress prints a coarse percentage while a bundle uploads, without buffering it a second time.
+type uploadProgress struct {
+	reader      io.Reader
+	total, done int64
+	next        int64
+	last        time.Time
+}
+
+func (u *uploadProgress) Read(p []byte) (int, error) {
+	count, err := u.reader.Read(p)
+	u.done += int64(count)
+	if u.total <= 0 {
+		return count, err
+	}
+	if u.next == 0 {
+		u.next = u.total / 4
+		u.last = time.Now()
+	}
+	if u.done >= u.next || err == io.EOF {
+		percent := u.done * 100 / u.total
+		fmt.Fprintf(os.Stderr, "upload: %d%% (%d/%d bytes)\n", percent, u.done, u.total)
+		u.next = u.done + u.total/4
+	}
+	return count, err
 }
 
 func env(key, fallback string) string {
@@ -134,6 +160,7 @@ func resolveConfig(args []string) (*deployConfig, error) {
 	appHost := flags.String("app-host", fileCfg.AppHost, "override the app host in the uploaded app.json")
 	config := flags.String("config", configPath, "config file (default ~/.config/wt/config.json)")
 	jsonOut := flags.Bool("json", false, "print only the raw API response")
+	forceBuild := flags.Bool("force-build", false, "rebuild the component even when its inputs are unchanged")
 	skipBuild := flags.Bool("skip-build", false, "skip running app.json's build command")
 	skipCompile := flags.Bool("skip-compile", false, "do not compile; include main.cwasm only if it already exists")
 	if err := flags.Parse(args); err != nil {
@@ -166,6 +193,7 @@ func resolveConfig(args []string) (*deployConfig, error) {
 		target:      *target,
 		skipBuild:   *skipBuild,
 		skipCompile: *skipCompile,
+		forceBuild:  *forceBuild,
 		appHost:     *appHost,
 		jsonOut:     *jsonOut,
 	}, nil
@@ -336,7 +364,7 @@ func writeTarPath(tw *tar.Writer, name, path string) error {
 	return err
 }
 
-func bundle(dir string, m manifest) ([]byte, error) {
+func bundle(dir string, m manifest, includeComponent bool) ([]byte, error) {
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
@@ -348,24 +376,26 @@ func bundle(dir string, m manifest) ([]byte, error) {
 	if err := writeTarFile(tw, "app.json", append(appJSON, '\n')); err != nil {
 		return nil, err
 	}
-	wasm, err := os.ReadFile(filepath.Join(dir, "main.wasm"))
-	if err != nil {
-		return nil, fmt.Errorf("read main.wasm: %w (did the build run?)", err)
-	}
-	if err := writeTarFile(tw, "main.wasm", wasm); err != nil {
-		return nil, err
-	}
-	// main.cwasm is only a precompiled hint; the supervisor can compile from main.wasm or reuse its cache.
-	for _, name := range []string{"main.cwasm", artifactName} {
-		extra, err := os.ReadFile(filepath.Join(dir, name))
-		if os.IsNotExist(err) {
-			continue
-		}
+	if includeComponent {
+		wasm, err := os.ReadFile(filepath.Join(dir, "main.wasm"))
 		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", name, err)
+			return nil, fmt.Errorf("read main.wasm: %w (did the build run?)", err)
 		}
-		if err := writeTarFile(tw, name, extra); err != nil {
+		if err := writeTarFile(tw, "main.wasm", wasm); err != nil {
 			return nil, err
+		}
+		// main.cwasm is only a precompiled hint; the supervisor can compile from main.wasm or reuse its cache.
+		for _, name := range []string{"main.cwasm", artifactName} {
+			extra, err := os.ReadFile(filepath.Join(dir, name))
+			if os.IsNotExist(err) {
+				continue
+			}
+			if err != nil {
+				return nil, fmt.Errorf("read %s: %w", name, err)
+			}
+			if err := writeTarFile(tw, name, extra); err != nil {
+				return nil, err
+			}
 		}
 	}
 	// Static files are served by the supervisor, so a frontend change does not need to be inside the component.
@@ -430,6 +460,13 @@ func upload(cfg *deployConfig, m manifest, bundle []byte) error {
 		req.Header.Set("Authorization", "Bearer "+cfg.token)
 	}
 	req.Header.Set("Content-Type", form.FormDataContentType())
+	if cfg.staticOnly {
+		req.Header.Set("X-WT-Static-Only", "1")
+	}
+	size := int64(body.Len())
+	req.ContentLength = size
+	progress := &uploadProgress{reader: bytes.NewReader(body.Bytes()), total: size}
+	req.Body = io.NopCloser(progress)
 
 	client := &http.Client{Timeout: 2 * time.Minute}
 	resp, err := client.Do(req)
@@ -470,13 +507,10 @@ func buildBundle(cfg *deployConfig) (manifest, []byte, error) {
 	if cfg.appHost != "" {
 		m.Host = cfg.appHost
 	}
-	if err := runBuild(cfg, m); err != nil {
+	if _, err := prepareComponent(cfg, m); err != nil {
 		return m, nil, err
 	}
-	if err := runCompile(cfg); err != nil {
-		return m, nil, err
-	}
-	data, err := bundle(cfg.dir, m)
+	data, err := bundle(cfg.dir, m, true)
 	if err != nil {
 		return m, nil, err
 	}
@@ -488,7 +522,29 @@ func deploy(args []string) error {
 	if err != nil {
 		return err
 	}
-	m, data, err := buildBundle(cfg)
+	m, err := readManifest(cfg.dir)
+	if err != nil {
+		return err
+	}
+	if cfg.app != "" {
+		if !validName(cfg.app) {
+			return fmt.Errorf("invalid app name %q", cfg.app)
+		}
+		m.Name = cfg.app
+	}
+	if cfg.appHost != "" {
+		m.Host = cfg.appHost
+	}
+	reused, err := prepareComponent(cfg, m)
+	if err != nil {
+		return err
+	}
+	if reused && !cfg.forceBuild {
+		if digest, err := fileDigest(filepath.Join(cfg.dir, "main.wasm")); err == nil && digest != "" && digest == serverDigest(cfg, m.Name) {
+			cfg.staticOnly = true
+		}
+	}
+	data, err := bundle(cfg.dir, m, !cfg.staticOnly)
 	if err != nil {
 		return err
 	}
@@ -508,6 +564,7 @@ func resolveBundleConfig(args []string) (*deployConfig, error) {
 	out := flags.String("out", "", "output file (default <name>.tar.gz)")
 	skipBuild := flags.Bool("skip-build", false, "skip running app.json's build command")
 	skipCompile := flags.Bool("skip-compile", false, "do not compile; include main.cwasm only if it already exists")
+	forceBuild := flags.Bool("force-build", false, "rebuild the component even when its inputs are unchanged")
 	if err := flags.Parse(args); err != nil {
 		return nil, err
 	}
@@ -520,6 +577,7 @@ func resolveBundleConfig(args []string) (*deployConfig, error) {
 		target:      *target,
 		skipBuild:   *skipBuild,
 		skipCompile: *skipCompile,
+		forceBuild:  *forceBuild,
 		out:         *out,
 	}, nil
 }
