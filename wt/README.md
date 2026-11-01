@@ -94,7 +94,34 @@ The supervisor scans `WT_APPS_DIR` at boot, starts every app found there, and se
 
 ## Admin panel
 
-The supervisor serves a small admin panel at `/admin/` on its own address (for example `http://127.0.0.1:8080/admin/` locally, or the deploy host in production). It lists apps with status, uptime and disk usage, streams each app's log live over server-sent events with level and text filters, restarts apps, starts and stops them, edits their runtime config, deletes them with an optional state purge, uploads new bundles, configures and restores database and `/data` backups, browses each app's database tables and recent writes, and shows the retained deployment history with a rollback action. Updates stream over server-sent events, so the dashboard reflects deploys and restarts without refreshing. Every API endpoint except `/healthz` requires the deploy bearer token, which the panel asks for once and keeps in the browser. The static panel shell at `/admin/` is public so the browser can load the token form; it contains no secrets. `POST /login` validates it and sets `wt_token` as an `HttpOnly`, `SameSite=Lax` cookie (also `Secure` when the request is HTTPS or arrives with `X-Forwarded-Proto: https`), so event streams authenticate without JavaScript reading the cookie; `POST /logout` clears it. Ordinary panel requests still send a bearer header. The token is also kept in `localStorage` so a reload can re-authenticate, which means a script injection on the admin origin can still read it; there are no scopes, audit log or login rate limiting. In trusted mode the supervisor refuses to start on a non-loopback address without `WT_TOKEN`, so a loopback-only listener is the only unauthenticated mode. In untrusted mode it refuses to start at all without `WT_TOKEN` and rejects every admin route without it. A reverse proxy on the same host makes remote requests look like loopback, so do not expose the loopback listener through a proxy without setting `WT_TOKEN`; use `WT_ADMIN_LISTEN` to separate admin traffic when apps are untrusted. App logs persist under `/var/lib/wt/.logs` (or `WT_STATE_DIR`), outside each app's `/data` preopen, and every line is stamped with the time the supervisor received it so timestamps do not depend on how an app logs. The supervisor also logs each proxied request at info level into a separate per-app supervisor log, as `METHOD status duration path`; the panel recognises the shape and lays it out as structured columns with each line badged by origin.
+The supervisor serves a small admin panel at `/admin/` on its own address (for example `http://127.0.0.1:8080/admin/` locally, or the deploy host in production). It lists apps with status, uptime and disk usage, streams each app's log live over server-sent events with level and text filters, restarts apps, starts and stops them, edits their runtime config, deletes them with an optional state purge, uploads new bundles, configures and restores database and `/data` backups, browses each app's database tables and recent writes, and shows the retained deployment history with a rollback action. Updates stream over server-sent events, so the dashboard reflects deploys and restarts without refreshing. Every API endpoint except `/healthz` requires an operator or scoped bearer token, which the panel asks for once and keeps in the browser. The static panel shell at `/admin/` is public so the browser can load the token form; it contains no secrets. `POST /login` validates it and sets `wt_token` as an `HttpOnly`, `SameSite=Lax` cookie (also `Secure` when the request is HTTPS or arrives with `X-Forwarded-Proto: https`), so event streams authenticate without JavaScript reading the cookie; `POST /logout` clears it. Ordinary panel requests still send a bearer header. The token is also kept in `localStorage` so a reload can re-authenticate, which means a script injection on the admin origin can still read it; scoped tokens, the audit log and login rate limiting are described below. In trusted mode the supervisor refuses to start on a non-loopback address without `WT_TOKEN`, so a loopback-only listener is the only unauthenticated mode. In untrusted mode it refuses to start at all without `WT_TOKEN` and rejects every admin route without it. A reverse proxy on the same host makes remote requests look like loopback, so do not expose the loopback listener through a proxy without setting `WT_TOKEN`; use `WT_ADMIN_LISTEN` to separate admin traffic when apps are untrusted. App logs persist under `/var/lib/wt/.logs` (or `WT_STATE_DIR`), outside each app's `/data` preopen, and every line is stamped with the time the supervisor received it so timestamps do not depend on how an app logs. The supervisor also logs each proxied request at info level into a separate per-app supervisor log, as `METHOD status duration path`; the panel recognises the shape and lays it out as structured columns with each line badged by origin.
+
+## Authentication and access tokens
+
+`WT_TOKEN` (or `--token`) remains the bootstrap operator token and has the `admin` role for every app. It is enough for a single operator, but it should not be the credential in CI: create scoped tokens instead. Scoped tokens are stored in `WT_AUTH_FILE` (or `--auth-file`, default `WT_STATE_DIR/.auth/tokens.json`), directory `0700`, file `0600`, and only a SHA-256 hash of each bearer value is kept. The generated bearer is returned once by the create call and never listed again. Corrupt or unreadable auth state fails startup rather than silently dropping tokens.
+
+Roles:
+
+- `admin` may use every route and app.
+- `deploy` may read app status, logs, resources, config and deployments, and may deploy, roll back code, restart, stop and start the apps in its `apps` list. It cannot change config, read or write secrets, touch backups or databases, or delete an app. A rollback with `?backup=` is admin-only because it replaces data.
+- `read` may use the non-sensitive `GET` app routes for its apps, including status, logs, resources and deployments. Database contents, backups and secrets stay admin-only.
+
+A token's `apps` list contains app names, or `*` for every app. Admin tokens always imply every app. Scoped tokens are independent of the per-app storage token and the internal app-fetch token.
+
+```text
+GET    /auth/tokens            list token metadata, never bearer values
+POST   /auth/tokens            {"name":"ci-notes","role":"deploy","apps":["notes"],"expires_in":"720h"}
+DELETE /auth/tokens/<id>       revoke one token
+GET    /audit?limit=200        newest audit entries, admin only
+```
+
+`expires_in` is a Go duration between `1m` and ten years; omit it or use `0`/`never` for no expiry. `POST /auth/tokens` returns the bearer once as `{"token":"...","id":"...","name":"...","role":"...","apps":[...],"createdAt":"...","expiresAt":"..."}`. Store it in the CI secret store and use it as `Authorization: Bearer <token>`. The panel cookie accepts any valid token; an EventSource stays admin-only because it streams every app.
+
+`/login` now accepts the bootstrap token or any scoped token and is rate-limited per remote host: five failed attempts in a minute lock that host out for a minute. The limiter is in memory and resets on restart. The cookie is still `HttpOnly`, `SameSite=Lax` and `Secure` behind HTTPS.
+
+Mutating app requests are appended to `WT_STATE_DIR/.audit/audit.log` (`0700` directory, `0600` file, JSON lines, one rotation at 16 MiB). Entries record the time, actor name, role, action, app, status, whether it succeeded, a redacted error, the remote host and `X-Request-Id` when present. Deploy, rollback, backup restore/import, database import/maintenance, config changes, secret changes, lifecycle actions and app deletion are covered; token create and delete are logged too. The audit log is on the same disk and is not tamper-evident or shipped offsite, and a failed audit write is logged but does not roll back the action.
+
+This is deliberately a single-operator model: there are no owners, namespaces or per-person quotas. Isolation for untrusted apps, per-app storage tokens and the internal app-fetch identity remain separate and are still enforced.
 
 ## Untrusted tenant mode
 
@@ -147,7 +174,7 @@ Remaining limitations of this prototype:
 - SQLite still runs **in the supervisor process**, not in a separate storage process. Each connection now uses `temp_store=FILE`, a 2 MiB page cache, `mmap_size=0`, SQL-length/value/row limits, a global 16-query semaphore and a pre-update row capture that checks size before base64 encoding. That reduces the blast radius but is not full control-plane isolation; the complete fix is a separate storage process with its own limits.
 - There is no network namespace and no per-app loopback isolation: the iptables owner rules are the only egress boundary, and `inherit-network` still exposes the shared loopback stack to allowed destinations. Storage, the internal app-fetch listener and configured egress CIDRs are part of the allowed boundary; the internal listener authenticates every call and the target allowlist still applies. A compromised kernel or an allowed endpoint remains part of the trust boundary.
 - There is no user namespace; isolation relies on the supervisor running as root and dropping to numeric UIDs.
-- Data is not encrypted at rest, including `.secrets` files, and one global token still deploys and reads every app. There are no per-app tokens, scopes, audit log or login rate limiting. Log redaction cannot scrub existing files or transformed values.
+- Data is not encrypted at rest, including `.secrets`, `.auth` and `.audit` files. The bootstrap `WT_TOKEN` still deploys and reads every app; prefer scoped tokens for CI. Scoped tokens, their hashes and the audit log live on the same host, and the audit log is not tamper-evident or shipped offsite. Log redaction cannot scrub existing files or transformed values.
 - App ports are dynamic and the proxy container is still expected to run as root (see the container notes).
 
 ## Resource usage
@@ -222,6 +249,10 @@ The admin token also guards the lifecycle and config endpoints:
 
 ```text
 GET    /usage                  measured disk usage and the global budget
+GET    /audit                  newest audit entries, admin only
+GET    /auth/tokens            list scoped tokens, admin only
+POST   /auth/tokens            create a scoped token, admin only
+DELETE /auth/tokens/<id>       revoke a scoped token, admin only
 GET    /apps/<name>/config      runtime config, with env and secret keys but not values
 PATCH  /apps/<name>/config      partial config update
 GET    /apps/<name>/secrets     write-only secret names, never values
