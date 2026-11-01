@@ -90,3 +90,25 @@ func FuzzExtractTarGz(f *testing.F) {
 		}
 	})
 }
+
+func FuzzBackupArchive(f *testing.F) {
+	f.Add(fuzzTarGz(f))
+	f.Add([]byte("not a backup"))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		src, err := os.CreateTemp(t.TempDir(), "backup-*.tar.gz")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := src.Write(data); err != nil {
+			t.Fatal(err)
+		}
+		if err := src.Close(); err != nil {
+			t.Fatal(err)
+		}
+		dst := t.TempDir()
+		_ = extractTarGzLimited(src.Name(), dst, maxBackupExtractBytes, maxBackupTarFiles)
+		if _, err := os.Stat(filepath.Join(filepath.Dir(dst), "escape")); err == nil {
+			t.Error("backup entry escaped the destination")
+		}
+	})
+}

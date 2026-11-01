@@ -20,6 +20,29 @@ mkdir -p "$apps" "$state"
 
 supervisor_pid=
 
+start_supervisor() {
+	WT_APPS_DIR=$apps \
+	WT_STATE_DIR=$state \
+	WT_LISTEN=127.0.0.1:$port \
+	WT_WASMTIME=$wasmtime \
+	WT_WASMTIME_TARGET=$target \
+	WT_TOKEN=$token \
+		"$work/wt-supervisor" >>"$log" 2>&1 &
+	supervisor_pid=$!
+}
+
+wait_healthy() {
+	i=0
+	until curl -fsS "http://127.0.0.1:$port/healthz" >/dev/null 2>&1; do
+		i=$((i + 1))
+		if [ "$i" -gt 100 ]; then
+			echo "supervisor did not become healthy" >&2
+			exit 1
+		fi
+		sleep 0.2
+	done
+}
+
 cleanup() {
 	if [ -n "$supervisor_pid" ]; then
 		kill "$supervisor_pid" 2>/dev/null || true
@@ -55,30 +78,26 @@ echo "e2e: bundling hello for $target"
 "$work/wt-deploy" bundle --dir "$root/wt/example/hello" --out "$work/hello.tar.gz" --wasmtime "$wasmtime" --target "$target"
 
 echo "e2e: starting supervisor on 127.0.0.1:$port"
-WT_APPS_DIR=$apps \
-WT_STATE_DIR=$state \
-WT_LISTEN=127.0.0.1:$port \
-WT_WASMTIME=$wasmtime \
-WT_WASMTIME_TARGET=$target \
-WT_TOKEN=$token \
-	"$work/wt-supervisor" >"$log" 2>&1 &
-supervisor_pid=$!
-
-i=0
-until curl -fsS "http://127.0.0.1:$port/healthz" >/dev/null 2>&1; do
-	i=$((i + 1))
-	if [ "$i" -gt 100 ]; then
-		echo "supervisor did not become healthy" >&2
-		exit 1
-	fi
-	sleep 0.2
-done
+start_supervisor
+wait_healthy
 
 echo "e2e: deploying hello"
 api -X POST -F "artifact=@$work/hello.tar.gz" "http://127.0.0.1:$port/apps/hello" >/dev/null
 body=$(curl -fsS -H "Host: hello.localhost" "http://127.0.0.1:$port/")
 echo "$body" | grep -q "hello from wt"
 echo "$body" | grep -q "path=/"
+
+echo "e2e: bundling and deploying a second app"
+"$work/wt-deploy" bundle --dir "$root/wt/example/ticker" --out "$work/ticker.tar.gz" --wasmtime "$wasmtime" --target "$target"
+api -X POST -F "artifact=@$work/ticker.tar.gz" "http://127.0.0.1:$port/apps/ticker" >/dev/null
+curl -fsS -H "Host: ticker.localhost" "http://127.0.0.1:$port/" | grep -q "ticker logs a beat"
+
+echo "e2e: rejecting a colliding host"
+code=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $token" -X POST -F "artifact=@$work/hello.tar.gz" "http://127.0.0.1:$port/apps/collision")
+if [ "$code" != "409" ]; then
+	echo "host collision returned $code, want 409" >&2
+	exit 1
+fi
 
 echo "e2e: checking the per-request guest timeout"
 code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -H "Host: hello.localhost" "http://127.0.0.1:$port/?spin=1")
@@ -111,5 +130,27 @@ deployment=$(printf '%s' "$deployments" | python3 -c 'import json,sys; print(jso
 api -X POST "http://127.0.0.1:$port/apps/hello/rollback/$deployment?backup=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "$snapshot")" >/dev/null
 curl -fsS -H "Host: hello.localhost" "http://127.0.0.1:$port/" | grep -q "hello from wt"
 grep -q keep "$state/hello/data.txt"
+
+echo "e2e: restarting the supervisor and checking apps survive"
+kill "$supervisor_pid" 2>/dev/null || true
+wait "$supervisor_pid" 2>/dev/null || true
+supervisor_pid=
+start_supervisor
+wait_healthy
+curl -fsS -H "Host: hello.localhost" "http://127.0.0.1:$port/" | grep -q "hello from wt"
+curl -fsS -H "Host: ticker.localhost" "http://127.0.0.1:$port/" | grep -q "ticker logs a beat"
+
+if [ "${WT_E2E_EXAMPLES:-0}" = "1" ]; then
+	echo "e2e: scaffolding a standalone app"
+	"$work/wt-deploy" new --dir "$work/scaffolded"
+	"$work/wt-deploy" bundle --dir "$work/scaffolded" --out "$work/scaffolded.tar.gz" --wasmtime "$wasmtime" --target "$target"
+	api -X POST -F "artifact=@$work/scaffolded.tar.gz" "http://127.0.0.1:$port/apps/scaffolded" >/dev/null
+	curl -fsS -H "Host: scaffolded.localhost" "http://127.0.0.1:$port/" | grep -q "scaffolded"
+
+	echo "e2e: bundling and deploying the guestbook"
+	"$work/wt-deploy" bundle --dir "$root/wt/example/guestbook" --out "$work/guestbook.tar.gz" --wasmtime "$wasmtime" --target "$target"
+	api -X POST -F "artifact=@$work/guestbook.tar.gz" "http://127.0.0.1:$port/apps/guestbook" >/dev/null
+	curl -fsS -H "Host: guestbook.localhost" "http://127.0.0.1:$port/" | grep -q "Guestbook"
+fi
 
 echo "e2e: ok"
