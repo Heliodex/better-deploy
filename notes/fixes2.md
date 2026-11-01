@@ -11,6 +11,7 @@ The short assessment: the spine is right and unusually well executed for a proto
 - [x] **Tests and docs.** Unit tests cover the namespace plan, argument rewriting, sysproc attributes, the seccomp filter and the mandatory-config check. `WT_NS_TEST=1` and `WT_SECCOMP_TEST=1` run the opt-in integration tests. The README documents the boundary, the kernel and container requirements, and the remaining network gap.
 - [x] **Migration phase before readiness.** `app.ServeStorage` exposes `POST /_wt/migrate`; the supervisor calls it after port discovery with `WT_STORAGE_MIGRATION_TIMEOUT`, then probes health with the normal 3-second timeout and a fresh `startup_timeout`. Migrations run with `context.WithoutCancel`, so a disconnected probe does not abort them. Bundles without the endpoint fall back to health-only readiness.
 - [x] **Per-app operation locks.** Deploy, config, lifecycle, backup restore, rollback and database import now serialize per app instead of globally. The shared artifact cache keeps its own mutex so concurrent per-app deploys cannot race its lookup, compile, install and prune steps.
+- [x] **Persistent deploy idempotency.** The 24-hour `Idempotency-Key` replay now lives beside the app's deployment history, survives restarts, keeps the newest 64 keys per app, and is cleared on delete. The in-memory map and its wholesale 512-entry clear are gone.
 
 ## Do not regress
 
@@ -59,7 +60,11 @@ These are the choices that make this worth continuing. Keep them unless a replac
    - [x] Add a separate cache mutex for the shared artifact cache, because per-app concurrency would otherwise race cache lookup, compile, install and pruning.
    - [x] Add tests that different apps acquire independent locks and the same app still serializes.
 
-6. [ ] **Persist deploy idempotency.** `deployReplay` is an in-memory map capped at 512 entries, cleared wholesale when full and lost on restart. "24h replay" is not what the code does. Store the key and response beside the deployment record.
+6. [x] **Persist deploy idempotency.** `deployReplay` was an in-memory map capped at 512 entries, cleared wholesale when full and lost on restart. "24h replay" was not what the code did.
+   - [x] Store each app's idempotency key and response beside its deployment history at `WT_STATE_DIR/.deployments/<app>/idempotency.json`, with `0600` permissions and atomic replacement.
+   - [x] Keep the newest 64 keys per app, prune entries older than 24 hours on store, and drop a corrupt file rather than blocking a deploy.
+   - [x] Clear the file when an app is deleted, so a recreated app does not replay a deleted app's response.
+   - [x] Test persistence across a new deployment manager, expiry, the per-app cap, corrupt files, clearing, file permissions and replay after a supervisor restart.
 
 7. [ ] **Stop treating a `deploy` token as code-execution trust.** A deploy token can upload `main.cwasm`, which is native code fed to wasmtime's deserializer and hardlinked into the cache.
    - [ ] Reject uploaded cwasm for non-admin tokens, or reject it entirely in untrusted mode, and compile `main.wasm` host-side.
@@ -124,15 +129,16 @@ These are the choices that make this worth continuing. Keep them unless a replac
 
 20. [ ] **Accept the static-only boundary explicitly.** `adapter-static` and `prerender` mean no SSR, no `+server.ts`, no form actions and no server load. Either state that in the README as the supported SvelteKit mode, or plan a JS component runtime for SSR once the host path can support it.
 
-21. [ ] **Split the docs and test the claims.** The README is 87KB and `notes/fixes.md` is 60KB, and small claims are already drifting: CPU features in the cache key, 24h idempotency, `wt` versus `wt-deploy` in usage strings.
+21. [ ] **Split the docs and test the claims.** The README is 87KB and `notes/fixes.md` is 60KB, and small claims are already drifting: CPU features in the cache key and `wt` versus `wt-deploy` in usage strings.
    - [ ] Move rationale into `docs/` and keep the README to install, run, deploy and limits.
-   - [ ] Add cheap assertions for claims that can be tested, such as the artifact key contents and the idempotency TTL.
+   - [x] Add cheap assertions for the idempotency TTL and per-app replay cap.
+   - [ ] Add an assertion for the artifact cache key contents.
    - [ ] Fix the CLI naming: the binary is `wt-deploy` and the usage string says `wt`.
 
 ## If I picked the next five
 
 1. [ ] Embedded host with typed WIT imports, and the density benchmark that justifies it.
 2. [ ] Vite HMR plus the two-tier dev loop.
-3. [ ] Deployment resource: async, per-app lock, persisted idempotency, immutable preview hosts.
+3. [ ] Deployment resource: async deploys and immutable preview hosts; per-app locks and persisted idempotency are done.
 4. [ ] Host event bus and blob/uploads.
 5. [ ] Explicit migrate phase, dependency-aware readiness and maintenance mode.
