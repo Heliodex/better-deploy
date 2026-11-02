@@ -230,7 +230,7 @@ func appURLEnvName(name string) string {
 	return key.String()
 }
 
-// appFetchURL builds the base URL for one target app.
+// appURL builds the base URL for one target app.
 func (f *appFetchServer) appURL(name string) string {
 	return f.url() + appFetchPathPrefix + name
 }

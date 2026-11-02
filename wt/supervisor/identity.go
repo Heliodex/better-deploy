@@ -626,7 +626,7 @@ func (s *identityStore) deleteSession(token string) error {
 	return s.saveSessionsLocked()
 }
 
-// identityHeaders signs the user values so an app can verify that the supervisor, not the client, supplied them.
+// identityUserSignature signs the user values so an app can verify that the supervisor, not the client, supplied them.
 func identityUserSignature(secret, id, email, name, groups string) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = fmt.Fprintf(mac, "%s\n%s\n%s\n%s", id, email, name, groups)
