@@ -23,7 +23,7 @@ Concrete evidence from this build:
 
 ## Priority ordered
 
-1. [ ] **[P0] Make the component input set explicit and cache component and static builds separately.**
+1. [x] **[P0] Make the component input set explicit and cache component and static builds separately.**
 
    **Current behaviour.** `componentInputHash` in `wt/deploy/cache.go` walks the whole app directory with a denylist. It ignores `static`, `web/build`, `web/.svelte-kit` and `node_modules`, but it hashes `web/src`, so every Svelte source edit invalidates the component. It does not hash the replaced SDK modules under `wt/packages` or the WIT, so an SDK change can leave the cache valid and reuse a stale `main.wasm`. `prepareComponent` then skips the entire `build` command when the hash matches, and `deploy` only keeps the running component when that whole build was skipped and the digest matches.
 
@@ -35,6 +35,8 @@ Concrete evidence from this build:
    - Print which phases ran and which were reused, so a static-only deploy is visible rather than inferred.
 
    **Done when.** A frontend-only edit runs only the frontend build, uploads no wasm and leaves the running digest alone. A Go or SDK change rebuilds the component. A change under `wt/packages` invalidates the app's cache. A fresh checkout builds both phases, and the deploy output says which path it took.
+
+   Implemented in `f830bc6` and `309b9f3`. `build_component` and `build_static` are separate cached phases; `build` remains the legacy single-command fallback. `.wt-build.json` now stores `componentHash` and `staticHash` independently. The component hash covers Go and WIT files, the nearest `go.mod`/`go.sum` (including a parent module above the app directory), every local `replace` target resolved from that module such as `../packages`, and explicit `component_inputs`. The static hash covers the `web` directory (or `dev.web`) and explicit `static_inputs`, excluding `web/build`, `static`, `*.gen.go`, `packages/binding` and `packages/tmp`. Deploy always computes the wasm digest and omits the component when the supervisor already runs it, even if the component was rebuilt. Verified on pulse: a `web/static/robots.txt` edit reused the component, rebuilt static and uploaded about 44 KB instead of the 12 MB component; a Go edit rebuilt only the component; a second build reused both phases. The unit tests cover the parent-module and `wt/packages` invalidation, explicit component inputs and the legacy fallback. The phase summary prints `component: reused|built`, `static: reused|built|skipped` and `component: already running; uploading static only`.
 
 2. [ ] **[P1] Add a supervisor capability endpoint and make the CLI preflight against it.**
 
@@ -150,7 +152,7 @@ Concrete evidence from this build:
 
 ## If I picked the next three
 
-1. [ ] **Split component and static builds, and replace the cache key.** This is the biggest daily cost and the stale-SDK case is a correctness bug.
+1. [x] **Split component and static builds, and replace the cache key.** This is the biggest daily cost and the stale-SDK case is a correctness bug. Implemented in `f830bc6` and `309b9f3`.
 2. [ ] **Add the capability endpoint and deploy preflight.** It is small, removes the 405 class of failures and makes runtime and target matching automatic.
 3. [ ] **Add one-source contract generation and a standard error shape.** It is the biggest remaining authoring cost after the build loop.
 
