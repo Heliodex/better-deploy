@@ -185,6 +185,16 @@ func (s *supervisor) handleIdentityMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, identityMeResponse{User: user, CSRFToken: session.CSRF})
 }
 
+// readIdentityJSON decodes a small identity request body.
+func readIdentityJSON(w http.ResponseWriter, r *http.Request, target any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+	if err := json.UnmarshalRead(r.Body, target); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return false
+	}
+	return true
+}
+
 func (s *supervisor) handleIdentityPassword(w http.ResponseWriter, r *http.Request) {
 	session, user, _, ok := s.identityRequest(r)
 	if !ok {
@@ -195,10 +205,8 @@ func (s *supervisor) handleIdentityPassword(w http.ResponseWriter, r *http.Reque
 		writeIdentityError(w, errIdentityCSRF)
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
 	var request identityPasswordRequest
-	if err := json.UnmarshalRead(r.Body, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !readIdentityJSON(w, r, &request) {
 		return
 	}
 	if _, err := s.identity.authenticate(user.Email, request.CurrentPassword); err != nil {
@@ -251,10 +259,8 @@ func (s *supervisor) handleIdentityUsers(w http.ResponseWriter, r *http.Request)
 	case http.MethodGet:
 		writeJSON(w, http.StatusOK, identityUsersResponse{Users: s.identity.listUsers()})
 	case http.MethodPost:
-		r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
 		var request identityCreateUserRequest
-		if err := json.UnmarshalRead(r.Body, &request); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		if !readIdentityJSON(w, r, &request) {
 			return
 		}
 		user, err := s.identity.createUser(request.Email, request.Name, request.Password, request.Groups)
@@ -267,6 +273,68 @@ func (s *supervisor) handleIdentityUsers(w http.ResponseWriter, r *http.Request)
 		w.Header().Set("Allow", "GET, POST")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// handleIdentityUserPassword resets one user's password.
+func (s *supervisor) handleIdentityUserPassword(w http.ResponseWriter, r *http.Request, id string) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var request identityResetPasswordRequest
+	if !readIdentityJSON(w, r, &request) {
+		return
+	}
+	if err := s.identity.setPassword(id, request.Password); err != nil {
+		writeIdentityError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleIdentityUserGet serves one user.
+func (s *supervisor) handleIdentityUserGet(w http.ResponseWriter, id string) {
+	user, ok := s.identity.user(id)
+	if !ok {
+		writeIdentityError(w, errIdentityUserMissing)
+		return
+	}
+	writeJSON(w, http.StatusOK, user)
+}
+
+// handleIdentityUserUpdate applies a name, group or disabled change.
+func (s *supervisor) handleIdentityUserUpdate(w http.ResponseWriter, r *http.Request, id string) {
+	var request identityUpdateUserRequest
+	if !readIdentityJSON(w, r, &request) {
+		return
+	}
+	current, ok := s.identity.user(id)
+	if !ok {
+		writeIdentityError(w, errIdentityUserMissing)
+		return
+	}
+	name := current.Name
+	if request.Name != nil {
+		name = *request.Name
+	}
+	groups := current.Groups
+	if request.Groups != nil {
+		groups = *request.Groups
+	}
+	user, err := s.identity.updateUser(id, name, groups, request.Disabled)
+	if err != nil {
+		writeIdentityError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, user)
+}
+
+// handleIdentityUserDelete removes one user and their sessions.
+func (s *supervisor) handleIdentityUserDelete(w http.ResponseWriter, id string) {
+	if err := s.identity.deleteUser(id); err != nil {
+		writeIdentityError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *supervisor) handleIdentityUser(w http.ResponseWriter, r *http.Request, rest string) {
@@ -283,62 +351,16 @@ func (s *supervisor) handleIdentityUser(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	if action == "password" {
-		if !requireMethod(w, r, http.MethodPost) {
-			return
-		}
-		r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
-		var request identityResetPasswordRequest
-		if err := json.UnmarshalRead(r.Body, &request); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
-			return
-		}
-		if err := s.identity.setPassword(id, request.Password); err != nil {
-			writeIdentityError(w, err)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
+		s.handleIdentityUserPassword(w, r, id)
 		return
 	}
 	switch r.Method {
 	case http.MethodGet:
-		user, ok := s.identity.user(id)
-		if !ok {
-			writeIdentityError(w, errIdentityUserMissing)
-			return
-		}
-		writeJSON(w, http.StatusOK, user)
+		s.handleIdentityUserGet(w, id)
 	case http.MethodPatch:
-		r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
-		var request identityUpdateUserRequest
-		if err := json.UnmarshalRead(r.Body, &request); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
-			return
-		}
-		current, ok := s.identity.user(id)
-		if !ok {
-			writeIdentityError(w, errIdentityUserMissing)
-			return
-		}
-		name := current.Name
-		if request.Name != nil {
-			name = *request.Name
-		}
-		groups := current.Groups
-		if request.Groups != nil {
-			groups = *request.Groups
-		}
-		user, err := s.identity.updateUser(id, name, groups, request.Disabled)
-		if err != nil {
-			writeIdentityError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, user)
+		s.handleIdentityUserUpdate(w, r, id)
 	case http.MethodDelete:
-		if err := s.identity.deleteUser(id); err != nil {
-			writeIdentityError(w, err)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
+		s.handleIdentityUserDelete(w, id)
 	default:
 		w.Header().Set("Allow", "GET, PATCH, DELETE")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
