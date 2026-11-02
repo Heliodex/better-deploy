@@ -6,6 +6,7 @@ import (
 	"strings"
 )
 
+// lowerFieldName lowercases the first character of a json/v2 "field X" message.
 func lowerFieldName(message string) string {
 	const prefix = "field "
 	if !strings.HasPrefix(message, prefix) {

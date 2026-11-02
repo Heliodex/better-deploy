@@ -12,6 +12,7 @@ import (
 	"wt.packages/httpmeta"
 )
 
+// methodToString maps a standard wasi:http method to its HTTP name and rejects the "other" variant.
 func methodToString(m wasi.Method) (string, error) {
 	switch m.Tag() {
 	case wasi.MethodConnect:
@@ -39,6 +40,7 @@ func methodToString(m wasi.Method) (string, error) {
 	}
 }
 
+// toHttpHeader appends wasi header pairs to dest, preserving repeated fields.
 func toHttpHeader(src []wit.Tuple2[string, []uint8], dest *http.Header) {
 	for _, pair := range src {
 		key := pair.F0

@@ -18,6 +18,7 @@ type bodyReader struct {
 	trailers *wit.FutureReader[wit.Result[wit.Option[*wasi.Fields], wasi.ErrorCode]]
 }
 
+// takeError consumes the trailers future and returns its error, or io.EOF when the body ended cleanly.
 func (r *bodyReader) takeError() error {
 	if r.trailers != nil {
 		trailers := r.trailers.Read()

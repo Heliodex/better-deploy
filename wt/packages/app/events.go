@@ -30,6 +30,7 @@ type publishPayload struct {
 	Data  any    `json:"data"`
 }
 
+// eventResult decodes the publish response and turns a non-2xx status into an error.
 func eventResult(resp *http.Response) (Event, error) {
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))

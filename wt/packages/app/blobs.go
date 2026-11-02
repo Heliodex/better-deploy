@@ -19,6 +19,7 @@ const (
 	blobMaxTTL    = 24 * time.Hour
 )
 
+// blobSecret reads and validates the 64-character hex key shared with the supervisor.
 func blobSecret() (string, error) {
 	secret := os.Getenv(blobSecretEnv)
 	if secret == "" {
@@ -30,6 +31,7 @@ func blobSecret() (string, error) {
 	return secret, nil
 }
 
+// blobBase returns the configured same-origin blob prefix, defaulting to BlobPrefix.
 func blobBase() string {
 	if prefix := os.Getenv(blobPrefixEnv); prefix != "" {
 		return prefix
@@ -44,6 +46,7 @@ func blobSignature(secret, method, digest string, expires, maxBytes int64, conte
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
+// blobExpiry validates a URL lifetime against the one-day maximum and returns the expiry time.
 func blobExpiry(ttl time.Duration) (time.Time, error) {
 	if ttl <= 0 || ttl > blobMaxTTL {
 		return time.Time{}, fmt.Errorf("blob URL lifetime must be between 1s and %s", blobMaxTTL)

@@ -29,6 +29,7 @@ type User struct {
 	Groups []string `json:"groups"`
 }
 
+// identitySignature computes the supervisor's HMAC over the identity headers. The field order and separators must match the supervisor.
 func identitySignature(secret, id, email, name, groups string) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = fmt.Fprintf(mac, "%s\n%s\n%s\n%s", id, email, name, groups)
