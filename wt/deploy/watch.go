@@ -65,6 +65,7 @@ func devSourceState(root string) (map[string]devFileState, error) {
 	return state, err
 }
 
+// devSourcesChanged reports whether any watched file changed size or modification time.
 func devSourcesChanged(previous, next map[string]devFileState) bool {
 	if len(previous) != len(next) {
 		return true
@@ -98,6 +99,7 @@ var componentIgnoredFiles = map[string]struct{}{
 	".wt-dev.vite.config.ts": {},
 }
 
+// addDevFile records one explicit dev.watch path when it is a regular file.
 func addDevFile(state map[string]devFileState, path string) error {
 	info, err := os.Stat(path)
 	if err != nil || !info.Mode().IsRegular() {

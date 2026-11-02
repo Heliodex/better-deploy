@@ -90,6 +90,7 @@ func componentInputHash(dir, build string) (string, error) {
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
+// readBuildCache loads the last build cache. A missing or malformed file reads as an empty cache, which forces a rebuild.
 func readBuildCache(dir string) (buildCache, error) {
 	var cache buildCache
 	data, err := os.ReadFile(filepath.Join(dir, buildCacheName))
@@ -105,6 +106,7 @@ func readBuildCache(dir string) (buildCache, error) {
 	return cache, nil
 }
 
+// writeBuildCache records a successful component build. Write errors are ignored because the cache only skips future work.
 func writeBuildCache(dir, componentHash, wasmDigest string) {
 	data, err := json.Marshal(buildCache{ComponentHash: componentHash, WasmDigest: wasmDigest})
 	if err != nil {
@@ -212,6 +214,7 @@ func serverDigest(cfg *deployConfig, name string) string {
 	return info.CurrentDigest
 }
 
+// httpRequest creates a supervisor API request, adding the bearer token and the base URL from the deploy config.
 func httpRequest(cfg *deployConfig, method, path string, body io.Reader) (*http.Request, error) {
 	req, err := http.NewRequest(method, baseURL(cfg.host)+path, body)
 	if err != nil {

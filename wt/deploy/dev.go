@@ -23,6 +23,7 @@ type devConfig struct {
 	skipBuild, skipCompile, watch, vite                   bool
 }
 
+// resolveDevConfig loads dev flags, applies WT_DEV_PORT and derives the admin port from the app port.
 func resolveDevConfig(args []string) (*devConfig, error) {
 	configPath := configArg(args)
 	fileCfg, err := loadFileConfig(configPath)
@@ -175,6 +176,7 @@ func detectTarget(wasmtime string) (string, error) {
 	return "", fmt.Errorf("no usable target for %s (tried %s); pass --target", wasmtime, strings.Join(devTargetProbes, ", "))
 }
 
+// waitHealthy polls url until it answers or the timeout expires.
 func waitHealthy(url string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for {
@@ -218,6 +220,7 @@ func devEnv(appsDir, stateDir, addr, adminAddr, wasmtime, target string) []strin
 	return out
 }
 
+// workspaceAppDirs lists the immediate child directories that contain app.json, sorted by path.
 func workspaceAppDirs(dir string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

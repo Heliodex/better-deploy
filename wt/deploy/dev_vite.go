@@ -20,6 +20,7 @@ type viteDev struct {
 	host, configPath string
 }
 
+// freeLocalPort asks the kernel for an unused loopback port.
 func freeLocalPort() (int, error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -125,6 +126,7 @@ func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
+// startVite runs the web dev command with the generated config in its own process group, so stopping it also stops its children.
 func startVite(dev *viteDev) (*exec.Cmd, error) {
 	command := dev.command
 	if strings.Contains(command, "vite") {
@@ -152,6 +154,7 @@ func signalViteGroup(cmd *exec.Cmd, signal syscall.Signal) {
 	_ = syscall.Kill(-cmd.Process.Pid, signal)
 }
 
+// ensureWebDeps runs bun install when node_modules is missing.
 func ensureWebDeps(webDir string) error {
 	info, err := os.Stat(filepath.Join(webDir, "node_modules"))
 	if err == nil && info.IsDir() {

@@ -34,6 +34,7 @@ type clientOptions struct {
 	timeout     time.Duration
 }
 
+// configArg finds --config before flag parsing so file defaults can seed the flag values.
 func configArg(args []string) string {
 	for index, arg := range args {
 		if arg == "--config" && index+1 < len(args) {
@@ -46,6 +47,7 @@ func configArg(args []string) string {
 	return ""
 }
 
+// defaultConfigPath returns WT_CONFIG, then the XDG config path, then ~/.config/wt/config.json.
 func defaultConfigPath() string {
 	if value := strings.TrimSpace(os.Getenv("WT_CONFIG")); value != "" {
 		return value
@@ -91,6 +93,7 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+// clientFlags loads flags and falls back to WT_DEPLOY_HOST, WT_TOKEN and the config file for missing values.
 func clientFlags(name string, args []string, requireHost bool) (clientOptions, []string, error) {
 	configPath := configArg(args)
 	fileCfg, err := loadFileConfig(configPath)
@@ -128,6 +131,7 @@ func supervisorURL(host, path string) string {
 	return baseURL(host) + path
 }
 
+// apiDo performs one API request with the client timeout and returns at most 8 MiB of the response body.
 func apiDo(cfg clientOptions, method, path string, body io.Reader, contentType string) (int, http.Header, []byte, error) {
 	req, err := http.NewRequest(method, supervisorURL(cfg.host, path), body)
 	if err != nil {
@@ -152,6 +156,7 @@ func apiDo(cfg clientOptions, method, path string, body io.Reader, contentType s
 	return resp.StatusCode, resp.Header, data, nil
 }
 
+// checkAPI turns a non-2xx API response into an error that includes the response body.
 func checkAPI(status int, body []byte) error {
 	if status >= 200 && status < 300 {
 		return nil
@@ -241,6 +246,7 @@ func derefLog(entry *logLine) []logLine {
 	return []logLine{*entry}
 }
 
+// followLogs consumes the supervisor's SSE log stream and prints each decoded entry.
 func followLogs(cfg clientOptions, path string) error {
 	req, err := http.NewRequest(http.MethodGet, supervisorURL(cfg.host, path), nil)
 	if err != nil {
@@ -313,6 +319,7 @@ type logOptions struct {
 	follow               bool
 }
 
+// parseLogOptions parses wt logs filters and defaults to the last 200 entries.
 func parseLogOptions(cfg *clientOptions, rest []string) (string, logOptions, error) {
 	name := rest[0]
 	opts := logOptions{tail: 200}
@@ -466,6 +473,7 @@ func backupOutPath(rest []string) string {
 	return out
 }
 
+// backupImport streams the archive as a multipart upload so large snapshots are not held in memory.
 func backupImport(cfg clientOptions, name, archive string) error {
 	reader, writer := io.Pipe()
 	multipartWriter := multipart.NewWriter(writer)
@@ -508,6 +516,7 @@ func backupImport(cfg clientOptions, name, archive string) error {
 	return nil
 }
 
+// backupDownload streams a snapshot archive to out without the client timeout, since snapshots can be large.
 func backupDownload(cfg clientOptions, name, snapshot, out string) error {
 	req, err := http.NewRequest(http.MethodGet, supervisorURL(cfg.host, "/apps/"+name+"/backups/"+snapshot+"/download"), nil)
 	if err != nil {
@@ -764,6 +773,7 @@ func runConfig(args []string) error {
 	}
 }
 
+// runOpen prints the app URL and opens it with the platform handler unless --print is set.
 func runOpen(args []string) error {
 	cfg, rest, err := clientFlags("open", args, true)
 	if err != nil {
@@ -820,6 +830,7 @@ func runOpen(args []string) error {
 	return exec.Command(command, append(commandArgs, url)...).Start()
 }
 
+// runCompletion prints a completion script for the selected shell.
 func runCompletion(args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("usage: wt completion <bash|zsh|fish>")

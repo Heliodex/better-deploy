@@ -98,6 +98,7 @@ func exampleModule(dir string) (string, error) {
 	return module, nil
 }
 
+// scaffoldFor chooses the monorepo layout for apps under wt/example and a standalone layout otherwise.
 func scaffoldFor(cfg *newConfig, abs, name string) (scaffoldMode, error) {
 	if cfg.sdk == "" {
 		if module, err := exampleModule(abs); err == nil {
@@ -128,6 +129,7 @@ func scaffoldFor(cfg *newConfig, abs, name string) (scaffoldMode, error) {
 	}, nil
 }
 
+// copyEmbeddedDir copies the embedded SDK tree, preserving executable bits on shell scripts.
 func copyEmbeddedDir(root, dst string) (int, error) {
 	count := 0
 	err := fs.WalkDir(sdkFS, root, func(path string, entry fs.DirEntry, err error) error {
@@ -163,6 +165,7 @@ func copyEmbeddedDir(root, dst string) (int, error) {
 	return count, err
 }
 
+// copyLocalDir copies a checked-out SDK, skipping generated bindings, temp files and tests.
 func copyLocalDir(src, dst string) (int, error) {
 	count := 0
 	err := filepath.WalkDir(src, func(path string, entry fs.DirEntry, err error) error {
@@ -206,6 +209,7 @@ func copyLocalDir(src, dst string) (int, error) {
 	return count, err
 }
 
+// writeStandaloneGoMod writes the app's go.mod and go.sum plus the SDK's module files for a standalone scaffold.
 func writeStandaloneGoMod(abs, module string) error {
 	data, err := standaloneFS.ReadFile("testdata/standalone/go.mod.tmpl")
 	if err != nil {

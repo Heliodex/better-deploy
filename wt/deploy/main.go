@@ -118,6 +118,7 @@ func env(key, fallback string) string {
 	return fallback
 }
 
+// validName reports whether name is a lowercase DNS label no longer than 63 characters.
 func validName(name string) bool {
 	if len(name) == 0 || len(name) > 63 {
 		return false
@@ -134,6 +135,7 @@ func validName(name string) bool {
 	return true
 }
 
+// readManifest loads and validates app.json, defaulting the name to the directory name.
 func readManifest(dir string) (manifest, error) {
 	var m manifest
 	data, err := os.ReadFile(filepath.Join(dir, "app.json"))
@@ -181,6 +183,7 @@ func validAppRelative(value string) bool {
 	return clean != ".." && !strings.HasPrefix(clean, ".."+string(filepath.Separator))
 }
 
+// normalizeDevConfig validates dev paths and fills the default proxy prefix.
 func normalizeDevConfig(dev *appDevConfig) error {
 	if !validAppRelative(dev.Web) {
 		return fmt.Errorf("dev.web %q must stay inside the app directory", dev.Web)
@@ -204,6 +207,7 @@ func normalizeDevConfig(dev *appDevConfig) error {
 	return nil
 }
 
+// resolveConfig builds the deploy config from the config file, environment and deploy flags.
 func resolveConfig(args []string) (*deployConfig, error) {
 	configPath := configArg(args)
 	fileCfg, err := loadFileConfig(configPath)
@@ -259,6 +263,7 @@ func resolveConfig(args []string) (*deployConfig, error) {
 	}, nil
 }
 
+// runBuild runs the flag build command, falling back to app.json's build command.
 func runBuild(cfg *deployConfig, m manifest) error {
 	if cfg.skipBuild {
 		return nil
@@ -429,6 +434,7 @@ func writeTarPath(tw *tar.Writer, name, path string) error {
 	return err
 }
 
+// bundle packs app.json, the component files and static output into a gzipped tarball for upload.
 func bundle(dir string, m manifest, includeComponent bool) ([]byte, error) {
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
@@ -495,6 +501,7 @@ func bundle(dir string, m manifest, includeComponent bool) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// baseURL adds https when host has no scheme and strips a trailing slash.
 func baseURL(host string) string {
 	if strings.HasPrefix(host, "http://") || strings.HasPrefix(host, "https://") {
 		return strings.TrimSuffix(host, "/")
@@ -502,6 +509,7 @@ func baseURL(host string) string {
 	return "https://" + host
 }
 
+// upload posts the bundle as a multipart deployment and waits for a queued deployment to finish.
 func upload(cfg *deployConfig, m manifest, bundle []byte) error {
 	var body bytes.Buffer
 	form := multipart.NewWriter(&body)
@@ -644,6 +652,7 @@ func buildBundle(cfg *deployConfig) (manifest, []byte, error) {
 	return m, data, nil
 }
 
+// deploy builds the bundle and uploads it, omitting the component when the supervisor already runs the same wasm.
 func deploy(args []string) error {
 	cfg, err := resolveConfig(args)
 	if err != nil {
@@ -679,6 +688,7 @@ func deploy(args []string) error {
 	return upload(cfg, m, data)
 }
 
+// resolveBundleConfig parses the flags for building a bundle without a supervisor.
 func resolveBundleConfig(args []string) (*deployConfig, error) {
 	configPath := configArg(args)
 	fileCfg, err := loadFileConfig(configPath)
