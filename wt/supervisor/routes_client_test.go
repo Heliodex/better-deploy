@@ -95,7 +95,7 @@ func renderRouteClient(entries []routeClientEntry) string {
 				name, _ = strings.CutSuffix(name, "}")
 				if rest, isRest := strings.CutSuffix(name, "..."); isRest {
 					params = append(params, rest+" = \"\"")
-					template += "${" + rest + " ? `/${" + rest + "}` : \"\"}"
+					template += "${" + rest + "}"
 				} else {
 					params = append(params, name+": string")
 					template += "${enc(" + name + ")}"
