@@ -105,7 +105,7 @@ Concrete evidence from this build:
 
    The opt-in Vite test now resolves the dev config through the normal defaults and checks three paths through Vite: `/api`, an SSE response from `/v1/events`, and a blob from `/_wt/blobs/test`. `WT_VITE_TEST=1 go test -run TestViteDevProxy` passes with the events stream and blob body intact. Pulse needs no `app.json` change because its explicit `/api` proxy is merged with the platform defaults.
 
-6. [ ] **[P2] Make app handlers and storage testable without deploying.**
+6. [x] **[P2] Make app handlers and storage testable without deploying.**
 
    **Current behaviour.** The examples build a package-level `store` in `init()` and register through `wasihttp.Handle`. Handlers are not constructed with a store, so a test has to set environment variables, run a storage service and share globals. `storage.Client` accepts an `http.Client`, so injection is possible, but there is no in-memory storage server or fake that understands the statement shapes. The template has no handler test, and `go test ./...` in an example fails in the generated binding export stub with `missing function body` before it reaches app code.
 
@@ -117,6 +117,10 @@ Concrete evidence from this build:
    - Consider an `app.Run(store, migrate, mux)` helper to remove the repeated `ServeStorage` plus route registration boilerplate, but do not hide the explicit migration.
 
    **Done when.** The scaffolded app has a passing handler test with a fake store, and an author can test validation and storage errors without running `wt dev` or deploying.
+
+   Implemented in `93de0f2` and `d717417`. `storage.NewTestServer()` starts an isolated in-memory SQLite service speaking the storage wire format for query, exec, write, batch, transaction, migrate and sessions; `server.NewClient(server.Client())` returns a normal `*storage.Client`. The server lives in a `//go:build !wasip1` file, so `modernc.org/sqlite` is a host-test dependency and never enters the component. The SDK copy and standalone templates carry the dependency and sums.
+
+   The scaffold now keeps handlers on a `notesApp` struct with `newNotesApp(store)` and `handler()`. Its `main.go` has no `wasihttp` import, so host tests never compile the generated binding stub; `wasm.go` owns the `//go:build wasip1` storage construction, migration and `wasihttp.Handle` wiring. `main_test.go` creates a note, lists it, checks a `400` with `code=invalid, field=text`, then closes the storage server and checks a `500` failure. `go generate ./contract/ && go test ./...` passes in both a monorepo scaffold and a standalone scaffold, and both scaffolds still componentize successfully. The older examples keep their existing wiring; the scaffold is the reference layout for new apps.
 
 7. [ ] **[P2] Improve CLI flag parsing and deploy output.**
 
