@@ -434,80 +434,91 @@ func storedMigrationChecksum(ctx context.Context, tx *sql.Tx, version int) (chec
 }
 
 // migrate applies statements and records a new user_version and checksum in one transaction. A version at or below the current one is a no-op when its checksum matches, or when it predates the bookkeeping table; an edited migration fails instead of silently doing nothing.
-func (s *storageServer) migrate(ctx context.Context, app string, version int, statements []storageStatement) (storageMigrationResponse, error) {
+// prepareMigration validates the version and statements and computes the migration checksum.
+func prepareMigration(version int, statements []storageStatement) ([][]any, string, error) {
 	if version < 1 || version > maxStorageMigrationVersion {
-		return storageMigrationResponse{}, fmt.Errorf("%w: version must be between 1 and %d", errStorageInvalid, maxStorageMigrationVersion)
+		return nil, "", fmt.Errorf("%w: version must be between 1 and %d", errStorageInvalid, maxStorageMigrationVersion)
 	}
 	if len(statements) > maxStorageStatements {
-		return storageMigrationResponse{}, fmt.Errorf("%w: at most %d statements are allowed", errStorageInvalid, maxStorageStatements)
+		return nil, "", fmt.Errorf("%w: at most %d statements are allowed", errStorageInvalid, maxStorageStatements)
 	}
 	params := make([][]any, len(statements))
 	for i, statement := range statements {
 		if err := validateStorageSQL(statement.SQL); err != nil {
-			return storageMigrationResponse{}, fmt.Errorf("statement %d: %w", i+1, err)
+			return nil, "", fmt.Errorf("statement %d: %w", i+1, err)
 		}
 		decoded, err := decodeStorageParams(statement.Params)
 		if err != nil {
-			return storageMigrationResponse{}, fmt.Errorf("statement %d: %w", i+1, err)
+			return nil, "", fmt.Errorf("statement %d: %w", i+1, err)
 		}
 		params[i] = decoded
 	}
-	checksum := storageMigrationChecksum(version, statements)
+	return params, storageMigrationChecksum(version, statements), nil
+}
 
-	var (
-		current int
-		applied bool
-	)
-	err := s.withConn(ctx, app, func(conn *sql.Conn) error {
-		tx, err := conn.BeginTx(ctx, nil)
+// applyMigration runs one version in a transaction and reports whether it was newly applied.
+func applyMigration(ctx context.Context, conn *sql.Conn, version int, statements []storageStatement, params [][]any, checksum string) (bool, error) {
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+
+	if err := ensureStorageMigrationsTable(ctx, tx); err != nil {
+		return false, err
+	}
+	var current int
+	if err := tx.QueryRowContext(ctx, "pragma user_version").Scan(&current); err != nil {
+		return false, err
+	}
+	if current >= version {
+		stored, ok, err := storedMigrationChecksum(ctx, tx, version)
 		if err != nil {
-			return err
+			return false, err
 		}
-		defer tx.Rollback()
+		if ok && stored != checksum {
+			return false, fmt.Errorf("%w: version %d was applied with a different checksum", errStorageMigrationChecksum, version)
+		}
+		return false, nil
+	}
 
-		if err := ensureStorageMigrationsTable(ctx, tx); err != nil {
-			return err
-		}
-		if err := tx.QueryRowContext(ctx, "pragma user_version").Scan(&current); err != nil {
-			return err
-		}
-		if current >= version {
-			stored, ok, err := storedMigrationChecksum(ctx, tx, version)
-			if err != nil {
-				return err
-			}
-			if ok && stored != checksum {
-				return fmt.Errorf("%w: version %d was applied with a different checksum", errStorageMigrationChecksum, version)
-			}
-			return nil
-		}
+	unregister, err := requireStorageAuthorizer(conn, false)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = unregister() }()
 
-		unregister, err := requireStorageAuthorizer(conn, false)
-		if err != nil {
-			return err
+	for i, statement := range statements {
+		if _, err := tx.ExecContext(ctx, statement.SQL, params[i]...); err != nil {
+			return false, fmt.Errorf("statement %d: %w", i+1, err)
 		}
-		defer func() { _ = unregister() }()
+	}
+	// The version bump and checksum are host bookkeeping, not app SQL, so they run without the app authorizer.
+	if err := unregister(); err != nil {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx,
+		"insert into "+quoteSQLiteIdentifier(storageMigrationsTable)+" (version, checksum, applied_at) values (?, ?, ?)",
+		version, checksum, time.Now().UTC().Format(time.RFC3339Nano),
+	); err != nil {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf("pragma user_version = %d", version)); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
+}
 
-		for i, statement := range statements {
-			if _, err := tx.ExecContext(ctx, statement.SQL, params[i]...); err != nil {
-				return fmt.Errorf("statement %d: %w", i+1, err)
-			}
-		}
-		// The version bump and checksum are host bookkeeping, not app SQL, so they run without the app authorizer.
-		if err := unregister(); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx,
-			"insert into "+quoteSQLiteIdentifier(storageMigrationsTable)+" (version, checksum, applied_at) values (?, ?, ?)",
-			version, checksum, time.Now().UTC().Format(time.RFC3339Nano),
-		); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, fmt.Sprintf("pragma user_version = %d", version)); err != nil {
-			return err
-		}
-		applied = true
-		return tx.Commit()
+func (s *storageServer) migrate(ctx context.Context, app string, version int, statements []storageStatement) (storageMigrationResponse, error) {
+	params, checksum, err := prepareMigration(version, statements)
+	if err != nil {
+		return storageMigrationResponse{}, err
+	}
+	applied := false
+	err = s.withConn(ctx, app, func(conn *sql.Conn) error {
+		var err error
+		applied, err = applyMigration(ctx, conn, version, statements, params, checksum)
+		return err
 	})
 	if err != nil {
 		return storageMigrationResponse{}, err

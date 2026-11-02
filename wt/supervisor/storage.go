@@ -812,36 +812,38 @@ func (s *storageServer) exec(w http.ResponseWriter, r *http.Request, app string)
 	writeJSON(w, http.StatusOK, result)
 }
 
-func (s *storageServer) batch(w http.ResponseWriter, r *http.Request, app string) {
+// readBatchRequest parses and validates one write batch.
+func readBatchRequest(w http.ResponseWriter, r *http.Request) (storageBatchRequest, [][]any, bool) {
 	var req storageBatchRequest
 	if !readStorageJSON(w, r, &req) {
-		return
+		return req, nil, false
 	}
 	if len(req.Statements) == 0 {
 		writeStorageError(w, fmt.Errorf("%w: at least one statement is required", errStorageInvalid))
-		return
+		return req, nil, false
 	}
 	if len(req.Statements) > maxStorageStatements {
 		writeStorageError(w, fmt.Errorf("%w: at most %d statements are allowed", errStorageInvalid, maxStorageStatements))
-		return
+		return req, nil, false
 	}
 	params := make([][]any, len(req.Statements))
 	for i, statement := range req.Statements {
 		if err := validateStorageSQL(statement.SQL); err != nil {
 			writeStorageError(w, fmt.Errorf("statement %d: %w", i+1, err))
-			return
+			return req, nil, false
 		}
 		decoded, err := decodeStorageParams(statement.Params)
 		if err != nil {
 			writeStorageError(w, fmt.Errorf("statement %d: %w", i+1, err))
-			return
+			return req, nil, false
 		}
 		params[i] = decoded
 	}
+	return req, params, true
+}
 
-	ctx, cancel := context.WithTimeout(r.Context(), storageTimeout)
-	defer cancel()
-
+// executeBatch runs every statement in one write transaction and records its row-change range.
+func (s *storageServer) executeBatch(ctx context.Context, app string, req storageBatchRequest, params [][]any) ([]storageResult, []int, []int, *rowChangeCollector, error) {
 	results := make([]storageResult, 0, len(req.Statements))
 	starts := make([]int, len(req.Statements))
 	ends := make([]int, len(req.Statements))
@@ -876,10 +878,11 @@ func (s *storageServer) batch(w http.ResponseWriter, r *http.Request, app string
 		}
 		return tx.Commit()
 	})
-	if err != nil {
-		writeStorageError(w, err)
-		return
-	}
+	return results, starts, ends, collector, err
+}
+
+// logBatchChanges turns the batch statements into change-log entries.
+func (s *storageServer) logBatchChanges(app string, r *http.Request, req storageBatchRequest, results []storageResult, starts, ends []int, collector *rowChangeCollector) {
 	changes := make([]storageChange, len(req.Statements))
 	for i, statement := range req.Statements {
 		var rows []rowChange
@@ -899,6 +902,22 @@ func (s *storageServer) batch(w http.ResponseWriter, r *http.Request, app string
 		}
 	}
 	s.logChanges(app, changes)
+}
+
+func (s *storageServer) batch(w http.ResponseWriter, r *http.Request, app string) {
+	req, params, ok := readBatchRequest(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), storageTimeout)
+	defer cancel()
+
+	results, starts, ends, collector, err := s.executeBatch(ctx, app, req, params)
+	if err != nil {
+		writeStorageError(w, err)
+		return
+	}
+	s.logBatchChanges(app, r, req, results, starts, ends, collector)
 	writeJSON(w, http.StatusOK, storageBatchResponse{Results: results})
 }
 
