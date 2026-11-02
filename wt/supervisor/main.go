@@ -229,6 +229,7 @@ func requireMethod(w http.ResponseWriter, r *http.Request, method string) bool {
 	return false
 }
 
+// info assembles the API representation of an app, including live resource stats.
 func (s *supervisor) info(a *app) appInfo {
 	info := appInfo{Name: a.name, Port: a.port}
 	a.mu.Lock()
@@ -318,6 +319,7 @@ type appInfo struct {
 	Ready          bool      `json:"ready"`
 }
 
+// stopAll stops and drains every app during supervisor shutdown.
 func (s *supervisor) stopAll() {
 	s.deployRunsMu.Lock()
 	for _, run := range s.deployRuns {
@@ -408,6 +410,7 @@ func (s *supervisor) handleAppAudited(w http.ResponseWriter, r *http.Request, id
 	s.appendAudit(identity, r, auditAction(r.Method, action), name, status, auditError(recorder.body.Bytes()))
 }
 
+// handleApp dispatches actions on one app.
 func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
 	identity, ok := s.requireIdentity(w, r)
 	if !ok {

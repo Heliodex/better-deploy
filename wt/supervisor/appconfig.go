@@ -115,6 +115,7 @@ func envBool(key string, fallback bool) bool {
 	}
 }
 
+// envInt64 reads a positive integer from the environment, keeping the fallback for invalid values.
 func envInt64(key string, fallback int64) int64 {
 	value := os.Getenv(key)
 	if value == "" {
@@ -249,6 +250,7 @@ func normalizeEgress(rules []egressRule) ([]egressRule, error) {
 	return out, nil
 }
 
+// validName reports whether name is a lowercase DNS label no longer than 63 characters.
 func validName(name string) bool {
 	if len(name) == 0 || len(name) > 63 {
 		return false
@@ -265,6 +267,7 @@ func validName(name string) bool {
 	return true
 }
 
+// defaultHost returns <name>.<domain>, or <name>.localhost when no domain is set.
 func defaultHost(name, domain string) string {
 	if domain != "" {
 		return name + "." + domain
@@ -561,6 +564,7 @@ func normalizeAppConfig(cfg appConfig, name, domain, mode string) (appConfig, er
 	return cfg, nil
 }
 
+// readAppConfig reads and normalizes app.json, returning an empty config when the file is absent.
 func readAppConfig(dir, name, domain, mode string) (appConfig, error) {
 	cfg := appConfig{Name: name, Env: map[string]string{}}
 

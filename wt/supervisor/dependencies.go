@@ -25,6 +25,7 @@ func (s *supervisor) dependencyCycleError(name string, deps []string) error {
 	return s.walkDependencies(name, deps, visiting, []string{name})
 }
 
+// walkDependencies checks the depends_on graph for a cycle using a visiting set.
 func (s *supervisor) walkDependencies(name string, deps []string, visiting map[string]bool, path []string) error {
 	for _, dep := range deps {
 		if dep == name || visiting[dep] {
@@ -60,6 +61,7 @@ func (s *supervisor) dependenciesReady(a *app) (bool, []string) {
 	return len(waiting) == 0, waiting
 }
 
+// appDependencyReady checks an app and its transitive dependencies, bounded by maxDependsOn.
 func (s *supervisor) appDependencyReady(name string, depth int) bool {
 	if depth > maxDependsOn {
 		return false

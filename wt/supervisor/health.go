@@ -49,6 +49,7 @@ func probeHealth(port int, path string) error {
 	return nil
 }
 
+// trimMessage bounds a response body excerpt used in a health error.
 func trimMessage(body []byte) string {
 	text := strings.TrimSpace(string(body))
 	if len(text) > 200 {

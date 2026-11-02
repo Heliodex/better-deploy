@@ -137,6 +137,7 @@ func (m *metrics) observeJob(app, result string) {
 	m.observeOutcome(m.jobs, app, "job", result)
 }
 
+// prometheusLabel escapes a value for use inside a Prometheus label.
 func prometheusLabel(value string) string {
 	value = strings.ReplaceAll(value, `\`, `\\`)
 	value = strings.ReplaceAll(value, "\n", `\n`)
@@ -144,6 +145,7 @@ func prometheusLabel(value string) string {
 	return value
 }
 
+// writeMetric appends one metric sample with optional labels.
 func writeMetric(builder *strings.Builder, name, labels string, value string) {
 	builder.WriteString(name)
 	if labels != "" {

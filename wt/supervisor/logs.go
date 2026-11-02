@@ -66,6 +66,7 @@ func (l *appLog) redactLocked(text string) string {
 	return redactSecrets(text, l.secrets)
 }
 
+// subscribe registers a buffered channel for live log lines.
 func (l *appLog) subscribe() chan logEntry {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -74,6 +75,7 @@ func (l *appLog) subscribe() chan logEntry {
 	return messages
 }
 
+// unsubscribe removes a channel without closing it, so a concurrent publish cannot panic.
 func (l *appLog) unsubscribe(messages chan logEntry) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -106,6 +108,7 @@ func (l *appLog) supervisorBackupPath() string {
 	return filepath.Join(l.dir, "supervisor.log.1")
 }
 
+// openLogFile opens an append-only log file and returns its current size.
 func openLogFile(path string) (*os.File, int64, error) {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
@@ -119,6 +122,7 @@ func openLogFile(path string) (*os.File, int64, error) {
 	return file, info.Size(), nil
 }
 
+// rotateLogFile closes the current file, moves it to backup and opens a fresh one.
 func rotateLogFile(file *os.File, path, backup string) (*os.File, int64, error) {
 	if err := file.Close(); err != nil {
 		return nil, 0, err
@@ -145,6 +149,7 @@ func (l *appLog) open() error {
 	return nil
 }
 
+// newAppLog opens an app's output and supervisor logs.
 func newAppLog(dir string) (*appLog, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
@@ -422,6 +427,7 @@ func logTailParam(w http.ResponseWriter, r *http.Request) (int, bool) {
 	return parsed, true
 }
 
+// logFilterParam parses level, source, text and time filters and writes 400 on invalid input.
 func logFilterParam(w http.ResponseWriter, r *http.Request) (logFilter, bool) {
 	filter := logFilter{
 		level:  strings.ToLower(strings.TrimSpace(r.URL.Query().Get("level"))),

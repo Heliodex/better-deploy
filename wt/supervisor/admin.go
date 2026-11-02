@@ -32,6 +32,7 @@ func newHub() *hub {
 	return &hub{subs: map[chan []byte]struct{}{}}
 }
 
+// subscribe registers a buffered channel for snapshot broadcasts.
 func (h *hub) subscribe() chan []byte {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -40,6 +41,7 @@ func (h *hub) subscribe() chan []byte {
 	return messages
 }
 
+// unsubscribe removes a channel without closing it, so a concurrent publish cannot panic.
 func (h *hub) unsubscribe(messages chan []byte) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -52,6 +54,7 @@ func (h *hub) hasSubscribers() bool {
 	return len(h.subs) > 0
 }
 
+// publish fans a snapshot out without blocking a slow subscriber.
 func (h *hub) publish(message []byte) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -145,6 +148,7 @@ func (s *supervisor) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleRestart stops an app and starts it again under the app lock.
 func (s *supervisor) handleRestart(w http.ResponseWriter, _ *http.Request, a *app) {
 	defer s.lockApp(a.name)()
 	if s.lookup(a.name) != a {
@@ -170,6 +174,7 @@ func (s *supervisor) handleRestart(w http.ResponseWriter, _ *http.Request, a *ap
 // maxBackupRequestBytes caps the small JSON body used to change backup settings.
 const maxBackupRequestBytes = 4 << 10
 
+// writeBackups returns the app's backup overview and marks a newly created snapshot.
 func (s *supervisor) writeBackups(w http.ResponseWriter, name, created string) {
 	overview, err := s.backups.overview(name)
 	if err != nil {
@@ -199,6 +204,7 @@ func (s *supervisor) handleBackupSettings(w http.ResponseWriter, r *http.Request
 	s.writeBackups(w, name, "")
 }
 
+// writeBackupError maps backup errors to their HTTP statuses.
 func writeBackupError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, errNoStorageDatabase), errors.Is(err, errInvalidBackupName):
@@ -210,6 +216,7 @@ func writeBackupError(w http.ResponseWriter, err error) {
 	}
 }
 
+// handleBackups lists retained snapshots or creates a new one.
 func (s *supervisor) handleBackups(w http.ResponseWriter, r *http.Request, name string) {
 	switch r.Method {
 	case http.MethodGet:

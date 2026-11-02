@@ -271,6 +271,7 @@ func (s *secretStore) redactionValues(app string) []string {
 	return values
 }
 
+// writeLocked saves an app's secrets atomically with owner-only permissions; the caller holds the lock.
 func (s *secretStore) writeLocked(app string, values map[string]string) error {
 	data, err := json.Marshal(values)
 	if err != nil {

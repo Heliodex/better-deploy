@@ -80,6 +80,7 @@ func configETag(cfg appConfig) string {
 	return `"` + hex.EncodeToString(sum[:]) + `"`
 }
 
+// etagMatches compares an If-Match style header against one ETag, accepting weak quotes and "*".
 func etagMatches(header, etag string) bool {
 	for candidate := range strings.SplitSeq(header, ",") {
 		candidate = strings.TrimSpace(candidate)
@@ -90,6 +91,7 @@ func etagMatches(header, etag string) bool {
 	return false
 }
 
+// configResponse converts the internal config to the public response, using empty slices instead of nil.
 func configResponse(cfg appConfig) appConfigResponse {
 	schedule := cfg.Schedule
 	if schedule == nil {
@@ -168,6 +170,7 @@ func mergeConfigEnv(current map[string]string, patch map[string]*string) map[str
 	return env
 }
 
+// applyConfigPatch overlays the fields named by a PATCH, leaving omitted values unchanged.
 func applyConfigPatch(cfg appConfig, patch appConfigPatch) appConfig {
 	applyValue(&cfg.Host, patch.Host)
 	applyValue(&cfg.Health, patch.Health)
@@ -205,6 +208,7 @@ func appConfigPermission(untrusted bool) os.FileMode {
 
 // persistAppConfig writes app.json with the tenant-appropriate permission. The optional mode keeps
 // existing trusted callers working while untrusted PATCHes write the file 0600 from the start.
+// persistAppConfig writes app.json with the tenant-appropriate permission.
 func persistAppConfig(dir string, cfg appConfig, mode string) error {
 	data, err := json.Marshal(cfg)
 	if err != nil {

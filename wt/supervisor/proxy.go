@@ -40,6 +40,7 @@ func newRequestID() string {
 	return hex.EncodeToString(value[:])
 }
 
+// newProxy builds the per-app reverse proxy that rewrites forwarded headers and compresses JSON responses.
 func (s *supervisor) newProxy(a *app) *httputil.ReverseProxy {
 	target := &url.URL{Scheme: "http", Host: fmt.Sprintf("127.0.0.1:%d", a.port)}
 	proxy := &httputil.ReverseProxy{
@@ -141,6 +142,7 @@ func (s *supervisor) appForHost(host string) *app {
 	return s.hosts["*."+strings.Join(labels[1:], ".")]
 }
 
+// handleProxy resolves the app host and dispatches maintenance, events, identity and blob traffic before proxying.
 func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
 	host := s.effectiveHost(r)
 	a := s.appForHost(host)

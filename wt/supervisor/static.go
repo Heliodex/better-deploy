@@ -81,6 +81,7 @@ func staticVariant(dir, requestPath, acceptEncoding string) (path, original, enc
 	return path, original, encoding, hasVariants, true
 }
 
+// serveStaticFile writes the static caching headers, content encoding and type.
 func serveStaticFile(w http.ResponseWriter, r *http.Request, path, original, requestPath, encoding string, hasVariants bool) {
 	if strings.HasPrefix(requestPath, "/_app/immutable/") {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
