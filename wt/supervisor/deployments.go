@@ -4,7 +4,6 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -360,62 +359,15 @@ func (m *deploymentManager) bundle(app, id string) (string, error) {
 	return "", errDeploymentNotFound
 }
 
-// storeBlob puts a file in the content-addressed store and returns its digest and size.
-func (m *deploymentManager) storeBlob(app, source string) (string, int64, error) {
-	info, err := os.Stat(source)
-	if err != nil {
-		return "", 0, err
-	}
-	digest, err := fileDigest(source)
-	if err != nil {
-		return "", 0, err
-	}
-	if err := os.MkdirAll(m.blobDir(app), 0o755); err != nil {
-		return "", 0, err
-	}
-	blob := filepath.Join(m.blobDir(app), digest)
-	if existing, err := os.Stat(blob); err == nil && existing.Size() == info.Size() {
-		return digest, info.Size(), nil
-	}
-
-	// Copy rather than hardlink the source: a later in-place write to the live app must not mutate retained history.
-	temp, err := os.CreateTemp(m.blobDir(app), ".blob-")
-	if err != nil {
-		return "", 0, err
-	}
-	name := temp.Name()
-	src, err := os.Open(source)
-	if err != nil {
-		_ = temp.Close()
-		_ = os.Remove(name)
-		return "", 0, err
-	}
-	_, copyErr := io.Copy(temp, src)
-	closeErr := src.Close()
-	if copyErr == nil {
-		copyErr = temp.Close()
-	} else {
-		_ = temp.Close()
-	}
-	if copyErr == nil {
-		copyErr = closeErr
-	}
-	if copyErr != nil {
-		_ = os.Remove(name)
-		return "", 0, copyErr
-	}
-	if err := os.Rename(name, blob); err != nil {
-		_ = os.Remove(name)
-		return "", 0, err
-	}
-	return digest, info.Size(), nil
+// content returns the app's content-addressed store.
+func (m *deploymentManager) content(app string) *contentStore {
+	return newContentStore(m.blobDir(app), m.blobDir(app))
 }
 
-func linkBlob(blob, dst string) error {
-	if err := os.Link(blob, dst); err == nil {
-		return nil
-	}
-	return copyFile(blob, dst)
+// storeBlob puts a file in the content-addressed store and returns its digest and size.
+func (m *deploymentManager) storeBlob(app, source string) (string, int64, error) {
+	digest, size, _, err := m.content(app).putFile(source)
+	return digest, size, err
 }
 
 // gcBlobs removes stored artifacts no retained bundle references.
@@ -442,25 +394,7 @@ func (m *deploymentManager) gcBlobs(app string) error {
 		}
 	}
 
-	entries, err := os.ReadDir(m.blobDir(app))
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		if _, ok := referenced[entry.Name()]; ok {
-			continue
-		}
-		if err := os.Remove(filepath.Join(m.blobDir(app), entry.Name())); err != nil {
-			return err
-		}
-	}
-	return nil
+	return m.content(app).prune(referenced)
 }
 
 type fileKey struct {

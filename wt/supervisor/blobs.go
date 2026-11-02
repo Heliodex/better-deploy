@@ -132,46 +132,22 @@ func (b *blobStore) store(app, contentType string, src io.Reader, maxBytes int64
 		return blobInfo{}, false, errBlobInvalid
 	}
 	appDir := b.appDir(app)
-	tmpDir := filepath.Join(appDir, ".tmp")
-	if err := os.MkdirAll(tmpDir, 0o700); err != nil {
-		return blobInfo{}, false, err
-	}
-	temp, err := os.CreateTemp(tmpDir, "upload-")
+	content := newContentStore(appDir, filepath.Join(appDir, ".tmp"))
+	digest, written, created, tooLarge, err := content.putReader(src, maxBytes)
 	if err != nil {
 		return blobInfo{}, false, err
 	}
-	name := temp.Name()
-	cleanup := func() { _ = os.Remove(name) }
-	hash := sha256.New()
-	written, err := io.Copy(io.MultiWriter(temp, hash), io.LimitReader(src, maxBytes+1))
-	closeErr := temp.Close()
-	if err != nil {
-		cleanup()
-		return blobInfo{}, false, err
-	}
-	if closeErr != nil {
-		cleanup()
-		return blobInfo{}, false, closeErr
-	}
-	if written > maxBytes {
-		cleanup()
+	if tooLarge {
 		return blobInfo{}, false, errBlobTooLarge
 	}
-	digest := hex.EncodeToString(hash.Sum(nil))
-	target := filepath.Join(appDir, digest)
-	if info, err := os.Stat(target); err == nil && info.Mode().IsRegular() {
-		cleanup()
+	if !created {
 		meta, _ := b.openMeta(app, digest)
 		meta.Digest = digest
-		meta.Size = info.Size()
+		meta.Size = written
 		if meta.ContentType == "" {
 			meta.ContentType = contentType
 		}
 		return meta, false, nil
-	}
-	if err := os.Rename(name, target); err != nil {
-		cleanup()
-		return blobInfo{}, false, err
 	}
 	info := blobInfo{Digest: digest, Size: written, ContentType: contentType, CreatedAt: time.Now().UTC()}
 	if info.ContentType == "" {
@@ -179,11 +155,11 @@ func (b *blobStore) store(app, contentType string, src io.Reader, maxBytes int64
 	}
 	data, err := json.Marshal(info)
 	if err != nil {
-		_ = os.Remove(target)
+		_ = os.Remove(content.path(digest))
 		return blobInfo{}, false, err
 	}
 	if err := writeFileAtomicMode(filepath.Join(appDir, digest+".json"), append(data, '\n'), 0o600); err != nil {
-		_ = os.Remove(target)
+		_ = os.Remove(content.path(digest))
 		return blobInfo{}, false, err
 	}
 	return info, true, nil

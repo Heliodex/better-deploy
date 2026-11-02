@@ -134,7 +134,7 @@ func (m *deploymentManager) storeStatic(app, source, dst string) (map[string]str
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return err
 		}
-		if err := linkBlob(filepath.Join(m.blobDir(app), stored), target); err != nil {
+		if err := m.content(app).link(stored, target); err != nil {
 			return fmt.Errorf("link static %s: %w", rel, err)
 		}
 		files[filepath.ToSlash(rel)] = stored
@@ -181,7 +181,7 @@ func (m *deploymentManager) storeComponent(app, source, temp string) (componentR
 		if err != nil {
 			return record, fmt.Errorf("store %s: %w", name, err)
 		}
-		if err := linkBlob(filepath.Join(m.blobDir(app), stored), filepath.Join(temp, name)); err != nil {
+		if err := m.content(app).link(stored, filepath.Join(temp, name)); err != nil {
 			return record, fmt.Errorf("link %s: %w", name, err)
 		}
 		record.files[name] = stored
