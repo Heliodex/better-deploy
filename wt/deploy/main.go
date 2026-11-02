@@ -897,6 +897,8 @@ func main() {
 		err = runLogs(args)
 	case "jobs":
 		err = runJobs(args)
+	case "blobs":
+		err = runBlobs(args)
 	case "rollback":
 		err = runRollback(args)
 	case "backup":
@@ -912,6 +914,7 @@ func main() {
 		fmt.Println("       wt apps [--host URL] [--token TOKEN] [--json]")
 		fmt.Println("       wt logs <app> [--tail N] [--level LEVEL] [--source app|supervisor] [--q TEXT] [--follow]")
 		fmt.Println("       wt jobs <app> <list|show|enqueue|cancel|retry> ...")
+		fmt.Println("       wt blobs <app> <list|delete|gc> ...")
 		fmt.Println("       wt deploy [--dir DIR] [--host URL] [--token TOKEN] [--app-host HOST]")
 		fmt.Println("       wt rollback <app> <deployment-id> [--backup SNAPSHOT]")
 		fmt.Println("       wt backup <list|create|restore|download|import> <app> ...")
