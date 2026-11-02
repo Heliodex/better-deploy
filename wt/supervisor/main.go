@@ -200,10 +200,6 @@ type supervisor struct {
 	version     string
 }
 
-func (s *supervisor) hostTaken(host, except string) bool {
-	return s.hostConflictError(appConfig{Host: host}, except) != nil
-}
-
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)

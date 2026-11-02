@@ -611,22 +611,6 @@ func (s *identityStore) deleteSession(token string) error {
 	return s.saveSessionsLocked()
 }
 
-// rotateSession replaces a session with a fresh one, used after a password change.
-func (s *identityStore) rotateSession(token string) (string, *identitySession, identityUserInfo, error) {
-	session, user, err := s.session(token)
-	if err != nil {
-		return "", nil, identityUserInfo{}, err
-	}
-	if err := s.deleteSession(token); err != nil {
-		return "", nil, identityUserInfo{}, err
-	}
-	newToken, newSession, err := s.newSession(session.UserID)
-	if err != nil {
-		return "", nil, identityUserInfo{}, err
-	}
-	return newToken, newSession, user, nil
-}
-
 // identityHeaders signs the user values so an app can verify that the supervisor, not the client, supplied them.
 func identityUserSignature(secret, id, email, name, groups string) string {
 	mac := hmac.New(sha256.New, []byte(secret))

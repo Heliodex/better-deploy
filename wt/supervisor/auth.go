@@ -25,7 +25,6 @@ const (
 	roleDeploy = "deploy"
 	roleRead   = "read"
 
-	authTempSuffix   = ".tmp"
 	authFileVersion  = 1
 	maxAuthTokenName = 64
 	maxAuthTokens    = 256

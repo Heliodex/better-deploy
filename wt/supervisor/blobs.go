@@ -234,41 +234,6 @@ func (b *blobStore) remove(app, digest string) error {
 	return nil
 }
 
-// usage counts one app's blob data and metadata for the disk quota.
-func (b *blobStore) usage(app string) (bytes, entries int64, err error) {
-	if b == nil {
-		return 0, 0, nil
-	}
-	root := b.appDir(app)
-	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			if os.IsNotExist(walkErr) {
-				return nil
-			}
-			return walkErr
-		}
-		if path == root {
-			return nil
-		}
-		entries++
-		if entry.IsDir() {
-			return nil
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		if info.Mode().IsRegular() {
-			bytes += info.Size()
-		}
-		return nil
-	})
-	if os.IsNotExist(err) {
-		return 0, 0, nil
-	}
-	return bytes, entries, err
-}
-
 type blobUploadResponse struct {
 	blobInfo
 	URL string `json:"url"`
