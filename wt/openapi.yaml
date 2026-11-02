@@ -307,10 +307,10 @@ paths:
     parameters:
       - $ref: "#/components/parameters/AppName"
     get:
-      summary: List an app's stored blobs
+      summary: "List an app's stored blobs"
       responses:
         "200":
-          description: Blobs, oldest first
+          description: "Blobs, oldest first"
           content:
             application/json:
               schema:
@@ -339,7 +339,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/AppName"
     post:
-      summary: Remove old blobs, or preview the removal with dryRun
+      summary: "Remove old blobs, or preview the removal with dryRun"
       requestBody:
         required: true
         content:
@@ -1039,7 +1039,7 @@ paths:
           description: Not found
   /v1/jobs:
     get:
-      summary: List an app's durable jobs
+      summary: "List an app's durable jobs"
       description: "Served by the storage loopback service (WT_STORAGE_URL). The storage bearer token selects the app.\n"
       parameters:
         - name: status
@@ -1055,7 +1055,7 @@ paths:
               - canceled
       responses:
         "200":
-          description: Jobs, newest first
+          description: "Jobs, newest first"
           content:
             application/json:
               schema:
@@ -1079,14 +1079,14 @@ paths:
             schema:
               $ref: "#/components/schemas/JobRequest"
       responses:
-        "201":
-          description: Job created
+        "200":
+          description: Existing job returned for an idempotency key
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Job"
-        "200":
-          description: Existing job returned for an idempotency key
+        "201":
+          description: Job created
           content:
             application/json:
               schema:
@@ -1097,7 +1097,7 @@ paths:
           description: Unauthorized
         "503":
           description: Job queue unavailable
-  /v1/jobs/{id}:
+  "/v1/jobs/{id}":
     get:
       summary: Read one durable job
       responses:
@@ -1111,7 +1111,7 @@ paths:
           description: Unauthorized
         "404":
           description: Job not found
-  /v1/jobs/{id}/cancel:
+  "/v1/jobs/{id}/cancel":
     post:
       summary: Cancel a pending or running job
       responses:
@@ -1127,9 +1127,9 @@ paths:
           description: Job not found
         "409":
           description: Job already finished
-  /v1/jobs/{id}/retry:
+  "/v1/jobs/{id}/retry":
     post:
-      summary: Requeue a dead, failed or canceled job
+      summary: "Requeue a dead, failed or canceled job"
       responses:
         "200":
           description: Requeued job
@@ -1143,9 +1143,9 @@ paths:
           description: Job not found
         "409":
           description: Job is not retryable
-  /v1/blobs/{id}:
+  "/v1/blobs/{id}":
     delete:
-      summary: Delete one of the app's blobs
+      summary: "Delete one of the app's blobs"
       description: "Served by the storage loopback service (WT_STORAGE_URL). The storage bearer token selects the app.\n"
       responses:
         "204":
