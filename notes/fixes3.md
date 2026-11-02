@@ -4,7 +4,7 @@ Architecture simplification review, 2026-11-01. This pass looks for duplicated m
 
 The short assessment: the code is clean at function level after the earlier splits, but the same concepts are still implemented two or three times. The biggest wins are removing the test-only direct launch path, giving isolation one lifecycle, and making the storage and configuration surfaces share one representation.
 
-All eleven items below are implemented. The remaining follow-ups are narrower and are listed under "If I picked the next three".
+All eleven items below and the first two follow-ups are implemented. The remaining follow-up is listed under "If I picked the next three".
 
 ## Small changes in this pass
 
@@ -82,8 +82,8 @@ All eleven items below are implemented. The remaining follow-ups are narrower an
 
 ## If I picked the next three
 
-1. Generate the OpenAPI component schemas and the panel's typed response schemas from the same contract; the path and URL layer is already generated.
-2. Consolidate the remaining accounting dimensions (`setquota`, cache cap, session cap and concurrency slots) behind the budget component.
-3. Replace loopback app-to-app fetch with a typed internal call once the embedded host exists, instead of the bearer and HMAC path.
+1. [x] **Generate the OpenAPI component schemas from the panel contract.** The panel Valibot schemas are the source: `web/src/lib/api.ts` exports `responseContracts`, and `web/scripts/openapi.ts` writes those schemas into `openapi.yaml` and supports `--check` for CI. Panel types remain `InferOutput` of the same schemas; paths and URL helpers were already generated.
+2. [x] **Consolidate the remaining accounting dimensions.** `byteBudget` now owns the global disk, storage temp and artifact cache limits with one transition watcher, and `countBudget` owns the session cap and concurrency-slot admission. `setquota` remains an external filesystem quota backend by nature rather than an in-process budget.
+3. [ ] **Replace loopback app-to-app fetch with a typed internal call once the embedded host exists**, instead of the bearer and HMAC path.
 
 Keep the invariants in `notes/fixes2.md` under "Do not regress"; none of the items above requires weakening the wasm artifact, blue/green deploys, the storage authorizer, sessions, scoped tokens or the tested isolation boundaries.
