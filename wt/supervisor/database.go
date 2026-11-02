@@ -78,8 +78,8 @@ func (s *storageServer) databaseStats(ctx context.Context, app string) ([]databa
 		for rows.Next() {
 			var name string
 			if err := rows.Scan(&name); err != nil {
-				rows.Close()
-				return err
+				closeErr := rows.Close() //nolint:sqlclosecheck // Rows are closed explicitly so the close error can be returned.
+				return errors.Join(err, closeErr)
 			}
 			names = append(names, name)
 		}
@@ -319,7 +319,7 @@ func (s *supervisor) handleDatabaseImport(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if r.MultipartForm != nil {
-		defer r.MultipartForm.RemoveAll()
+		defer func() { _ = r.MultipartForm.RemoveAll() }()
 	}
 	file, _, err := r.FormFile("database")
 	if err != nil {

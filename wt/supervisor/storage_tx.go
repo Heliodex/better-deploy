@@ -59,7 +59,7 @@ func executeStatement(ctx context.Context, tx *sql.Tx, statement storageStatemen
 			return storageResult{}, start, start, fmt.Errorf("statement %d: %w", index+1, err)
 		}
 		columns, encoded, truncated, err := readStorageRows(rows, maxStorageRows)
-		closeErr := rows.Close()
+		closeErr := rows.Close() //nolint:sqlclosecheck // Rows are closed explicitly so the close error can be returned.
 		if err != nil {
 			return storageResult{}, start, start, fmt.Errorf("statement %d: %w", index+1, err)
 		}
@@ -89,7 +89,7 @@ func (s *storageServer) executeTransaction(ctx context.Context, app string, req 
 		if err != nil {
 			return err
 		}
-		defer tx.Rollback()
+		defer func() { _ = tx.Rollback() }()
 
 		unregister, err := requireStorageAuthorizer(conn, false)
 		if err != nil {

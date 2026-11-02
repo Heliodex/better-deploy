@@ -49,7 +49,7 @@ func (s *supervisor) waitReadyUntil(a *app, done <-chan struct{}, deadline time.
 	limit := a.cfg.startupLimit()
 	a.mu.Unlock()
 	target := fmt.Sprintf("http://127.0.0.1:%d%s", port, health)
-	lastFailure := ""
+	var lastFailure string
 	wait := 50 * time.Millisecond
 
 	for {

@@ -227,7 +227,8 @@ func TestLoadResourceHistoryTrimsStale(t *testing.T) {
 	s := testSupervisor()
 	s.cfg.stateDir = dir
 	now := time.Now().UTC()
-	history := []resourceSample{{At: now.Add(-resourceHistoryWindow - time.Minute), CPUPercent: 9999, MemoryBytes: 9999}}
+	history := make([]resourceSample, 1, 1+resourceHistoryPoints+5)
+	history[0] = resourceSample{At: now.Add(-resourceHistoryWindow - time.Minute), CPUPercent: 9999, MemoryBytes: 9999}
 	for i := range resourceHistoryPoints + 5 {
 		// Tightly spaced so every fresh sample is inside the window; only the stale one is cut.
 		history = append(history, resourceSample{At: now.Add(-time.Duration(resourceHistoryPoints+4-i) * 100 * time.Millisecond), CPUPercent: float64(i), MemoryBytes: int64(i)})

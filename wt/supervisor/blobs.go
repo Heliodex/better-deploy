@@ -18,7 +18,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -54,8 +53,6 @@ type blobInfo struct {
 type blobStore struct {
 	dir    string
 	secret []byte
-
-	mu sync.Mutex
 }
 
 // newBlobStore loads or creates the supervisor-wide signing secret and prepares the blob root.

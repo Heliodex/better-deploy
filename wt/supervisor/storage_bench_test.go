@@ -27,7 +27,7 @@ func seedStorageDB(tb testing.TB, db *sql.DB) {
 	if err != nil {
 		tb.Fatal(err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	for i := range 50 {
 		if _, err := tx.Exec(`insert into notes (id, body, created_at) values (?, ?, ?)`,
 			fmt.Sprintf("id-%02d", i), fmt.Sprintf("note %d", i), time.Unix(int64(i), 0).UTC()); err != nil {

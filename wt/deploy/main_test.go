@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -50,7 +51,7 @@ func TestBundle(t *testing.T) {
 	tr := tar.NewReader(gz)
 	for {
 		header, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -94,7 +95,7 @@ func TestBundlePreservesUnknownManifestFields(t *testing.T) {
 	tr := tar.NewReader(gz)
 	for {
 		header, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			t.Fatal("bundle has no app.json")
 		}
 		if err != nil {
@@ -136,7 +137,7 @@ func TestBundleOmitsMissingCwasm(t *testing.T) {
 	tr := tar.NewReader(gz)
 	for {
 		header, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -336,7 +337,7 @@ func TestRunBundle(t *testing.T) {
 	tr := tar.NewReader(gz)
 	for {
 		header, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {

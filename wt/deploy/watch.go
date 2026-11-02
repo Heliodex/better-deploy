@@ -188,7 +188,6 @@ func watchComponent(cfg *deployConfig, extra []string, done <-chan struct{}) {
 			continue
 		}
 		time.Sleep(400 * time.Millisecond)
-		previous, _ = componentSourceState(cfg.dir, extra)
 		fmt.Fprintln(os.Stderr, "dev: component change, rebuilding")
 		m, data, status, err := buildBundle(cfg)
 		if err != nil {

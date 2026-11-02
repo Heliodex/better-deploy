@@ -177,7 +177,7 @@ func runBackup(args []string) error {
 		return err
 	}
 	if len(rest) < 2 {
-		return fmt.Errorf("usage: wt backup <list|create|restore|download|import> <app> ...")
+		return fmt.Errorf("usage: wt backup <list|create|restore|download|import> <app>")
 	}
 	action, name := rest[0], rest[1]
 	switch action {

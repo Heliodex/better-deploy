@@ -38,7 +38,11 @@ func storageCount(t *testing.T, storage *storageServer, token string) int {
 	if len(result.Rows) != 1 {
 		t.Fatalf("count rows = %v", result.Rows)
 	}
-	return int(result.Rows[0][0].(float64))
+	count, ok := result.Rows[0][0].(float64)
+	if !ok {
+		t.Fatalf("count = %T, want float64", result.Rows[0][0])
+	}
+	return int(count)
 }
 
 func insertItem(t *testing.T, storage *storageServer, token, value string) {
@@ -548,8 +552,8 @@ func TestBackupLocksArePerApp(t *testing.T) {
 		same <- err
 	}()
 	select {
-	case <-same:
-		t.Fatal("the same app ran two backup operations at once")
+	case err := <-same:
+		t.Fatalf("the same app ran two backup operations at once: %v", err)
 	case <-time.After(50 * time.Millisecond):
 	}
 

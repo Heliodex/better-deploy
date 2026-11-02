@@ -20,7 +20,7 @@ func readStorageJSON(w http.ResponseWriter, r *http.Request, out any) bool {
 			writeError(w, http.StatusRequestEntityTooLarge, "request body is too large")
 			return false
 		}
-		writeStorageError(w, fmt.Errorf("%w: read body: %v", errStorageInvalid, err))
+		writeStorageError(w, fmt.Errorf("%w: read body: %w", errStorageInvalid, err))
 		return false
 	}
 	if len(data) == 0 {
@@ -28,7 +28,7 @@ func readStorageJSON(w http.ResponseWriter, r *http.Request, out any) bool {
 		return false
 	}
 	if err := json.Unmarshal(data, out); err != nil {
-		writeStorageError(w, fmt.Errorf("%w: invalid JSON: %v", errStorageInvalid, err))
+		writeStorageError(w, fmt.Errorf("%w: invalid JSON: %w", errStorageInvalid, err))
 		return false
 	}
 	return true
@@ -273,7 +273,7 @@ func (s *storageServer) writeReturning(w http.ResponseWriter, r *http.Request, a
 			return err
 		}
 		result.Columns, result.Rows, result.Truncated, err = readStorageRows(rows, maxRows)
-		closeErr := rows.Close()
+		closeErr := rows.Close() //nolint:sqlclosecheck // Rows are closed explicitly so the close error can be returned.
 		if err != nil {
 			return err
 		}

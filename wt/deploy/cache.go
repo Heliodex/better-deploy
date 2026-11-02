@@ -552,7 +552,8 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 		staticStale = cfg.forceBuild || cache.StaticHash != staticHash || !staticExists
 	}
 
-	if componentStale {
+	switch {
+	case componentStale:
 		if err := runBuildPhase(cfg, "component", componentCmd); err != nil {
 			return status, err
 		}
@@ -570,13 +571,12 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 			cache.ComponentHash = componentHash
 		}
 		writeBuildCache(cfg.dir, cache)
-	} else if hasComponentBuild {
-		status.ComponentReused = true
-	} else if wasmExists {
+	case hasComponentBuild, wasmExists:
 		status.ComponentReused = true
 	}
 
-	if staticRelevant && staticStale {
+	switch {
+	case staticRelevant && staticStale:
 		if err := runBuildPhase(cfg, "static", staticCmd); err != nil {
 			return status, err
 		}
@@ -590,7 +590,7 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 		if info, err := os.Stat(staticDir); err != nil || !info.IsDir() {
 			fmt.Fprintf(os.Stderr, "warning: static build finished but %s is missing\n", staticDir)
 		}
-	} else if staticRelevant {
+	case staticRelevant:
 		status.StaticReused = true
 	}
 
@@ -608,18 +608,20 @@ func printBuildStatus(status buildStatus) {
 		fmt.Fprintln(os.Stderr, "build: skipped")
 		return
 	}
-	if status.ComponentBuilt {
+	switch {
+	case status.ComponentBuilt:
 		fmt.Fprintln(os.Stderr, "component: built")
-	} else if status.ComponentReused {
+	case status.ComponentReused:
 		fmt.Fprintln(os.Stderr, "component: reused")
 	}
-	if status.StaticBuilt {
+	switch {
+	case status.StaticBuilt:
 		fmt.Fprintln(os.Stderr, "static: built")
-	} else if status.StaticReused {
+	case status.StaticReused:
 		fmt.Fprintln(os.Stderr, "static: reused")
-	} else if status.StaticSkipped {
+	case status.StaticSkipped:
 		fmt.Fprintln(os.Stderr, "static: skipped")
-	} else {
+	default:
 		fmt.Fprintln(os.Stderr, "static: no build command")
 	}
 }

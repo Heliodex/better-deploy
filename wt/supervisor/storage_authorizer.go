@@ -182,7 +182,7 @@ func unregisterStorageAuthorizer(conn *sql.Conn) error {
 func requireStorageAuthorizer(conn *sql.Conn, readOnly bool) (func() error, error) {
 	unregister, err := installStorageAuthorizer(conn, readOnly)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", errStorageUnavailable, err)
+		return nil, fmt.Errorf("%w: %w", errStorageUnavailable, err)
 	}
 	return unregister, nil
 }

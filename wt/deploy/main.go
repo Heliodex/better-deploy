@@ -118,11 +118,8 @@ func (u *uploadProgress) Read(p []byte) (int, error) {
 	return count, err
 }
 
-func env(key, fallback string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return fallback
+func env(key string) string {
+	return os.Getenv(key)
 }
 
 // validName reports whether name is a lowercase DNS label no longer than 63 characters.
@@ -261,10 +258,10 @@ func resolveConfig(args []string) (*deployConfig, error) {
 	flags := flag.NewFlagSet("deploy", flag.ContinueOnError)
 	dir := flags.String("dir", ".", "app directory containing app.json")
 	app := flags.String("app", "", "app name (default: app.json name or directory name)")
-	host := flags.String("host", firstNonEmpty(env("WT_DEPLOY_HOST", ""), fileCfg.Host), "supervisor URL, e.g. http://127.0.0.1:8080")
-	token := flags.String("token", firstNonEmpty(env("WT_TOKEN", ""), fileCfg.Token), "deploy bearer token")
-	wasmtime := flags.String("wasmtime", firstNonEmpty(env("WT_WASMTIME", ""), fileCfg.Wasmtime, "wasmtime"), "wasmtime binary")
-	targetDefault := firstNonEmpty(env("WT_WASMTIME_TARGET", ""), fileCfg.Target)
+	host := flags.String("host", firstNonEmpty(env("WT_DEPLOY_HOST"), fileCfg.Host), "supervisor URL, e.g. http://127.0.0.1:8080")
+	token := flags.String("token", firstNonEmpty(env("WT_TOKEN"), fileCfg.Token), "deploy bearer token")
+	wasmtime := flags.String("wasmtime", firstNonEmpty(env("WT_WASMTIME"), fileCfg.Wasmtime, "wasmtime"), "wasmtime binary")
+	targetDefault := firstNonEmpty(env("WT_WASMTIME_TARGET"), fileCfg.Target)
 	targetConfigured := targetDefault != ""
 	if targetDefault == "" {
 		targetDefault = "x86_64-unknown-linux-musl"
@@ -820,8 +817,8 @@ func resolveBundleConfig(args []string) (*deployConfig, error) {
 	}
 	flags := flag.NewFlagSet("bundle", flag.ContinueOnError)
 	dir := flags.String("dir", ".", "app directory containing app.json")
-	wasmtime := flags.String("wasmtime", firstNonEmpty(env("WT_WASMTIME", ""), fileCfg.Wasmtime, "wasmtime"), "wasmtime binary")
-	target := flags.String("target", firstNonEmpty(env("WT_WASMTIME_TARGET", ""), fileCfg.Target, "x86_64-unknown-linux-musl"), "wasmtime compile target")
+	wasmtime := flags.String("wasmtime", firstNonEmpty(env("WT_WASMTIME"), fileCfg.Wasmtime, "wasmtime"), "wasmtime binary")
+	target := flags.String("target", firstNonEmpty(env("WT_WASMTIME_TARGET"), fileCfg.Target, "x86_64-unknown-linux-musl"), "wasmtime compile target")
 	out := flags.String("out", "", "output file (default <name>.tar.gz)")
 	skipBuild := flags.Bool("skip-build", false, "skip running app.json's build commands")
 	skipCompile := flags.Bool("skip-compile", false, "do not compile; include main.cwasm only if it already exists")

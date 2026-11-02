@@ -26,9 +26,9 @@ type note struct {
 }
 
 var (
-	mu       sync.Mutex
-	store    *storage.Client
-	storeErr error
+	mu         sync.Mutex
+	store      *storage.Client
+	errStorage error
 )
 
 func migrate(ctx context.Context) error {
@@ -122,8 +122,8 @@ func handle(w http.ResponseWriter, r *http.Request) {
 }
 
 func init() {
-	store, storeErr = storage.New(wasihttp.NewClient())
-	wasihttp.Handle(app.ServeStorage(storeErr, migrate, http.HandlerFunc(handle)).ServeHTTP)
+	store, errStorage = storage.New(wasihttp.NewClient())
+	wasihttp.Handle(app.ServeStorage(errStorage, migrate, http.HandlerFunc(handle)).ServeHTTP)
 }
 
 func main() {}

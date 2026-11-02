@@ -48,7 +48,7 @@ func TestAppStatusLocked(t *testing.T) {
 
 func TestRecordHealthTransitions(t *testing.T) {
 	a := testApp(1)
-	failure := errString("connection refused")
+	failure := stringError("connection refused")
 
 	if changed := a.recordHealth(failure, time.Now()); !changed {
 		t.Error("first failure should publish the new error")
@@ -83,9 +83,9 @@ func TestRecordHealthTransitions(t *testing.T) {
 	}
 }
 
-type errString string
+type stringError string
 
-func (e errString) Error() string { return string(e) }
+func (e stringError) Error() string { return string(e) }
 
 func TestCheckHealthMarksAppUnhealthy(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -126,7 +126,7 @@ func TestCheckHealthMarksAppUnhealthy(t *testing.T) {
 
 func TestCheckHealthSkipsStoppedApp(t *testing.T) {
 	a := &app{name: "demo", port: 1, cfg: appConfig{Health: "/"}, cmd: nil}
-	if changed := a.recordHealth(errString("boom"), time.Now()); changed {
+	if changed := a.recordHealth(stringError("boom"), time.Now()); changed {
 		t.Error("a stopped app should not record health")
 	}
 }
@@ -136,14 +136,14 @@ func TestRecordHealthHonorsFailureLimit(t *testing.T) {
 	a.cfg.HealthFailures = 3
 
 	for range 2 {
-		a.recordHealth(errString("boom"), time.Now())
+		a.recordHealth(stringError("boom"), time.Now())
 	}
 	a.mu.Lock()
 	if !a.ready {
 		t.Error("app became unready before the configured failure count")
 	}
 	a.mu.Unlock()
-	a.recordHealth(errString("boom"), time.Now())
+	a.recordHealth(stringError("boom"), time.Now())
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.ready {

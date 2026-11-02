@@ -159,8 +159,8 @@ func schemaTableIndexes(ctx context.Context, conn *sql.Conn, table string) ([]st
 			partial int
 		)
 		if err := rows.Scan(&seq, &name, &unique, &origin, &partial); err != nil {
-			rows.Close()
-			return nil, err
+			closeErr := rows.Close() //nolint:sqlclosecheck // Rows are closed explicitly so the close error can be returned.
+			return nil, errors.Join(err, closeErr)
 		}
 		indexes = append(indexes, storageIndex{Name: name, Unique: unique != 0, Origin: origin, Partial: partial != 0, Columns: []storageIndexColumn{}})
 		names = append(names, name)
@@ -184,8 +184,8 @@ func schemaTableIndexes(ctx context.Context, conn *sql.Conn, table string) ([]st
 				value sql.NullString
 			)
 			if err := columnRows.Scan(&seqno, &cid, &value); err != nil {
-				columnRows.Close()
-				return nil, err
+				closeErr := columnRows.Close() //nolint:sqlclosecheck // Rows are closed explicitly so the close error can be returned.
+				return nil, errors.Join(err, closeErr)
 			}
 			var column *string
 			if value.Valid {
@@ -274,8 +274,8 @@ func schemaViews(ctx context.Context, conn *sql.Conn) ([]storageView, error) {
 			ddl  sql.NullString
 		)
 		if err := rows.Scan(&name, &ddl); err != nil {
-			rows.Close()
-			return nil, err
+			closeErr := rows.Close() //nolint:sqlclosecheck // Rows are closed explicitly so the close error can be returned.
+			return nil, errors.Join(err, closeErr)
 		}
 		views = append(views, storageView{Name: name, SQL: ddl.String, Columns: []storageColumn{}})
 		names = append(names, name)
@@ -343,8 +343,8 @@ func (s *storageServer) schema(ctx context.Context, app string, stats bool) (sto
 		for rows.Next() {
 			var name string
 			if err := rows.Scan(&name); err != nil {
-				rows.Close()
-				return err
+				closeErr := rows.Close() //nolint:sqlclosecheck // Rows are closed explicitly so the close error can be returned.
+				return errors.Join(err, closeErr)
 			}
 			names = append(names, name)
 		}
@@ -451,7 +451,7 @@ func applyMigration(ctx context.Context, conn *sql.Conn, version int, statements
 	if err != nil {
 		return false, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if err := ensureStorageMigrationsTable(ctx, tx); err != nil {
 		return false, err

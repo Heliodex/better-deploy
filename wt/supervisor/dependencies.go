@@ -118,7 +118,7 @@ func (s *supervisor) handleAppMaintenance(w http.ResponseWriter, r *http.Request
 		a.cfg.Maintenance = request.Enabled
 		a.mu.Unlock()
 		s.broadcast()
-		writeJSON(w, http.StatusOK, maintenanceResponse{Enabled: request.Enabled})
+		writeJSON(w, http.StatusOK, maintenanceResponse(request))
 	default:
 		w.Header().Set("Allow", "GET, POST")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

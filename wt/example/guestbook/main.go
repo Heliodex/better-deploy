@@ -27,8 +27,8 @@ const (
 var errMessageNotFound = errors.New("message not found")
 
 var (
-	store    *storage.Client
-	storeErr error
+	store      *storage.Client
+	errStorage error
 )
 
 func seed(ctx context.Context) error {
@@ -225,8 +225,8 @@ func handleStats(w http.ResponseWriter, r *http.Request) {
 }
 
 func init() {
-	store, storeErr = storage.New(wasihttp.NewClient())
-	if storeErr != nil {
+	store, errStorage = storage.New(wasihttp.NewClient())
+	if errStorage != nil {
 		return
 	}
 
@@ -236,7 +236,7 @@ func init() {
 	mux.HandleFunc("POST /api/messages/{id}/react", handleReact)
 	mux.HandleFunc("GET /api/stats", handleStats)
 
-	wasihttp.Handle(app.ServeStorage(storeErr, migrate, mux).ServeHTTP)
+	wasihttp.Handle(app.ServeStorage(errStorage, migrate, mux).ServeHTTP)
 }
 
 func main() {}

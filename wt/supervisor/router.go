@@ -44,15 +44,13 @@ func newRouteTable() *routeTable {
 }
 
 // add registers one method and pattern. Empty method means any method.
-func (rt *routeTable) add(method, pattern string, handler routeHandler) *routeTable {
+func (rt *routeTable) add(method, pattern string, handler routeHandler) {
 	rt.routes = append(rt.routes, route{method: method, pattern: routeSegments(pattern), handler: handler})
-	return rt
 }
 
 // addApp registers an app route and records the action used for scope checks and audit.
-func (rt *routeTable) addApp(method, pattern string, action func(map[string]string) string, handler routeHandler) *routeTable {
+func (rt *routeTable) addApp(method, pattern string, action func(map[string]string) string, handler routeHandler) {
 	rt.routes = append(rt.routes, route{method: method, pattern: routeSegments(pattern), handler: handler, action: action})
-	return rt
 }
 
 // ServeHTTP writes 405 for a known path with the wrong method and 404 otherwise.

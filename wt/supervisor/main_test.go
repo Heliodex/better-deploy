@@ -143,7 +143,7 @@ func TestLogRingKeepsTail(t *testing.T) {
 
 func TestWithLaunchLog(t *testing.T) {
 	base := errors.New("wasmtime exited")
-	if err := withLaunchLog("main.cwasm", newLogRing(), base); err != base {
+	if err := withLaunchLog("main.cwasm", newLogRing(), base); !errors.Is(err, base) {
 		t.Errorf("empty ring should return the error unchanged, got %v", err)
 	}
 	recent := newLogRing()

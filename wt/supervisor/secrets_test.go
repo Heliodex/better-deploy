@@ -8,11 +8,11 @@ import (
 	"testing"
 )
 
-func testSecretStore(t testing.TB) *secretStore {
-	t.Helper()
-	store, err := newSecretStore(filepath.Join(t.TempDir(), secretDirName))
+func testSecretStore(tb testing.TB) *secretStore {
+	tb.Helper()
+	store, err := newSecretStore(filepath.Join(tb.TempDir(), secretDirName))
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	return store
 }
@@ -21,12 +21,12 @@ func containsString(values []string, want string) bool {
 	return slices.Contains(values, want)
 }
 
-func secretTestSupervisor(t testing.TB) (*supervisor, *app) {
-	t.Helper()
+func secretTestSupervisor(tb testing.TB) (*supervisor, *app) {
+	tb.Helper()
 	s := testSupervisor()
-	s.secrets = testSecretStore(t)
-	s.cfg.stateDir = t.TempDir()
-	dir := t.TempDir()
+	s.secrets = testSecretStore(tb)
+	s.cfg.stateDir = tb.TempDir()
+	dir := tb.TempDir()
 	a := &app{name: "demo", dir: dir, cfg: appConfig{Name: "demo", Host: "demo.localhost"}}
 	s.apps[a.name] = a
 	s.hosts[a.cfg.Host] = a

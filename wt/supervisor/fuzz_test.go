@@ -40,8 +40,8 @@ func FuzzDecodeStorageValue(f *testing.F) {
 	})
 }
 
-func fuzzTarGz(t testing.TB) []byte {
-	t.Helper()
+func fuzzTarGz(tb testing.TB) []byte {
+	tb.Helper()
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
@@ -53,17 +53,17 @@ func fuzzTarGz(t testing.TB) []byte {
 		{"../escape", "nope"},
 	} {
 		if err := tw.WriteHeader(&tar.Header{Name: entry.name, Mode: 0o644, Size: int64(len(entry.body))}); err != nil {
-			t.Fatal(err)
+			tb.Fatal(err)
 		}
 		if _, err := tw.Write([]byte(entry.body)); err != nil {
-			t.Fatal(err)
+			tb.Fatal(err)
 		}
 	}
 	if err := tw.Close(); err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	if err := gz.Close(); err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	return buf.Bytes()
 }

@@ -42,9 +42,9 @@ type (
 )
 
 var (
-	store    *storage.Client
-	storeErr error
-	cycleMu  sync.Mutex
+	store      *storage.Client
+	errStorage error
+	cycleMu    sync.Mutex
 )
 
 // migrate creates the schema and seeds a few public endpoints on first run.
@@ -443,7 +443,7 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 }
 
 func init() {
-	store, storeErr = storage.New(wasihttp.NewClient())
+	store, errStorage = storage.New(wasihttp.NewClient())
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", handleRoot)
 	mux.HandleFunc("GET /api/monitors", handleListMonitors)
@@ -451,7 +451,7 @@ func init() {
 	mux.HandleFunc("DELETE /api/monitors/{id}", handleDeleteMonitor)
 	mux.HandleFunc("POST /api/check", handleCheck)
 	mux.HandleFunc("GET /api/stats", handleStats)
-	wasihttp.Handle(app.ServeStorage(storeErr, migrate, mux).ServeHTTP)
+	wasihttp.Handle(app.ServeStorage(errStorage, migrate, mux).ServeHTTP)
 }
 
 func main() {}

@@ -310,7 +310,7 @@ func runJobs(args []string) error {
 		return err
 	}
 	if len(rest) < 2 {
-		return fmt.Errorf("usage: wt jobs <app> <list|show|enqueue|cancel|retry> ...")
+		return fmt.Errorf("usage: wt jobs <app> <list|show|enqueue|cancel|retry>")
 	}
 	name, action := rest[0], rest[1]
 	if !validName(name) {

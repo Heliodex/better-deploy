@@ -27,11 +27,11 @@ func freeTestPort(t *testing.T) string {
 	return port
 }
 
-func waitHTTP(t *testing.T, url, method string, headers map[string]string, want int) *http.Response {
+func waitHTTP(t *testing.T, url string, headers map[string]string, want int) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		request, err := http.NewRequest(method, url, nil)
+		request, err := http.NewRequest(http.MethodGet, url, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -46,12 +46,12 @@ func waitHTTP(t *testing.T, url, method string, headers map[string]string, want 
 		if err == nil {
 			if response.StatusCode == want {
 				response.Body.Close()
-				return response
+				return
 			}
 			response.Body.Close()
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("%s %s did not return %d: %v", method, url, want, err)
+			t.Fatalf("GET %s did not return %d: %v", url, want, err)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
@@ -143,8 +143,8 @@ func TestSupervisorHandoverKeepsAppPID(t *testing.T) {
 		}
 	})
 
-	waitHTTP(t, base+"/healthz", http.MethodGet, nil, http.StatusOK)
-	waitHTTP(t, base+"/", http.MethodGet, map[string]string{"Host": "demo.localhost"}, http.StatusNoContent)
+	waitHTTP(t, base+"/healthz", nil, http.StatusOK)
+	waitHTTP(t, base+"/", map[string]string{"Host": "demo.localhost"}, http.StatusNoContent)
 	before := supervisorAppPID(t, base, "test")
 	if before == 0 {
 		t.Fatal("app has no pid")
@@ -156,8 +156,8 @@ func TestSupervisorHandoverKeepsAppPID(t *testing.T) {
 	waitLog(t, logFile.Name(), func(text string) bool {
 		return strings.Contains(text, "handover: exec") && strings.Count(text, "supervisor listening") >= 2
 	})
-	waitHTTP(t, base+"/healthz", http.MethodGet, nil, http.StatusOK)
-	waitHTTP(t, base+"/", http.MethodGet, map[string]string{"Host": "demo.localhost"}, http.StatusNoContent)
+	waitHTTP(t, base+"/healthz", nil, http.StatusOK)
+	waitHTTP(t, base+"/", map[string]string{"Host": "demo.localhost"}, http.StatusNoContent)
 	after := supervisorAppPID(t, base, "test")
 	if after != before {
 		t.Errorf("app pid changed from %d to %d across handover", before, after)
@@ -169,8 +169,8 @@ func TestSupervisorHandoverKeepsAppPID(t *testing.T) {
 	waitLog(t, logFile.Name(), func(text string) bool {
 		return strings.Count(text, "supervisor listening") >= 3
 	})
-	waitHTTP(t, base+"/healthz", http.MethodGet, nil, http.StatusOK)
-	waitHTTP(t, base+"/", http.MethodGet, map[string]string{"Host": "demo.localhost"}, http.StatusNoContent)
+	waitHTTP(t, base+"/healthz", nil, http.StatusOK)
+	waitHTTP(t, base+"/", map[string]string{"Host": "demo.localhost"}, http.StatusNoContent)
 	if second := supervisorAppPID(t, base, "test"); second != before {
 		t.Errorf("app pid changed from %d to %d across the second handover", before, second)
 	}
@@ -193,7 +193,10 @@ func TestSupervisorHandoverKeepsAppPID(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	select {
-	case <-done:
+	case err := <-done:
+		if err != nil {
+			t.Errorf("supervisor shutdown: %v", err)
+		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("supervisor did not shut down")
 	}

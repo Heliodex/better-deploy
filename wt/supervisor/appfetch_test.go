@@ -70,7 +70,11 @@ func TestAppFetchSignsCallerAndForwards(t *testing.T) {
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
 	defer targetServer.Close()
-	target.port = targetServer.Listener.Addr().(*net.TCPAddr).Port
+	address, ok := targetServer.Listener.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("listener address = %T, want *net.TCPAddr", targetServer.Listener.Addr())
+	}
+	target.port = address.Port
 	target.proxy = s.newProxy(target)
 
 	req := httptest.NewRequest(http.MethodPost, "/apps/target/v1/items?limit=1", strings.NewReader(`{"value":"one"}`))

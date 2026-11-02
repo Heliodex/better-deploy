@@ -425,7 +425,7 @@ func (m *deploymentManager) usage(app string) (int64, error) {
 			return err
 		}
 		if stat, ok := info.Sys().(*syscall.Stat_t); ok {
-			key := fileKey{device: uint64(stat.Dev), inode: stat.Ino}
+			key := fileKey{device: uint64(stat.Dev), inode: stat.Ino} //nolint:unconvert // Stat_t.Dev is not uint64 on every platform.
 			if _, ok := seen[key]; ok {
 				return nil
 			}

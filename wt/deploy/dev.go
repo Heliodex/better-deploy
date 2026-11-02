@@ -35,9 +35,9 @@ func resolveDevConfig(args []string) (*devConfig, error) {
 	workspace := flags.String("workspace", "", "directory whose child apps are all served together")
 	port := flags.Int("port", 0, "loopback port for the dev supervisor (default 8080)")
 	adminPort := flags.Int("admin-port", 0, "separate admin port (default app port + 1)")
-	wasmtime := flags.String("wasmtime", firstNonEmpty(env("WT_WASMTIME", ""), fileCfg.Wasmtime, "wasmtime"), "wasmtime binary")
-	target := flags.String("target", firstNonEmpty(env("WT_WASMTIME_TARGET", ""), fileCfg.Target), "wasmtime compile target (default: match the local wasmtime)")
-	supervisor := flags.String("supervisor", env("WT_SUPERVISOR", ""), "supervisor binary (default: PATH, then build from ../../supervisor)")
+	wasmtime := flags.String("wasmtime", firstNonEmpty(env("WT_WASMTIME"), fileCfg.Wasmtime, "wasmtime"), "wasmtime binary")
+	target := flags.String("target", firstNonEmpty(env("WT_WASMTIME_TARGET"), fileCfg.Target), "wasmtime compile target (default: match the local wasmtime)")
+	supervisor := flags.String("supervisor", env("WT_SUPERVISOR"), "supervisor binary (default: PATH, then build from ../../supervisor)")
 	appHostDefault := fileCfg.AppHost
 	appHost := flags.String("app-host", appHostDefault, "override the app host (default: <app>.localhost)")
 	skipBuild := flags.Bool("skip-build", false, "skip running app.json's build commands")
@@ -158,7 +158,7 @@ func detectTarget(wasmtime string) (string, error) {
 	artifact := filepath.Join(dir, "probe.cwasm")
 	cmd := exec.Command(wasmtime, "compile", "--target", devTargetProbes[0], src, "-o", artifact)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("wasmtime compile probe: %v: %s", err, strings.TrimSpace(string(out)))
+		return "", fmt.Errorf("wasmtime compile probe: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	for _, target := range devTargetProbes {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

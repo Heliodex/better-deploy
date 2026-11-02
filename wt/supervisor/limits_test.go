@@ -12,17 +12,17 @@ import (
 	"time"
 )
 
-func backendApp(t testing.TB, s *supervisor, handler http.Handler, cfg appConfig) *app {
-	t.Helper()
+func backendApp(tb testing.TB, s *supervisor, handler http.Handler, cfg appConfig) *app {
+	tb.Helper()
 	backend := httptest.NewServer(handler)
-	t.Cleanup(backend.Close)
+	tb.Cleanup(backend.Close)
 	target, err := url.Parse(backend.URL)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	port, err := strconv.Atoi(target.Port())
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	a := &app{name: "demo", port: port, cfg: cfg, cmd: &exec.Cmd{}, healthOK: true, ready: true}
 	if cfg.MaxConcurrent > 0 {
@@ -189,11 +189,11 @@ func TestSameRuntimeConfigIncludesHealthSettings(t *testing.T) {
 	}
 }
 
-func mustAppArgs(t testing.TB, s *supervisor, a *app, source string) (string, []string) {
-	t.Helper()
+func mustAppArgs(tb testing.TB, s *supervisor, a *app, source string) (string, []string) {
+	tb.Helper()
 	args, env, err := s.appArgs(a, source)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	return strings.Join(args, " "), env
 }

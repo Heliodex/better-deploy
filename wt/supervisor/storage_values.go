@@ -71,7 +71,7 @@ func decodeStorageParams(raw []jsontext.Value) ([]any, error) {
 	for i, value := range raw {
 		decoded, err := decodeStorageValue(value)
 		if err != nil {
-			return nil, fmt.Errorf("%w: parameter %d: %v", errStorageInvalid, i+1, err)
+			return nil, fmt.Errorf("%w: parameter %d: %w", errStorageInvalid, i+1, err)
 		}
 		params[i] = decoded
 	}

@@ -248,17 +248,17 @@ func writeSessionError(w http.ResponseWriter, err error) {
 func (s *storageServer) openSession(w http.ResponseWriter, ctx context.Context, app string) (*storageSession, bool) {
 	db, err := s.dbFor(app)
 	if err != nil {
-		writeStorageError(w, fmt.Errorf("%w: %v", errStorageUnavailable, err))
+		writeStorageError(w, fmt.Errorf("%w: %w", errStorageUnavailable, err))
 		return nil, false
 	}
 	conn, err := db.Conn(ctx)
 	if err != nil {
-		writeStorageError(w, fmt.Errorf("%w: %v", errStorageUnavailable, err))
+		writeStorageError(w, fmt.Errorf("%w: %w", errStorageUnavailable, err))
 		return nil, false
 	}
 	if err := configureStorageConn(ctx, conn); err != nil {
 		_ = conn.Close()
-		writeStorageError(w, fmt.Errorf("%w: %v", errStorageUnavailable, err))
+		writeStorageError(w, fmt.Errorf("%w: %w", errStorageUnavailable, err))
 		return nil, false
 	}
 	collector := &rowChangeCollector{}

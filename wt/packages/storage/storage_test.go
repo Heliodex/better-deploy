@@ -191,9 +191,11 @@ func TestClientQueryDefaultSendsNoMaxRows(t *testing.T) {
 		_, _ = io.WriteString(w, `{"columns":["id"],"rows":[]}`)
 	})
 
-	if _, err := client.Query(context.Background(), `select id from things`); err != nil {
+	rows, err := client.Query(context.Background(), `select id from things`)
+	if err != nil {
 		t.Fatal(err)
 	}
+	_ = rows.Close()
 	if received.MaxRows != 0 {
 		t.Errorf("max_rows = %d, want the server default", received.MaxRows)
 	}
@@ -286,7 +288,9 @@ func TestClientQueryError(t *testing.T) {
 	client := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, `{"error":"no such table"}`, http.StatusBadRequest)
 	})
-	if _, err := client.Query(context.Background(), `select * from missing`); err == nil {
+	rows, err := client.Query(context.Background(), `select * from missing`)
+	if err == nil {
+		_ = rows.Close()
 		t.Fatal("expected error")
 	}
 }
@@ -296,7 +300,7 @@ func TestClientQueryRowNoRows(t *testing.T) {
 		_, _ = fmt.Fprint(w, `{"columns":["id"],"rows":[]}`)
 	})
 	var id string
-	if err := client.QueryRow(context.Background(), `select id from empty`).Scan(&id); err != ErrNoRows {
+	if err := client.QueryRow(context.Background(), `select id from empty`).Scan(&id); !errors.Is(err, ErrNoRows) {
 		t.Fatalf("error = %v, want ErrNoRows", err)
 	}
 }

@@ -75,13 +75,13 @@ func runOpen(args []string) error {
 		return nil
 	}
 	var command string
-	var commandArgs []string
+	commandArgs := make([]string, 0, 1)
 	switch runtime.GOOS {
 	case "darwin":
 		command = "open"
 	case "windows":
 		command = "rundll32"
-		commandArgs = []string{"url.dll,FileProtocolHandler"}
+		commandArgs = append(commandArgs, "url.dll,FileProtocolHandler")
 	default:
 		command = "xdg-open"
 	}

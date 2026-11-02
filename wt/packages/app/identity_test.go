@@ -1,6 +1,7 @@
 package app
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"testing"
 )
@@ -14,7 +15,7 @@ func TestIdentitySignatureVector(t *testing.T) {
 func TestUserFromRequest(t *testing.T) {
 	t.Setenv(identitySecretEnv, "identity-secret")
 	groups := "admins,beta"
-	req := httptest.NewRequest("GET", "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set(identityUserIDHeader, "usr_1")
 	req.Header.Set(identityUserEmailHeader, "ada@example.com")
 	req.Header.Set(identityUserNameHeader, "Ada")
@@ -41,7 +42,7 @@ func TestUserFromRequest(t *testing.T) {
 
 func TestUserFromRequestWithoutSecret(t *testing.T) {
 	t.Setenv(identitySecretEnv, "")
-	if _, ok := UserFromRequest(httptest.NewRequest("GET", "/", nil)); ok {
+	if _, ok := UserFromRequest(httptest.NewRequest(http.MethodGet, "/", nil)); ok {
 		t.Error("request without a secret was accepted")
 	}
 }

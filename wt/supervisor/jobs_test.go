@@ -58,8 +58,11 @@ func TestJobQueueRunsAndPersists(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer target.Close()
-	port := target.Listener.Addr().(*net.TCPAddr).Port
-	s, manager := jobTestSupervisor(t, port)
+	address, ok := target.Listener.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("listener address = %T, want *net.TCPAddr", target.Listener.Addr())
+	}
+	s, manager := jobTestSupervisor(t, address.Port)
 
 	store := manager.store("demo")
 	job, created, err := store.enqueue(jobEnqueueRequest{
@@ -133,8 +136,11 @@ func TestJobQueueRetriesAndDeadLetters(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer target.Close()
-	port := target.Listener.Addr().(*net.TCPAddr).Port
-	_, manager := jobTestSupervisor(t, port)
+	address, ok := target.Listener.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("listener address = %T, want *net.TCPAddr", target.Listener.Addr())
+	}
+	_, manager := jobTestSupervisor(t, address.Port)
 	store := manager.store("demo")
 	job, _, err := store.enqueue(jobEnqueueRequest{Path: "/work", MaxAttempts: 2})
 	if err != nil {
@@ -156,8 +162,11 @@ func TestJobQueueCancelAndAPI(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer target.Close()
-	port := target.Listener.Addr().(*net.TCPAddr).Port
-	s, manager := jobTestSupervisor(t, port)
+	address, ok := target.Listener.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("listener address = %T, want *net.TCPAddr", target.Listener.Addr())
+	}
+	s, manager := jobTestSupervisor(t, address.Port)
 	store := manager.store("demo")
 	job, _, err := store.enqueue(jobEnqueueRequest{Path: "/work", RunAt: time.Now().Add(time.Hour)})
 	if err != nil {

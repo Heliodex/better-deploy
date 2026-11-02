@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json/v2"
 	"fmt"
 	"go/ast"
@@ -296,7 +297,7 @@ func TestEmbeddedSDKMatchesPackages(t *testing.T) {
 			if err != nil {
 				return fmt.Errorf("%s is missing from testdata/sdk: %w", rel, err)
 			}
-			if string(got) != string(want) {
+			if !bytes.Equal(got, want) {
 				return fmt.Errorf("testdata/sdk/%s is stale; copy %s from packages", rel, rel)
 			}
 			return nil
@@ -314,7 +315,7 @@ func TestEmbeddedSDKMatchesPackages(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if string(got) != string(want) {
+		if !bytes.Equal(got, want) {
 			t.Errorf("testdata/sdk/%s is stale", name)
 		}
 	}

@@ -165,7 +165,7 @@ func (s *supervisor) receiveBundle(w http.ResponseWriter, r *http.Request, name 
 		return "", appConfig{}, cleanup, false
 	}
 	if r.MultipartForm != nil {
-		defer r.MultipartForm.RemoveAll()
+		defer func() { _ = r.MultipartForm.RemoveAll() }()
 	}
 
 	file, _, err := r.FormFile("artifact")

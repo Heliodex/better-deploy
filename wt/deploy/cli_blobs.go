@@ -149,7 +149,7 @@ func runBlobs(args []string) error {
 		return err
 	}
 	if len(rest) < 2 {
-		return fmt.Errorf("usage: wt blobs <app> <list|delete|gc> ...")
+		return fmt.Errorf("usage: wt blobs <app> <list|delete|gc>")
 	}
 	name, action := rest[0], rest[1]
 	if !validName(name) {

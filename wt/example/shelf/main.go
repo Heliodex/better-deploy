@@ -91,13 +91,13 @@ type rowScanner interface {
 }
 
 var (
-	store    *storage.Client
-	storeErr error
-	mux      *http.ServeMux
+	store      *storage.Client
+	errStorage error
+	mux        *http.ServeMux
 )
 
 func init() {
-	store, storeErr = storage.New(wasihttp.NewClient())
+	store, errStorage = storage.New(wasihttp.NewClient())
 
 	mux = http.NewServeMux()
 	mux.HandleFunc("GET /{$}", handleIndex)
@@ -106,7 +106,7 @@ func init() {
 	mux.HandleFunc("POST /links/{id}/delete", handleDelete)
 	mux.HandleFunc("GET /go/{id}", handleGo)
 
-	wasihttp.Handle(app.ServeStorage(storeErr, migrate, mux).ServeHTTP)
+	wasihttp.Handle(app.ServeStorage(errStorage, migrate, mux).ServeHTTP)
 }
 
 func main() {}

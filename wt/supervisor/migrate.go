@@ -35,7 +35,7 @@ func (s *supervisor) migrateApp(a *app, port int, done <-chan struct{}) error {
 		},
 	}
 	target := fmt.Sprintf("http://127.0.0.1:%d%s", port, migratePath)
-	last := ""
+	var last string
 	wait := 50 * time.Millisecond
 
 	for {

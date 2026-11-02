@@ -116,7 +116,7 @@ func (m *cgroupManager) enableControllers() error {
 		return err
 	}
 	if parentErr := enableControllersAt(parent, required); parentErr != nil {
-		return fmt.Errorf("%w (enabling parent %s: %v)", err, parent, parentErr)
+		return fmt.Errorf("%w (enabling parent %s: %w)", err, parent, parentErr)
 	}
 	if err := enableControllersAt(m.root, required); err != nil {
 		return fmt.Errorf("cgroup controllers under %s after enabling parent %s: %w", m.root, parent, err)

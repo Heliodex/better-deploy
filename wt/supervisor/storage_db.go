@@ -170,15 +170,15 @@ func (s *storageServer) withConnUnlocked(ctx context.Context, app string, fn fun
 	}()
 	db, err := s.dbFor(app)
 	if err != nil {
-		return fmt.Errorf("%w: %v", errStorageUnavailable, err)
+		return fmt.Errorf("%w: %w", errStorageUnavailable, err)
 	}
 	conn, err := db.Conn(ctx)
 	if err != nil {
-		return fmt.Errorf("%w: %v", errStorageUnavailable, err)
+		return fmt.Errorf("%w: %w", errStorageUnavailable, err)
 	}
 	defer conn.Close()
 	if err := configureStorageConn(ctx, conn); err != nil {
-		return fmt.Errorf("%w: %v", errStorageUnavailable, err)
+		return fmt.Errorf("%w: %w", errStorageUnavailable, err)
 	}
 	return fn(conn)
 }
@@ -195,15 +195,15 @@ func (s *storageServer) withReadConn(ctx context.Context, app string, fn func(*s
 	defer s.opMu.RUnlock()
 	db, err := s.readDBFor(app)
 	if err != nil {
-		return fmt.Errorf("%w: %v", errStorageUnavailable, err)
+		return fmt.Errorf("%w: %w", errStorageUnavailable, err)
 	}
 	conn, err := db.Conn(ctx)
 	if err != nil {
-		return fmt.Errorf("%w: %v", errStorageUnavailable, err)
+		return fmt.Errorf("%w: %w", errStorageUnavailable, err)
 	}
 	defer conn.Close()
 	if err := configureStorageConn(ctx, conn); err != nil {
-		return fmt.Errorf("%w: %v", errStorageUnavailable, err)
+		return fmt.Errorf("%w: %w", errStorageUnavailable, err)
 	}
 	return fn(conn)
 }

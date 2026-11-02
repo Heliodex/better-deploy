@@ -438,7 +438,11 @@ func TestStorageTransaction(t *testing.T) {
 
 	resp = storageSQL(t, s, token, "/v1/query", map[string]any{"sql": `select count(*) from items where id = 'c'`})
 	resultRows := storageResultOf(t, resp)
-	if len(resultRows.Rows) != 1 || resultRows.Rows[0][0].(float64) != 0 {
+	if len(resultRows.Rows) != 1 {
+		t.Fatalf("rolled-back row count = %+v", resultRows.Rows)
+	}
+	count, ok := resultRows.Rows[0][0].(float64)
+	if !ok || count != 0 {
 		t.Errorf("rolled-back row count = %+v", resultRows.Rows)
 	}
 
@@ -476,7 +480,11 @@ func storageSessionCount(t *testing.T, s *storageServer, token, table string) fl
 	if len(result.Rows) != 1 || len(result.Rows[0]) != 1 {
 		t.Fatalf("count rows = %+v", result.Rows)
 	}
-	return result.Rows[0][0].(float64)
+	count, ok := result.Rows[0][0].(float64)
+	if !ok {
+		t.Fatalf("count = %T, want float64", result.Rows[0][0])
+	}
+	return count
 }
 
 func TestStorageSessionCommit(t *testing.T) {
