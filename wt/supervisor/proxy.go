@@ -160,11 +160,8 @@ func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
 		s.handleAppEvents(w, r, a)
 		return
 	}
-	if identityMode {
-		if action, ok := identityAppAction(r.URL.Path); ok {
-			s.handleIdentityApp(w, r, a, action)
-			return
-		}
+	if identityMode && s.serveIdentityApp(w, r) {
+		return
 	}
 	s.identityProxyHeaders(r, a.name, identityMode)
 	// Blob traffic belongs to the supervisor, not the wasm component, so large bodies never take an app slot.
@@ -300,37 +297,13 @@ func (s *supervisor) isAppHost(host string) bool {
 }
 
 // adminMux holds the supervisor's own routes and never proxies app hosts.
-func (s *supervisor) adminMux() *http.ServeMux {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", s.handleHealthz)
-	mux.HandleFunc("/readyz", s.handleReadyz)
-	mux.HandleFunc("/apps", s.handleApps)
-	mux.HandleFunc("/apps/", s.handleApp)
-	mux.HandleFunc("/auth/tokens", s.handleAuthTokens)
-	mux.HandleFunc("/auth/tokens/", func(w http.ResponseWriter, r *http.Request) {
-		s.handleAuthToken(w, r, strings.TrimPrefix(r.URL.Path, "/auth/tokens/"))
-	})
-	mux.HandleFunc("/identity/users", s.handleIdentityUsers)
-	mux.HandleFunc("/identity/users/", func(w http.ResponseWriter, r *http.Request) {
-		s.handleIdentityUser(w, r, strings.TrimPrefix(r.URL.Path, "/identity/users/"))
-	})
-	mux.HandleFunc("GET /usage", s.handleUsage)
-	mux.HandleFunc("GET /audit", s.handleAudit)
-	mux.HandleFunc("GET /metrics", s.handleMetrics)
-	mux.HandleFunc("GET /events", s.handleEvents)
-	mux.HandleFunc("POST /login", s.handleLogin)
-	mux.HandleFunc("POST /logout", s.handleLogout)
-	mux.HandleFunc("/admin", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/admin/", http.StatusFound)
-	})
-	// The panel shell is public so the browser can load the login form; every API route stays authenticated.
-	mux.Handle("/admin/", http.StripPrefix("/admin", adminStatic()))
-	return mux
+func (s *supervisor) adminMux() http.Handler {
+	return s.adminRoutes()
 }
 
 // adminHandler serves admin/API routes on the separate admin listener.
 func (s *supervisor) adminHandler() http.Handler {
-	return s.adminMux()
+	return s.adminRoutes()
 }
 
 // publicHandler serves app hosts and the health check only. Admin routes live on the separate listener.
@@ -341,31 +314,18 @@ func (s *supervisor) publicHandler() http.Handler {
 			s.handleProxy(w, r)
 			return
 		}
-		switch r.URL.Path {
-		case "/healthz":
-			s.handleHealthz(w, r)
-		case "/readyz":
-			s.handleReadyz(w, r)
-		default:
-			http.NotFound(w, r)
-		}
+		s.publicRoutes().ServeHTTP(w, r)
 	})
 }
 
 func (s *supervisor) handler() http.Handler {
-	mux := s.adminMux()
-	mux.HandleFunc("/", s.handleProxy)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host := s.effectiveHost(r)
-		if s.reservedHost(host) {
-			mux.ServeHTTP(w, r)
-			return
-		}
-		if s.isAppHost(host) {
+		if !s.reservedHost(host) && s.isAppHost(host) {
 			s.handleProxy(w, r)
 			return
 		}
-		mux.ServeHTTP(w, r)
+		s.serveAdminOrProxy(w, r)
 	})
 }
 

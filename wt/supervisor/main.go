@@ -192,8 +192,12 @@ type supervisor struct {
 	stopping        atomic.Bool
 	ready           atomic.Bool
 
-	versionOnce sync.Once
-	version     string
+	versionOnce         sync.Once
+	version             string
+	appRoutesCache      routeCache
+	identityRoutesCache routeCache
+	adminRoutesCache    routeCache
+	publicRoutesCache   routeCache
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -400,109 +404,10 @@ func (s *supervisor) requireAppMethod(w http.ResponseWriter, r *http.Request, na
 	return s.requireApp(w, r, name)
 }
 
-// parseAppRoute splits /apps/<name>/<action> and rejects invalid names.
-func parseAppRoute(path string) (name, action string, ok bool) {
-	rest := strings.TrimPrefix(path, "/apps/")
-	name, action, _ = strings.Cut(rest, "/")
-	return name, action, name != "" && validName(name)
-}
-
-// handleAppPrefixRoute serves the routes whose action carries a subpath.
-func (s *supervisor) handleAppPrefixRoute(w http.ResponseWriter, r *http.Request, name, action string) bool {
-	if action == "jobs" || strings.HasPrefix(action, "jobs/") {
-		s.handleAppJobs(w, r, name, action)
-		return true
-	}
-	if action == "backups" || strings.HasPrefix(action, "backups/") {
-		s.handleBackupRoute(w, r, name, strings.TrimPrefix(action, "backups"))
-		return true
-	}
-	if id, ok := strings.CutPrefix(action, "deployments/"); ok {
-		s.handleDeploymentRoute(w, r, name, id)
-		return true
-	}
-	if action == "validate" {
-		if requireMethod(w, r, http.MethodPost) {
-			r.URL.RawQuery = "dry_run=1"
-			s.deploy(w, r, name)
-		}
-		return true
-	}
-	if id, ok := strings.CutPrefix(action, "rollback/"); ok {
-		if requireMethod(w, r, http.MethodPost) {
-			s.handleRollback(w, r, name, id)
-		}
-		return true
-	}
-	if key, ok := strings.CutPrefix(action, "secrets/"); ok {
-		s.handleAppSecrets(w, r, name, key)
-		return true
-	}
-	return false
-}
-
-// handleAppVerb serves the routes whose action is a single word.
-func (s *supervisor) handleAppVerb(w http.ResponseWriter, r *http.Request, name, action string) {
-	switch action {
-	case "":
-		s.handleAppRoot(w, r, name)
-	case "config":
-		s.handleAppConfig(w, r, name)
-	case "maintenance":
-		s.handleAppMaintenance(w, r, name)
-	case "secrets":
-		s.handleAppSecrets(w, r, name, "")
-	case "deployments":
-		switch r.Method {
-		case http.MethodGet:
-			s.handleDeployments(w, r, name)
-		case http.MethodPost:
-			s.handleDeploymentCreate(w, r, name)
-		default:
-			w.Header().Set("Allow", "GET, POST")
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		}
-	case "stop":
-		if requireMethod(w, r, http.MethodPost) {
-			s.handleStop(w, r, name)
-		}
-	case "start":
-		if requireMethod(w, r, http.MethodPost) {
-			s.handleStart(w, r, name)
-		}
-	case "logs/stream", "logs":
-		s.handleAppLogs(w, r, name, action)
-	case "logs/export":
-		if a, ok := s.requireAppMethod(w, r, name, http.MethodGet); ok {
-			s.handleLogExport(w, r, a)
-		}
-	case "resources":
-		if a, ok := s.requireAppMethod(w, r, name, http.MethodGet); ok {
-			s.handleResources(w, r, a)
-		}
-	case "database", "database/rows", "database/changes", "database/export", "database/import", "database/maintenance":
-		s.handleAppDatabase(w, r, name, action)
-	case "restart":
-		if a, ok := s.requireAppMethod(w, r, name, http.MethodPost); ok {
-			s.handleRestart(w, r, a)
-		}
-	default:
-		http.Error(w, "unknown endpoint", http.StatusNotFound)
-	}
-}
-
-// handleAppAction picks the subresource route before falling back to a single-word action.
-func (s *supervisor) handleAppAction(w http.ResponseWriter, r *http.Request, name, action string) {
-	if s.handleAppPrefixRoute(w, r, name, action) {
-		return
-	}
-	s.handleAppVerb(w, r, name, action)
-}
-
-// handleAppAudited runs a mutating app request and appends its outcome to the audit log.
-func (s *supervisor) handleAppAudited(w http.ResponseWriter, r *http.Request, identity authIdentity, name, action string) {
+// handleAppAudited runs a matched mutating app route and appends its outcome to the audit log.
+func (s *supervisor) handleAppAudited(w http.ResponseWriter, r *http.Request, identity authIdentity, name, action string, handler routeHandler, params map[string]string) {
 	recorder := &auditWriter{ResponseWriter: w}
-	s.handleAppAction(recorder, r, name, action)
+	handler(recorder, r, params)
 	status := recorder.status
 	if status == 0 {
 		status = http.StatusOK
@@ -515,8 +420,18 @@ func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	name, action, ok := parseAppRoute(r.URL.Path)
-	if !ok {
+	route, params, allowed := s.appRoutes().match(r.Method, r.URL.Path)
+	if route == nil {
+		if len(allowed) > 0 {
+			w.Header().Set("Allow", strings.Join(allowed, ", "))
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		http.NotFound(w, r)
+		return
+	}
+	name := params["name"]
+	if !validName(name) {
 		http.Error(w, "invalid app name", http.StatusBadRequest)
 		return
 	}
@@ -524,15 +439,19 @@ func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
+	action := ""
+	if route.action != nil {
+		action = route.action(params)
+	}
 	if !identity.canPerformAppAction(r, action) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 	if s.audit != nil && r.Method != http.MethodGet && r.Method != http.MethodHead {
-		s.handleAppAudited(w, r, identity, name, action)
+		s.handleAppAudited(w, r, identity, name, action, route.handler, params)
 		return
 	}
-	s.handleAppAction(w, r, name, action)
+	route.handler(w, r, params)
 }
 
 // loopbackListen reports whether addr only accepts loopback connections.

@@ -100,6 +100,8 @@ type storageServer struct {
 
 	metrics *metrics
 	bus     *eventBus
+
+	routesCache routeCache
 }
 
 type storageRequest struct {
@@ -727,29 +729,6 @@ func (s *storageServer) restoreFrom(ctx context.Context, app, src string) error 
 	})
 }
 
-func (s *storageServer) handleSQL(w http.ResponseWriter, r *http.Request, app string, fn func(http.ResponseWriter, *http.Request, string)) {
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	fn(w, r, app)
-}
-
-// handleSessionAction routes one pinned-session operation.
-func (s *storageServer) handleSessionAction(w http.ResponseWriter, r *http.Request, app, id, action string) {
-	switch action {
-	case "query":
-		s.sessionQuery(w, r, app, id)
-	case "exec":
-		s.sessionExec(w, r, app, id)
-	case "commit":
-		s.closeSessionRequest(w, r, app, id, true)
-	case "rollback":
-		s.closeSessionRequest(w, r, app, id, false)
-	}
-}
-
 func readStorageJSON(w http.ResponseWriter, r *http.Request, out any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, maxStorageBody)
 	data, err := io.ReadAll(r.Body)
@@ -1066,48 +1045,18 @@ func (s *storageServer) handle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	if r.URL.Path == "/v1/publish" {
-		handleEventPublish(s.bus, w, r, app)
-		return
+	// Publish traffic is part of the event bus and does not consume a query slot.
+	if r.URL.Path != "/v1/publish" {
+		if s.tempOver.Load() {
+			writeStorageError(w, errStorageTempBudget)
+			return
+		}
+		if !s.acquireQuery(w, r) {
+			return
+		}
+		if s.querySem != nil {
+			defer func() { <-s.querySem }()
+		}
 	}
-	if s.tempOver.Load() {
-		writeStorageError(w, errStorageTempBudget)
-		return
-	}
-	if !s.acquireQuery(w, r) {
-		return
-	}
-	if s.querySem != nil {
-		defer func() { <-s.querySem }()
-	}
-
-	if r.URL.Path == "/v1/sessions" {
-		s.handleSQL(w, r, app, s.createSession)
-		return
-	}
-	if id, action, ok := sessionAction(r.URL.Path); ok {
-		s.handleSQL(w, r, app, func(w http.ResponseWriter, r *http.Request, app string) {
-			s.handleSessionAction(w, r, app, id, action)
-		})
-		return
-	}
-
-	switch r.URL.Path {
-	case "/v1/query":
-		s.handleSQL(w, r, app, s.query)
-	case "/v1/exec":
-		s.handleSQL(w, r, app, s.exec)
-	case "/v1/write":
-		s.handleSQL(w, r, app, s.writeReturning)
-	case "/v1/batch":
-		s.handleSQL(w, r, app, s.batch)
-	case "/v1/transaction":
-		s.handleSQL(w, r, app, s.transaction)
-	case "/v1/schema":
-		s.readSchema(w, r, app)
-	case "/v1/migrate":
-		s.handleSQL(w, r, app, s.runMigration)
-	default:
-		http.NotFound(w, r)
-	}
+	s.storageRoutes().serve(w, r, app)
 }

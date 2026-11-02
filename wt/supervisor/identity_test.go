@@ -34,7 +34,7 @@ func testIdentitySupervisor(t *testing.T) (*supervisor, *app, identityUserInfo) 
 	return s, a, user
 }
 
-func identityCall(t *testing.T, s *supervisor, a *app, action, method, path, body string, cookie *http.Cookie, csrf string) *httptest.ResponseRecorder {
+func identityCall(t *testing.T, s *supervisor, method, path, body string, cookie *http.Cookie, csrf string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	if cookie != nil {
@@ -44,7 +44,7 @@ func identityCall(t *testing.T, s *supervisor, a *app, action, method, path, bod
 		req.Header.Set(identityCSRFHeader, csrf)
 	}
 	rec := httptest.NewRecorder()
-	s.handleIdentityApp(rec, req, a, action)
+	s.serveIdentityApp(rec, req)
 	return rec
 }
 
@@ -99,9 +99,9 @@ func TestIdentityStorePasswordAndSessions(t *testing.T) {
 }
 
 func TestIdentityLoginMeLogout(t *testing.T) {
-	s, a, _ := testIdentitySupervisor(t)
+	s, _, _ := testIdentitySupervisor(t)
 
-	rec := identityCall(t, s, a, "login", http.MethodPost, identityAppPrefix+"/login", `{"email":"ada@example.com","password":"correct horse battery"}`, nil, "")
+	rec := identityCall(t, s, http.MethodPost, identityAppPrefix+"/login", `{"email":"ada@example.com","password":"correct horse battery"}`, nil, "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("login = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -117,7 +117,7 @@ func TestIdentityLoginMeLogout(t *testing.T) {
 		t.Errorf("login response = %+v", me)
 	}
 
-	rec = identityCall(t, s, a, "me", http.MethodGet, "/v1/me", "", cookies[0], "")
+	rec = identityCall(t, s, http.MethodGet, "/v1/me", "", cookies[0], "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("me = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -125,31 +125,31 @@ func TestIdentityLoginMeLogout(t *testing.T) {
 		t.Errorf("me body = %s", rec.Body.String())
 	}
 
-	rec = identityCall(t, s, a, "logout", http.MethodPost, identityAppPrefix+"/logout", "", cookies[0], "")
+	rec = identityCall(t, s, http.MethodPost, identityAppPrefix+"/logout", "", cookies[0], "")
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("logout without CSRF = %d, want 403", rec.Code)
 	}
 
-	rec = identityCall(t, s, a, "logout", http.MethodPost, identityAppPrefix+"/logout", "", cookies[0], me.CSRFToken)
+	rec = identityCall(t, s, http.MethodPost, identityAppPrefix+"/logout", "", cookies[0], me.CSRFToken)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("logout = %d: %s", rec.Code, rec.Body.String())
 	}
 
-	rec = identityCall(t, s, a, "me", http.MethodGet, "/v1/me", "", cookies[0], "")
+	rec = identityCall(t, s, http.MethodGet, "/v1/me", "", cookies[0], "")
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("me after logout = %d, want 401", rec.Code)
 	}
 }
 
 func TestIdentityPasswordChangeAndProxyHeaders(t *testing.T) {
-	s, a, user := testIdentitySupervisor(t)
+	s, _, user := testIdentitySupervisor(t)
 	token, session, err := s.identity.newSession(user.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	cookie := &http.Cookie{Name: identityCookieName, Value: token}
 
-	rec := identityCall(t, s, a, "password", http.MethodPost, identityAppPrefix+"/password",
+	rec := identityCall(t, s, http.MethodPost, identityAppPrefix+"/password",
 		`{"currentPassword":"correct horse battery","newPassword":"another long password"}`, cookie, session.CSRF)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("password = %d: %s", rec.Code, rec.Body.String())

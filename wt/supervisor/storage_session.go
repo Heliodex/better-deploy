@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 )
@@ -445,22 +444,4 @@ func (s *storageServer) closeSessionRequest(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	writeJSON(w, http.StatusOK, storageSessionCloseResponse{Committed: commit, RolledBack: !commit})
-}
-
-// sessionAction splits /v1/sessions/<id>/<action> and reports whether the path names a session operation.
-func sessionAction(path string) (string, string, bool) {
-	rest, ok := strings.CutPrefix(path, "/v1/sessions/")
-	if !ok || rest == "" {
-		return "", "", false
-	}
-	id, action, ok := strings.Cut(rest, "/")
-	if !ok || id == "" || action == "" || strings.Contains(action, "/") {
-		return "", "", false
-	}
-	switch action {
-	case "query", "exec", "commit", "rollback":
-		return id, action, true
-	default:
-		return "", "", false
-	}
 }

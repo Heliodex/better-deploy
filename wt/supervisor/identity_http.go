@@ -50,18 +50,32 @@ type identityUsersResponse struct {
 	Users []identityUserInfo `json:"users"`
 }
 
-func identityAppAction(path string) (string, bool) {
-	switch path {
-	case identityAppPrefix + "/login", "/v1/login":
-		return "login", true
-	case identityAppPrefix + "/logout", "/v1/logout":
-		return "logout", true
-	case identityAppPrefix + "/me", "/v1/me":
-		return "me", true
-	case identityAppPrefix + "/password":
-		return "password", true
+// identityAppRoutes returns the cached table for the per-app identity endpoints.
+func (s *supervisor) identityAppRoutes() *routeTable {
+	return s.identityRoutesCache.get(func() *routeTable {
+		rt := newRouteTable()
+		for _, prefix := range []string{identityAppPrefix, "/v1"} {
+			rt.add(http.MethodPost, prefix+"/login", plainHandler(s.handleIdentityLogin))
+			rt.add(http.MethodPost, prefix+"/logout", plainHandler(s.handleIdentityLogout))
+			rt.add(http.MethodGet, prefix+"/me", plainHandler(s.handleIdentityMe))
+		}
+		rt.add(http.MethodPost, identityAppPrefix+"/password", plainHandler(s.handleIdentityPassword))
+		return rt
+	})
+}
+
+// serveIdentityApp serves an identity route and reports whether the path belonged to one.
+func (s *supervisor) serveIdentityApp(w http.ResponseWriter, r *http.Request) bool {
+	routes := s.identityAppRoutes()
+	if !routes.matches(r.URL.Path) {
+		return false
 	}
-	return "", false
+	if s.identity == nil {
+		writeError(w, http.StatusServiceUnavailable, "identity is unavailable")
+		return true
+	}
+	routes.ServeHTTP(w, r)
+	return true
 }
 
 func (s *supervisor) identityLoginGuard() *loginLimiter {
@@ -92,36 +106,7 @@ func writeIdentityError(w http.ResponseWriter, err error) {
 	}
 }
 
-func (s *supervisor) handleIdentityApp(w http.ResponseWriter, r *http.Request, a *app, action string) {
-	if s.identity == nil {
-		writeError(w, http.StatusServiceUnavailable, "identity is unavailable")
-		return
-	}
-	switch action {
-	case "login":
-		if !requireMethod(w, r, http.MethodPost) {
-			return
-		}
-		s.handleIdentityLogin(w, r, a)
-	case "logout":
-		if !requireMethod(w, r, http.MethodPost) {
-			return
-		}
-		s.handleIdentityLogout(w, r)
-	case "me":
-		if !requireMethod(w, r, http.MethodGet) {
-			return
-		}
-		s.handleIdentityMe(w, r)
-	case "password":
-		if !requireMethod(w, r, http.MethodPost) {
-			return
-		}
-		s.handleIdentityPassword(w, r)
-	}
-}
-
-func (s *supervisor) handleIdentityLogin(w http.ResponseWriter, r *http.Request, _ *app) {
+func (s *supervisor) handleIdentityLogin(w http.ResponseWriter, r *http.Request) {
 	limiter := s.identityLoginGuard()
 	key := s.forwardedInfo(r).ClientIP
 	if key == "" {
