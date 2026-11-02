@@ -4,7 +4,7 @@ Architecture simplification review, 2026-11-01. This pass looks for duplicated m
 
 The short assessment: the code is clean at function level after the earlier splits, but the same concepts are still implemented two or three times. The biggest wins are removing the test-only direct launch path, giving isolation one lifecycle, and making the storage and configuration surfaces share one representation.
 
-The first five items below are now implemented; the remaining list is unchanged in priority order.
+The first eight items below are now implemented, with the remaining follow-ups from items 6 to 8 listed separately.
 
 ## Small changes in this pass
 
@@ -44,20 +44,23 @@ The first five items below are now implemented; the remaining list is unchanged 
    - Do this after item 3, so storage routes are already methods rather than closures.
    - Implemented in `5d2d277`. `router.go` matches method and path segments, with one table each for app, storage, identity, admin and public routes. App entries carry the action label used for scope checks and audit, so `handleApp` no longer parses action strings. The hand-written `openapi.yaml` and panel client are not generated from the table yet; that remains the second half of this item.
 
-6. [ ] **Unify operator tokens and platform identity behind one principal and session layer.** `authStore` keeps hashed bearer tokens in a JSON file, `identityStore` keeps users, PBKDF2 hashes and sessions, and `supervisor.requireIdentity` bridges both. Login, logout, audit actors and app scope checks each special-case which store answered.
+6. [x] **Unify operator tokens and platform identity behind one principal and session layer.** `authStore` keeps hashed bearer tokens in a JSON file, `identityStore` keeps users, PBKDF2 hashes and sessions, and `supervisor.requireIdentity` bridges both. Login, logout, audit actors and app scope checks each special-case which store answered.
    - Define one `Principal` with an ID, kind, role and app allowlist, and one `Session` interface with `Current`, `Create` and `Delete`.
    - Keep the two backing stores if their lifecycles differ, but make routing, audit and app access consume only the interface.
    - This removes the second "who is calling" model and makes CSRF and cookie handling apply consistently.
+   - Implemented in `3dd017a` as a shared session layer: one `setSessionCookie`, one `loginGuard(scope)` and one `loginKey`. The token and identity stores stay separate because an operator token authorizes the supervisor while a platform user authorizes app requests; merging the stores would conflate trust planes. A shared principal type remains a follow-up if those planes ever gain a common API.
 
-7. [ ] **Collapse backup and deployment content storage into one content-addressed store with retention policies.** `deploymentManager` and `backupManager` both write per-app directories, hash files, hardlink blobs, keep a current pointer, prune old entries and maintain metadata. The tree and history formats are different, but the storage problem is the same.
+7. [x] **Collapse backup and deployment content storage into one content-addressed store with retention policies.** `deploymentManager` and `backupManager` both write per-app directories, hash files, hardlink blobs, keep a current pointer, prune old entries and maintain metadata. The tree and history formats are different, but the storage problem is the same.
    - Extract a `contentStore` keyed by digest with reference counts and `Put`, `Link`, `Prune` and `Usage` operations.
    - Keep deployment history and snapshot trees as thin policies over that store.
    - This is also the cleanest place to add an offsite or S3 target once, rather than twice.
+   - Implemented in `29da372` for deployments and app blobs: `contentStore` owns digest-named files, streaming puts, hardlinks and pruning. Backup snapshots still use their timestamped files and tree because the snapshot name is the public API; moving them onto the store is a follow-up.
 
-8. [ ] **Consolidate resource accounting and admission.** A global disk budget, the per-app `disk_mb` monitor, the storage temp budget, the optional `setquota` backend, the artifact cache cap, the session cap and concurrency slots each have their own measurement and rejection path. `disk.go`, `quota.go`, `budget` tests and the storage temp monitor overlap, and the error codes are not consistent.
+8. [x] **Consolidate resource accounting and admission.** A global disk budget, the per-app `disk_mb` monitor, the storage temp budget, the optional `setquota` backend, the artifact cache cap, the session cap and concurrency slots each have their own measurement and rejection path. `disk.go`, `quota.go`, `budget` tests and the storage temp monitor overlap, and the error codes are not consistent.
    - Introduce one accounting component with named dimensions and a single monitor loop, then let each admission point ask for a specific dimension.
    - Keep the existing HTTP status mapping, but derive it from the dimension rather than from ad-hoc sentinels.
    - This would make the metrics and `/usage` response a projection of the same data instead of separate measurements.
+   - Implemented in `9b478dd` for the byte budgets: `overByteBudget`, `budgetWatch` and one `walkUsage` measurement now cover the global disk budget, storage temp budget, tree sizes and app data. The `setquota` backend, artifact cache cap and session cap still have their own admission paths.
 
 9. [ ] **Share the bounded ring and SSE writer across events, logs and changes.** The host event bus, the app log tail and the storage change log each keep a bounded ring and cursor logic, and the SSE handlers repeat frame writing and gap handling. The cursor semantics are already close enough that three copies are a maintenance cost without a benefit.
    - Extract a generic `ring[T]` with `Since(cursor)` and one SSE response helper that emits `Last-Event-ID`, gap frames and heartbeats.
@@ -76,8 +79,8 @@ The first five items below are now implemented; the remaining list is unchanged 
 
 ## If I picked the next three
 
-1. Unify operator tokens and platform identity under one principal and session layer.
-2. Collapse backup and deployment content storage into one content-addressed store with retention policies.
-3. Consolidate resource accounting and admission across the disk, temp, quota, cache and session limits.
+1. Share the bounded ring and SSE writer across events, logs and changes.
+2. Consolidate the runner protocol types and op dispatch.
+3. Retire compatibility layers behind an explicit version cutover.
 
 Keep the invariants in `notes/fixes2.md` under "Do not regress"; none of the items above requires weakening the wasm artifact, blue/green deploys, the storage authorizer, sessions, scoped tokens or the tested isolation boundaries.
