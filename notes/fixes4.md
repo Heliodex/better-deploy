@@ -89,7 +89,7 @@ Concrete evidence from this build:
 
    Verified with the running supervisor: the ticker produced `ticker queued …`, the job reached `succeeded` with status code 204 and delivered the payload to `/jobs/beat`; `wt jobs ticker list` showed it, `wt jobs ticker show` printed its timestamps and idempotency key, and a future CLI-enqueued job was visible as `pending` and then `canceled`. Tests cover the SDK paths, the storage route handlers, CLI parsing and requests, and the full supervisor suite. Delivery remains at-least-once, the body is capped at 64 KiB, and a schedule still differs from a job by having no payload, retries, future time or dead-letter state.
 
-5. [ ] **[P1] Make supervisor-owned routes work by default in the dev loop.**
+5. [x] **[P1] Make supervisor-owned routes work by default in the dev loop.**
 
    **Current behaviour.** `wt dev` starts a real dev supervisor and Vite proxies to it with the app's `Host`, so `/v1/events`, `/_wt/blobs` and `/_wt/identity` can work. But `appDevConfig.Proxy` defaults to `["/api"]`, and its comment says prefixes are "forwarded to the wasm app", which makes host-owned routes sound out of scope. A pulse-style dashboard therefore falls back to polling in dev, and a blob or identity app would appear broken until the author added the prefixes by hand.
 
@@ -100,6 +100,10 @@ Concrete evidence from this build:
    - Add a dev test that opens an `EventSource` through Vite and receives one event, and one that follows a signed blob URL.
 
    **Done when.** Pulse's live updates, a blob upload and a platform identity login all work under `wt dev` with no `app.json` proxy change.
+
+   Implemented in `39a4e79`. `appDevConfig` now has `supervisor_proxy`; when it is omitted the default is `/v1/events`, `/_wt/events`, `/_wt/blobs` and `/_wt/identity`. An explicit `[]` disables the supervisor routes while keeping `dev.proxy` (default `/api`). `resolveViteDev` merges the app and supervisor prefixes without duplicates, and `normalizeDevConfig` validates both lists. The comments and README now describe app prefixes versus supervisor-owned routes.
+
+   The opt-in Vite test now resolves the dev config through the normal defaults and checks three paths through Vite: `/api`, an SSE response from `/v1/events`, and a blob from `/_wt/blobs/test`. `WT_VITE_TEST=1 go test -run TestViteDevProxy` passes with the events stream and blob body intact. Pulse needs no `app.json` change because its explicit `/api` proxy is merged with the platform defaults.
 
 6. [ ] **[P2] Make app handlers and storage testable without deploying.**
 
