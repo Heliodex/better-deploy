@@ -176,27 +176,83 @@ func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
 }
 
 // serveApp proxies one request to a resolved app. The public host proxy and the internal app fetch share it, so both get concurrency limits, readiness, static files and access logs.
-func (s *supervisor) serveApp(w http.ResponseWriter, r *http.Request, a *app) {
-	if ready, waiting := s.dependenciesReady(a); !ready {
-		w.Header().Set("Retry-After", "1")
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		_, _ = fmt.Fprintf(w, "waiting for dependencies: %s\n", strings.Join(waiting, ", "))
+// logAccess writes one proxied request line when sampling allows it.
+func (s *supervisor) logAccess(a *app, r *http.Request, started time.Time, requestID string, status int) {
+	if a.logs == nil || !s.shouldLogAccess(a, status) {
 		return
 	}
+	a.logs.logSupervisor(formatAccessLog(r.Method, status, time.Since(started), r.URL.RequestURI(), requestID))
+}
+
+// startAccess ensures the request has an ID header and returns it.
+func (s *supervisor) startAccess(w http.ResponseWriter, r *http.Request) string {
 	requestID := r.Header.Get(requestIDHeader)
 	if requestID == "" {
 		requestID = newRequestID()
 		r.Header.Set(requestIDHeader, requestID)
 	}
 	w.Header().Set(requestIDHeader, requestID)
+	return requestID
+}
+
+// requireDependencies serves a 503 while any declared dependency is not ready.
+func (s *supervisor) requireDependencies(w http.ResponseWriter, a *app) bool {
+	ready, waiting := s.dependenciesReady(a)
+	if ready {
+		return true
+	}
+	w.Header().Set("Retry-After", "1")
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_, _ = fmt.Fprintf(w, "waiting for dependencies: %s\n", strings.Join(waiting, ", "))
+	return false
+}
+
+// writeUnavailable serves a 503 with Retry-After and records the access line.
+func (s *supervisor) writeUnavailable(w http.ResponseWriter, r *http.Request, a *app, started time.Time, requestID, message string) {
+	w.Header().Set("Retry-After", "1")
+	http.Error(w, message, http.StatusServiceUnavailable)
+	s.logAccess(a, r, started, requestID, http.StatusServiceUnavailable)
+}
+
+// proxyRequest forwards the request within the app's concurrency and timeout limits.
+func (s *supervisor) proxyRequest(w http.ResponseWriter, r *http.Request, a *app) bool {
+	a.mu.Lock()
+	slots := a.slots
+	timeout := a.cfg.requestTimeout
+	proxy := a.proxy
+	a.mu.Unlock()
+	if proxy == nil {
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "app is not ready", http.StatusServiceUnavailable)
+		return false
+	}
+	if slots != nil {
+		select {
+		case slots <- struct{}{}:
+			defer func() { <-slots }()
+		default:
+			http.Error(w, "app is busy", http.StatusTooManyRequests)
+			return false
+		}
+	}
+	if timeout > 0 {
+		ctx, cancel := context.WithTimeout(r.Context(), timeout)
+		defer cancel()
+		r = r.WithContext(ctx)
+	}
+	proxy.ServeHTTP(w, r)
+	return true
+}
+
+func (s *supervisor) serveApp(w http.ResponseWriter, r *http.Request, a *app) {
+	if !s.requireDependencies(w, a) {
+		return
+	}
+	requestID := s.startAccess(w, r)
 	started := time.Now()
 	if !a.beginRequest() {
-		w.Header().Set("Retry-After", "1")
-		http.Error(w, "app is restarting", http.StatusServiceUnavailable)
-		if a.logs != nil && s.shouldLogAccess(a, http.StatusServiceUnavailable) {
-			a.logs.logSupervisor(formatAccessLog(r.Method, http.StatusServiceUnavailable, time.Since(started), r.URL.RequestURI(), requestID))
-		}
+		s.writeUnavailable(w, r, a, started, requestID, "app is restarting")
 		return
 	}
 	defer a.requests.Done()
@@ -211,48 +267,15 @@ func (s *supervisor) serveApp(w http.ResponseWriter, r *http.Request, a *app) {
 
 	// Static files come from the bundle and do not consume the app's concurrency slots, but a stopped app does not serve them.
 	if static && a.serveStatic(wrapped, r) {
-		if a.logs != nil && s.shouldLogAccess(a, wrapped.status) {
-			a.logs.logSupervisor(formatAccessLog(r.Method, wrapped.status, time.Since(started), r.URL.RequestURI(), requestID))
-		}
+		s.logAccess(a, r, started, requestID, wrapped.status)
 		return
 	}
 	if !ready {
-		w.Header().Set("Retry-After", "1")
-		http.Error(w, "app not ready", http.StatusServiceUnavailable)
-		if a.logs != nil && s.shouldLogAccess(a, http.StatusServiceUnavailable) {
-			a.logs.logSupervisor(formatAccessLog(r.Method, http.StatusServiceUnavailable, time.Since(started), r.URL.RequestURI(), requestID))
-		}
+		s.writeUnavailable(w, r, a, started, requestID, "app not ready")
 		return
 	}
-
-	a.mu.Lock()
-	slots := a.slots
-	timeout := a.cfg.requestTimeout
-	proxy := a.proxy
-	a.mu.Unlock()
-	if proxy == nil {
-		w.Header().Set("Retry-After", "1")
-		http.Error(w, "app is not ready", http.StatusServiceUnavailable)
-		return
-	}
-	if slots != nil {
-		select {
-		case slots <- struct{}{}:
-			defer func() { <-slots }()
-		default:
-			http.Error(w, "app is busy", http.StatusTooManyRequests)
-			return
-		}
-	}
-	if timeout > 0 {
-		ctx, cancel := context.WithTimeout(r.Context(), timeout)
-		defer cancel()
-		r = r.WithContext(ctx)
-	}
-
-	proxy.ServeHTTP(wrapped, r)
-	if a.logs != nil && s.shouldLogAccess(a, wrapped.status) {
-		a.logs.logSupervisor(formatAccessLog(r.Method, wrapped.status, time.Since(started), r.URL.RequestURI(), requestID))
+	if s.proxyRequest(wrapped, r, a) {
+		s.logAccess(a, r, started, requestID, wrapped.status)
 	}
 }
 
