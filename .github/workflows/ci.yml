@@ -69,6 +69,8 @@ jobs:
                   echo "$PWD/wasmtime-v50.0.0-x86_64-linux" >> "$GITHUB_PATH"
 
             - name: Run end-to-end test
+              env:
+                  WT_E2E_EXAMPLES: "1"
               run: WT_WASMTIME="$(command -v wasmtime)" bash wt/e2e.sh
 
     test:
@@ -98,22 +100,51 @@ jobs:
               working-directory: wt/supervisor
               run: go generate ./...
 
+            - name: Install guestbook web dependencies
+              working-directory: wt/example/guestbook/web
+              run: bun install --frozen-lockfile
+
             - name: Test supervisor
               working-directory: wt/supervisor
-              run: go test -race ./...
+              env:
+                  WT_HANDOVER_TEST: "1"
+                  WT_NS_TEST: "1"
+                  WT_SECCOMP_TEST: "1"
+              run: go test -race -count=1 -covermode=atomic -coverprofile=coverage.out ./...
 
             - name: Test deploy tool
               working-directory: wt/deploy
-              run: go test ./...
+              env:
+                  WT_VITE_TEST: "1"
+              run: go test -race -count=1 -covermode=atomic -coverprofile=coverage.out ./...
 
             - name: Test shared packages
               working-directory: wt/packages
-              run: go test ./app/... ./storage/...
+              run: go test -race -count=1 -covermode=atomic -coverprofile=coverage.out ./app/... ./storage/... ./httpmeta/...
+
+            - name: Summarize Go coverage
+              if: always()
+              run: |
+                  {
+                      echo "### Go coverage"
+                      echo
+                      echo "| Scope | Statements |"
+                      echo "| --- | ---: |"
+                      for entry in "supervisor=wt/supervisor/coverage.out" "deploy=wt/deploy/coverage.out" "packages=wt/packages/coverage.out"; do
+                          name=${entry%%=*}
+                          file=${entry#*=}
+                          if [ ! -s "$file" ]; then
+                              echo "| $name | not measured |"
+                              continue
+                          fi
+                          total=$(cd "$(dirname "$file")" && go tool cover -func="$(basename "$file")" | tail -n 1 | awk '{print $3}')
+                          echo "| $name | $total |"
+                      done
+                  } >> "$GITHUB_STEP_SUMMARY"
 
             - name: Generate guestbook contract and assets
               working-directory: wt/example/guestbook
               run: |
-                  (cd web && bun install --frozen-lockfile)
                   go generate ./...
                   (cd web && bun run build)
                   rm -rf static
