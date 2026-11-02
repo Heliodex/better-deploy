@@ -4,6 +4,8 @@ Architecture simplification review, 2026-11-01. This pass looks for duplicated m
 
 The short assessment: the code is clean at function level after the earlier splits, but the same concepts are still implemented two or three times. The biggest wins are removing the test-only direct launch path, giving isolation one lifecycle, and making the storage and configuration surfaces share one representation.
 
+The first two items below are now implemented; the remaining list is unchanged in priority order.
+
 ## Small changes in this pass
 
 - [x] **Shared storage statement validation and execution.** `batch` now converts to the transaction statement form and calls the shared validator and executor, so write batches, transactions and migrations no longer carry three copies of the SQL and parameter checks. `f649fb5`
@@ -12,15 +14,17 @@ The short assessment: the code is clean at function level after the earlier spli
 
 ## Larger changes, priority ordered
 
-1. [ ] **Remove the legacy direct launch path and make the runner the only process transport.** Production always has a runner because `startRunner` either connects, starts one, or exits; `launchDirect`, `startDirectProcess`, `watchDirectExit`, `appCredential` and the rlimit path are reached only when `s.runner == nil`, which now happens only in unit tests with a bare `testSupervisor`. Keeping both transports duplicates argument and environment construction, namespace setup, egress, readiness, exit bookkeeping and adoption logic, and it means every launch change must be made twice.
+1. [x] **Remove the legacy direct launch path and make the runner the only process transport.** Production always has a runner because `startRunner` either connects, starts one, or exits; `launchDirect`, `startDirectProcess`, `watchDirectExit`, `appCredential` and the rlimit path are reached only when `s.runner == nil`, which now happens only in unit tests with a bare `testSupervisor`. Keeping both transports duplicates argument and environment construction, namespace setup, egress, readiness, exit bookkeeping and adoption logic, and it means every launch change must be made twice.
    - Make `supervisor.runner` mandatory in the type and run every app through it.
    - Replace the test-only fake wasmtime process with an in-process runner client or the existing test runner socket, then delete the direct path and its process-level tests.
    - This also lets `process.go` lose the second exit path and makes handover the only process adoption story.
+   - Implemented in `7aeb78c`. The direct path and its rlimit, credential and namespace-child helpers are gone. The runner now keys processes by a per-launch instance ID, so a blue/green deploy can keep the old and new generation of one app apart; tests attach the real runner over its Unix socket.
 
-2. [ ] **Make isolation a single prepare, activate and close lifecycle.** `process_launch.go` currently orchestrates `prepareLaunch`, `prepareNamespaces`, `applyProcessLimits`, `cgroups.addPID`, `applyEgress`, `quota.apply` and `releaseIsolation` with several inline rollback paths. The boundaries live in six files (`isolation.go`, `ns.go`, `seccomp_linux.go`, `cgroup.go`, `uid.go`, `egress.go`, plus `quota.go` and `rlimit.go`), and the call order is knowledge that only the launch function has.
+2. [x] **Make isolation a single prepare, activate and close lifecycle.** `process_launch.go` currently orchestrates `prepareLaunch`, `prepareNamespaces`, `applyProcessLimits`, `cgroups.addPID`, `applyEgress`, `quota.apply` and `releaseIsolation` with several inline rollback paths. The boundaries live in six files (`isolation.go`, `ns.go`, `seccomp_linux.go`, `cgroup.go`, `uid.go`, `egress.go`, plus `quota.go` and `rlimit.go`), and the call order is knowledge that only the launch function has.
    - Introduce an `isolationPlan` with `Prepare`, `Start`, `Activate` and an idempotent `Close`, returning the argv and environment it owns.
    - Keep trusted mode as the empty plan, so launch has one code path and untrusted mode is a plan implementation.
    - This is security-relevant: a single `Close` makes it much harder to leak a cgroup, uid, namespace root or firewall rule on a partial launch.
+   - Implemented as `isolationPlan` with `prepareIsolation`, `attachProcess`, `activate` and an idempotent `close`. `launch` stores the active plan on the app so `stop` and failed launches release the same resources through one path.
 
 3. [ ] **Unify the storage statement types and the SQL handler surface.** There are still two statement shapes (`storageStatement` and `storageTransactionStatement`) plus conversion for batches and migrations, and `storageServer.handle` wraps most routes in `handleSQL` closures for the same semaphore and error handling. One statement type with an optional `Query` flag, one decoder and one executor would cover query, exec, write, batch, transaction, session and migration.
    - Collapse `storageBatchRequest` and `storageTransactionRequest` into one request type; keep the wire names compatible.
@@ -69,8 +73,8 @@ The short assessment: the code is clean at function level after the earlier spli
 
 ## If I picked the next three
 
-1. Remove the direct launch path and make the runner mandatory; it is the largest remaining duplicate and the change is mostly deletion.
-2. Give isolation one lifecycle object before adding more untrusted-mode features.
-3. Unify storage statements and handlers, because storage is the most-touched API and still has parallel representations.
+1. Unify storage statements and handlers, because storage is the most-touched API and still has parallel representations.
+2. Table-drive configuration and remove the variadic tenant mode; it is the main source of operational drift.
+3. Replace the manual dispatch with a route table that also generates the OpenAPI document and panel client.
 
 Keep the invariants in `notes/fixes2.md` under "Do not regress"; none of the items above requires weakening the wasm artifact, blue/green deploys, the storage authorizer, sessions, scoped tokens or the tested isolation boundaries.
