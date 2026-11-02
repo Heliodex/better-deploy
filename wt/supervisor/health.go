@@ -57,6 +57,35 @@ func trimMessage(body []byte) string {
 	return text
 }
 
+// handleReadyz reports supervisor readiness, distinct from the process liveness path /healthz.
+func (s *supervisor) handleReadyz(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	if !s.ready.Load() || s.stopping.Load() {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		if r.Method != http.MethodHead {
+			_, _ = io.WriteString(w, "not ready\n")
+		}
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	if r.Method != http.MethodHead {
+		_, _ = io.WriteString(w, "ok\n")
+	}
+}
+
+// handleHealthz is the liveness probe: it stays 200 while the process can serve HTTP at all.
+func (s *supervisor) handleHealthz(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = io.WriteString(w, "ok\n")
+}
+
 // servingState reports whether static files may be served and whether component traffic should be routed.
 func (a *app) servingState() (static, ready bool) {
 	a.mu.Lock()

@@ -80,6 +80,8 @@ type appConfig struct {
 	RestartOnUnhealthy bool              `json:"restart_on_unhealthy,omitempty"`
 	Network            string            `json:"network,omitempty"`
 	Identity           string            `json:"identity,omitempty"`
+	Maintenance        bool              `json:"maintenance,omitempty"`
+	DependsOn          []string          `json:"depends_on,omitempty"`
 	JobConcurrency     int               `json:"job_concurrency,omitempty"`
 	AllowCallers       []string          `json:"allow_callers,omitempty"`
 	Egress             []egressRule      `json:"egress,omitempty"`
@@ -191,6 +193,7 @@ type supervisor struct {
 	identityLoginMu sync.Mutex
 	identityLogin   *loginLimiter
 	stopping        atomic.Bool
+	ready           atomic.Bool
 
 	versionOnce sync.Once
 	version     string
@@ -232,6 +235,7 @@ func (s *supervisor) info(a *app) appInfo {
 	lastError := a.lastError
 	info.CurrentDigest = a.digest
 	info.Ready = a.ready
+	info.Maintenance = a.cfg.Maintenance
 	info.UID = a.uid
 	if a.cmd != nil && a.cmd.Process != nil && !a.exited {
 		info.PID = a.cmd.Process.Pid
@@ -301,6 +305,7 @@ type appInfo struct {
 	DiskLimitBytes int64     `json:"diskLimitBytes,omitempty"`
 	HistoryBytes   int64     `json:"historyBytes"`
 	OverQuota      bool      `json:"overQuota,omitempty"`
+	Maintenance    bool      `json:"maintenance,omitempty"`
 	SampledAt      time.Time `json:"sampledAt"`
 	LastHealthy    time.Time `json:"lastHealthy,omitempty"`
 	LastError      string    `json:"lastError,omitempty"`
@@ -460,6 +465,8 @@ func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
 		s.handleAppRoot(w, r, name)
 	case "config":
 		s.handleAppConfig(w, r, name)
+	case "maintenance":
+		s.handleAppMaintenance(w, r, name)
 	case "secrets":
 		s.handleAppSecrets(w, r, name, "")
 	case "deployments":
@@ -790,6 +797,7 @@ func startSupervisor(cfg config) *supervisor {
 	if err := s.loadApps(); err != nil {
 		log.Fatalf("load apps: %v", err)
 	}
+	s.ready.Store(true)
 	return s
 }
 
@@ -870,6 +878,7 @@ func serve(s *supervisor) {
 				continue
 			}
 			s.stopping.Store(true)
+			s.ready.Store(false)
 			log.Printf("shutting down")
 			if adminServer != nil {
 				if err := shutdownServer(adminServer, shutdownTimeout); err != nil {

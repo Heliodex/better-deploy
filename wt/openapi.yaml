@@ -659,6 +659,49 @@ paths:
                             schema:
                                 $ref: "#/components/schemas/IdentityMe"
 
+    /readyz:
+        get:
+            summary: Supervisor readiness
+            responses:
+                "200":
+                    description: Ready to serve
+                "503":
+                    description: Starting up or shutting down
+    /apps/{name}/maintenance:
+        parameters:
+            - $ref: "#/components/parameters/AppName"
+        get:
+            summary: Read the app maintenance flag
+            responses:
+                "200":
+                    description: Maintenance state
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    enabled: { type: boolean }
+        post:
+            summary: Enable or disable app maintenance
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            required: [enabled]
+                            properties:
+                                enabled: { type: boolean }
+            responses:
+                "200":
+                    description: Updated maintenance state
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    enabled: { type: boolean }
+
 components:
     securitySchemes:
         bearerAuth:
@@ -691,6 +734,7 @@ components:
                 host: { type: string }
                 status: { type: string }
                 ready: { type: boolean }
+                maintenance: { type: boolean }
                 currentDigest: { type: string }
                 lastError: { type: string }
         IdentityUser:

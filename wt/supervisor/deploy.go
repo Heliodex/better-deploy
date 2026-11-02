@@ -223,6 +223,10 @@ func (s *supervisor) receiveBundle(w http.ResponseWriter, r *http.Request, name 
 		writeError(w, http.StatusBadRequest, err.Error())
 		return "", appConfig{}, cleanup, false
 	}
+	if err := s.dependencyCycleError(name, cfg.DependsOn); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return "", appConfig{}, cleanup, false
+	}
 	return dir, cfg, cleanup, true
 }
 

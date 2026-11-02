@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/http"
@@ -151,7 +150,12 @@ func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	a.mu.Lock()
 	identityMode := a.cfg.Identity == identityModePlatform
+	maintenance := a.cfg.Maintenance
 	a.mu.Unlock()
+	if maintenance {
+		s.serveMaintenance(w, r, a)
+		return
+	}
 	if identityMode {
 		if action, ok := identityAppAction(r.URL.Path); ok {
 			s.handleIdentityApp(w, r, a, action)
@@ -169,6 +173,13 @@ func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 // serveApp proxies one request to a resolved app. The public host proxy and the internal app fetch share it, so both get concurrency limits, readiness, static files and access logs.
 func (s *supervisor) serveApp(w http.ResponseWriter, r *http.Request, a *app) {
+	if ready, waiting := s.dependenciesReady(a); !ready {
+		w.Header().Set("Retry-After", "1")
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = fmt.Fprintf(w, "waiting for dependencies: %s\n", strings.Join(waiting, ", "))
+		return
+	}
 	requestID := r.Header.Get(requestIDHeader)
 	if requestID == "" {
 		requestID = newRequestID()
@@ -264,10 +275,8 @@ func (s *supervisor) isAppHost(host string) bool {
 // adminMux holds the supervisor's own routes and never proxies app hosts.
 func (s *supervisor) adminMux() *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("content-type", "text/plain; charset=utf-8")
-		_, _ = io.WriteString(w, "ok\n")
-	})
+	mux.HandleFunc("/healthz", s.handleHealthz)
+	mux.HandleFunc("/readyz", s.handleReadyz)
 	mux.HandleFunc("/apps", s.handleApps)
 	mux.HandleFunc("/apps/", s.handleApp)
 	mux.HandleFunc("/auth/tokens", s.handleAuthTokens)
@@ -305,12 +314,14 @@ func (s *supervisor) publicHandler() http.Handler {
 			s.handleProxy(w, r)
 			return
 		}
-		if r.URL.Path == "/healthz" {
-			w.Header().Set("content-type", "text/plain; charset=utf-8")
-			_, _ = io.WriteString(w, "ok\n")
-			return
+		switch r.URL.Path {
+		case "/healthz":
+			s.handleHealthz(w, r)
+		case "/readyz":
+			s.handleReadyz(w, r)
+		default:
+			http.NotFound(w, r)
 		}
-		http.NotFound(w, r)
 	})
 }
 

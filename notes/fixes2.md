@@ -23,6 +23,7 @@ The short assessment: the spine is right and unusually well executed for a proto
 - [x] **Queued deployment resource.** `POST /apps/<name>/deployments` stages the upload, returns `202` with a `Location`, and runs install and readiness in the background. Entries report queued/running/success/failed/canceled, expose a plain-text log and an SSE stream, and can be canceled. `POST /apps/<name>` stays as the synchronous compatibility alias.
 - [x] **Signed blob store.** Each app has a content-addressed blob store at `WT_STATE_DIR/.blobs/<app>`, signed with a per-app HMAC key in `WT_BLOB_SECRET`. Uploads hash the body and enforce a declared maximum; downloads support `Range`, `HEAD`, `ETag` and `If-None-Match`; deletes are signed. Blob bytes count toward `disk_mb` and the global budget, and the wasm component never handles the file body.
 - [x] **Platform end-user identity.** Apps opt in with `identity: "platform"`. The supervisor stores users and sessions under `WT_STATE_DIR/.identity`, hashes passwords with PBKDF2-SHA256, and serves login, logout, `GET /v1/me` and password change on the app host with a `wt_user` cookie and CSRF token. Admin routes create, list, update, reset and delete users. Proxied requests get signed `X-WT-User-*` headers and `app.UserFromRequest` verifies them; client-supplied identity headers and the session cookie never reach the app.
+- [x] **Readiness, dependencies and maintenance.** `GET /readyz` is separate from `/healthz`, `depends_on` gates an app host until its dependencies are ready (transitively, with cycle rejection and forward references), and `maintenance` serves a supervisor page with `503` and `Retry-After` without stopping the process.
 
 ## Do not regress
 
@@ -132,10 +133,10 @@ These are the choices that make this worth continuing. Keep them unless a replac
    - [ ] Give each retained bundle an immutable preview host such as `<short>--<name>.apps.example.com`; promotion flips the app alias.
    - [x] Keep `POST /apps/<name>` as a compatibility alias until the CLI and panel move.
 
-16. [ ] **Readiness, dependencies and maintenance.** Startup ordering across a frontend, API and worker is implicit.
-   - [ ] Add `GET /readyz`, distinct from liveness.
-   - [ ] Add `depends_on` to gate routing until dependencies are ready.
-   - [ ] Add an explicit maintenance mode that serves a supervisor page instead of proxying.
+16. [x] **Readiness, dependencies and maintenance.** Startup ordering across a frontend, API and worker was implicit.
+   - [x] Add `GET /readyz`, distinct from liveness: liveness stays `200` while the process serves HTTP, readiness is `503` until startup has loaded every app and during shutdown.
+   - [x] Add `depends_on` to gate routing until dependencies are ready. Dependencies are transitive, missing/stopped/maintenance apps block dependents, forward references are allowed, cycles are rejected, and health probes still run so the app becomes routable without a restart.
+   - [x] Add an explicit maintenance mode that serves a supervisor HTML page with `503` and `Retry-After` instead of proxying, toggled with `POST /apps/<name>/maintenance` or the `maintenance` config field without restarting the process.
 
 17. [ ] **Contract tooling around SvelteKit.** The pipeline generates request and response types from the Valibot registries (TS → JSON Schema → Go). Response types used to be hand-written on both sides; they now come from the same source as requests, so a field rename fails to compile instead of drifting silently.
    - [x] Add a `responseSchemas` registry, generate Go response structs with `go-jsonschema`, use them in the handlers, and validate every client response, including the error body, with the same schemas. Registered nested schemas become `$ref` files so an envelope reuses the generated item type.

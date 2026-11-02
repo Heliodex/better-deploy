@@ -35,6 +35,8 @@ type appConfigPatch struct {
 	RestartOnUnhealthy *bool              `json:"restart_on_unhealthy"`
 	Network            *string            `json:"network"`
 	Identity           *string            `json:"identity"`
+	Maintenance        *bool              `json:"maintenance"`
+	DependsOn          *[]string          `json:"depends_on"`
 	JobConcurrency     *int               `json:"job_concurrency"`
 	AllowCallers       *[]string          `json:"allow_callers"`
 	Egress             *[]egressRule      `json:"egress"`
@@ -62,6 +64,8 @@ type appConfigResponse struct {
 	RestartOnUnhealthy bool             `json:"restart_on_unhealthy"`
 	Network            string           `json:"network"`
 	Identity           string           `json:"identity"`
+	Maintenance        bool             `json:"maintenance"`
+	DependsOn          []string         `json:"depends_on"`
 	JobConcurrency     int              `json:"job_concurrency"`
 	AllowCallers       []string         `json:"allow_callers"`
 	Egress             []egressRule     `json:"egress"`
@@ -103,6 +107,10 @@ func configResponse(cfg appConfig) appConfigResponse {
 	if egress == nil {
 		egress = []egressRule{}
 	}
+	dependsOn := cfg.DependsOn
+	if dependsOn == nil {
+		dependsOn = []string{}
+	}
 	return appConfigResponse{
 		Name:               cfg.Name,
 		Host:               cfg.Host,
@@ -123,6 +131,8 @@ func configResponse(cfg appConfig) appConfigResponse {
 		RestartOnUnhealthy: cfg.RestartOnUnhealthy,
 		Network:            cfg.Network,
 		Identity:           cfg.Identity,
+		Maintenance:        cfg.Maintenance,
+		DependsOn:          dependsOn,
 		JobConcurrency:     cfg.JobConcurrency,
 		AllowCallers:       callers,
 		Egress:             egress,
@@ -178,6 +188,12 @@ func applyConfigPatch(cfg appConfig, patch appConfigPatch) appConfig {
 	}
 	if patch.Identity != nil {
 		cfg.Identity = *patch.Identity
+	}
+	if patch.Maintenance != nil {
+		cfg.Maintenance = *patch.Maintenance
+	}
+	if patch.DependsOn != nil {
+		cfg.DependsOn = append([]string(nil), (*patch.DependsOn)...)
 	}
 	if patch.JobConcurrency != nil {
 		cfg.JobConcurrency = *patch.JobConcurrency
@@ -282,6 +298,10 @@ func (s *supervisor) handleAppConfig(w http.ResponseWriter, r *http.Request, nam
 	}
 	if err := s.hostConflictError(next, a.name); err != nil {
 		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	if err := s.dependencyCycleError(a.name, next.DependsOn); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if s.cfg.untrusted() && cfg.DiskMB != next.DiskMB && s.quota.enabled() {

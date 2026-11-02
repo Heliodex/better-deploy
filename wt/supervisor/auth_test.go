@@ -164,6 +164,7 @@ func TestAppRolePermissions(t *testing.T) {
 		{deploy, http.MethodPost, "/apps/notes/deployments", "deployments", true},
 		{deploy, http.MethodPost, "/apps/notes/deployments/id/cancel", "deployments/id/cancel", true},
 		{deploy, http.MethodPost, "/apps/notes/restart", "restart", true},
+		{deploy, http.MethodPost, "/apps/notes/maintenance", "maintenance", true},
 		{deploy, http.MethodPost, "/apps/notes/rollback/id", "rollback/id", true},
 		{deploy, http.MethodPost, "/apps/notes/rollback/id?backup=snap", "rollback/id", false},
 		{deploy, http.MethodPatch, "/apps/notes/config", "config", false},

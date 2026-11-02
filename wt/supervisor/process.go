@@ -948,5 +948,14 @@ func (s *supervisor) loadApps() error {
 		log.Printf("app %s: running without an app directory; stopping it", name)
 		_ = s.runner.Stop(name)
 	}
+	for _, a := range s.allApps() {
+		a.mu.Lock()
+		name := a.name
+		deps := append([]string(nil), a.cfg.DependsOn...)
+		a.mu.Unlock()
+		if err := s.dependencyCycleError(name, deps); err != nil {
+			return fmt.Errorf("app %s: %w", name, err)
+		}
+	}
 	return nil
 }

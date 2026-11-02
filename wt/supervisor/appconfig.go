@@ -38,6 +38,7 @@ const (
 	untrustedDefaultDiskMB         = 256
 	untrustedDefaultNetwork        = "storage"
 	maxAllowCallers                = 128
+	maxDependsOn                   = 32
 	maxEgressRules                 = 128
 )
 
@@ -231,6 +232,34 @@ func normalizeAllowCallers(names []string) ([]string, error) {
 	return out, nil
 }
 
+// normalizeDependsOn validates the apps this app waits for before its host routes traffic. Forward references are allowed because a dependency may be deployed later.
+func normalizeDependsOn(names []string, self string) ([]string, error) {
+	if len(names) > maxDependsOn {
+		return nil, fmt.Errorf("depends_on must contain at most %d apps", maxDependsOn)
+	}
+	out := make([]string, 0, len(names))
+	seen := map[string]struct{}{}
+	for _, name := range names {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name == "" {
+			continue
+		}
+		if name == self {
+			return nil, fmt.Errorf("depends_on must not include the app itself")
+		}
+		if !validName(name) {
+			return nil, fmt.Errorf("depends_on: %q is not a valid app name", name)
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
 // normalizeEgress validates an explicit untrusted-mode outbound allowlist. CIDR rules are IPv4 only because the IPv6 chain remains deny-all.
 func normalizeEgress(rules []egressRule) ([]egressRule, error) {
 	if len(rules) > maxEgressRules {
@@ -398,6 +427,11 @@ func normalizeAppConfig(cfg appConfig, name, domain string, modes ...string) (ap
 		return cfg, err
 	}
 	cfg.AllowCallers = callers
+	dependsOn, err := normalizeDependsOn(cfg.DependsOn, name)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.DependsOn = dependsOn
 	egress, err := normalizeEgress(cfg.Egress)
 	if err != nil {
 		return cfg, err
