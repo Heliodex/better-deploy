@@ -1,6 +1,7 @@
 <script lang="ts">
 import { onMount } from "svelte"
 import {
+	ApiError,
 	type Check,
 	createMonitor,
 	deleteMonitor,
@@ -68,7 +69,7 @@ onMount((): (() => void) => {
 })
 
 function statusOf(monitor: Monitor): "up" | "down" | "pending" {
-	if (monitor.last === null) return "pending"
+	if (!monitor.last) return "pending"
 	return monitor.last.ok ? "up" : "down"
 }
 
@@ -136,6 +137,8 @@ async function submit(event: SubmitEvent): Promise<void> {
 		if (err instanceof ValidationError) {
 			fieldErrors = err.fields
 			if (Object.keys(err.fields).length === 0) error = err.message
+		} else if (err instanceof ApiError && err.field !== "") {
+			fieldErrors = { [err.field]: err.message }
 		} else {
 			error = err instanceof Error ? err.message : "Could not add the monitor."
 		}

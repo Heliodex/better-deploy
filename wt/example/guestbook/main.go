@@ -155,7 +155,7 @@ func handleListMessages(w http.ResponseWriter, r *http.Request) {
 
 func handleCreateMessage(w http.ResponseWriter, r *http.Request) {
 	var request contract.CreateMessageRequest
-	if !app.ReadJSON(w, r, maxBody, "reaction", &request) {
+	if !app.ReadJSON(w, r, maxBody, "name", &request) {
 		return
 	}
 

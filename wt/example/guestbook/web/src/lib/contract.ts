@@ -6,6 +6,7 @@ import {
 	minValue,
 	number,
 	object,
+	optional,
 	picklist,
 	pipe,
 	regex,
@@ -77,7 +78,10 @@ export const statsResponseSchema = pipe(
 	title("StatsResponse"),
 )
 
-export const errorResponseSchema = pipe(object({ error: string() }), title("ErrorResponse"))
+export const errorResponseSchema = pipe(
+	object({ code: pipe(string(), minLength(1)), error: pipe(string(), minLength(1)), field: optional(string()) }),
+	title("ErrorResponse"),
+)
 
 // The client also validates the message id from the URL before calling react. This is not a wire body, so it stays out of the registries.
 export const reactMessageInput = object({

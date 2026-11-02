@@ -1,10 +1,10 @@
 {
 	"build": "cd web && bun install && bun run build && cd .. && go generate ./contract/ && rm -rf static && cp -r web/build static && __SDK_GENERATE__ && go tool componentize-go -d __SDK_WIT__ -w wt:app/app build",
-	"build_component": "go generate ./contract/ && __SDK_GENERATE__ && go tool componentize-go -d __SDK_WIT__ -w wt:app/app build",
+	"build_component": "cd web && bun install && cd .. && go generate ./contract/ && __SDK_GENERATE__ && go tool componentize-go -d __SDK_WIT__ -w wt:app/app build",
 	"build_static": "cd web && bun install && bun run build && rm -rf ../static && cp -r build ../static",
-	"component_inputs": ["web/src/lib/contract.ts"],
+	"component_inputs": ["web/bun.lock", "web/package.json", "web/src/lib/contract.ts"],
 	"dev": {
-		"build": "go generate ./contract/ && __SDK_GENERATE__ && go tool componentize-go -d __SDK_WIT__ -w wt:app/app build",
+		"build": "cd web && bun install && cd .. && go generate ./contract/ && __SDK_GENERATE__ && go tool componentize-go -d __SDK_WIT__ -w wt:app/app build",
 		"command": "bun run dev",
 		"proxy": ["/api"],
 		"watch": ["web/src/lib/contract.ts"]

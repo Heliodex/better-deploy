@@ -2,4 +2,4 @@
 package contract
 
 //go:generate sh -c "cd ../web && bun run contract"
-//go:generate sh -c "go tool go-jsonschema --package contract --struct-name-from-title --capitalization ID -o contract.gen.go schemas/*.json"
+//go:generate sh -c "go tool go-jsonschema --package contract --struct-name-from-title --capitalization ID --capitalization URL --capitalization MS --capitalization OK -o contract.gen.go schemas/*.json"

@@ -11,6 +11,19 @@ import {
 
 export type Message = InferOutput<typeof messageSchema>
 
+// ApiError carries the stable code and optional field from the standard error body.
+export class ApiError extends Error {
+	readonly code: string
+	readonly field: string
+
+	constructor(message: string, code = "", field = "") {
+		super(message)
+		this.name = "ApiError"
+		this.code = code
+		this.field = field
+	}
+}
+
 // ValidationError carries per-field messages so the form can show them next to the input that failed.
 export class ValidationError extends Error {
 	readonly fields: { [_: string]: string }
@@ -37,7 +50,8 @@ async function parseJSON<T>(response: Response, schema: GenericSchema<T>): Promi
 
 	if (!response.ok) {
 		const error = safeParse(errorResponseSchema, data)
-		throw new Error(error.success ? error.output.error : `The wall API returned ${response.status}`)
+		if (error.success) throw new ApiError(error.output.error, error.output.code, error.output.field ?? "")
+		throw new ApiError(`The wall API returned ${response.status}`, "http_error")
 	}
 
 	const parsed = safeParse(schema, data)

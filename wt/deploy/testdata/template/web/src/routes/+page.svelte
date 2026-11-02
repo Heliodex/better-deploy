@@ -1,6 +1,6 @@
 <script lang="ts">
 import { onMount } from "svelte"
-import { createNote, fetchNotes, type Note, ValidationError } from "../lib/api"
+import { ApiError, createNote, fetchNotes, type Note, ValidationError } from "../lib/api"
 import { maxNote } from "../lib/contract"
 
 let notes = $state<Note[]>([])
@@ -58,6 +58,8 @@ async function submit(event: SubmitEvent): Promise<void> {
 		if (err instanceof ValidationError) {
 			fieldErrors = err.fields
 			if (Object.keys(err.fields).length === 0) error = err.message
+		} else if (err instanceof ApiError && err.field !== "") {
+			fieldErrors = { [err.field]: err.message }
 		} else error = err instanceof Error ? err.message : "Could not save the note."
 	} finally {
 		sending = false

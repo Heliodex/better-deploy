@@ -1,4 +1,4 @@
-import { array, maxLength, minLength, object, pipe, regex, string, title } from "valibot"
+import { array, maxLength, minLength, object, optional, pipe, regex, string, title } from "valibot"
 
 // These schemas are the source of truth for the generated Go contract. The client trims before validating and the server trims before storing, so leading and trailing spaces are not part of the contract.
 export const maxNote = 280
@@ -30,7 +30,10 @@ export const noteSchema = pipe(
 
 export const notesResponseSchema = pipe(object({ notes: array(noteSchema) }), title("NotesResponse"))
 
-export const errorResponseSchema = pipe(object({ error: string() }), title("ErrorResponse"))
+export const errorResponseSchema = pipe(
+	object({ code: pipe(string(), minLength(1)), error: pipe(string(), minLength(1)), field: optional(string()) }),
+	title("ErrorResponse"),
+)
 
 // Registries of endpoint contracts. Add new request and response schemas here.
 export const requestSchemas = Object.freeze([createNoteSchema])

@@ -52,7 +52,7 @@ I sent the same probes to every server: missing `name`, a 41-character name, `na
 
 | Approach | Missing / too long | Wrong type | Extra field | Whitespace only | Error shape |
 |---|---|---|---|---|---|
-| REST today | 400 | 400, generic | accepted | 400 | `{error: "..."}` |
+| REST today | 400 | 400, generic | accepted | 400 | `{error, code, field?}` |
 | JSON-RPC envelope | 400 | 400, generic | accepted | 400 | `{ok:false,error:{code,field,message}}` |
 | JSON Schema runtime | 400, field | 400, field | accepted | 201, empty name | field and message |
 | Go codegen | 400, field | 400, field | accepted | 201, empty name | field and message |
@@ -84,7 +84,7 @@ Connect also drops unknown JSON fields silently and omits zero-valued proto fiel
 
 1. **Keep the HTTP JSON API.** Switching protocols would add a runtime, a code generator and a second error model before it added any validation.
 
-2. **Request and response validation are implemented in the client.** `createMessageSchema` and `reactMessageSchema` live in `web/src/lib/contract.ts`, run before `fetch`, and throw a `ValidationError` with per-field messages. The form shows them under each input and clears them on typing. The page chunk is 13.02 KB / 4.71 KB gzip, about 0.5 KB over the previous build. The same file exports `responseSchemas`, which `web/src/lib/api.ts` uses to validate every response, including the error body, and which `go generate` turns into the Go response structs returned by the handlers. The server keeps its existing string error body; upgrading it to `{error:{code,field,message}}` would let the form show server-side field errors too.
+2. **Request and response validation are implemented in the client.** `createMessageSchema` and `reactMessageSchema` live in `web/src/lib/contract.ts`, run before `fetch`, and throw a `ValidationError` with per-field messages. The form shows them under each input and clears them on typing. The page chunk is 13.02 KB / 4.71 KB gzip, about 0.5 KB over the previous build. The same file exports `responseSchemas`, which `web/src/lib/api.ts` uses to validate every response, including the error body, and which `go generate` turns into the Go response structs returned by the handlers. The server returns the shared `{error, code, field?}` envelope; the client's `ApiError` exposes `code` and `field`, and the form shows a server-side field error under the named input. `code` is derived from the status, so a client can distinguish `invalid`, `not_found`, `conflict` and `unavailable` without matching message text.
 
 3. **Share test vectors between the two sides.** A small JSON file of valid and invalid payloads, run against the Go handlers and against the Valibot schemas, catches drift without a framework. This is the cheapest way to keep the manual rules honest.
 
