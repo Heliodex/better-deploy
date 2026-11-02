@@ -63,12 +63,13 @@ ENV WT_APPS_DIR=/var/lib/wt/apps \
     WT_LISTEN=0.0.0.0:8080 \
     WT_WASMTIME=/usr/local/bin/wasmtime \
     WT_APPS_DOMAIN=localhost \
+    WT_DROP_PRIVILEGES=1 \
     TMPDIR=/var/lib/wt
 
 WORKDIR /var/lib/wt
 EXPOSE 8080
 VOLUME ["/var/lib/wt"]
-USER 10001:10001
+USER 0:0
 
 ENTRYPOINT ["/usr/local/bin/wt-supervisor"]
 

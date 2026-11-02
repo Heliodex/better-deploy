@@ -488,5 +488,6 @@ func main() {
 		return
 	}
 	log.SetFlags(log.LstdFlags | log.LUTC)
+	dropPrivileges()
 	serve(startSupervisor(parseConfig()))
 }

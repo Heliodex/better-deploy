@@ -513,7 +513,7 @@ podman run -d --name wt-demo -p 127.0.0.1:8080:8080 \
   -e WT_TOKEN=dev -v wt-data:/var/lib/wt wt-demo
 ```
 
-The image defaults to the non-root `wt` user (`10001:10001`). This is enough for trusted mode: the supervisor only writes under `/var/lib/wt`, binds an unprivileged port and needs no capabilities. `/var/lib/wt` is a volume so the root filesystem can be read-only. A bind mount must be owned by `10001:10001`; a named volume inherits ownership from the image. The hardened defaults are also in `wt/compose.yaml`:
+The image sets `WT_DROP_PRIVILEGES=1` and starts its entrypoint as root so it can chown a freshly mounted volume, then immediately drops to the non-root `wt` user (`10001:10001`). A bind mount must still be owned by `10001:10001`; a named volume inherits ownership from the image, and a Kubernetes PVC owned by root is fixed by the entrypoint. The supervisor only writes under `/var/lib/wt`, binds an unprivileged port and needs no capabilities after the drop. `/var/lib/wt` is a volume so the root filesystem can be read-only. The hardened defaults for local runs are also in `wt/compose.yaml`:
 
 ```sh
 podman compose -f wt/compose.yaml up -d
