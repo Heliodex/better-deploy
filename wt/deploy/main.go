@@ -26,7 +26,6 @@ type manifest struct {
 	Host            string            `json:"host"`
 	Health          string            `json:"health"`
 	Env             map[string]string `json:"env"`
-	Build           string            `json:"build"`
 	BuildComponent  string            `json:"build_component,omitempty"`
 	BuildStatic     string            `json:"build_static,omitempty"`
 	ComponentInputs []string          `json:"component_inputs,omitempty"`
@@ -38,24 +37,6 @@ type manifest struct {
 	Network         string            `json:"network,omitempty"`
 	Schedule        []schedule        `json:"schedule,omitempty"`
 	Dev             *appDevConfig     `json:"dev,omitempty"`
-}
-
-// componentBuildCommand selects the component phase, falling back to the legacy single build command.
-func (m manifest) componentBuildCommand() string {
-	if strings.TrimSpace(m.BuildComponent) != "" {
-		return m.BuildComponent
-	}
-	return strings.TrimSpace(m.Build)
-}
-
-// staticBuildCommand returns the explicit static phase. A legacy single build is handled by prepareBuilds.
-func (m manifest) staticBuildCommand() string {
-	return strings.TrimSpace(m.BuildStatic)
-}
-
-// legacyBuild reports a manifest that only has the original single build command and cannot separate component and static work.
-func (m manifest) legacyBuild() bool {
-	return strings.TrimSpace(m.BuildComponent) == "" && strings.TrimSpace(m.BuildStatic) == "" && strings.TrimSpace(m.Build) != ""
 }
 
 // appDevConfig selects the optional SvelteKit development loop for an app.
@@ -107,7 +88,7 @@ type deployConfig struct {
 	dir, app, host, token, wasmtime, target, appHost, out   string
 	buildComponentCommand                                   string
 	skipBuild, skipCompile, skipStatic, jsonOut, forceBuild bool
-	targetConfigured, noPreflight                           bool
+	targetConfigured                                        bool
 	start                                                   time.Time
 }
 
@@ -230,7 +211,7 @@ func validInputPath(value string) bool {
 }
 
 // defaultSupervisorProxy lists the supervisor-owned app-host routes the Vite dev server must forward in addition to the app API.
-var defaultSupervisorProxy = []string{"/v1/events", "/_wt/events", "/_wt/blobs", "/_wt/identity"}
+var defaultSupervisorProxy = []string{"/v1/events", "/_wt/blobs", "/_wt/identity"}
 
 // normalizeDevConfig validates dev paths and fills the default proxy prefixes.
 func normalizeDevConfig(dev *appDevConfig) error {
@@ -295,7 +276,6 @@ func resolveConfig(args []string) (*deployConfig, error) {
 	forceBuild := flags.Bool("force-build", false, "rebuild the component and static phases even when their inputs are unchanged")
 	skipBuild := flags.Bool("skip-build", false, "skip running app.json's build commands")
 	skipCompile := flags.Bool("skip-compile", false, "do not compile; include main.cwasm only if it already exists")
-	noPreflight := flags.Bool("no-preflight", false, "skip the supervisor capability check and target discovery")
 	if err := flags.Parse(args); err != nil {
 		return nil, err
 	}
@@ -338,7 +318,6 @@ func resolveConfig(args []string) (*deployConfig, error) {
 		appHost:          *appHost,
 		jsonOut:          *jsonOut,
 		targetConfigured: targetConfigured,
-		noPreflight:      *noPreflight,
 	}, nil
 }
 

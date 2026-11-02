@@ -11,10 +11,7 @@ import (
 	"time"
 )
 
-const (
-	eventHostPrefix = "/_wt/events"
-	eventKeepAlive  = 20 * time.Second
-)
+const eventKeepAlive = 20 * time.Second
 
 type eventPublishRequest struct {
 	Topic string         `json:"topic"`
@@ -129,5 +126,5 @@ func writeBusEvent(stream *sseStream, event busEvent) bool {
 
 // appEventPath reports whether a path belongs to the host event bus rather than the app's wasm component.
 func appEventPath(path string) bool {
-	return path == "/v1/events" || path == eventHostPrefix || path == eventHostPrefix+"/"
+	return path == "/v1/events"
 }

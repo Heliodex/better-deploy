@@ -31,7 +31,6 @@ type buildStatus struct {
 	StaticReused    bool
 	StaticSkipped   bool
 	BuildSkipped    bool
-	LegacyBuild     bool
 	WasmDigest      string
 }
 
@@ -464,30 +463,6 @@ func staticInputHash(dir string, m manifest, command string) (string, error) {
 	return inputHash(dir, command, seed, files)
 }
 
-// staticSourcesExist reports whether a legacy single build has any frontend or static input to reason about.
-func staticSourcesExist(dir string, m manifest) bool {
-	if info, err := os.Stat(filepath.Join(dir, webDirName(m))); err == nil && info.IsDir() {
-		return true
-	}
-	for _, value := range m.StaticInputs {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		path := value
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(dir, path)
-		}
-		if _, err := os.Stat(path); err == nil {
-			return true
-		}
-	}
-	if info, err := os.Stat(filepath.Join(dir, "static")); err == nil && info.IsDir() {
-		return true
-	}
-	return false
-}
-
 // checkStaticSvelteKit rejects server-only SvelteKit files: the production artifact is adapter-static output.
 func checkStaticSvelteKit(dir string, m manifest) error {
 	web := webDirName(m)
@@ -524,19 +499,13 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 	if err := checkStaticSvelteKit(cfg.dir, m); err != nil {
 		return status, err
 	}
-	status.LegacyBuild = m.legacyBuild()
 	componentCmd := strings.TrimSpace(cfg.buildComponentCommand)
 	if componentCmd == "" {
-		componentCmd = m.componentBuildCommand()
+		componentCmd = strings.TrimSpace(m.BuildComponent)
 	}
-	staticCmd := m.staticBuildCommand()
-	legacy := status.LegacyBuild
-	if legacy {
-		staticCmd = componentCmd
-	}
+	staticCmd := strings.TrimSpace(m.BuildStatic)
 	if cfg.skipStatic {
 		staticCmd = ""
-		legacy = false
 		status.StaticSkipped = true
 	}
 	if cfg.skipBuild {
@@ -552,7 +521,7 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 	wasmExists := wasmErr == nil && wasmInfo.Mode().IsRegular()
 	hasComponentBuild := componentCmd != ""
 	if !hasComponentBuild && !wasmExists {
-		return status, fmt.Errorf("app.json has no component build command and main.wasm is missing; set build_component or build")
+		return status, fmt.Errorf("app.json has no build_component and main.wasm is missing")
 	}
 	if !hasComponentBuild && cfg.forceBuild {
 		return status, fmt.Errorf("cannot force-build without a component build command")
@@ -562,9 +531,6 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 	staticInfo, staticErr := os.Stat(staticDir)
 	staticExists := staticErr == nil && staticInfo.IsDir()
 	staticRelevant := staticCmd != ""
-	if legacy && !staticSourcesExist(cfg.dir, m) {
-		staticRelevant = false
-	}
 
 	cache, _ := readBuildCache(cfg.dir)
 	var componentHash, staticHash string
@@ -590,18 +556,12 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 	if staticRelevant {
 		staticStale = cfg.forceBuild || cache.StaticHash != staticHash || !staticExists
 	}
-	if legacy && staticStale {
-		componentStale = true
-	}
 
 	if componentStale {
 		if err := runBuildPhase(cfg, "component", componentCmd); err != nil {
 			return status, err
 		}
 		status.ComponentBuilt = true
-		if legacy && staticRelevant {
-			status.StaticBuilt = true
-		}
 		if err := runCompile(cfg); err != nil {
 			return status, err
 		}
@@ -614,13 +574,6 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 		} else {
 			cache.ComponentHash = componentHash
 		}
-		if legacy && staticRelevant {
-			if hash, err := staticInputHash(cfg.dir, m, staticCmd); err == nil {
-				cache.StaticHash = hash
-			} else {
-				cache.StaticHash = staticHash
-			}
-		}
 		writeBuildCache(cfg.dir, cache)
 	} else if hasComponentBuild {
 		status.ComponentReused = true
@@ -628,7 +581,7 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 		status.ComponentReused = true
 	}
 
-	if !legacy && staticRelevant && staticStale {
+	if staticRelevant && staticStale {
 		if err := runBuildPhase(cfg, "static", staticCmd); err != nil {
 			return status, err
 		}
@@ -642,10 +595,7 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 		if info, err := os.Stat(staticDir); err != nil || !info.IsDir() {
 			fmt.Fprintf(os.Stderr, "warning: static build finished but %s is missing\n", staticDir)
 		}
-	} else if !legacy && staticRelevant {
-		status.StaticReused = true
-	}
-	if legacy && staticRelevant && !status.StaticBuilt {
+	} else if staticRelevant {
 		status.StaticReused = true
 	}
 
@@ -668,16 +618,13 @@ func printBuildStatus(status buildStatus) {
 	} else if status.ComponentReused {
 		fmt.Fprintln(os.Stderr, "component: reused")
 	}
-	if status.LegacyBuild {
-		fmt.Fprintln(os.Stderr, "build: legacy single command; set build_component and build_static to separate the phases")
-	}
-	if status.StaticBuilt && !status.LegacyBuild {
+	if status.StaticBuilt {
 		fmt.Fprintln(os.Stderr, "static: built")
 	} else if status.StaticReused {
 		fmt.Fprintln(os.Stderr, "static: reused")
 	} else if status.StaticSkipped {
 		fmt.Fprintln(os.Stderr, "static: skipped")
-	} else if !status.LegacyBuild {
+	} else {
 		fmt.Fprintln(os.Stderr, "static: no build command")
 	}
 }

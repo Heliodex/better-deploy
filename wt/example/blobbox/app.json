@@ -1,5 +1,4 @@
 {
-	"build": "rm -rf static && cp -r web/static static && ../../packages/generate.sh && go tool componentize-go -d ../../packages/wit -w wt:app/app build",
 	"build_component": "../../packages/generate.sh && go tool componentize-go -d ../../packages/wit -w wt:app/app build",
 	"build_static": "rm -rf static && cp -r web/static static",
 	"health": "/healthz",

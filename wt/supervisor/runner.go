@@ -139,7 +139,7 @@ func (r *runnerServer) handleConnection(conn net.Conn) {
 
 // handleRequest dispatches one runner protocol request.
 func (r *runnerServer) handleRequest(_ net.Conn, request runnerRequest) {
-	id := runnerKey(request.ID, request.App)
+	id := request.ID
 	switch request.Op {
 	case runnerOpStart:
 		if request.Start == nil {
@@ -241,7 +241,7 @@ func newRunnerCommand(request runnerStartRequest, output *os.File) (*exec.Cmd, *
 func (r *runnerServer) registerProcess(request runnerStartRequest, cmd *exec.Cmd, goWriter, pidReader *os.File) *runnerProcess {
 	app := &runnerProcess{
 		info: runnerAppInfo{
-			ID:           runnerKey(request.ID, request.Name),
+			ID:           request.ID,
 			Name:         request.Name,
 			Dir:          request.Dir,
 			PID:          cmd.Process.Pid,
@@ -267,7 +267,7 @@ func (r *runnerServer) registerProcess(request runnerStartRequest, cmd *exec.Cmd
 
 // start launches one app process and begins streaming its output and exit.
 func (r *runnerServer) start(request runnerStartRequest) {
-	id := runnerKey(request.ID, request.Name)
+	id := request.ID
 	sendError := func(message string) {
 		r.send(runnerEvent{Op: runnerOpError, ID: id, App: request.Name, Error: message})
 	}

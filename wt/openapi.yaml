@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: wt supervisor API
   version: 0.1.0
-  description: "OpenAPI document for the supervisor's admin and app APIs. The path and method set is checked against the route tables; component schemas and descriptions are maintained here. Newer resources use camelCase. Legacy config, backup and job-enqueue request fields still use the snake_case spellings shown here.\n"
+  description: "OpenAPI document for the supervisor's admin and app APIs. The path and method set is checked against the route tables; component schemas and descriptions are maintained here. Newer resources use camelCase, while config, backup and job-enqueue request fields use the snake_case spellings shown here.\n"
 servers:
   - url: http://127.0.0.1:8080
 security:
@@ -1348,7 +1348,7 @@ paths:
           description: Not found
   /capabilities:
     get:
-      summary: Supervisor version, runtime and feature capabilities
+      summary: Supervisor version and runtime capabilities
       responses:
         "200":
           description: Capability document
@@ -1363,10 +1363,6 @@ paths:
                     type: string
                   goVersion:
                     type: string
-                  capabilitiesVersion:
-                    type: integer
-                  deployProtocol:
-                    type: integer
                   wasmtime:
                     type: string
                   wasmtimeTarget:
@@ -1375,10 +1371,6 @@ paths:
                     type: boolean
                   epoch:
                     type: boolean
-                  features:
-                    type: object
-                    additionalProperties:
-                      type: boolean
         "401":
           description: Unauthorized
         "403":

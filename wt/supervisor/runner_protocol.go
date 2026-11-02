@@ -85,11 +85,3 @@ type runnerConn interface {
 	Stream(name string) *runnerStream
 	Close()
 }
-
-// runnerKey is the runner's process key: the launch ID, or the app name for older requests.
-func runnerKey(id, name string) string {
-	if id != "" {
-		return id
-	}
-	return name
-}

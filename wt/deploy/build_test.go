@@ -203,50 +203,6 @@ func TestPrepareBuildsSplitsPhases(t *testing.T) {
 	}
 }
 
-func TestPrepareBuildsLegacySingleCommand(t *testing.T) {
-	dir := t.TempDir()
-	writeTestFile(t, filepath.Join(dir, "main.go"), "package main")
-	writeTestFile(t, filepath.Join(dir, "web", "src", "+page.svelte"), "<h1>one</h1>")
-
-	m := manifest{
-		Name:  "demo",
-		Build: "printf 'build\\n' >> build.log; printf wasm > main.wasm; mkdir -p static; printf html > static/index.html",
-	}
-	cfg := &deployConfig{dir: dir, skipCompile: true, wasmtime: fakeWasmtime(t, t.TempDir()), target: "x86_64-test"}
-	logPath := filepath.Join(dir, "build.log")
-
-	first, err := prepareBuilds(cfg, m)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !first.LegacyBuild || !first.ComponentBuilt || !first.StaticBuilt {
-		t.Errorf("first prepareBuilds() = %+v, want a legacy build", first)
-	}
-	if got := readTestFile(t, logPath); got != "build\n" {
-		t.Errorf("first build log = %q", got)
-	}
-
-	second, err := prepareBuilds(cfg, m)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !second.ComponentReused || !second.StaticReused || second.ComponentBuilt || second.StaticBuilt {
-		t.Errorf("second prepareBuilds() = %+v, want both phases reused", second)
-	}
-	if got := readTestFile(t, logPath); got != "build\n" {
-		t.Errorf("second build log = %q", got)
-	}
-
-	writeTestFile(t, filepath.Join(dir, "web", "src", "+page.svelte"), "<h1>two</h1>")
-	third, err := prepareBuilds(cfg, m)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !third.LegacyBuild || !third.ComponentBuilt || !third.StaticBuilt {
-		t.Errorf("frontend prepareBuilds() = %+v, want the legacy command to run again", third)
-	}
-}
-
 func TestKeepRunningComponent(t *testing.T) {
 	status := buildStatus{WasmDigest: "abc"}
 	if !keepRunningComponent(false, status, "abc") {

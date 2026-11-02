@@ -412,7 +412,7 @@ func (s *supervisor) adoptApp(name, dir string, cfg appConfig, info runnerAppInf
 	a.exited = false
 	s.loadResourceHistory(a)
 
-	stream := s.runner.Stream(runnerKey(info.ID, name))
+	stream := s.runner.Stream(info.ID)
 	logging := log.New(os.Stderr, "["+name+"] ", 0).Writer()
 	go s.consumeRunnerStream(a, cmd, a.done, stream, io.MultiWriter(a.logs, logging), "")
 	a.isolation = &isolationPlan{app: a}
@@ -466,7 +466,7 @@ func (s *supervisor) loadApps() error {
 			delete(snapshot, name)
 			if err != nil {
 				log.Printf("app %s: adopt: %v (skipped)", name, err)
-				_ = s.runner.Stop(runnerKey(info.ID, name))
+				_ = s.runner.Stop(info.ID)
 				continue
 			}
 			s.register(a)
@@ -482,7 +482,7 @@ func (s *supervisor) loadApps() error {
 
 	for name, info := range snapshot {
 		log.Printf("app %s: running without an app directory; stopping it", name)
-		_ = s.runner.Stop(runnerKey(info.ID, name))
+		_ = s.runner.Stop(info.ID)
 	}
 	for _, a := range s.allApps() {
 		a.mu.Lock()

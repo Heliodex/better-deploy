@@ -32,15 +32,12 @@ func capabilityTestServer(t *testing.T, caps supervisorCapabilities, status int)
 
 func TestFetchCapabilities(t *testing.T) {
 	want := supervisorCapabilities{
-		Version:             "1.2.3",
-		Commit:              "abcdef0123456789",
-		GoVersion:           "go1.27.1",
-		CapabilitiesVersion: 1,
-		DeployProtocol:      1,
-		Wasmtime:            "wasmtime 50.0.0",
-		WasmtimeTarget:      "x86_64-test",
-		Compiler:            true,
-		Features:            map[string]bool{"deployments": true},
+		Version:        "1.2.3",
+		Commit:         "abcdef0123456789",
+		GoVersion:      "go1.27.1",
+		Wasmtime:       "wasmtime 50.0.0",
+		WasmtimeTarget: "x86_64-test",
+		Compiler:       true,
 	}
 	server := capabilityTestServer(t, want, http.StatusOK)
 	defer server.Close()
@@ -65,8 +62,8 @@ func TestFetchCapabilitiesOldSupervisor(t *testing.T) {
 	defer server.Close()
 
 	_, err := fetchCapabilities(clientOptions{host: server.URL, timeout: time.Second})
-	if err == nil || !strings.Contains(err.Error(), "does not expose /capabilities") || !strings.Contains(err.Error(), "--no-preflight") {
-		t.Errorf("error = %v, want an actionable missing-capabilities error", err)
+	if err == nil || !strings.Contains(err.Error(), "404") {
+		t.Errorf("error = %v, want a missing-capabilities status", err)
 	}
 }
 
@@ -74,11 +71,9 @@ func TestPreflightDeployUsesServerTarget(t *testing.T) {
 	bin := fakeWasmtime(t, t.TempDir())
 	server := capabilityTestServer(t, supervisorCapabilities{
 		Version:        "1.2.3",
-		DeployProtocol: 1,
 		Wasmtime:       "wasmtime 50.0.0",
 		WasmtimeTarget: "x86_64-test",
 		Compiler:       true,
-		Features:       map[string]bool{"deployments": true},
 	}, http.StatusOK)
 	defer server.Close()
 
@@ -99,11 +94,9 @@ func TestPreflightDeployKeepsExplicitTarget(t *testing.T) {
 	bin := fakeWasmtime(t, t.TempDir())
 	server := capabilityTestServer(t, supervisorCapabilities{
 		Version:        "1.2.3",
-		DeployProtocol: 1,
 		Wasmtime:       "wasmtime 50.0.0",
 		WasmtimeTarget: "x86_64-test",
 		Compiler:       true,
-		Features:       map[string]bool{"deployments": true},
 	}, http.StatusOK)
 	defer server.Close()
 
@@ -125,52 +118,8 @@ func TestPreflightDeployRejectsOldSupervisor(t *testing.T) {
 	defer server.Close()
 
 	cfg := &deployConfig{host: server.URL, target: "x86_64-test"}
-	if _, err := preflightDeploy(cfg); err == nil || !strings.Contains(err.Error(), "does not expose /capabilities") {
-		t.Errorf("error = %v, want a missing-capabilities error", err)
-	}
-}
-
-func TestPreflightDeployRejectsMissingFeature(t *testing.T) {
-	server := capabilityTestServer(t, supervisorCapabilities{
-		Version:  "1.2.3",
-		Features: map[string]bool{"deployments": false},
-		Wasmtime: "wasmtime 50.0.0",
-		Compiler: false,
-	}, http.StatusOK)
-	defer server.Close()
-
-	cfg := &deployConfig{host: server.URL, target: "x86_64-test"}
-	if _, err := preflightDeploy(cfg); err == nil || !strings.Contains(err.Error(), "does not advertise deployments") {
-		t.Errorf("error = %v, want a missing-feature error", err)
-	}
-}
-
-func TestPreflightDeployNoPreflight(t *testing.T) {
-	requests := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests++
-		http.NotFound(w, r)
-	}))
-	defer server.Close()
-
-	cfg := &deployConfig{host: server.URL, target: "x86_64-test", noPreflight: true}
-	if _, err := preflightDeploy(cfg); err != nil {
-		t.Fatal(err)
-	}
-	if requests != 0 {
-		t.Errorf("preflight made %d requests with --no-preflight", requests)
-	}
-}
-
-func TestCapabilitiesFeatureFallback(t *testing.T) {
-	if !(supervisorCapabilities{DeployProtocol: 1}).supports("deployments") {
-		t.Error("deploy protocol should imply deployments")
-	}
-	if (supervisorCapabilities{}).supports("deployments") {
-		t.Error("empty capabilities should not imply deployments")
-	}
-	if !(supervisorCapabilities{Features: map[string]bool{"jobs": true}}).supports("jobs") {
-		t.Error("feature map should be read")
+	if _, err := preflightDeploy(cfg); err == nil || !strings.Contains(err.Error(), "404") {
+		t.Errorf("error = %v, want a missing-capabilities status", err)
 	}
 }
 

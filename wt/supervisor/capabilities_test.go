@@ -37,9 +37,6 @@ func TestHandleCapabilities(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &caps); err != nil {
 		t.Fatal(err)
 	}
-	if caps.CapabilitiesVersion != capabilitiesVersion || caps.DeployProtocol != deployProtocolVersion {
-		t.Errorf("versions = %d/%d, want %d/%d", caps.CapabilitiesVersion, caps.DeployProtocol, capabilitiesVersion, deployProtocolVersion)
-	}
 	if caps.Version == "" || caps.GoVersion == "" {
 		t.Errorf("build fields are empty: %+v", caps)
 	}
@@ -48,11 +45,6 @@ func TestHandleCapabilities(t *testing.T) {
 	}
 	if !caps.Compiler || !caps.Epoch {
 		t.Errorf("compiler=%v epoch=%v, want both true", caps.Compiler, caps.Epoch)
-	}
-	for _, feature := range []string{"deployments", "jobs", "blobs", "identity", "events", "backups", "database"} {
-		if !caps.Features[feature] {
-			t.Errorf("feature %q is not advertised", feature)
-		}
 	}
 
 	req = httptest.NewRequest(http.MethodPost, "/capabilities", nil)
@@ -81,8 +73,5 @@ func TestCapabilitiesWithoutCompiler(t *testing.T) {
 	}
 	if caps.Compiler {
 		t.Error("missing compiler was advertised as available")
-	}
-	if !caps.Features["deployments"] {
-		t.Error("deployments should still be advertised without a compiler")
 	}
 }

@@ -101,7 +101,7 @@ func (c *runnerClient) dispatch(event runnerEvent) {
 		c.snapshot = append([]runnerAppInfo(nil), event.Snapshot...)
 		c.runnerPID = event.RunnerPID
 		for _, info := range event.Snapshot {
-			id := runnerKey(info.ID, info.Name)
+			id := info.ID
 			if c.streams[id] == nil {
 				c.streams[id] = &runnerStream{
 					name:    id,
@@ -114,7 +114,7 @@ func (c *runnerClient) dispatch(event runnerEvent) {
 		c.snapshotOnce.Do(func() { close(c.snapshotCh) })
 	case runnerOpStarted, runnerOpError:
 		c.mu.Lock()
-		stream := c.streams[runnerKey(event.ID, event.App)]
+		stream := c.streams[event.ID]
 		c.mu.Unlock()
 		if stream == nil {
 			return
@@ -125,7 +125,7 @@ func (c *runnerClient) dispatch(event runnerEvent) {
 		}
 	case runnerOpExited:
 		c.mu.Lock()
-		stream := c.streams[runnerKey(event.ID, event.App)]
+		stream := c.streams[event.ID]
 		c.mu.Unlock()
 		if stream != nil {
 			select {
@@ -135,7 +135,7 @@ func (c *runnerClient) dispatch(event runnerEvent) {
 		}
 	default:
 		c.mu.Lock()
-		stream := c.streams[runnerKey(event.ID, event.App)]
+		stream := c.streams[event.ID]
 		c.mu.Unlock()
 		if stream == nil {
 			return
@@ -247,7 +247,7 @@ func (c *runnerClient) Stream(id string) *runnerStream {
 
 // Start sends a start request and waits for the runner's started event.
 func (c *runnerClient) Start(request runnerStartRequest) (*runnerStream, runnerEvent, error) {
-	stream := c.startStream(runnerKey(request.ID, request.Name))
+	stream := c.startStream(request.ID)
 	if err := c.send(runnerRequest{Op: runnerOpStart, Start: &request}); err != nil {
 		return nil, runnerEvent{}, err
 	}

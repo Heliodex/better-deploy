@@ -104,7 +104,6 @@ func TestViteDevConfigIncludesProxy(t *testing.T) {
 		`"/api"`,
 		`"/v1"`,
 		`"/v1/events"`,
-		`"/_wt/events"`,
 		`"/_wt/blobs"`,
 		`"/_wt/identity"`,
 		"strictPort: true",

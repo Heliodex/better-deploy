@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json/v2"
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -10,20 +9,15 @@ import (
 	"time"
 )
 
-var errCapabilitiesMissing = errors.New("supervisor does not expose /capabilities")
-
-// supervisorCapabilities is the capability document served by a current supervisor.
+// supervisorCapabilities is the runtime document served by a supervisor.
 type supervisorCapabilities struct {
-	Version             string          `json:"version"`
-	Commit              string          `json:"commit,omitempty"`
-	GoVersion           string          `json:"goVersion,omitempty"`
-	CapabilitiesVersion int             `json:"capabilitiesVersion"`
-	DeployProtocol      int             `json:"deployProtocol"`
-	Wasmtime            string          `json:"wasmtime,omitempty"`
-	WasmtimeTarget      string          `json:"wasmtimeTarget,omitempty"`
-	Compiler            bool            `json:"compiler"`
-	Epoch               bool            `json:"epoch"`
-	Features            map[string]bool `json:"features"`
+	Version        string `json:"version"`
+	Commit         string `json:"commit,omitempty"`
+	GoVersion      string `json:"goVersion,omitempty"`
+	Wasmtime       string `json:"wasmtime,omitempty"`
+	WasmtimeTarget string `json:"wasmtimeTarget,omitempty"`
+	Compiler       bool   `json:"compiler"`
+	Epoch          bool   `json:"epoch"`
 }
 
 // deployPreflight is the result of asking the supervisor what it can do before a build starts.
@@ -63,22 +57,11 @@ func (c supervisorCapabilities) summary() string {
 	return "supervisor: " + c.displayVersion() + "; " + runtime
 }
 
-// supports reports whether a named feature is available. Deployments are covered by the protocol revision as well as the feature map.
-func (c supervisorCapabilities) supports(feature string) bool {
-	if c.Features[feature] {
-		return true
-	}
-	return feature == "deployments" && c.DeployProtocol >= 1
-}
-
-// fetchCapabilities asks the supervisor for its version, runtime and features.
+// fetchCapabilities asks the supervisor for its version and runtime.
 func fetchCapabilities(client clientOptions) (supervisorCapabilities, error) {
 	status, _, body, err := apiDo(client, http.MethodGet, "/capabilities", nil, "")
 	if err != nil {
 		return supervisorCapabilities{}, fmt.Errorf("query supervisor capabilities: %w", err)
-	}
-	if status == http.StatusNotFound || status == http.StatusMethodNotAllowed {
-		return supervisorCapabilities{}, fmt.Errorf("%w; it predates the current deploy protocol. Rebuild or upgrade the supervisor, or pass --no-preflight", errCapabilitiesMissing)
 	}
 	if err := checkAPI(status, body); err != nil {
 		return supervisorCapabilities{}, fmt.Errorf("query supervisor capabilities: %w", err)
@@ -92,15 +75,9 @@ func fetchCapabilities(client clientOptions) (supervisorCapabilities, error) {
 
 // preflightDeploy negotiates the runtime target before a build and reports whether the local cwasm will match.
 func preflightDeploy(cfg *deployConfig) (deployPreflight, error) {
-	if cfg.noPreflight {
-		return deployPreflight{}, nil
-	}
 	caps, err := fetchCapabilities(clientOptions{host: cfg.host, token: cfg.token, timeout: 10 * time.Second})
 	if err != nil {
 		return deployPreflight{}, fmt.Errorf("preflight %s: %w", cfg.host, err)
-	}
-	if !caps.supports("deployments") {
-		return deployPreflight{}, fmt.Errorf("supervisor %s (%s) does not advertise deployments; upgrade it or pass --no-preflight", cfg.host, caps.displayVersion())
 	}
 	pre := deployPreflight{Checked: true, Capabilities: caps}
 	if caps.WasmtimeTarget != "" && !cfg.targetConfigured {

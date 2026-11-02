@@ -501,7 +501,7 @@ func applyMigration(ctx context.Context, conn *sql.Conn, version int, statements
 	return true, tx.Commit()
 }
 
-// migrate applies statements and records a new user_version and checksum in one transaction. A version at or below the current one is a no-op when its checksum matches, or when it predates the bookkeeping table; an edited migration fails instead of silently doing nothing.
+// migrate applies statements and records a new user_version and checksum in one transaction. A version at or below the current one is a no-op when its checksum matches; a missing or edited migration fails instead of silently doing nothing.
 func (s *storageServer) migrate(ctx context.Context, app string, version int, statements []storageStatement) (storageMigrationResponse, error) {
 	params, checksum, err := prepareMigration(version, statements)
 	if err != nil {
