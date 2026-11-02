@@ -113,7 +113,6 @@ func writeBuildCache(dir, componentHash, wasmDigest string) {
 	_ = os.WriteFile(filepath.Join(dir, buildCacheName), append(data, '\n'), 0o644)
 }
 
-// prepareComponent skips the build and compile when the component inputs are unchanged and main.wasm is present.
 // checkStaticSvelteKit rejects server-only SvelteKit files: the production artifact is adapter-static output.
 func checkStaticSvelteKit(dir string, m manifest) error {
 	web := "web"
@@ -147,6 +146,7 @@ func checkStaticSvelteKit(dir string, m manifest) error {
 	return nil
 }
 
+// prepareComponent skips the build and compile when the component inputs are unchanged and main.wasm is present.
 func prepareComponent(cfg *deployConfig, m manifest) (bool, error) {
 	if err := checkStaticSvelteKit(cfg.dir, m); err != nil {
 		return false, err

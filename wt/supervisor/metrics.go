@@ -156,7 +156,7 @@ func writeMetric(builder *strings.Builder, name, labels string, value string) {
 	builder.WriteByte('\n')
 }
 
-// render writes a Prometheus exposition snapshot. It is intentionally a small hand-written registry so the supervisor keeps one dependency set and no background goroutines.
+// writeOutcomes writes one counter family from an outcome map.
 func writeOutcomes(builder *strings.Builder, name, help string, values map[outcomeKey]uint64) {
 	fmt.Fprintf(builder, "# HELP %s %s\n# TYPE %s counter\n", name, help, name)
 	keys := make([]outcomeKey, 0, len(values))
@@ -295,6 +295,7 @@ func (m *metrics) renderApps(builder *strings.Builder, s *supervisor) {
 	}
 }
 
+// render writes a Prometheus exposition snapshot. It is intentionally a small hand-written registry so the supervisor keeps one dependency set and no background goroutines.
 func (m *metrics) render(s *supervisor) string {
 	var builder strings.Builder
 	m.mu.Lock()

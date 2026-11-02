@@ -476,8 +476,6 @@ func validateAppFetchListen(value string) error {
 	return nil
 }
 
-// parseConfig reads flags and environment, then prepares the runtime directories.
-// startSupervisor builds the storage service, recovers interrupted rollbacks and loads every app.
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == runnerArg {
 		runnerMain()

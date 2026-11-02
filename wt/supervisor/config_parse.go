@@ -191,6 +191,7 @@ func resolveConfigPaths(cfg *config) {
 	}
 }
 
+// parseConfig reads flags and environment, then prepares the runtime directories.
 func parseConfig() config {
 	cfg := config{}
 	diskBudgetMB := int64(0)

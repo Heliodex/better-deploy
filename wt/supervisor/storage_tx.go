@@ -8,7 +8,6 @@ import (
 	"time"
 )
 
-// transaction runs statements in one SQLite transaction and can return rows from reads as well as write counts.
 // decodeStorageStatements validates SQL and parameters for a bounded statement list.
 func decodeStorageStatements(statements []storageStatement, requireOne bool) ([][]any, error) {
 	if requireOne && len(statements) == 0 {
@@ -136,6 +135,7 @@ func transactionChanges(req storageStatementsRequest, results []storageResult, s
 	return changes
 }
 
+// transaction runs statements in one SQLite transaction and can return rows from reads as well as write counts.
 func (s *storageServer) transaction(w http.ResponseWriter, r *http.Request, app string) {
 	req, params, ok := readTransactionRequest(w, r)
 	if !ok {

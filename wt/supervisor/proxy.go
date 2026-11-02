@@ -172,7 +172,6 @@ func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
 	s.serveApp(w, r, a)
 }
 
-// serveApp proxies one request to a resolved app. The public host proxy and the internal app fetch share it, so both get concurrency limits, readiness, static files and access logs.
 // logAccess writes one proxied request line when sampling allows it.
 func (s *supervisor) logAccess(a *app, r *http.Request, started time.Time, requestID string, status int) {
 	if a.logs == nil || !s.shouldLogAccess(a, status) {
@@ -242,6 +241,7 @@ func (s *supervisor) proxyRequest(w http.ResponseWriter, r *http.Request, a *app
 	return true
 }
 
+// serveApp proxies one request to a resolved app. The public host proxy and the internal app fetch share it, so both get concurrency limits, readiness, static files and access logs.
 func (s *supervisor) serveApp(w http.ResponseWriter, r *http.Request, a *app) {
 	if !s.requireDependencies(w, a) {
 		return

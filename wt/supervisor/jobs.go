@@ -644,7 +644,6 @@ func jobBackoff(attempt int) time.Duration {
 	return min(backoff, 5*time.Minute)
 }
 
-// handleAppJobs serves the queue resource for one app.
 // writeJobActionError maps a job action failure to its HTTP status.
 func writeJobActionError(w http.ResponseWriter, err error) {
 	status := http.StatusConflict
@@ -714,6 +713,7 @@ func handleJobItem(w http.ResponseWriter, r *http.Request, store *jobStore, id, 
 	}
 }
 
+// handleAppJobs serves the queue resource for one app.
 func (s *supervisor) handleAppJobs(w http.ResponseWriter, r *http.Request, name, action string) {
 	if _, ok := s.requireApp(w, r, name); !ok {
 		return

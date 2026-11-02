@@ -106,7 +106,7 @@ func statsRequested(r *http.Request) bool {
 	}
 }
 
-// tableColumns reads one table's columns through SQLite's table_xinfo pragma.
+// schemaTableColumns reads one table's columns through SQLite's table_xinfo pragma.
 func schemaTableColumns(ctx context.Context, conn *sql.Conn, table string) ([]storageColumn, error) {
 	rows, err := conn.QueryContext(ctx, "pragma table_xinfo("+quoteSQLiteIdentifier(table)+")")
 	if err != nil {
@@ -433,7 +433,6 @@ func storedMigrationChecksum(ctx context.Context, tx *sql.Tx, version int) (chec
 	}
 }
 
-// migrate applies statements and records a new user_version and checksum in one transaction. A version at or below the current one is a no-op when its checksum matches, or when it predates the bookkeeping table; an edited migration fails instead of silently doing nothing.
 // prepareMigration validates the version and statements and computes the migration checksum.
 func prepareMigration(version int, statements []storageStatement) ([][]any, string, error) {
 	if version < 1 || version > maxStorageMigrationVersion {
@@ -502,6 +501,7 @@ func applyMigration(ctx context.Context, conn *sql.Conn, version int, statements
 	return true, tx.Commit()
 }
 
+// migrate applies statements and records a new user_version and checksum in one transaction. A version at or below the current one is a no-op when its checksum matches, or when it predates the bookkeeping table; an edited migration fails instead of silently doing nothing.
 func (s *storageServer) migrate(ctx context.Context, app string, version int, statements []storageStatement) (storageMigrationResponse, error) {
 	params, checksum, err := prepareMigration(version, statements)
 	if err != nil {

@@ -437,7 +437,6 @@ func validateAppSettings(cfg *appConfig) error {
 	return nil
 }
 
-// applyAppDefaults fills in tenant defaults, network and identity rules, timeouts and scheduled calls.
 // applyTenantDefaults fills the limits that differ between trusted and untrusted mode.
 func applyTenantDefaults(cfg *appConfig, mode string) {
 	if mode == tenantUntrusted {
@@ -531,6 +530,7 @@ func validateAppSchedule(cfg *appConfig) error {
 	return nil
 }
 
+// applyAppDefaults fills in tenant defaults, network and identity rules, timeouts and scheduled calls.
 func applyAppDefaults(cfg *appConfig, mode string) error {
 	applyTenantDefaults(cfg, mode)
 	if err := normalizeAppNetwork(cfg, mode); err != nil {
