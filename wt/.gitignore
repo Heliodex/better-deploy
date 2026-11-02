@@ -15,3 +15,5 @@ example/*/contract/schemas/
 supervisor/web/build/
 supervisor/web/node_modules/
 supervisor/web/.svelte-kit/
+supervisor/wt-supervisor
+deploy/wt-deploy
