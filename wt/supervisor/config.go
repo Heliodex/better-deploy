@@ -242,34 +242,99 @@ func persistAppConfig(dir string, cfg appConfig, modes ...string) error {
 	return nil
 }
 
-// handleAppConfig reads or updates an app's runtime config. Env and memory changes need a restart to affect the running process; host and schedule changes apply immediately.
-func (s *supervisor) handleAppConfig(w http.ResponseWriter, r *http.Request, name string) {
-	if r.Method != http.MethodGet && r.Method != http.MethodPatch {
-		w.Header().Set("Allow", "GET, PATCH")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
+// validateConfigPatch normalizes a patch and checks host, dependency and quota constraints.
+func (s *supervisor) validateConfigPatch(w http.ResponseWriter, a *app, cfg appConfig, patch appConfigPatch) (appConfig, bool) {
+	next, err := normalizeAppConfig(applyConfigPatch(cfg, patch), a.name, s.cfg.domain, s.cfg.tenantMode)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return cfg, false
 	}
-
-	if r.Method == http.MethodGet {
-		a, ok := s.requireApp(w, r, name)
-		if !ok {
-			return
-		}
+	if err := s.hostConflictError(next, a.name); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return cfg, false
+	}
+	if err := s.dependencyCycleError(a.name, next.DependsOn); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return cfg, false
+	}
+	if s.cfg.untrusted() && cfg.DiskMB != next.DiskMB && s.quota.enabled() {
 		a.mu.Lock()
-		cfg := a.cfg
+		uid := a.uid
 		a.mu.Unlock()
-		etag := configETag(cfg)
-		w.Header().Set("ETag", etag)
-		if ifNoneMatch := r.Header.Get("If-None-Match"); ifNoneMatch != "" && etagMatches(ifNoneMatch, etag) {
-			w.WriteHeader(http.StatusNotModified)
-			return
+		// An app that has never launched gets its quota from prepareLaunch instead.
+		if uid > 0 {
+			if err := s.quota.apply(uid, int64(next.DiskMB)<<20, maxAppEntries); err != nil {
+				writeError(w, http.StatusInternalServerError, "apply data quota: "+err.Error())
+				return cfg, false
+			}
 		}
-		response := configResponse(cfg)
-		response.SecretKeys = s.secrets.keys(name)
-		writeJSON(w, http.StatusOK, response)
+	}
+	return next, true
+}
+
+// configRestartRequired reports whether the changes only take effect after the process restarts.
+func configRestartRequired(cfg, next appConfig) bool {
+	return !maps.Equal(cfg.Env, next.Env) || cfg.MemoryMB != next.MemoryMB ||
+		cfg.DiskMB != next.DiskMB || cfg.CPUMillicores != next.CPUMillicores || cfg.PidsMax != next.PidsMax ||
+		cfg.IOWeight != next.IOWeight || cfg.MaxConcurrent != next.MaxConcurrent ||
+		cfg.RequestTimeout != next.RequestTimeout || cfg.Network != next.Network ||
+		!slices.Equal(cfg.Egress, next.Egress)
+}
+
+// activateConfigPatch swaps the in-memory config and applies the side effects that do not need a restart.
+func (s *supervisor) activateConfigPatch(a *app, cfg, next appConfig) bool {
+	s.mu.Lock()
+	a.mu.Lock()
+	oldConfig := a.cfg
+	a.cfg = next
+	if cfg.Health != next.Health || cfg.healthInterval != next.healthInterval {
+		a.nextHealth = time.Time{}
+	}
+	a.mu.Unlock()
+	s.setAppHostsLocked(a, oldConfig, next)
+	s.mu.Unlock()
+
+	if s.storage != nil && cfg.DiskMB != next.DiskMB {
+		s.storage.setQuota(a.name, int64(next.DiskMB)<<20)
+	}
+	if s.jobs != nil && cfg.JobConcurrency != next.JobConcurrency {
+		s.jobs.setConcurrency(a.name, next.JobConcurrency)
+	}
+	if !slices.Equal(cfg.Schedule, next.Schedule) {
+		a.mu.Lock()
+		running := a.cmd != nil && !a.exited
+		a.mu.Unlock()
+		if running {
+			s.stopSchedule(a)
+			s.startSchedule(a)
+		}
+	}
+	s.broadcast()
+	return configRestartRequired(cfg, next)
+}
+
+// handleAppConfigGet serves the current config with its ETag and secret key names.
+func (s *supervisor) handleAppConfigGet(w http.ResponseWriter, r *http.Request, name string) {
+	a, ok := s.requireApp(w, r, name)
+	if !ok {
 		return
 	}
+	a.mu.Lock()
+	cfg := a.cfg
+	a.mu.Unlock()
+	etag := configETag(cfg)
+	w.Header().Set("ETag", etag)
+	if ifNoneMatch := r.Header.Get("If-None-Match"); ifNoneMatch != "" && etagMatches(ifNoneMatch, etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	response := configResponse(cfg)
+	response.SecretKeys = s.secrets.keys(name)
+	writeJSON(w, http.StatusOK, response)
+}
 
+// handleAppConfigPatch validates and applies one JSON patch to the app config.
+func (s *supervisor) handleAppConfigPatch(w http.ResponseWriter, r *http.Request, name string) {
 	defer s.lockApp(name)()
 	a, ok := s.requireApp(w, r, name)
 	if !ok {
@@ -291,73 +356,33 @@ func (s *supervisor) handleAppConfig(w http.ResponseWriter, r *http.Request, nam
 		writeError(w, http.StatusPreconditionFailed, "config has changed; reload and retry")
 		return
 	}
-	next, err := normalizeAppConfig(applyConfigPatch(cfg, patch), a.name, s.cfg.domain, s.cfg.tenantMode)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+	next, ok := s.validateConfigPatch(w, a, cfg, patch)
+	if !ok {
 		return
-	}
-	if err := s.hostConflictError(next, a.name); err != nil {
-		writeError(w, http.StatusConflict, err.Error())
-		return
-	}
-	if err := s.dependencyCycleError(a.name, next.DependsOn); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if s.cfg.untrusted() && cfg.DiskMB != next.DiskMB && s.quota.enabled() {
-		a.mu.Lock()
-		uid := a.uid
-		a.mu.Unlock()
-		// An app that has never launched gets its quota from prepareLaunch instead.
-		if uid > 0 {
-			if err := s.quota.apply(uid, int64(next.DiskMB)<<20, maxAppEntries); err != nil {
-				writeError(w, http.StatusInternalServerError, "apply data quota: "+err.Error())
-				return
-			}
-		}
 	}
 	if err := persistAppConfig(a.dir, next, s.cfg.tenantMode); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	s.mu.Lock()
-	a.mu.Lock()
-	oldConfig := a.cfg
-	a.cfg = next
-	if cfg.Health != next.Health || cfg.healthInterval != next.healthInterval {
-		a.nextHealth = time.Time{}
-	}
-	a.mu.Unlock()
-	s.setAppHostsLocked(a, oldConfig, next)
-	s.mu.Unlock()
-
-	if s.storage != nil && cfg.DiskMB != next.DiskMB {
-		s.storage.setQuota(a.name, int64(next.DiskMB)<<20)
-	}
-	if s.jobs != nil && cfg.JobConcurrency != next.JobConcurrency {
-		s.jobs.setConcurrency(a.name, next.JobConcurrency)
-	}
-
-	restartRequired := !maps.Equal(cfg.Env, next.Env) || cfg.MemoryMB != next.MemoryMB ||
-		cfg.DiskMB != next.DiskMB || cfg.CPUMillicores != next.CPUMillicores || cfg.PidsMax != next.PidsMax ||
-		cfg.IOWeight != next.IOWeight || cfg.MaxConcurrent != next.MaxConcurrent ||
-		cfg.RequestTimeout != next.RequestTimeout || cfg.Network != next.Network ||
-		!slices.Equal(cfg.Egress, next.Egress)
-	if !slices.Equal(cfg.Schedule, next.Schedule) {
-		a.mu.Lock()
-		running := a.cmd != nil && !a.exited
-		a.mu.Unlock()
-		if running {
-			s.stopSchedule(a)
-			s.startSchedule(a)
-		}
-	}
-
-	s.broadcast()
+	restartRequired := s.activateConfigPatch(a, cfg, next)
 	w.Header().Set("ETag", configETag(next))
 	response := configResponse(next)
 	response.SecretKeys = s.secrets.keys(name)
 	response.RestartRequired = restartRequired
 	writeJSON(w, http.StatusOK, response)
+}
+
+// handleAppConfig reads or updates an app's runtime config. Env and memory changes need a restart to affect the running process; host and schedule changes apply immediately.
+func (s *supervisor) handleAppConfig(w http.ResponseWriter, r *http.Request, name string) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPatch {
+		w.Header().Set("Allow", "GET, PATCH")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if r.Method == http.MethodGet {
+		s.handleAppConfigGet(w, r, name)
+		return
+	}
+	s.handleAppConfigPatch(w, r, name)
 }
