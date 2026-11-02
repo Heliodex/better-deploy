@@ -118,7 +118,7 @@ func seed(ctx context.Context) error {
 		}
 		statements := make([]storage.Statement, 0, len(seeds))
 		for i, entry := range seeds {
-			createdAt := now.Add(-time.Duration(i) * time.Minute).Format(app.TimestampFormat)
+			createdAt := now.Add(-time.Duration(len(seeds)-1-i) * time.Minute).Format(app.TimestampFormat)
 			statements = append(statements, storage.Statement{
 				SQL:  `insert or ignore into monitors (id, name, url, created_at) values (?, ?, ?, ?)`,
 				Args: []any{entry.id, entry.name, entry.url, createdAt},
@@ -160,7 +160,7 @@ func loadMonitors(ctx context.Context) ([]monitor, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err := store.Query(ctx, `select id, name, url, created_at from monitors order by created_at asc, id asc`)
+	rows, err := store.Query(ctx, `select id, name, url, created_at from monitors order by lower(name) asc, id asc`)
 	if err != nil {
 		return nil, err
 	}

@@ -231,9 +231,12 @@ async function checkNow(): Promise<void> {
 			<span>Name</span>
 			<input
 				aria-invalid={fieldErrors.name ? "true" : undefined}
+				aria-label="Monitor name"
+				autocomplete="off"
 				maxlength={60}
 				oninput={() => clearField("name")}
 				placeholder="Payments API"
+				type="text"
 				bind:value={name}
 			>
 			{#if fieldErrors.name}
@@ -244,9 +247,13 @@ async function checkNow(): Promise<void> {
 			<span>URL</span>
 			<input
 				aria-invalid={fieldErrors.url ? "true" : undefined}
+				aria-label="Monitor URL"
+				autocomplete="off"
 				inputmode="url"
 				oninput={() => clearField("url")}
 				placeholder="https://api.example.com/health"
+				spellcheck="false"
+				type="url"
 				bind:value={url}
 			>
 			{#if fieldErrors.url}
