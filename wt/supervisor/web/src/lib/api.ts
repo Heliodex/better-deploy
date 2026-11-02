@@ -107,7 +107,10 @@ async function parseJSON<T>(response: Response, schema: GenericSchema<T>): Promi
 	}
 
 	const parsed = safeParse(schema, data)
-	if (!parsed.success) throw new Error("The supervisor returned an unexpected response shape.")
+	if (!parsed.success) {
+		const preview = JSON.stringify(data)?.slice(0, 300) ?? "no body"
+		throw new Error(`The supervisor returned an unexpected response shape (${response.status}: ${preview}).`)
+	}
 
 	return parsed.output
 }
