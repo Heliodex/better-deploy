@@ -142,7 +142,7 @@ func namespaceLibDirs(interp string) []string {
 
 // namespaceIDs picks the host uid mapped to container uid 0.
 // Untrusted apps use their allocated uid; trusted apps may use namespaces only when the supervisor is not root, because there is no per-app uid to map to otherwise.
-func (s *supervisor) namespaceIDs(iso *launchIsolation) (int, int, bool, error) {
+func (s *supervisor) namespaceIDs(iso *isolationPlan) (int, int, bool, error) {
 	if iso != nil && iso.uid > 0 {
 		if os.Geteuid() != 0 {
 			return 0, 0, false, fmt.Errorf("untrusted app namespaces need root")
@@ -261,7 +261,7 @@ func resetNamespaceRoots(stateDir string, untrusted bool) error {
 }
 
 // prepareNamespaces builds the namespace plan for one launch attempt.
-func (s *supervisor) prepareNamespaces(a *app, iso *launchIsolation) (*nsLaunch, error) {
+func (s *supervisor) prepareNamespaces(a *app, iso *isolationPlan) (*nsLaunch, error) {
 	hostID, hostGID, allowSetgroups, err := s.namespaceIDs(iso)
 	if err != nil {
 		return nil, err

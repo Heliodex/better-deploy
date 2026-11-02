@@ -131,6 +131,8 @@ func (s *supervisor) stop(a *app) {
 	a.retired = true
 	a.healthOK = false
 	a.ready = false
+	iso := a.isolation
+	a.isolation = nil
 	if a.timer != nil {
 		a.timer.Stop()
 		a.timer = nil
@@ -138,7 +140,10 @@ func (s *supervisor) stop(a *app) {
 	a.mu.Unlock()
 	s.stopSchedule(a)
 	s.kill(a)
-	s.releaseAppIsolation(a)
+	if iso == nil {
+		iso = &isolationPlan{app: a}
+	}
+	iso.close(s)
 }
 
 // drainAndStop stops routing new requests, waits for in-flight work, then stops the process.
@@ -396,6 +401,7 @@ func (s *supervisor) adoptApp(name, dir string, cfg appConfig, info runnerAppInf
 	stream := s.runner.Stream(runnerKey(info.ID, name))
 	logging := log.New(os.Stderr, "["+name+"] ", 0).Writer()
 	go s.consumeRunnerStream(a, cmd, a.done, stream, io.MultiWriter(a.logs, logging), "")
+	a.isolation = &isolationPlan{app: a}
 	a.proxy = s.newProxy(a)
 	s.startSchedule(a)
 	return a, nil

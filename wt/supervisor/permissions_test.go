@@ -152,7 +152,7 @@ func TestTrustedPrepareLaunchCreatesNoCgroup(t *testing.T) {
 	s.cgroups = newCgroupManager(root)
 	a := &app{name: "demo", dir: t.TempDir()}
 
-	iso, err := s.prepareLaunch(a, appConfig{DiskMB: 256})
+	iso, err := s.prepareIsolation(a, appConfig{DiskMB: 256})
 	if err != nil {
 		t.Fatal(err)
 	}

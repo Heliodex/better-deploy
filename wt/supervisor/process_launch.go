@@ -20,8 +20,7 @@ type launchSession struct {
 	cfg        appConfig
 	source     string
 	args, env  []string
-	iso        *launchIsolation
-	ns         *nsLaunch
+	iso        *isolationPlan
 	plan       []byte
 	deadline   time.Time
 	namespaced bool
@@ -176,7 +175,13 @@ func (s *supervisor) launch(a *app, source string) error {
 		return err
 	}
 	session.id = a.name + "-" + newRequestID()
-	return s.launchRunner(a, session)
+	if err := s.launchRunner(a, session); err != nil {
+		return err
+	}
+	a.mu.Lock()
+	a.isolation = session.iso
+	a.mu.Unlock()
+	return nil
 }
 
 // prepareLaunchSession resolves the environment, isolation and namespace inputs before any process starts.
@@ -196,28 +201,20 @@ func (s *supervisor) prepareLaunchSession(a *app, source string, cfg appConfig, 
 	if a.logs != nil {
 		a.logs.setSecrets(s.appRedactionValues(a.name))
 	}
-	iso, err := s.prepareLaunch(a, cfg)
+	iso, err := s.prepareIsolation(a, cfg)
 	if err != nil {
 		a.recordError(err)
 		return nil, err
 	}
 	session.iso = iso
-	if !session.namespaced {
+	if iso.ns == nil {
 		return session, nil
 	}
-	ns, err := s.prepareNamespaces(a, iso)
+	plan, err := json.Marshal(iso.ns.plan)
 	if err != nil {
-		s.releaseIsolation(a, iso)
-		a.recordError(err)
-		return nil, err
-	}
-	plan, err := json.Marshal(ns.plan)
-	if err != nil {
-		s.releaseIsolation(a, iso)
+		iso.close(s)
 		return nil, fmt.Errorf("encode namespace plan: %w", err)
 	}
-	iso.nsRoot = ns.plan.Root
-	session.ns = ns
 	session.plan = plan
 	return session, nil
 }
@@ -254,14 +251,14 @@ func (s *supervisor) launchRunner(a *app, l *launchSession) error {
 	}
 	if l.namespaced {
 		request.Plan = l.plan
-		request.HostID = l.ns.hostID
-		request.HostGID = l.ns.hostGID
-		request.AllowSetgroups = l.ns.plan.ClearGroups
+		request.HostID = l.iso.ns.hostID
+		request.HostGID = l.iso.ns.hostGID
+		request.AllowSetgroups = l.iso.ns.plan.ClearGroups
 	}
 
 	stream, started, err := s.runner.Start(request)
 	if err != nil {
-		s.releaseIsolation(a, l.iso)
+		l.iso.close(s)
 		a.recordError(err)
 		return err
 	}
@@ -280,22 +277,16 @@ func (s *supervisor) launchRunner(a *app, l *launchSession) error {
 	}
 	a.mu.Unlock()
 
-	nsRoot := ""
-	if l.ns != nil {
-		nsRoot = l.ns.plan.Root
-	}
-	go s.consumeRunnerStream(a, cmd, done, stream, out, nsRoot)
+	go s.consumeRunnerStream(a, cmd, done, stream, out, l.iso.nsRoot)
 
 	fail := func(err error) error {
 		a.recordError(err)
 		s.kill(a)
-		s.releaseIsolation(a, l.iso)
+		l.iso.close(s)
 		return err
 	}
-	if l.iso.cgroup != "" && s.cgroups != nil {
-		if err := s.cgroups.addPID(a.name, cmd.Process.Pid); err != nil {
-			return fail(err)
-		}
+	if err := l.iso.attachProcess(s, cmd.Process.Pid); err != nil {
+		return fail(err)
 	}
 	if l.namespaced {
 		if err := s.runner.Go(l.id); err != nil {
@@ -313,7 +304,7 @@ func (s *supervisor) awaitAppReady(a *app, l *launchSession, done <-chan struct{
 	if err := s.waitForPort(a, finder, done, l.deadline); err != nil {
 		return withLaunchLog(l.source, recent, err)
 	}
-	if err := s.applyStorageEgress(a, l.cfg); err != nil {
+	if err := l.iso.activate(s, l.cfg); err != nil {
 		return err
 	}
 	if err := s.migrateBeforeReady(a, l.cfg, done); err != nil {
@@ -323,21 +314,6 @@ func (s *supervisor) awaitAppReady(a *app, l *launchSession, done <-chan struct{
 		return withLaunchLog(l.source, recent, err)
 	}
 	s.markAppReady(a)
-	return nil
-}
-
-// applyStorageEgress installs per-app rules before readiness and before the proxy routes traffic.
-func (s *supervisor) applyStorageEgress(a *app, cfg appConfig) error {
-	if cfg.Network != "storage" {
-		return nil
-	}
-	if !s.cfg.untrusted() {
-		log.Printf("app %s: network storage in trusted mode has no per-app uid, so inherit-network stays unrestricted", a.name)
-		return nil
-	}
-	if err := s.applyEgress(a); err != nil {
-		return fmt.Errorf("egress rules: %w", err)
-	}
 	return nil
 }
 

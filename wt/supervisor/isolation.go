@@ -9,15 +9,19 @@ import (
 	"path/filepath"
 )
 
-type launchIsolation struct {
+// isolationPlan owns every per-launch resource outside the process itself.
+type isolationPlan struct {
+	app            *app
 	uid, gid       int
 	cgroup, nsRoot string
+	ns             *nsLaunch
+	closed         bool
 }
 
-// prepareLaunch gives an untrusted app its identity and cgroup before the process starts.
-// Trusted apps keep the old single-user behaviour; cgroup failures are only warnings there.
-func (s *supervisor) prepareLaunch(a *app, cfg appConfig) (*launchIsolation, error) {
-	iso := &launchIsolation{}
+// prepareIsolation allocates the app uid, /data ownership, quota, cgroup and namespaces before the process starts.
+// Trusted apps keep the single-user behaviour; cgroup failures are only warnings there.
+func (s *supervisor) prepareIsolation(a *app, cfg appConfig) (*isolationPlan, error) {
+	plan := &isolationPlan{app: a}
 	dataDir := filepath.Join(s.cfg.stateDir, a.name)
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return nil, fmt.Errorf("state dir: %w", err)
@@ -40,7 +44,7 @@ func (s *supervisor) prepareLaunch(a *app, cfg appConfig) (*launchIsolation, err
 		if err != nil {
 			return nil, fmt.Errorf("allocate app uid: %w", err)
 		}
-		iso.uid, iso.gid = uid, uid
+		plan.uid, plan.gid = uid, uid
 		if err := chownTree(dataDir, uid, uid); err != nil {
 			return nil, fmt.Errorf("chown /data to uid %d: %w", uid, err)
 		}
@@ -61,9 +65,54 @@ func (s *supervisor) prepareLaunch(a *app, cfg appConfig) (*launchIsolation, err
 		if err != nil {
 			return nil, fmt.Errorf("cgroup: %w", err)
 		}
-		iso.cgroup = path
+		plan.cgroup = path
 	}
-	return iso, nil
+	if s.cfg.appNamespaces {
+		ns, err := s.prepareNamespaces(a, plan)
+		if err != nil {
+			plan.close(s)
+			return nil, err
+		}
+		plan.ns = ns
+		plan.nsRoot = ns.plan.Root
+	}
+	return plan, nil
+}
+
+// attachProcess adds a started process to the plan's cgroup.
+func (p *isolationPlan) attachProcess(s *supervisor, pid int) error {
+	if p == nil || p.cgroup == "" || s.cgroups == nil {
+		return nil
+	}
+	return s.cgroups.addPID(p.app.name, pid)
+}
+
+// activate installs the firewall rules that need the app's listening port.
+func (p *isolationPlan) activate(s *supervisor, cfg appConfig) error {
+	if cfg.Network != "storage" {
+		return nil
+	}
+	if !s.cfg.untrusted() {
+		log.Printf("app %s: network storage in trusted mode has no per-app uid, so inherit-network stays unrestricted", p.app.name)
+		return nil
+	}
+	if err := s.applyEgress(p.app); err != nil {
+		return fmt.Errorf("egress rules: %w", err)
+	}
+	return nil
+}
+
+// close removes the plan's firewall, cgroup and namespace resources. It is safe to call more than once.
+func (p *isolationPlan) close(s *supervisor) {
+	if p == nil || p.closed {
+		return
+	}
+	p.closed = true
+	s.removeAppEgress(p.app)
+	s.removeAppCgroup(p.app)
+	if p.nsRoot != "" {
+		_ = os.RemoveAll(p.nsRoot)
+	}
 }
 
 // ensureDirTraversable adds execute bits to a parent directory without granting read or write access.
@@ -129,29 +178,6 @@ func ensureAppReadable(root string) error {
 			return nil
 		}
 	})
-}
-
-// releaseIsolation removes resources that belong to one launch attempt. The process must already be gone.
-func (s *supervisor) releaseIsolation(a *app, iso *launchIsolation) {
-	if a == nil {
-		return
-	}
-	s.removeAppEgress(a)
-	if iso != nil && iso.cgroup != "" {
-		s.removeAppCgroup(a)
-	}
-	if iso != nil && iso.nsRoot != "" {
-		_ = os.RemoveAll(iso.nsRoot)
-	}
-}
-
-// releaseAppIsolation removes per-app resources on stop, using the app name so a stopped app leaves nothing behind.
-func (s *supervisor) releaseAppIsolation(a *app) {
-	if a == nil {
-		return
-	}
-	s.removeAppEgress(a)
-	s.removeAppCgroup(a)
 }
 
 func (s *supervisor) removeAppEgress(a *app) {

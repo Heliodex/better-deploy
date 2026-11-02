@@ -137,6 +137,7 @@ type app struct {
 	mu               sync.Mutex
 	scheduleCancel   context.CancelFunc
 	cmd              *exec.Cmd
+	isolation        *isolationPlan
 	done             chan struct{}
 	exited, retired  bool
 	starting         bool
