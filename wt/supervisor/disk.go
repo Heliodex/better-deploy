@@ -284,7 +284,7 @@ func (s *supervisor) handleUsage(w http.ResponseWriter, r *http.Request) {
 func (s *supervisor) monitorDiskBudget() {
 	ticker := time.NewTicker(diskBudgetInterval)
 	defer ticker.Stop()
-	var watch budgetWatch
+	budget := byteBudget{name: "disk budget", limit: s.cfg.diskBudgetBytes}
 	for range ticker.C {
 		if s.stopping.Load() {
 			return
@@ -294,6 +294,6 @@ func (s *supervisor) monitorDiskBudget() {
 			log.Printf("disk budget: %v", err)
 			continue
 		}
-		watch.update(overByteBudget(s.cfg.diskBudgetBytes, totals.totalBytes), "disk budget", totals.totalBytes, s.cfg.diskBudgetBytes)
+		budget.observe(totals.totalBytes)
 	}
 }

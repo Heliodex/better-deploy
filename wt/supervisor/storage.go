@@ -83,9 +83,8 @@ type storageServer struct {
 	// tempDir is the process-wide SQLite temp directory; tempBudget is its byte budget, zero for unlimited.
 	// tempOver is set by the monitor and rejects new storage requests until usage falls back under the budget.
 	tempDir    string
-	tempBudget int64
+	tempBudget *byteBudget
 	tempOver   atomic.Bool
-	tempWatch  budgetWatch
 
 	sessionMu      sync.Mutex
 	sessionCond    *sync.Cond
@@ -217,7 +216,7 @@ func (s *storageServer) setTempDir(dir string, budget int64) error {
 	}
 	s.mu.Lock()
 	s.tempDir = dir
-	s.tempBudget = max(budget, 0)
+	s.tempBudget = &byteBudget{name: "storage temp", limit: max(budget, 0)}
 	s.mu.Unlock()
 	s.tempOver.Store(false)
 	return nil
@@ -238,9 +237,11 @@ func (s *storageServer) checkTemp() {
 	dir := s.tempDir
 	budget := s.tempBudget
 	s.mu.Unlock()
-	if dir == "" || budget <= 0 {
+	if dir == "" || !budget.enabled() {
 		s.tempOver.Store(false)
-		s.tempWatch.update(false, "storage temp", 0, budget)
+		if budget != nil {
+			budget.observe(0)
+		}
 		return
 	}
 	size, err := dirSize(dir)
@@ -248,9 +249,7 @@ func (s *storageServer) checkTemp() {
 		log.Printf("storage temp: measure %s: %v", dir, err)
 		return
 	}
-	over := overByteBudget(budget, size)
-	s.tempOver.Store(over)
-	s.tempWatch.update(over, "storage temp", size, budget)
+	s.tempOver.Store(budget.observe(size))
 }
 
 func (s *storageServer) monitorTemp(ctx context.Context) {

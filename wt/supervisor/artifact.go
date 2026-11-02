@@ -285,12 +285,13 @@ func (s *supervisor) pruneArtifactCache(keep string) {
 		files = append(files, cacheEntry{path: path, size: info.Size(), mod: info.ModTime()})
 	}
 	limit := s.artifactCacheMaxBytes()
-	if total <= limit {
+	budget := byteBudget{name: "artifact cache", limit: limit}
+	if !budget.exceeded(total) {
 		return
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].mod.Before(files[j].mod) })
 	for _, file := range files {
-		if total <= limit {
+		if !budget.exceeded(total) {
 			break
 		}
 		if err := os.Remove(file.path); err != nil {

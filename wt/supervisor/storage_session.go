@@ -317,7 +317,7 @@ func (s *storageServer) registerSession(w http.ResponseWriter, session *storageS
 			appSessions++
 		}
 	}
-	if appSessions >= maxStorageSessions {
+	if !countBudget(maxStorageSessions).allows(int64(appSessions)) {
 		s.sessionMu.Unlock()
 		_ = s.finishSession(session, false, context.Background())
 		writeError(w, http.StatusTooManyRequests, "too many storage sessions")

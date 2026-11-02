@@ -158,7 +158,7 @@ func (s *supervisor) launch(a *app, source string) error {
 	a.port = 0
 	cfg := a.cfg
 	deadline := time.Now().Add(cfg.startupLimit())
-	if cfg.MaxConcurrent > 0 {
+	if countBudget(cfg.MaxConcurrent).enabled() {
 		a.slots = make(chan struct{}, cfg.MaxConcurrent)
 	} else {
 		a.slots = nil
