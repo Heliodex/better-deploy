@@ -4,7 +4,7 @@ Architecture simplification review, 2026-11-01. This pass looks for duplicated m
 
 The short assessment: the code is clean at function level after the earlier splits, but the same concepts are still implemented two or three times. The biggest wins are removing the test-only direct launch path, giving isolation one lifecycle, and making the storage and configuration surfaces share one representation.
 
-The first four items below are now implemented; the remaining list is unchanged in priority order.
+The first five items below are now implemented; the remaining list is unchanged in priority order.
 
 ## Small changes in this pass
 
@@ -38,10 +38,11 @@ The first four items below are now implemented; the remaining list is unchanged 
    - This is also the prerequisite for a real `wt config` that shows effective values and their source.
    - Implemented in `23ed5a9`. `bindString`, `bindBool`, `bindInt` and `bindInt64` load the environment default and register the flag on one line each, so `configFromEnv` and the separate flag pass are gone. `normalizeAppConfig`, `readAppConfig` and `persistAppConfig` now take an explicit tenant mode.
 
-5. [ ] **Replace the manual app, storage, identity and admin dispatch with one route table.** The supervisor has 72 HTTP handlers and several independent prefix switches: `handleAppPrefixRoute`, `handleAppVerb`, `storageServer.handle`, the identity action switch and the admin routes. Method checks, audit wrapping, body limits and scope checks are repeated at each layer, and the hand-written `openapi.yaml` can drift from all of them.
+5. [x] **Replace the manual app, storage, identity and admin dispatch with one route table.** The supervisor has 72 HTTP handlers and several independent prefix switches: `handleAppPrefixRoute`, `handleAppVerb`, `storageServer.handle`, the identity action switch and the admin routes. Method checks, audit wrapping, body limits and scope checks are repeated at each layer, and the hand-written `openapi.yaml` can drift from all of them.
    - Declare routes as `{pattern, method, scope, body limit, handler}` and let one dispatcher apply authentication, audit, `Allow` headers and 404s.
    - Generate the OpenAPI document and the panel client from the same table, so a new route cannot be added without its contract.
    - Do this after item 3, so storage routes are already methods rather than closures.
+   - Implemented in `5d2d277`. `router.go` matches method and path segments, with one table each for app, storage, identity, admin and public routes. App entries carry the action label used for scope checks and audit, so `handleApp` no longer parses action strings. The hand-written `openapi.yaml` and panel client are not generated from the table yet; that remains the second half of this item.
 
 6. [ ] **Unify operator tokens and platform identity behind one principal and session layer.** `authStore` keeps hashed bearer tokens in a JSON file, `identityStore` keeps users, PBKDF2 hashes and sessions, and `supervisor.requireIdentity` bridges both. Login, logout, audit actors and app scope checks each special-case which store answered.
    - Define one `Principal` with an ID, kind, role and app allowlist, and one `Session` interface with `Current`, `Create` and `Delete`.
@@ -75,8 +76,8 @@ The first four items below are now implemented; the remaining list is unchanged 
 
 ## If I picked the next three
 
-1. Replace the manual dispatch with a route table that also generates the OpenAPI document and panel client.
-2. Unify operator tokens and platform identity under one principal and session layer.
-3. Collapse backup and deployment content storage into one content-addressed store with retention policies.
+1. Unify operator tokens and platform identity under one principal and session layer.
+2. Collapse backup and deployment content storage into one content-addressed store with retention policies.
+3. Consolidate resource accounting and admission across the disk, temp, quota, cache and session limits.
 
 Keep the invariants in `notes/fixes2.md` under "Do not regress"; none of the items above requires weakening the wasm artifact, blue/green deploys, the storage authorizer, sessions, scoped tokens or the tested isolation boundaries.
