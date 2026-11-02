@@ -118,8 +118,6 @@ linters:
                 - G703
                 - G704
                 - G706
-        lll:
-            line-length: 200
         mnd:
             ignored-numbers:
                 - "0"
