@@ -14,6 +14,7 @@ func TestStorageJobsAPI(t *testing.T) {
 	a.mu.Lock()
 	a.ready = false
 	a.mu.Unlock()
+
 	storage := &storageServer{jobs: manager}
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/jobs", strings.NewReader(`{"path":"/jobs/run","body":"hello","runAt":"2030-01-01T00:00:00Z","maxAttempts":2}`))

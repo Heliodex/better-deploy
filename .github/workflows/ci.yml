@@ -143,9 +143,10 @@ jobs:
               working-directory: wt/supervisor
               run: go generate ./...
 
-            - name: Install guestbook web dependencies
-              working-directory: wt/example/guestbook/web
-              run: bun install --frozen-lockfile
+            - name: Install example web dependencies
+              run: |
+                  (cd wt/example/guestbook/web && bun install --frozen-lockfile)
+                  (cd wt/example/pulse/web && bun install --frozen-lockfile)
 
             - name: Check namespace test support
               run: |
@@ -192,13 +193,14 @@ jobs:
                       done
                   } >> "$GITHUB_STEP_SUMMARY"
 
-            - name: Generate guestbook contract and assets
+            - name: Generate example contracts and guestbook assets
               working-directory: wt/example/guestbook
               run: |
                   go generate ./...
                   (cd web && bun run build)
                   rm -rf static
                   cp -r web/build static
+                  (cd ../pulse && go generate ./contract/)
 
             - name: Vet host packages
               run: |
