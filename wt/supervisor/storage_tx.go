@@ -3,30 +3,14 @@ package main
 import (
 	"context"
 	"database/sql"
-	"encoding/json/jsontext"
 	"fmt"
 	"net/http"
 	"time"
 )
 
-type storageTransactionStatement struct {
-	SQL    string           `json:"sql"`
-	Params []jsontext.Value `json:"params,omitempty"`
-	// Query marks statements whose rows should be returned; otherwise the result carries rows_affected and last_insert_id.
-	Query bool `json:"query,omitempty"`
-}
-
-type storageTransactionRequest struct {
-	Statements []storageTransactionStatement `json:"statements"`
-}
-
-type storageTransactionResponse struct {
-	Results []storageResult `json:"results"`
-}
-
 // transaction runs statements in one SQLite transaction and can return rows from reads as well as write counts.
 // decodeStorageStatements validates SQL and parameters for a bounded statement list.
-func decodeStorageStatements(statements []storageTransactionStatement, requireOne bool) ([][]any, error) {
+func decodeStorageStatements(statements []storageStatement, requireOne bool) ([][]any, error) {
 	if requireOne && len(statements) == 0 {
 		return nil, fmt.Errorf("%w: at least one statement is required", errStorageInvalid)
 	}
@@ -48,7 +32,7 @@ func decodeStorageStatements(statements []storageTransactionStatement, requireOn
 }
 
 // validateStorageStatements writes the validation error and reports whether the statements are usable.
-func validateStorageStatements(w http.ResponseWriter, statements []storageTransactionStatement, requireOne bool) ([][]any, bool) {
+func validateStorageStatements(w http.ResponseWriter, statements []storageStatement, requireOne bool) ([][]any, bool) {
 	params, err := decodeStorageStatements(statements, requireOne)
 	if err != nil {
 		writeStorageError(w, err)
@@ -58,8 +42,8 @@ func validateStorageStatements(w http.ResponseWriter, statements []storageTransa
 }
 
 // readTransactionRequest parses and validates one batch request.
-func readTransactionRequest(w http.ResponseWriter, r *http.Request) (storageTransactionRequest, [][]any, bool) {
-	var req storageTransactionRequest
+func readTransactionRequest(w http.ResponseWriter, r *http.Request) (storageStatementsRequest, [][]any, bool) {
+	var req storageStatementsRequest
 	if !readStorageJSON(w, r, &req) {
 		return req, nil, false
 	}
@@ -68,7 +52,7 @@ func readTransactionRequest(w http.ResponseWriter, r *http.Request) (storageTran
 }
 
 // executeStatement runs one statement inside the transaction and records its row-change range.
-func executeStatement(ctx context.Context, tx *sql.Tx, statement storageTransactionStatement, params []any, changes *rowChangeCollector, index int) (storageResult, int, int, error) {
+func executeStatement(ctx context.Context, tx *sql.Tx, statement storageStatement, params []any, changes *rowChangeCollector, index int) (storageResult, int, int, error) {
 	start := len(changes.rows)
 	if statement.Query {
 		rows, err := tx.QueryContext(ctx, statement.SQL, params...)
@@ -95,7 +79,7 @@ func executeStatement(ctx context.Context, tx *sql.Tx, statement storageTransact
 }
 
 // executeTransaction runs every statement in one transaction and returns the per-statement results and row ranges.
-func (s *storageServer) executeTransaction(ctx context.Context, app string, req storageTransactionRequest, params [][]any) ([]storageResult, []int, []int, *rowChangeCollector, error) {
+func (s *storageServer) executeTransaction(ctx context.Context, app string, req storageStatementsRequest, params [][]any) ([]storageResult, []int, []int, *rowChangeCollector, error) {
 	results := make([]storageResult, len(req.Statements))
 	starts := make([]int, len(req.Statements))
 	ends := make([]int, len(req.Statements))
@@ -130,7 +114,7 @@ func (s *storageServer) executeTransaction(ctx context.Context, app string, req 
 }
 
 // transactionChanges turns the non-query statements into change-log entries.
-func transactionChanges(req storageTransactionRequest, results []storageResult, starts, ends []int, collector *rowChangeCollector) []storageChange {
+func transactionChanges(req storageStatementsRequest, results []storageResult, starts, ends []int, collector *rowChangeCollector) []storageChange {
 	changes := []storageChange{}
 	for i, statement := range req.Statements {
 		if statement.Query {
@@ -166,5 +150,5 @@ func (s *storageServer) transaction(w http.ResponseWriter, r *http.Request, app 
 		return
 	}
 	s.logChanges(app, transactionChanges(req, results, starts, ends, collector))
-	writeJSON(w, http.StatusOK, storageTransactionResponse{Results: results})
+	writeJSON(w, http.StatusOK, storageStatementsResponse{Results: results})
 }

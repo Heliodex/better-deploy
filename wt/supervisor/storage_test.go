@@ -406,7 +406,7 @@ func TestStorageTransaction(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("transaction: %d %s", resp.StatusCode, readBody(t, resp))
 	}
-	var result storageTransactionResponse
+	var result storageStatementsResponse
 	if err := json.UnmarshalRead(resp.Body, &result); err != nil {
 		t.Fatal(err)
 	}

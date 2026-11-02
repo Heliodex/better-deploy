@@ -35,7 +35,7 @@ type storageSession struct {
 }
 
 type storageSessionWrite struct {
-	statement storageTransactionStatement
+	statement storageStatement
 	result    storageResult
 	start     int
 	end       int
@@ -380,7 +380,7 @@ func (s *storageServer) sessionQuery(w http.ResponseWriter, r *http.Request, app
 		}
 		if end := len(session.collector.rows); end > start {
 			session.writes = append(session.writes, storageSessionWrite{
-				statement: storageTransactionStatement{SQL: req.SQL, Params: req.Params, Query: true},
+				statement: storageStatement{SQL: req.SQL, Params: req.Params, Query: true},
 				start:     start,
 				end:       end,
 			})
@@ -423,7 +423,7 @@ func (s *storageServer) sessionExec(w http.ResponseWriter, r *http.Request, app,
 		result.RowsAffected, _ = res.RowsAffected()
 		result.LastInsertID, _ = res.LastInsertId()
 		session.writes = append(session.writes, storageSessionWrite{
-			statement: storageTransactionStatement{SQL: req.SQL, Params: req.Params},
+			statement: storageStatement{SQL: req.SQL, Params: req.Params},
 			result:    result,
 			start:     start,
 			end:       end,

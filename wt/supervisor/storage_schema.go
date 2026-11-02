@@ -439,7 +439,7 @@ func prepareMigration(version int, statements []storageStatement) ([][]any, stri
 	if version < 1 || version > maxStorageMigrationVersion {
 		return nil, "", fmt.Errorf("%w: version must be between 1 and %d", errStorageInvalid, maxStorageMigrationVersion)
 	}
-	params, err := decodeStorageStatements(batchStatements(statements), false)
+	params, err := decodeStorageStatements(statements, false)
 	if err != nil {
 		return nil, "", err
 	}

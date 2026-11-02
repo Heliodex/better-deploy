@@ -116,16 +116,19 @@ type storageResult struct {
 	Truncated    bool     `json:"truncated"`
 }
 
+// storageStatement is one SQL statement in a batch, transaction or migration.
 type storageStatement struct {
 	SQL    string           `json:"sql"`
 	Params []jsontext.Value `json:"params,omitempty"`
+	// Query marks statements whose rows should be returned; otherwise the result carries rows_affected and last_insert_id.
+	Query bool `json:"query,omitempty"`
 }
 
-type storageBatchRequest struct {
+type storageStatementsRequest struct {
 	Statements []storageStatement `json:"statements"`
 }
 
-type storageBatchResponse struct {
+type storageStatementsResponse struct {
 	Results []storageResult `json:"results"`
 }
 
@@ -724,13 +727,27 @@ func (s *storageServer) restoreFrom(ctx context.Context, app, src string) error 
 	})
 }
 
-func (s *storageServer) handleSQL(w http.ResponseWriter, r *http.Request, fn func(http.ResponseWriter, *http.Request)) {
+func (s *storageServer) handleSQL(w http.ResponseWriter, r *http.Request, app string, fn func(http.ResponseWriter, *http.Request, string)) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	fn(w, r)
+	fn(w, r, app)
+}
+
+// handleSessionAction routes one pinned-session operation.
+func (s *storageServer) handleSessionAction(w http.ResponseWriter, r *http.Request, app, id, action string) {
+	switch action {
+	case "query":
+		s.sessionQuery(w, r, app, id)
+	case "exec":
+		s.sessionExec(w, r, app, id)
+	case "commit":
+		s.closeSessionRequest(w, r, app, id, true)
+	case "rollback":
+		s.closeSessionRequest(w, r, app, id, false)
+	}
 }
 
 func readStorageJSON(w http.ResponseWriter, r *http.Request, out any) bool {
@@ -812,17 +829,8 @@ func (s *storageServer) exec(w http.ResponseWriter, r *http.Request, app string)
 	writeJSON(w, http.StatusOK, result)
 }
 
-// batchStatements converts write statements into the shared transaction form.
-func batchStatements(statements []storageStatement) []storageTransactionStatement {
-	out := make([]storageTransactionStatement, len(statements))
-	for i, statement := range statements {
-		out[i] = storageTransactionStatement{SQL: statement.SQL, Params: statement.Params}
-	}
-	return out
-}
-
 // logBatchChanges turns the batch statements into change-log entries.
-func (s *storageServer) logBatchChanges(app string, r *http.Request, req storageBatchRequest, results []storageResult, starts, ends []int, collector *rowChangeCollector) {
+func (s *storageServer) logBatchChanges(app string, r *http.Request, req storageStatementsRequest, results []storageResult, starts, ends []int, collector *rowChangeCollector) {
 	changes := make([]storageChange, len(req.Statements))
 	for i, statement := range req.Statements {
 		var rows []rowChange
@@ -845,25 +853,30 @@ func (s *storageServer) logBatchChanges(app string, r *http.Request, req storage
 }
 
 func (s *storageServer) batch(w http.ResponseWriter, r *http.Request, app string) {
-	var req storageBatchRequest
+	var req storageStatementsRequest
 	if !readStorageJSON(w, r, &req) {
 		return
 	}
-	statements := batchStatements(req.Statements)
-	params, ok := validateStorageStatements(w, statements, true)
+	for i, statement := range req.Statements {
+		if statement.Query {
+			writeStorageError(w, fmt.Errorf("%w: batch statement %d cannot query", errStorageInvalid, i+1))
+			return
+		}
+	}
+	params, ok := validateStorageStatements(w, req.Statements, true)
 	if !ok {
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), storageTimeout)
 	defer cancel()
 
-	results, starts, ends, collector, err := s.executeTransaction(ctx, app, storageTransactionRequest{Statements: statements}, params)
+	results, starts, ends, collector, err := s.executeTransaction(ctx, app, req, params)
 	if err != nil {
 		writeStorageError(w, err)
 		return
 	}
 	s.logBatchChanges(app, r, req, results, starts, ends, collector)
-	writeJSON(w, http.StatusOK, storageBatchResponse{Results: results})
+	writeJSON(w, http.StatusOK, storageStatementsResponse{Results: results})
 }
 
 // readStorageRows scans and encodes a query result, stopping at maxRows or the result size limit.
@@ -1069,54 +1082,31 @@ func (s *storageServer) handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.URL.Path == "/v1/sessions" {
-		s.handleSQL(w, r, func(w http.ResponseWriter, r *http.Request) {
-			s.createSession(w, r, app)
-		})
+		s.handleSQL(w, r, app, s.createSession)
 		return
 	}
 	if id, action, ok := sessionAction(r.URL.Path); ok {
-		s.handleSQL(w, r, func(w http.ResponseWriter, r *http.Request) {
-			switch action {
-			case "query":
-				s.sessionQuery(w, r, app, id)
-			case "exec":
-				s.sessionExec(w, r, app, id)
-			case "commit":
-				s.closeSessionRequest(w, r, app, id, true)
-			case "rollback":
-				s.closeSessionRequest(w, r, app, id, false)
-			}
+		s.handleSQL(w, r, app, func(w http.ResponseWriter, r *http.Request, app string) {
+			s.handleSessionAction(w, r, app, id, action)
 		})
 		return
 	}
 
 	switch r.URL.Path {
 	case "/v1/query":
-		s.handleSQL(w, r, func(w http.ResponseWriter, r *http.Request) {
-			s.query(w, r, app)
-		})
+		s.handleSQL(w, r, app, s.query)
 	case "/v1/exec":
-		s.handleSQL(w, r, func(w http.ResponseWriter, r *http.Request) {
-			s.exec(w, r, app)
-		})
+		s.handleSQL(w, r, app, s.exec)
 	case "/v1/write":
-		s.handleSQL(w, r, func(w http.ResponseWriter, r *http.Request) {
-			s.writeReturning(w, r, app)
-		})
+		s.handleSQL(w, r, app, s.writeReturning)
 	case "/v1/batch":
-		s.handleSQL(w, r, func(w http.ResponseWriter, r *http.Request) {
-			s.batch(w, r, app)
-		})
+		s.handleSQL(w, r, app, s.batch)
 	case "/v1/transaction":
-		s.handleSQL(w, r, func(w http.ResponseWriter, r *http.Request) {
-			s.transaction(w, r, app)
-		})
+		s.handleSQL(w, r, app, s.transaction)
 	case "/v1/schema":
 		s.readSchema(w, r, app)
 	case "/v1/migrate":
-		s.handleSQL(w, r, func(w http.ResponseWriter, r *http.Request) {
-			s.runMigration(w, r, app)
-		})
+		s.handleSQL(w, r, app, s.runMigration)
 	default:
 		http.NotFound(w, r)
 	}
