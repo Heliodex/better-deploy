@@ -234,102 +234,11 @@ type logLine struct {
 	Message string `json:"message"`
 }
 
-func runLogs(args []string) error {
-	cfg, rest, err := clientFlags("logs", args, true)
-	if err != nil {
-		return err
-	}
-	if len(rest) == 0 {
-		return fmt.Errorf("usage: wt logs <app> [--tail N] [--level LEVEL] [--source app|supervisor] [--q TEXT] [--follow] [--json]")
-	}
-	name := rest[0]
-	tailValue, levelValue, sourceValue, queryValue := 200, "", "", ""
-	followValue := false
-	for index := 1; index < len(rest); index++ {
-		arg := rest[index]
-		switch {
-		case arg == "--follow":
-			followValue = true
-		case arg == "--json":
-			cfg.jsonOut = true
-		case arg == "--tail" && index+1 < len(rest):
-			index++
-			tailValue, err = strconv.Atoi(rest[index])
-			if err != nil {
-				return fmt.Errorf("tail must be an integer")
-			}
-		case strings.HasPrefix(arg, "--tail="):
-			tailValue, err = strconv.Atoi(strings.TrimPrefix(arg, "--tail="))
-			if err != nil {
-				return fmt.Errorf("tail must be an integer")
-			}
-		case arg == "--level" && index+1 < len(rest):
-			index++
-			levelValue = rest[index]
-		case strings.HasPrefix(arg, "--level="):
-			levelValue = strings.TrimPrefix(arg, "--level=")
-		case arg == "--source" && index+1 < len(rest):
-			index++
-			sourceValue = rest[index]
-		case strings.HasPrefix(arg, "--source="):
-			sourceValue = strings.TrimPrefix(arg, "--source=")
-		case arg == "--q" && index+1 < len(rest):
-			index++
-			queryValue = rest[index]
-		case strings.HasPrefix(arg, "--q="):
-			queryValue = strings.TrimPrefix(arg, "--q=")
-		default:
-			return fmt.Errorf("unexpected argument %q", arg)
-		}
-	}
-	values := map[string]string{"tail": strconv.Itoa(tailValue)}
-	if levelValue != "" {
-		values["level"] = levelValue
-	}
-	if sourceValue != "" {
-		values["source"] = sourceValue
-	}
-	if queryValue != "" {
-		values["q"] = queryValue
-	}
-	path := "/apps/" + name + "/logs"
-	if followValue {
-		path += "/stream"
-	}
-	var query strings.Builder
-	separator := byte('?')
-	for key, value := range values {
-		query.WriteByte(separator)
-		query.WriteString(key)
-		query.WriteByte('=')
-		query.WriteString(value)
-		separator = '&'
-	}
-	path += query.String()
-	if followValue {
-		return followLogs(cfg, path)
-	}
-	status, _, body, err := apiDo(cfg, http.MethodGet, path, nil, "")
-	if err != nil {
-		return err
-	}
-	if err := checkAPI(status, body); err != nil {
-		return err
-	}
-	if cfg.jsonOut {
-		printRawOrJSON(cfg, body)
+func derefLog(entry *logLine) []logLine {
+	if entry == nil {
 		return nil
 	}
-	var result struct {
-		Logs []logLine `json:"logs"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return err
-	}
-	for _, entry := range result.Logs {
-		fmt.Printf("%s %-6s %-10s %s\n", entry.Time, entry.Level, entry.Source, entry.Message)
-	}
-	return nil
+	return []logLine{*entry}
 }
 
 func followLogs(cfg clientOptions, path string) error {
@@ -372,11 +281,127 @@ func followLogs(cfg clientOptions, path string) error {
 	return scanner.Err()
 }
 
-func derefLog(entry *logLine) []logLine {
-	if entry == nil {
+// printLogs fetches one page of logs and prints the table or raw JSON.
+func printLogs(cfg clientOptions, path string) error {
+	status, _, body, err := apiDo(cfg, http.MethodGet, path, nil, "")
+	if err != nil {
+		return err
+	}
+	if err := checkAPI(status, body); err != nil {
+		return err
+	}
+	if cfg.jsonOut {
+		printRawOrJSON(cfg, body)
 		return nil
 	}
-	return []logLine{*entry}
+	var result struct {
+		Logs []logLine `json:"logs"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return err
+	}
+	for _, entry := range result.Logs {
+		fmt.Printf("%s %-6s %-10s %s\n", entry.Time, entry.Level, entry.Source, entry.Message)
+	}
+	return nil
+}
+
+// logOptions are the filters accepted by wt logs.
+type logOptions struct {
+	level, source, query string
+	tail                 int
+	follow               bool
+}
+
+func parseLogOptions(cfg *clientOptions, rest []string) (string, logOptions, error) {
+	name := rest[0]
+	opts := logOptions{tail: 200}
+	var err error
+	for index := 1; index < len(rest); index++ {
+		arg := rest[index]
+		switch {
+		case arg == "--follow":
+			opts.follow = true
+		case arg == "--json":
+			cfg.jsonOut = true
+		case arg == "--tail" && index+1 < len(rest):
+			index++
+			opts.tail, err = strconv.Atoi(rest[index])
+			if err != nil {
+				return "", opts, fmt.Errorf("tail must be an integer")
+			}
+		case strings.HasPrefix(arg, "--tail="):
+			opts.tail, err = strconv.Atoi(strings.TrimPrefix(arg, "--tail="))
+			if err != nil {
+				return "", opts, fmt.Errorf("tail must be an integer")
+			}
+		case arg == "--level" && index+1 < len(rest):
+			index++
+			opts.level = rest[index]
+		case strings.HasPrefix(arg, "--level="):
+			opts.level = strings.TrimPrefix(arg, "--level=")
+		case arg == "--source" && index+1 < len(rest):
+			index++
+			opts.source = rest[index]
+		case strings.HasPrefix(arg, "--source="):
+			opts.source = strings.TrimPrefix(arg, "--source=")
+		case arg == "--q" && index+1 < len(rest):
+			index++
+			opts.query = rest[index]
+		case strings.HasPrefix(arg, "--q="):
+			opts.query = strings.TrimPrefix(arg, "--q=")
+		default:
+			return "", opts, fmt.Errorf("unexpected argument %q", arg)
+		}
+	}
+	return name, opts, nil
+}
+
+// logPath builds /apps/<name>/logs with the requested filters.
+func logPath(name string, opts logOptions) string {
+	values := map[string]string{"tail": strconv.Itoa(opts.tail)}
+	if opts.level != "" {
+		values["level"] = opts.level
+	}
+	if opts.source != "" {
+		values["source"] = opts.source
+	}
+	if opts.query != "" {
+		values["q"] = opts.query
+	}
+	path := "/apps/" + name + "/logs"
+	if opts.follow {
+		path += "/stream"
+	}
+	var query strings.Builder
+	separator := byte('?')
+	for key, value := range values {
+		query.WriteByte(separator)
+		query.WriteString(key)
+		query.WriteByte('=')
+		query.WriteString(value)
+		separator = '&'
+	}
+	return path + query.String()
+}
+
+func runLogs(args []string) error {
+	cfg, rest, err := clientFlags("logs", args, true)
+	if err != nil {
+		return err
+	}
+	if len(rest) == 0 {
+		return fmt.Errorf("usage: wt logs <app> [--tail N] [--level LEVEL] [--source app|supervisor] [--q TEXT] [--follow] [--json]")
+	}
+	name, opts, err := parseLogOptions(&cfg, rest)
+	if err != nil {
+		return err
+	}
+	path := logPath(name, opts)
+	if opts.follow {
+		return followLogs(cfg, path)
+	}
+	return printLogs(cfg, path)
 }
 
 func runRollback(args []string) error {
@@ -415,101 +440,30 @@ func runRollback(args []string) error {
 	return nil
 }
 
-func runBackup(args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: wt backup <list|create|restore|download|import> <app> ...")
-	}
-	action := args[0]
-	cfg, rest, err := clientFlags("backup "+action, args[1:], true)
+// backupJSON performs one backup API call and returns the body.
+func backupJSON(cfg clientOptions, method, path string) ([]byte, error) {
+	status, _, body, err := apiDo(cfg, method, path, nil, "")
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if len(rest) == 0 {
-		return fmt.Errorf("usage: wt backup %s <app> ...", action)
+	if err := checkAPI(status, body); err != nil {
+		return nil, err
 	}
-	name := rest[0]
-	switch action {
-	case "list":
-		status, _, body, err := apiDo(cfg, http.MethodGet, "/apps/"+name+"/backups", nil, "")
-		if err != nil {
-			return err
+	return body, nil
+}
+
+// backupOutPath reads the optional --out argument, defaulting to <snapshot>.tar.gz.
+func backupOutPath(rest []string) string {
+	out := rest[1] + ".tar.gz"
+	for index := 2; index < len(rest); index++ {
+		if rest[index] == "--out" && index+1 < len(rest) {
+			index++
+			out = rest[index]
+		} else if value, ok := strings.CutPrefix(rest[index], "--out="); ok {
+			out = value
 		}
-		if err := checkAPI(status, body); err != nil {
-			return err
-		}
-		if cfg.jsonOut {
-			printRawOrJSON(cfg, body)
-			return nil
-		}
-		var result struct {
-			Current string `json:"current"`
-			Backups []struct {
-				Name    string `json:"name"`
-				Kind    string `json:"kind"`
-				Size    int64  `json:"size"`
-				HasData bool   `json:"hasData"`
-			} `json:"backups"`
-		}
-		if err := json.Unmarshal(body, &result); err != nil {
-			return err
-		}
-		for _, backup := range result.Backups {
-			marker := " "
-			if backup.Name == result.Current {
-				marker = "*"
-			}
-			fmt.Printf("%s %-42s %-10s %d\n", marker, backup.Name, backup.Kind, backup.Size)
-		}
-		return nil
-	case "create":
-		status, _, body, err := apiDo(cfg, http.MethodPost, "/apps/"+name+"/backups", nil, "")
-		if err != nil {
-			return err
-		}
-		if err := checkAPI(status, body); err != nil {
-			return err
-		}
-		printRawOrJSON(cfg, body)
-		return nil
-	case "restore":
-		if len(rest) < 2 {
-			return fmt.Errorf("usage: wt backup restore <app> <snapshot>")
-		}
-		status, _, body, err := apiDo(cfg, http.MethodPost, "/apps/"+name+"/backups/"+rest[1]+"/restore", nil, "")
-		if err != nil {
-			return err
-		}
-		if err := checkAPI(status, body); err != nil {
-			return err
-		}
-		printRawOrJSON(cfg, body)
-		return nil
-	case "download":
-		if len(rest) < 2 {
-			return fmt.Errorf("usage: wt backup download <app> <snapshot> [--out FILE]")
-		}
-		out := rest[1] + ".tar.gz"
-		for index := 2; index < len(rest); index++ {
-			if rest[index] == "--out" && index+1 < len(rest) {
-				index++
-				out = rest[index]
-			} else if value, ok := strings.CutPrefix(rest[index], "--out="); ok {
-				out = value
-			}
-		}
-		if err := backupDownload(cfg, name, rest[1], out); err != nil {
-			return err
-		}
-		fmt.Println("wrote", out)
-		return nil
-	case "import":
-		if len(rest) < 2 {
-			return fmt.Errorf("usage: wt backup import <app> <archive.tar.gz>")
-		}
-		return backupImport(cfg, name, rest[1])
-	default:
-		return fmt.Errorf("unknown backup action %q", action)
 	}
+	return out
 }
 
 func backupImport(cfg clientOptions, name, archive string) error {
@@ -583,6 +537,210 @@ func backupDownload(cfg clientOptions, name, snapshot, out string) error {
 	return closeErr
 }
 
+// runBackupList prints the retained snapshots and marks the current one.
+func runBackupList(cfg clientOptions, name string) error {
+	body, err := backupJSON(cfg, http.MethodGet, "/apps/"+name+"/backups")
+	if err != nil {
+		return err
+	}
+	if cfg.jsonOut {
+		printRawOrJSON(cfg, body)
+		return nil
+	}
+	var result struct {
+		Current string `json:"current"`
+		Backups []struct {
+			Name    string `json:"name"`
+			Kind    string `json:"kind"`
+			Size    int64  `json:"size"`
+			HasData bool   `json:"hasData"`
+		} `json:"backups"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return err
+	}
+	for _, backup := range result.Backups {
+		marker := " "
+		if backup.Name == result.Current {
+			marker = "*"
+		}
+		fmt.Printf("%s %-42s %-10s %d\n", marker, backup.Name, backup.Kind, backup.Size)
+	}
+	return nil
+}
+
+// runBackupCreate takes a new snapshot.
+func runBackupCreate(cfg clientOptions, name string) error {
+	body, err := backupJSON(cfg, http.MethodPost, "/apps/"+name+"/backups")
+	if err != nil {
+		return err
+	}
+	printRawOrJSON(cfg, body)
+	return nil
+}
+
+// runBackupRestore restores one snapshot.
+func runBackupRestore(cfg clientOptions, name, snapshot string) error {
+	body, err := backupJSON(cfg, http.MethodPost, "/apps/"+name+"/backups/"+snapshot+"/restore")
+	if err != nil {
+		return err
+	}
+	printRawOrJSON(cfg, body)
+	return nil
+}
+
+// runBackupDownload saves one snapshot archive.
+func runBackupDownload(cfg clientOptions, name, snapshot, out string) error {
+	if err := backupDownload(cfg, name, snapshot, out); err != nil {
+		return err
+	}
+	fmt.Println("wrote", out)
+	return nil
+}
+
+func runBackup(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: wt backup <list|create|restore|download|import> <app> ...")
+	}
+	action := args[0]
+	cfg, rest, err := clientFlags("backup "+action, args[1:], true)
+	if err != nil {
+		return err
+	}
+	if len(rest) == 0 {
+		return fmt.Errorf("usage: wt backup %s <app> ...", action)
+	}
+	name := rest[0]
+	switch action {
+	case "list":
+		return runBackupList(cfg, name)
+	case "create":
+		return runBackupCreate(cfg, name)
+	case "restore":
+		if len(rest) < 2 {
+			return fmt.Errorf("usage: wt backup restore <app> <snapshot>")
+		}
+		return runBackupRestore(cfg, name, rest[1])
+	case "download":
+		if len(rest) < 2 {
+			return fmt.Errorf("usage: wt backup download <app> <snapshot> [--out FILE]")
+		}
+		return runBackupDownload(cfg, name, rest[1], backupOutPath(rest))
+	case "import":
+		if len(rest) < 2 {
+			return fmt.Errorf("usage: wt backup import <app> <archive.tar.gz>")
+		}
+		return backupImport(cfg, name, rest[1])
+	default:
+		return fmt.Errorf("unknown backup action %q", action)
+	}
+}
+
+// configSetOptions are the flags accepted by wt config set.
+type configSetOptions struct {
+	data, file, ifMatch string
+}
+
+func parseConfigSetOptions(rest []string) (configSetOptions, error) {
+	var opts configSetOptions
+	for index := 1; index < len(rest); index++ {
+		switch {
+		case rest[index] == "--data" && index+1 < len(rest):
+			index++
+			opts.data = rest[index]
+		case strings.HasPrefix(rest[index], "--data="):
+			opts.data = strings.TrimPrefix(rest[index], "--data=")
+		case rest[index] == "--file" && index+1 < len(rest):
+			index++
+			opts.file = rest[index]
+		case strings.HasPrefix(rest[index], "--file="):
+			opts.file = strings.TrimPrefix(rest[index], "--file=")
+		case rest[index] == "--if-match" && index+1 < len(rest):
+			index++
+			opts.ifMatch = rest[index]
+		case strings.HasPrefix(rest[index], "--if-match="):
+			opts.ifMatch = strings.TrimPrefix(rest[index], "--if-match=")
+		default:
+			return opts, fmt.Errorf("unexpected argument %q", rest[index])
+		}
+	}
+	return opts, nil
+}
+
+// configSetData resolves a --file patch into the request body.
+func configSetData(opts configSetOptions) (string, error) {
+	if opts.data != "" || opts.file == "" {
+		return opts.data, nil
+	}
+	raw, err := os.ReadFile(opts.file)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+// patchConfig sends one config patch and prints the result.
+func patchConfig(cfg clientOptions, name, data, ifMatch string) error {
+	req, err := http.NewRequest(http.MethodPatch, supervisorURL(cfg.host, "/apps/"+name+"/config"), strings.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if cfg.token != "" {
+		req.Header.Set("Authorization", "Bearer "+cfg.token)
+	}
+	if ifMatch != "" {
+		req.Header.Set("If-Match", ifMatch)
+	}
+	resp, err := (&http.Client{Timeout: cfg.timeout}).Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if err := checkAPI(resp.StatusCode, body); err != nil {
+		return err
+	}
+	printRawOrJSON(cfg, body)
+	return nil
+}
+
+// runConfigShow prints one app config and its ETag.
+func runConfigShow(cfg clientOptions, name string) error {
+	status, header, body, err := apiDo(cfg, http.MethodGet, "/apps/"+name+"/config", nil, "")
+	if err != nil {
+		return err
+	}
+	if err := checkAPI(status, body); err != nil {
+		return err
+	}
+	if cfg.jsonOut {
+		printRawOrJSON(cfg, body)
+		return nil
+	}
+	if etag := header.Get("ETag"); etag != "" {
+		fmt.Fprintln(os.Stderr, "ETag:", etag)
+	}
+	printRawOrJSON(cfg, body)
+	return nil
+}
+
+// runConfigSet applies one patch from --data or --file.
+func runConfigSet(cfg clientOptions, name string, rest []string) error {
+	opts, err := parseConfigSetOptions(rest)
+	if err != nil {
+		return err
+	}
+	data, err := configSetData(opts)
+	if err != nil {
+		return err
+	}
+	if data == "" {
+		return fmt.Errorf("provide --data JSON or --file patch.json")
+	}
+	return patchConfig(cfg, name, data, opts.ifMatch)
+}
+
 func runConfig(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("usage: wt config <show|set> <app>")
@@ -598,79 +756,9 @@ func runConfig(args []string) error {
 	name := rest[0]
 	switch action {
 	case "show":
-		status, header, body, err := apiDo(cfg, http.MethodGet, "/apps/"+name+"/config", nil, "")
-		if err != nil {
-			return err
-		}
-		if err := checkAPI(status, body); err != nil {
-			return err
-		}
-		if cfg.jsonOut {
-			printRawOrJSON(cfg, body)
-			return nil
-		}
-		if etag := header.Get("ETag"); etag != "" {
-			fmt.Fprintln(os.Stderr, "ETag:", etag)
-		}
-		printRawOrJSON(cfg, body)
-		return nil
+		return runConfigShow(cfg, name)
 	case "set":
-		data := ""
-		file := ""
-		ifMatch := ""
-		for index := 1; index < len(rest); index++ {
-			switch {
-			case rest[index] == "--data" && index+1 < len(rest):
-				index++
-				data = rest[index]
-			case strings.HasPrefix(rest[index], "--data="):
-				data = strings.TrimPrefix(rest[index], "--data=")
-			case rest[index] == "--file" && index+1 < len(rest):
-				index++
-				file = rest[index]
-			case strings.HasPrefix(rest[index], "--file="):
-				file = strings.TrimPrefix(rest[index], "--file=")
-			case rest[index] == "--if-match" && index+1 < len(rest):
-				index++
-				ifMatch = rest[index]
-			case strings.HasPrefix(rest[index], "--if-match="):
-				ifMatch = strings.TrimPrefix(rest[index], "--if-match=")
-			default:
-				return fmt.Errorf("unexpected argument %q", rest[index])
-			}
-		}
-		if data == "" && file != "" {
-			raw, err := os.ReadFile(file)
-			if err != nil {
-				return err
-			}
-			data = string(raw)
-		}
-		if data == "" {
-			return fmt.Errorf("provide --data JSON or --file patch.json")
-		}
-		req, err := http.NewRequest(http.MethodPatch, supervisorURL(cfg.host, "/apps/"+name+"/config"), strings.NewReader(data))
-		if err != nil {
-			return err
-		}
-		req.Header.Set("Content-Type", "application/json")
-		if cfg.token != "" {
-			req.Header.Set("Authorization", "Bearer "+cfg.token)
-		}
-		if ifMatch != "" {
-			req.Header.Set("If-Match", ifMatch)
-		}
-		resp, err := (&http.Client{Timeout: cfg.timeout}).Do(req)
-		if err != nil {
-			return err
-		}
-		defer resp.Body.Close()
-		body, _ := io.ReadAll(resp.Body)
-		if err := checkAPI(resp.StatusCode, body); err != nil {
-			return err
-		}
-		printRawOrJSON(cfg, body)
-		return nil
+		return runConfigSet(cfg, name, rest)
 	default:
 		return fmt.Errorf("unknown config action %q", action)
 	}
