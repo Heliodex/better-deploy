@@ -70,7 +70,7 @@ Concrete evidence from this build:
 
    Errors are `{"error": "...", "code": "...", "field": "..."}` with `field` omitted when it does not apply. `app.WriteError` derives a stable code from the status; `app.WriteErrorField` adds the field; `app.ReadJSON` extracts the field from generated validation messages. `ApiError` in the guestbook, scaffold and pulse clients carries `code` and `field`, and the forms attach a server field error to the named input. Verified with invalid requests returning `{"error":"field url ...","code":"invalid","field":"url"}` and `{"error":"field body ...","code":"invalid","field":"body"}`, plus successful pulse and guestbook deployments. Tests cover status codes, field extraction, the embedded SDK copy, and omission of an empty `last` in the pulse contract; Svelte checks and builds pass for all three frontends.
 
-4. [ ] **[P1] Add a typed durable-jobs SDK, a CLI and an example.**
+4. [x] **[P1] Add a typed durable-jobs SDK, a CLI and an example.**
 
    **Current behaviour.** `schedule` is the only background primitive exposed in `app.json`, and it works well for a fixed recurring call. Durable jobs exist in the supervisor, but `wt/packages/app` has no job types or enqueue helper, so an app that needs a delayed run, retries, a payload or dead-letter handling drops to raw JSON on the supervisor API. There is no `wt jobs` command either. Pulse's "check now" is synchronous because a delayed or retried check has no comfortable client path.
 
@@ -82,6 +82,12 @@ Concrete evidence from this build:
    - Document the at-least-once delivery model, the 64 KiB payload limit and the difference between a schedule and a job.
 
    **Done when.** An app can enqueue and observe a job without hand-written JSON, and an operator can inspect idle, running, dead and failed jobs from the CLI.
+
+   Implemented in `8298cd1`, `861bffd`, `c8d6672` and `20c6a44`. `app.Job` and `app.JobRequest` mirror the supervisor resource; `EnqueueJob`, `ListJobs`, `GetJob`, `CancelJob` and `RetryJob` post through the storage loopback service with the app's normal token. The supervisor now serves `GET|POST /v1/jobs`, `GET /v1/jobs/{id}`, `POST /v1/jobs/{id}/cancel` and `POST /v1/jobs/{id}/retry` on that authenticated loopback, so an app does not need the admin API or a self-referential `allow_callers` entry. The admin and CLI paths remain `/apps/<name>/jobs`, and both are documented in `wt/openapi.yaml`.
+
+   `wt-deploy jobs <app> list|show|enqueue|cancel|retry` uses the same API, supports `--status`, repeated `--header`, `--body` or `--file`, `--run-at`, `--max-attempts`, `--idempotency-key` and `--json`, and prints a table or a job detail. `ticker` now enqueues one `/jobs/beat` job per 10-second slot with a JSON payload and an idempotency key, and logs both the queued id and the job delivery. `job_concurrency` is explicit in its manifest.
+
+   Verified with the running supervisor: the ticker produced `ticker queued …`, the job reached `succeeded` with status code 204 and delivered the payload to `/jobs/beat`; `wt jobs ticker list` showed it, `wt jobs ticker show` printed its timestamps and idempotency key, and a future CLI-enqueued job was visible as `pending` and then `canceled`. Tests cover the SDK paths, the storage route handlers, CLI parsing and requests, and the full supervisor suite. Delivery remains at-least-once, the body is capped at 64 KiB, and a schedule still differs from a job by having no payload, retries, future time or dead-letter state.
 
 5. [ ] **[P1] Make supervisor-owned routes work by default in the dev loop.**
 
