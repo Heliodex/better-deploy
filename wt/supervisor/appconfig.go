@@ -404,9 +404,8 @@ func tenantModeArg(modes []string) string {
 	return tenantTrusted
 }
 
-// normalizeAppConfig fills in defaults and validates an app's runtime config. The optional mode applies untrusted defaults.
-func normalizeAppConfig(cfg appConfig, name, domain string, modes ...string) (appConfig, error) {
-	mode := tenantModeArg(modes)
+// normalizeAppAddress fills in and validates the app name, host and host aliases.
+func normalizeAppAddress(cfg appConfig, name, domain string) (appConfig, error) {
 	if strings.TrimSpace(cfg.Name) == "" {
 		cfg.Name = name
 	}
@@ -422,6 +421,11 @@ func normalizeAppConfig(cfg appConfig, name, domain string, modes ...string) (ap
 		return cfg, err
 	}
 	cfg.Hosts = hosts
+	return cfg, nil
+}
+
+// normalizeAppRelations validates the caller allowlist, dependencies and egress rules.
+func normalizeAppRelations(cfg appConfig, name string) (appConfig, error) {
 	callers, err := normalizeAllowCallers(cfg.AllowCallers)
 	if err != nil {
 		return cfg, err
@@ -437,44 +441,54 @@ func normalizeAppConfig(cfg appConfig, name, domain string, modes ...string) (ap
 		return cfg, err
 	}
 	cfg.Egress = egress
+	return cfg, nil
+}
+
+// validateAppSettings checks the runtime limits and fills in the non-tenant defaults that have no mode dependency.
+func validateAppSettings(cfg *appConfig) error {
 	if cfg.JobConcurrency == 0 {
 		cfg.JobConcurrency = jobDefaultConcurrency
 	}
 	if cfg.JobConcurrency < 1 || cfg.JobConcurrency > jobMaxConcurrency {
-		return cfg, fmt.Errorf("job_concurrency must be between 1 and %d", jobMaxConcurrency)
+		return fmt.Errorf("job_concurrency must be between 1 and %d", jobMaxConcurrency)
 	}
 	if cfg.Health == "" {
 		cfg.Health = defaultHealthPath
 	}
 	if !strings.HasPrefix(cfg.Health, "/") {
-		return cfg, fmt.Errorf("health must start with /")
+		return fmt.Errorf("health must start with /")
 	}
 	if cfg.Env == nil {
 		cfg.Env = map[string]string{}
 	}
 	for key := range cfg.Env {
 		if key == "" || strings.ContainsAny(key, "=\x00") {
-			return cfg, fmt.Errorf("invalid env key %q", key)
+			return fmt.Errorf("invalid env key %q", key)
 		}
 	}
 	if cfg.MemoryMB < 0 || cfg.MemoryMB > maxMemoryMB {
-		return cfg, fmt.Errorf("memory_mb must be between 0 and %d", maxMemoryMB)
+		return fmt.Errorf("memory_mb must be between 0 and %d", maxMemoryMB)
 	}
 	if cfg.DiskMB < 0 || cfg.DiskMB > maxDiskMB {
-		return cfg, fmt.Errorf("disk_mb must be between 0 and %d", maxDiskMB)
+		return fmt.Errorf("disk_mb must be between 0 and %d", maxDiskMB)
 	}
 	if cfg.MaxConcurrent < 0 {
-		return cfg, fmt.Errorf("max_concurrency must be 0 or more")
+		return fmt.Errorf("max_concurrency must be 0 or more")
 	}
 	if cfg.CPUMillicores < 0 || cfg.CPUMillicores > maxCPUMillicores {
-		return cfg, fmt.Errorf("cpu_millicores must be between 0 and %d", maxCPUMillicores)
+		return fmt.Errorf("cpu_millicores must be between 0 and %d", maxCPUMillicores)
 	}
 	if cfg.PidsMax < 0 || cfg.PidsMax > maxPidsMax {
-		return cfg, fmt.Errorf("pids_max must be between 0 and %d", maxPidsMax)
+		return fmt.Errorf("pids_max must be between 0 and %d", maxPidsMax)
 	}
 	if cfg.IOWeight < 0 || cfg.IOWeight > maxIOWeight {
-		return cfg, fmt.Errorf("io_weight must be between 0 and %d", maxIOWeight)
+		return fmt.Errorf("io_weight must be between 0 and %d", maxIOWeight)
 	}
+	return nil
+}
+
+// applyAppDefaults fills in tenant defaults, network and identity rules, timeouts and scheduled calls.
+func applyAppDefaults(cfg *appConfig, mode string) error {
 	if mode == tenantUntrusted {
 		if cfg.MemoryMB == 0 {
 			cfg.MemoryMB = untrustedDefaultMemoryMB
@@ -503,20 +517,20 @@ func normalizeAppConfig(cfg appConfig, name, domain string, modes ...string) (ap
 		cfg.Network = "inherit"
 	case "none", "storage":
 	default:
-		return cfg, fmt.Errorf("network must be inherit, storage or none")
+		return fmt.Errorf("network must be inherit, storage or none")
 	}
 	cfg.Identity = strings.ToLower(strings.TrimSpace(cfg.Identity))
 	switch cfg.Identity {
 	case "", identityModePlatform:
 	default:
-		return cfg, fmt.Errorf("identity must be empty or %s", identityModePlatform)
+		return fmt.Errorf("identity must be empty or %s", identityModePlatform)
 	}
 	if mode == tenantUntrusted && cfg.Network == "inherit" {
-		return cfg, fmt.Errorf("network inherit is not allowed in untrusted mode; use storage or none")
+		return fmt.Errorf("network inherit is not allowed in untrusted mode; use storage or none")
 	}
 	timeout, err := parseRequestTimeout(cfg.RequestTimeout)
 	if err != nil {
-		return cfg, err
+		return err
 	}
 	cfg.requestTimeout = timeout
 	if cfg.StartupTimeout == "" {
@@ -524,7 +538,7 @@ func normalizeAppConfig(cfg appConfig, name, domain string, modes ...string) (ap
 	}
 	startup, err := parseStartupTimeout(cfg.StartupTimeout)
 	if err != nil {
-		return cfg, err
+		return err
 	}
 	cfg.startupTimeout = startup
 	if cfg.HealthInterval == "" {
@@ -532,22 +546,42 @@ func normalizeAppConfig(cfg appConfig, name, domain string, modes ...string) (ap
 	}
 	interval, err := parseHealthInterval(cfg.HealthInterval)
 	if err != nil {
-		return cfg, err
+		return err
 	}
 	cfg.healthInterval = interval
 	failures, err := parseHealthFailures(cfg.HealthFailures)
 	if err != nil {
-		return cfg, err
+		return err
 	}
 	cfg.HealthFailures = failures
 	for i := range cfg.Schedule {
 		entry := &cfg.Schedule[i]
 		if !strings.HasPrefix(entry.Path, "/") {
-			return cfg, fmt.Errorf("schedule[%d]: path must start with /", i)
+			return fmt.Errorf("schedule[%d]: path must start with /", i)
 		}
 		if _, err := parseScheduleInterval(*entry); err != nil {
-			return cfg, fmt.Errorf("schedule[%d]: %w", i, err)
+			return fmt.Errorf("schedule[%d]: %w", i, err)
 		}
+	}
+	return nil
+}
+
+// normalizeAppConfig fills in defaults and validates an app's runtime config. The optional mode applies untrusted defaults.
+func normalizeAppConfig(cfg appConfig, name, domain string, modes ...string) (appConfig, error) {
+	mode := tenantModeArg(modes)
+	cfg, err := normalizeAppAddress(cfg, name, domain)
+	if err != nil {
+		return cfg, err
+	}
+	cfg, err = normalizeAppRelations(cfg, name)
+	if err != nil {
+		return cfg, err
+	}
+	if err := validateAppSettings(&cfg); err != nil {
+		return cfg, err
+	}
+	if err := applyAppDefaults(&cfg, mode); err != nil {
+		return cfg, err
 	}
 	return cfg, nil
 }
