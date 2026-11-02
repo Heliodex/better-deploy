@@ -986,6 +986,15 @@ paths:
       responses:
         "200":
           description: Jobs, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Job"
         "401":
           description: Unauthorized
         "503":
@@ -993,11 +1002,25 @@ paths:
     post:
       summary: Enqueue a durable job
       description: "Served by the storage loopback service (WT_STORAGE_URL). The storage bearer token selects the app. Delivery is at-least-once and the body is capped at 64 KiB.\n"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JobRequest"
       responses:
         "201":
           description: Job created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
         "200":
           description: Existing job returned for an idempotency key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
         "400":
           description: Invalid job
         "401":
@@ -1010,6 +1033,10 @@ paths:
       responses:
         "200":
           description: Job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
         "401":
           description: Unauthorized
         "404":
@@ -1020,6 +1047,10 @@ paths:
       responses:
         "200":
           description: Canceled job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
         "401":
           description: Unauthorized
         "404":
@@ -1032,6 +1063,10 @@ paths:
       responses:
         "200":
           description: Requeued job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
         "401":
           description: Unauthorized
         "404":
