@@ -36,6 +36,7 @@ func decodeStorageNumber(text string) (any, error) {
 	return strconv.ParseInt(text, 10, 64)
 }
 
+// decodeStorageValue decodes one JSON parameter: null, bool, string, a $b64 blob or an exact integer or float.
 func decodeStorageValue(raw jsontext.Value) (any, error) {
 	text := strings.TrimSpace(string(raw))
 	if text == "" {
@@ -61,6 +62,7 @@ func decodeStorageValue(raw jsontext.Value) (any, error) {
 	}
 }
 
+// decodeStorageParams validates the parameter count and decodes each value.
 func decodeStorageParams(raw []jsontext.Value) ([]any, error) {
 	if len(raw) > maxStorageParams {
 		return nil, fmt.Errorf("%w: too many parameters (max %d)", errStorageInvalid, maxStorageParams)
@@ -76,6 +78,7 @@ func decodeStorageParams(raw []jsontext.Value) ([]any, error) {
 	return params, nil
 }
 
+// encodeStorageValue converts driver values to JSON: bytes as $b64, times as RFC 3339 and non-finite floats as null.
 func encodeStorageValue(value any) any {
 	switch value := value.(type) {
 	case []byte:
@@ -92,6 +95,7 @@ func encodeStorageValue(value any) any {
 	}
 }
 
+// storageValueSize estimates a driver value's encoded size for the result and change-log budgets.
 func storageValueSize(value any) int {
 	switch value := value.(type) {
 	case string:

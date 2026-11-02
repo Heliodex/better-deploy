@@ -88,6 +88,7 @@ func preUpdateValues(data sqlite.SQLitePreUpdateData, new bool, budget int) ([]a
 	return encoded, total, nil
 }
 
+// collectRowChange builds one change entry for an insert, update or delete and returns its encoded size.
 func collectRowChange(data sqlite.SQLitePreUpdateData, budget int) (rowChange, int, error) {
 	change := rowChange{Table: data.TableName, Columns: []string{}}
 	switch data.Op {
@@ -131,6 +132,7 @@ func collectRowChange(data sqlite.SQLitePreUpdateData, budget int) (rowChange, i
 	}
 }
 
+// add appends a change while the count and byte budgets allow, counting anything larger as omitted.
 func (c *rowChangeCollector) add(data sqlite.SQLitePreUpdateData) {
 	if len(c.rows) >= maxCollectedChanges || c.bytes >= maxCollectedRowBytes {
 		c.omitted++
@@ -156,6 +158,7 @@ func (c *rowChangeCollector) add(data sqlite.SQLitePreUpdateData) {
 	c.bytes += size
 }
 
+// tableColumns reads a table's column names through SQLite's table_xinfo pragma.
 func tableColumns(ctx context.Context, conn *sql.Conn, table string) ([]string, error) {
 	rows, err := conn.QueryContext(ctx, "pragma table_xinfo("+quoteSQLiteIdentifier(table)+")")
 	if err != nil {
@@ -213,6 +216,7 @@ func registerRowHook(conn *sql.Conn, collector *rowChangeCollector) error {
 	})
 }
 
+// unregisterRowHook removes the pre-update hook from the connection.
 func unregisterRowHook(conn *sql.Conn) error {
 	return conn.Raw(func(driverConn any) error {
 		if hooker, ok := driverConn.(interface {
@@ -397,6 +401,7 @@ func (s *storageServer) recentChanges(app string, limit int) ([]storageChange, e
 	return changes, nil
 }
 
+// changeLimitParam parses the change-log limit and bounds it to the accepted range.
 func changeLimitParam(w http.ResponseWriter, r *http.Request) (int, bool) {
 	value := r.URL.Query().Get("limit")
 	if value == "" {

@@ -252,6 +252,7 @@ func (s *storageServer) checkTemp() {
 	s.tempOver.Store(budget.observe(size))
 }
 
+// monitorTemp refreshes the temp directory budget until ctx is cancelled.
 func (s *storageServer) monitorTemp(ctx context.Context) {
 	s.checkTemp()
 	ticker := time.NewTicker(storageTempMonitorInterval)
@@ -363,6 +364,7 @@ func (s *storageServer) appForToken(token string) (string, bool) {
 	return app, ok
 }
 
+// appFor resolves the app from the request's bearer token.
 func (s *storageServer) appFor(r *http.Request) (string, bool) {
 	const prefix = "Bearer "
 	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), prefix)
@@ -630,12 +632,14 @@ func configureStorageConn(_ context.Context, conn *sql.Conn) error {
 	return nil
 }
 
+// withConn runs fn on the cached write pool under the shared restore lock.
 func (s *storageServer) withConn(ctx context.Context, app string, fn func(*sql.Conn) error) error {
 	s.opMu.RLock()
 	defer s.opMu.RUnlock()
 	return s.withConnUnlocked(ctx, app, fn)
 }
 
+// withConnUnlocked is withConn without the restore lock; callers that already hold it use this.
 func (s *storageServer) withConnUnlocked(ctx context.Context, app string, fn func(*sql.Conn) error) (err error) {
 	start := time.Now()
 	defer func() {
@@ -706,6 +710,7 @@ func (s *storageServer) restoreFrom(ctx context.Context, app, src string) error 
 	})
 }
 
+// readStorageJSON reads a bounded JSON request body and writes the matching error when it cannot.
 func readStorageJSON(w http.ResponseWriter, r *http.Request, out any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, maxStorageBody)
 	data, err := io.ReadAll(r.Body)
@@ -728,6 +733,7 @@ func readStorageJSON(w http.ResponseWriter, r *http.Request, out any) bool {
 	return true
 }
 
+// exec runs one write statement and records its touched rows in the change log.
 func (s *storageServer) exec(w http.ResponseWriter, r *http.Request, app string) {
 	var req storageRequest
 	if !readStorageJSON(w, r, &req) {
@@ -808,6 +814,7 @@ func (s *storageServer) logBatchChanges(app string, r *http.Request, req storage
 	s.logChanges(app, changes)
 }
 
+// batch runs a list of write statements in one transaction.
 func (s *storageServer) batch(w http.ResponseWriter, r *http.Request, app string) {
 	var req storageStatementsRequest
 	if !readStorageJSON(w, r, &req) {
@@ -880,6 +887,7 @@ func readStorageRows(rows *sql.Rows, maxRows int) (columns []string, encoded [][
 	return columns, encoded, truncated, nil
 }
 
+// query runs one statement on the query-only pool.
 func (s *storageServer) query(w http.ResponseWriter, r *http.Request, app string) {
 	var req storageRequest
 	if !readStorageJSON(w, r, &req) {

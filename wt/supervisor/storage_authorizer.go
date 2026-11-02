@@ -178,6 +178,7 @@ func unregisterStorageAuthorizer(conn *sql.Conn) error {
 	})
 }
 
+// requireStorageAuthorizer installs the SQL authorizer on one connection and returns its uninstall function.
 func requireStorageAuthorizer(conn *sql.Conn, readOnly bool) (func() error, error) {
 	unregister, err := installStorageAuthorizer(conn, readOnly)
 	if err != nil {

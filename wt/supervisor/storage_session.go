@@ -65,6 +65,7 @@ func (s *storageServer) pauseSessions() {
 	s.sessionMu.Unlock()
 }
 
+// resumeSessions releases the pause taken by pauseSessions.
 func (s *storageServer) resumeSessions() {
 	s.sessionMu.Lock()
 	s.sessionsPaused--
@@ -75,6 +76,7 @@ func (s *storageServer) resumeSessions() {
 	s.sessionMu.Unlock()
 }
 
+// closeSessionsForPaused rolls back and removes sessions, optionally limited to one app; new sessions must already be paused.
 func (s *storageServer) closeSessionsForPaused(app string) {
 	s.sessionMu.Lock()
 	var closing []*storageSession
@@ -91,12 +93,14 @@ func (s *storageServer) closeSessionsForPaused(app string) {
 	}
 }
 
+// closeSessionsFor pauses the session map, closes matching sessions and resumes.
 func (s *storageServer) closeSessionsFor(app string) {
 	s.pauseSessions()
 	defer s.resumeSessions()
 	s.closeSessionsForPaused(app)
 }
 
+// sessionLoop expires idle sessions once a second until shutdown.
 func (s *storageServer) sessionLoop() {
 	defer close(s.sessionDone)
 	ticker := time.NewTicker(time.Second)
@@ -111,6 +115,7 @@ func (s *storageServer) sessionLoop() {
 	}
 }
 
+// expireSessions rolls back sessions whose lease has elapsed.
 func (s *storageServer) expireSessions(now time.Time) {
 	s.sessionMu.Lock()
 	var expired []*storageSession
@@ -127,6 +132,7 @@ func (s *storageServer) expireSessions(now time.Time) {
 	}
 }
 
+// withSession looks up a live session, renews its lease and holds its lock while fn runs.
 func (s *storageServer) withSession(id, app string, fn func(*storageSession) error) error {
 	now := time.Now()
 	s.sessionMu.Lock()
@@ -152,6 +158,7 @@ func (s *storageServer) withSession(id, app string, fn func(*storageSession) err
 	return fn(session)
 }
 
+// closeSession removes and finishes a session, treating an expired lease as not found.
 func (s *storageServer) closeSession(id, app string, commit bool, ctx context.Context) error {
 	s.sessionMu.Lock()
 	session := s.sessions[id]
@@ -205,6 +212,7 @@ func (s *storageServer) finishSession(session *storageSession, commit bool, ctx 
 	return err
 }
 
+// changes builds change-log entries for the writes recorded during the session.
 func (session *storageSession) changes() []storageChange {
 	out := make([]storageChange, 0, len(session.writes))
 	for _, write := range session.writes {
@@ -224,6 +232,7 @@ func (session *storageSession) changes() []storageChange {
 	return out
 }
 
+// writeSessionError maps session errors to their HTTP statuses.
 func writeSessionError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, errSessionNotFound):
@@ -328,6 +337,7 @@ func (s *storageServer) registerSession(w http.ResponseWriter, session *storageS
 	return true
 }
 
+// createSession opens and registers a new pinned transaction.
 func (s *storageServer) createSession(w http.ResponseWriter, r *http.Request, app string) {
 	ctx, cancel := context.WithTimeout(r.Context(), storageTimeout)
 	defer cancel()
@@ -342,6 +352,7 @@ func (s *storageServer) createSession(w http.ResponseWriter, r *http.Request, ap
 	writeJSON(w, http.StatusOK, storageSessionResponse{ID: session.id, ExpiresAt: session.expiresAt})
 }
 
+// sessionQuery runs a query inside the session transaction and records any rows it changes.
 func (s *storageServer) sessionQuery(w http.ResponseWriter, r *http.Request, app, id string) {
 	var req storageRequest
 	if !readStorageJSON(w, r, &req) {
@@ -393,6 +404,7 @@ func (s *storageServer) sessionQuery(w http.ResponseWriter, r *http.Request, app
 	writeJSON(w, http.StatusOK, result)
 }
 
+// sessionExec runs a write inside the session transaction and records it for the change log.
 func (s *storageServer) sessionExec(w http.ResponseWriter, r *http.Request, app, id string) {
 	var req storageRequest
 	if !readStorageJSON(w, r, &req) {
@@ -436,6 +448,7 @@ func (s *storageServer) sessionExec(w http.ResponseWriter, r *http.Request, app,
 	writeJSON(w, http.StatusOK, result)
 }
 
+// closeSessionRequest commits or rolls back the session and reports which happened.
 func (s *storageServer) closeSessionRequest(w http.ResponseWriter, r *http.Request, app, id string, commit bool) {
 	ctx, cancel := context.WithTimeout(r.Context(), storageTimeout)
 	defer cancel()

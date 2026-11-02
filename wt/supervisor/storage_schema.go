@@ -519,6 +519,7 @@ func (s *storageServer) migrate(ctx context.Context, app string, version int, st
 	return storageMigrationResponse{Version: version, Applied: applied}, nil
 }
 
+// readSchema serves the app's schema overview, including optional statistics.
 func (s *storageServer) readSchema(w http.ResponseWriter, r *http.Request, app string) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
@@ -535,6 +536,7 @@ func (s *storageServer) readSchema(w http.ResponseWriter, r *http.Request, app s
 	writeJSON(w, http.StatusOK, schema)
 }
 
+// runMigration applies one user version with the host-wide migration timeout.
 func (s *storageServer) runMigration(w http.ResponseWriter, r *http.Request, app string) {
 	var req storageMigrationRequest
 	if !readStorageJSON(w, r, &req) {
