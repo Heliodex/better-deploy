@@ -74,6 +74,46 @@ func TestComponentInputHashTracksSDKAndNotFrontend(t *testing.T) {
 	}
 }
 
+func TestComponentInputHashFindsParentModule(t *testing.T) {
+	root := t.TempDir()
+	module := filepath.Join(root, "example")
+	app := filepath.Join(module, "app")
+	writeTestFile(t, filepath.Join(module, "go.mod"), "module example\n\ngo 1.27.1\n\nreplace wt.packages => ../packages\n")
+	writeTestFile(t, filepath.Join(module, "go.sum"), "wt.packages v0.0.0\n")
+	writeTestFile(t, filepath.Join(app, "main.go"), "package main")
+	writeTestFile(t, filepath.Join(module, "other", "main.go"), "package main")
+	writeTestFile(t, filepath.Join(root, "packages", "app", "app.go"), "package app")
+
+	first, err := componentInputHash(app, manifest{}, "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(module, "other", "main.go"), "package main // sibling")
+	afterSibling, err := componentInputHash(app, manifest{}, "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterSibling != first {
+		t.Error("sibling app change altered the component hash")
+	}
+	writeTestFile(t, filepath.Join(root, "packages", "app", "app.go"), "package app // changed")
+	afterSDK, err := componentInputHash(app, manifest{}, "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterSDK == first {
+		t.Error("parent module replace target change did not alter the component hash")
+	}
+	writeTestFile(t, filepath.Join(module, "go.mod"), "module example\n\ngo 1.27.1\n\nreplace wt.packages => ../packages\n// changed\n")
+	afterModule, err := componentInputHash(app, manifest{}, "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterModule == afterSDK {
+		t.Error("parent go.mod change did not alter the component hash")
+	}
+}
+
 func TestStaticInputHashTracksFrontendAndNotGo(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "main.go"), "package main")

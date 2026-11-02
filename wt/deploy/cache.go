@@ -195,9 +195,35 @@ func isModuleSource(path string, entry os.DirEntry) bool {
 	return false
 }
 
-// localReplaceDirs returns local paths from go.mod replace directives, so the shared SDK cannot fall outside a cache key.
+// goModuleRoot finds the nearest go.mod above dir, so a monorepo app hashes the module and its replace targets, not just its own folder.
+func goModuleRoot(dir string) (string, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	for {
+		info, err := os.Stat(filepath.Join(abs, "go.mod"))
+		if err == nil && !info.IsDir() {
+			return abs, nil
+		}
+		if err != nil && !os.IsNotExist(err) {
+			return "", err
+		}
+		parent := filepath.Dir(abs)
+		if parent == abs {
+			return "", nil
+		}
+		abs = parent
+	}
+}
+
+// localReplaceDirs returns absolute local paths from the module's go.mod replace directives, so the shared SDK cannot fall outside a cache key.
 func localReplaceDirs(dir string) ([]string, error) {
-	data, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+	root, err := goModuleRoot(dir)
+	if err != nil || root == "" {
+		return nil, err
+	}
+	data, err := os.ReadFile(filepath.Join(root, "go.mod"))
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
@@ -237,6 +263,9 @@ func localReplaceDirs(dir string) ([]string, error) {
 		}
 		value := fields[0]
 		if strings.HasPrefix(value, ".") || filepath.IsAbs(value) {
+			if !filepath.IsAbs(value) {
+				value = filepath.Join(root, value)
+			}
 			paths = append(paths, value)
 		}
 	}
@@ -297,6 +326,24 @@ func collectComponentInputFiles(dir string, m manifest) ([]string, error) {
 	replaces, err := localReplaceDirs(dir)
 	if err != nil {
 		return nil, err
+	}
+	root, err := goModuleRoot(dir)
+	if err != nil {
+		return nil, err
+	}
+	if root != "" {
+		appAbs, err := filepath.Abs(dir)
+		if err != nil {
+			return nil, err
+		}
+		if root != appAbs {
+			for _, name := range []string{"go.mod", "go.sum", "go.work", "go.work.sum"} {
+				path := filepath.Join(root, name)
+				if info, err := os.Stat(path); err == nil && !info.IsDir() {
+					files = append(files, path)
+				}
+			}
+		}
 	}
 	for _, value := range replaces {
 		path := value
