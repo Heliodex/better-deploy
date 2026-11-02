@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json/v2"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -70,40 +69,13 @@ func (l *loginLimiter) reset(key string) {
 	delete(l.attempts, key)
 }
 
-func (s *supervisor) loginGuard() *loginLimiter {
-	s.loginMu.Lock()
-	defer s.loginMu.Unlock()
-	if s.login == nil {
-		s.login = newLoginLimiter()
-	}
-	return s.login
-}
-
-// setAuthCookie writes the token as an HttpOnly cookie so event streams authenticate without JavaScript access.
-func (s *supervisor) setAuthCookie(w http.ResponseWriter, r *http.Request, token string, maxAge int) {
-	secure := s.forwardedInfo(r).Proto == "https"
-	http.SetCookie(w, &http.Cookie{
-		Name:     "wt_token",
-		Value:    token,
-		Path:     "/",
-		MaxAge:   maxAge,
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		Secure:   secure,
-	})
-}
-
 // handleLogin checks the token or scoped credential and issues the admin cookie. The panel still sends a bearer token for its own requests, but EventSource can only use the cookie.
 func (s *supervisor) handleLogin(w http.ResponseWriter, r *http.Request) {
-	limiter := s.loginGuard()
-	key := s.forwardedInfo(r).ClientIP
-	if key == "" {
-		key = remoteHost(r)
-	}
+	limiter := s.loginGuard("operator")
+	key := s.loginKey(r)
 	now := time.Now()
 	if allowed, wait := limiter.allow(key, now); !allowed {
-		seconds := max(int(wait.Seconds()), 1)
-		w.Header().Set("Retry-After", strconv.Itoa(seconds))
+		writeRetryAfter(w, wait)
 		s.appendAudit(authIdentity{Name: "anonymous"}, r, "login.failed", "", http.StatusTooManyRequests, "too many attempts")
 		writeError(w, http.StatusTooManyRequests, "too many login attempts; try again later")
 		return

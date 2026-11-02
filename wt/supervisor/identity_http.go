@@ -7,7 +7,6 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -78,15 +77,6 @@ func (s *supervisor) serveIdentityApp(w http.ResponseWriter, r *http.Request) bo
 	return true
 }
 
-func (s *supervisor) identityLoginGuard() *loginLimiter {
-	s.identityLoginMu.Lock()
-	defer s.identityLoginMu.Unlock()
-	if s.identityLogin == nil {
-		s.identityLogin = newLoginLimiter()
-	}
-	return s.identityLogin
-}
-
 func writeIdentityError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, errIdentityNoSession):
@@ -107,15 +97,11 @@ func writeIdentityError(w http.ResponseWriter, err error) {
 }
 
 func (s *supervisor) handleIdentityLogin(w http.ResponseWriter, r *http.Request) {
-	limiter := s.identityLoginGuard()
-	key := s.forwardedInfo(r).ClientIP
-	if key == "" {
-		key = remoteHost(r)
-	}
+	limiter := s.loginGuard("identity")
+	key := s.loginKey(r)
 	now := time.Now()
 	if allowed, wait := limiter.allow(key, now); !allowed {
-		seconds := max(int(wait.Seconds()), 1)
-		w.Header().Set("Retry-After", strconv.Itoa(seconds))
+		writeRetryAfter(w, wait)
 		writeError(w, http.StatusTooManyRequests, "too many login attempts; try again later")
 		return
 	}

@@ -694,30 +694,10 @@ func stripIdentityCookie(r *http.Request) {
 	r.Header.Set("Cookie", strings.Join(kept, "; "))
 }
 
-func (s *supervisor) identityCookieSecure(r *http.Request) bool {
-	return s.forwardedInfo(r).Proto == "https"
-}
-
 func (s *supervisor) setIdentityCookie(w http.ResponseWriter, r *http.Request, token string) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     identityCookieName,
-		Value:    token,
-		Path:     "/",
-		MaxAge:   int(identitySessionTTL / time.Second),
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		Secure:   s.identityCookieSecure(r),
-	})
+	s.setSessionCookie(w, r, identityCookieName, token, int(identitySessionTTL/time.Second))
 }
 
 func (s *supervisor) clearIdentityCookie(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     identityCookieName,
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		Secure:   s.identityCookieSecure(r),
-	})
+	s.setSessionCookie(w, r, identityCookieName, "", -1)
 }

@@ -186,9 +186,7 @@ type supervisor struct {
 	deployRuns      map[string]*deploymentRun
 	artifactCacheMu sync.Mutex
 	loginMu         sync.Mutex
-	login           *loginLimiter
-	identityLoginMu sync.Mutex
-	identityLogin   *loginLimiter
+	loginLimiters   map[string]*loginLimiter
 	stopping        atomic.Bool
 	ready           atomic.Bool
 
