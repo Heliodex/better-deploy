@@ -19,6 +19,7 @@ import (
 	"time"
 )
 
+// replaceDir swaps dst for src, moving the old tree aside first and restoring it when the install fails.
 func replaceDir(src, dst string) error {
 	backup := ""
 	if _, err := os.Stat(dst); err == nil {
@@ -96,6 +97,7 @@ func extractTarReg(tr *tar.Reader, header *tar.Header, target, name string, tota
 	return nil
 }
 
+// extractTarGzLimited extracts regular files and directories, rejecting links and enforcing byte and entry limits.
 func extractTarGzLimited(src, dst string, maxBytes int64, maxFiles int) error {
 	file, err := os.Open(src)
 	if err != nil {

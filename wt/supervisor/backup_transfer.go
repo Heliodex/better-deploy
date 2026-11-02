@@ -177,6 +177,7 @@ func (m *backupManager) recordImportedSnapshot(app, name string, now time.Time, 
 	return info, nil
 }
 
+// importSnapshot extracts an uploaded archive into a temporary directory and records it as a new snapshot.
 func (m *backupManager) importSnapshot(app, src string) (backupInfo, error) {
 	m.lock(app)
 	defer m.unlock(app)

@@ -26,6 +26,7 @@ func backupTreeAcyclic(tree backupTree) bool {
 	return true
 }
 
+// backupOldestRoot returns the lexicographically oldest root, which is also the oldest snapshot.
 func backupOldestRoot(tree backupTree) string {
 	root := ""
 	for name, node := range tree.Nodes {
@@ -179,6 +180,7 @@ func (m *backupManager) loadTreeLocked(app string, files []backupInfo) (backupTr
 	return tree, reconcileTree(&tree, files) || changed, nil
 }
 
+// saveTreeLocked writes the tree atomically while the caller holds the app lock.
 func (m *backupManager) saveTreeLocked(app string, tree backupTree) error {
 	if tree.Nodes == nil {
 		tree.Nodes = map[string]backupNode{}

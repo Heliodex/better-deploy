@@ -93,6 +93,7 @@ func (b *blobStore) secretFor(app string) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
+// validBlobDigest reports whether digest is a 64-character hex SHA-256.
 func validBlobDigest(digest string) bool {
 	if len(digest) != sha256.Size*2 {
 		return false
@@ -108,6 +109,7 @@ func blobSignature(secret, method, app, digest string, expires, maxBytes int64, 
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
+// sign derives the app's key and signs one blob action.
 func (b *blobStore) sign(method, app, digest string, expires time.Time, maxBytes int64, contentType string) (string, error) {
 	if b == nil {
 		return "", errBlobStoreEmpty
@@ -115,6 +117,7 @@ func (b *blobStore) sign(method, app, digest string, expires time.Time, maxBytes
 	return blobSignature(b.secretFor(app), method, app, digest, expires.Unix(), maxBytes, contentType), nil
 }
 
+// downloadURL returns a same-origin signed URL for one stored blob.
 func (b *blobStore) downloadURL(app, digest string, expires time.Time) (string, error) {
 	signature, err := b.sign("download", app, digest, expires, 0, "")
 	if err != nil {
@@ -177,6 +180,7 @@ func (b *blobStore) openMeta(app, digest string) (blobInfo, error) {
 	return info, nil
 }
 
+// open returns the blob body and metadata, falling back to file details when the sidecar is missing.
 func (b *blobStore) open(app, digest string) (*os.File, blobInfo, error) {
 	if !validBlobDigest(digest) {
 		return nil, blobInfo{}, errBlobNotFound
@@ -196,6 +200,7 @@ func (b *blobStore) open(app, digest string) (*os.File, blobInfo, error) {
 	return file, info, nil
 }
 
+// remove deletes a blob and its metadata, reporting a missing blob as not found.
 func (b *blobStore) remove(app, digest string) error {
 	if !validBlobDigest(digest) {
 		return errBlobNotFound
@@ -246,6 +251,7 @@ func (s *supervisor) handleBlobs(w http.ResponseWriter, r *http.Request, a *app)
 	}
 }
 
+// verifyBlobURL checks the expiry, action and HMAC signature of a signed blob URL.
 func (s *supervisor) verifyBlobURL(r *http.Request, a *app, method, digest string, maxBytes int64, contentType string) error {
 	value := r.URL.Query().Get("exp")
 	expires, err := strconv.ParseInt(value, 10, 64)
@@ -274,6 +280,7 @@ func (s *supervisor) verifyBlobURL(r *http.Request, a *app, method, digest strin
 	return nil
 }
 
+// handleBlobUpload stores a signed PUT body and returns a signed download URL.
 func (s *supervisor) handleBlobUpload(w http.ResponseWriter, r *http.Request, a *app) {
 	maxValue := r.URL.Query().Get("max")
 	maxBytes, err := strconv.ParseInt(maxValue, 10, 64)
@@ -322,6 +329,7 @@ func (s *supervisor) handleBlobUpload(w http.ResponseWriter, r *http.Request, a 
 	writeJSON(w, status, blobUploadResponse{blobInfo: info, URL: url})
 }
 
+// blobOverQuota reports whether an upload would exceed the app or host disk budget.
 func (s *supervisor) blobOverQuota(a *app) bool {
 	if s.cfg.diskBudgetBytes > 0 && s.overBudget() {
 		return true
@@ -339,6 +347,7 @@ func (s *supervisor) blobOverQuota(a *app) bool {
 	return used > limit
 }
 
+// handleBlobDownload serves a blob through a signed URL with an ETag and private caching.
 func (s *supervisor) handleBlobDownload(w http.ResponseWriter, r *http.Request, a *app, digest string) {
 	if err := s.verifyBlobURL(r, a, "download", digest, 0, ""); err != nil {
 		writeBlobError(w, err)
@@ -356,6 +365,7 @@ func (s *supervisor) handleBlobDownload(w http.ResponseWriter, r *http.Request, 
 	http.ServeContent(w, r, digest, info.CreatedAt, file)
 }
 
+// handleBlobDelete removes a blob through a signed URL.
 func (s *supervisor) handleBlobDelete(w http.ResponseWriter, r *http.Request, a *app, digest string) {
 	if err := s.verifyBlobURL(r, a, "delete", digest, 0, ""); err != nil {
 		writeBlobError(w, err)
@@ -368,6 +378,7 @@ func (s *supervisor) handleBlobDelete(w http.ResponseWriter, r *http.Request, a 
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// writeBlobError maps blob store errors to their HTTP statuses.
 func writeBlobError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, errBlobTooLarge):

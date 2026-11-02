@@ -73,6 +73,7 @@ func copyStatic(src, dst string) error {
 	})
 }
 
+// copyBundle copies the deployable files and static output from a bundle directory.
 func copyBundle(src, dst string) error {
 	if err := copyFile(filepath.Join(src, "app.json"), filepath.Join(dst, "app.json")); err != nil {
 		return fmt.Errorf("copy app.json: %w", err)
@@ -296,6 +297,7 @@ func (m *deploymentManager) recordAt(app, id string, previous deploymentInfo, so
 	return recorded, nil
 }
 
+// record copies a bundle into history under a new deployment id.
 func (m *deploymentManager) record(app, source string) (deploymentInfo, error) {
 	id, now, err := m.newID(app)
 	if err != nil {
@@ -367,6 +369,7 @@ func (s *supervisor) historyBytes(a *app) int64 {
 	return bytes
 }
 
+// resetHistoryUsage invalidates the cached deployment history size for an app.
 func (s *supervisor) resetHistoryUsage(name string) {
 	if a := s.lookup(name); a != nil {
 		a.history.mu.Lock()
@@ -375,6 +378,7 @@ func (s *supervisor) resetHistoryUsage(name string) {
 	}
 }
 
+// recordDeployment stores a deployed bundle in history and invalidates its size cache.
 func (s *supervisor) recordDeployment(name, dir string) {
 	if s.deployments == nil {
 		return

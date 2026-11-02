@@ -87,6 +87,7 @@ func (m *deploymentManager) blobDir(app string) string {
 	return filepath.Join(m.appDir(app), deploymentBlobDir)
 }
 
+// validDeploymentID reports whether id is a single deployment timestamp.
 func validDeploymentID(id string) error {
 	if id == "" || filepath.Base(id) != id {
 		return errDeploymentNotFound
@@ -116,6 +117,7 @@ func (m *deploymentManager) replayPath(app string) string {
 	return filepath.Join(m.appDir(app), deploymentReplayName)
 }
 
+// readReplayFile loads the replay cache, returning the OS error when it does not exist.
 func (m *deploymentManager) readReplayFile(app string) (deploymentReplayFile, error) {
 	var file deploymentReplayFile
 	data, err := os.ReadFile(m.replayPath(app))
@@ -131,6 +133,7 @@ func (m *deploymentManager) readReplayFile(app string) (deploymentReplayFile, er
 	return file, nil
 }
 
+// replay returns a recent stored response for an idempotency key, or false when it is absent or expired.
 func (m *deploymentManager) replay(app, key string, now time.Time) (deployReplayEntry, bool) {
 	if key == "" {
 		return deployReplayEntry{}, false
@@ -146,6 +149,7 @@ func (m *deploymentManager) replay(app, key string, now time.Time) (deployReplay
 	return entry, true
 }
 
+// storeReplay records an idempotency key, pruning expired and over-limit entries.
 func (m *deploymentManager) storeReplay(app, key string, entry deployReplayEntry) error {
 	if key == "" {
 		return nil
@@ -190,6 +194,7 @@ func (m *deploymentManager) storeReplay(app, key string, entry deployReplayEntry
 	return writeFileAtomicMode(m.replayPath(app), append(data, '\n'), 0o600)
 }
 
+// clearReplay drops the app's replay cache.
 func (m *deploymentManager) clearReplay(app string) error {
 	err := os.Remove(m.replayPath(app))
 	if os.IsNotExist(err) {
@@ -198,6 +203,7 @@ func (m *deploymentManager) clearReplay(app string) error {
 	return err
 }
 
+// ids lists deployment ids in oldest-first timestamp order.
 func (m *deploymentManager) ids(app string) ([]string, error) {
 	entries, err := os.ReadDir(m.appDir(app))
 	if os.IsNotExist(err) {
@@ -217,6 +223,7 @@ func (m *deploymentManager) ids(app string) ([]string, error) {
 	return ids, nil
 }
 
+// list returns deployment records newest first, skipping unreadable entries.
 func (m *deploymentManager) list(app string) ([]deploymentInfo, error) {
 	ids, err := m.ids(app)
 	if err != nil {
@@ -337,6 +344,7 @@ func (m *deploymentManager) readLog(app, id string) ([]byte, error) {
 	return data, err
 }
 
+// bundle returns the retained directory for a successful deployment that has a component.
 func (m *deploymentManager) bundle(app, id string) (string, error) {
 	if err := validDeploymentID(id); err != nil {
 		return "", err

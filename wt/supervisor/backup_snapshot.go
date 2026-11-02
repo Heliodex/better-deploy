@@ -134,6 +134,7 @@ func validBackupName(name string) (string, error) {
 	return name, nil
 }
 
+// removeSnapshot deletes a snapshot database and its /data archive, ignoring missing files.
 func (m *backupManager) removeSnapshot(app, name string) error {
 	if err := os.Remove(filepath.Join(m.appDir(app), name)); err != nil && !os.IsNotExist(err) {
 		return err

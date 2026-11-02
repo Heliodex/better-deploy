@@ -346,6 +346,7 @@ func (m *backupManager) stateLocked(app string) (backupState, error) {
 	return backupState{Files: files, Tree: tree}, nil
 }
 
+// listLocked returns snapshots while the caller holds the app lock.
 func (m *backupManager) listLocked(app string) ([]backupInfo, error) {
 	state, err := m.stateLocked(app)
 	if err != nil {
@@ -417,6 +418,7 @@ func (m *backupManager) create(ctx context.Context, app string) (backupInfo, err
 	return m.createLocked(ctx, app, backupKindManual)
 }
 
+// backupIfDue takes a scheduled snapshot when the app's interval has elapsed and the database changed.
 func (m *backupManager) backupIfDue(ctx context.Context, app string, now time.Time) error {
 	m.lock(app)
 	defer m.unlock(app)

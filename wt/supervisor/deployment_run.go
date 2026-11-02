@@ -45,11 +45,13 @@ func (s *supervisor) deploymentRun(app, id string) (*deploymentRun, bool) {
 	return run, ok
 }
 
+// deploymentLogf appends a redacted, timestamped line to the deployment log.
 func (s *supervisor) deploymentLogf(app, id, format string, args ...any) {
 	line := s.redactAppText(app, fmt.Sprintf(format, args...))
 	s.deployments.appendLog(app, id, []byte(time.Now().UTC().Format(logTimeFormat)+" "+line+"\n"))
 }
 
+// deploymentLog appends redacted text, adding a trailing newline when it is missing.
 func (s *supervisor) deploymentLog(app, id, text string) {
 	if text == "" {
 		return
@@ -182,6 +184,7 @@ func (s *supervisor) handleDeploymentCreate(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusAccepted, info)
 }
 
+// runDeployment installs a staged bundle, records it and updates the run's status and log.
 func (s *supervisor) runDeployment(ctx context.Context, name, id string, staged *stagedDeploy) {
 	defer staged.cleanup()
 	now := time.Now().UTC()
@@ -236,6 +239,7 @@ func (s *supervisor) runDeployment(ctx context.Context, name, id string, staged 
 	s.deploymentLogf(name, id, "deployment %s succeeded in %s mode", id, recorded.Mode)
 }
 
+// handleDeploymentRoute dispatches status, cancel, log and log-stream requests for one deployment.
 func (s *supervisor) handleDeploymentRoute(w http.ResponseWriter, r *http.Request, name, rest string) {
 	id, action, _ := strings.Cut(rest, "/")
 	if id == "" {
@@ -268,6 +272,7 @@ func (s *supervisor) handleDeploymentRoute(w http.ResponseWriter, r *http.Reques
 	}
 }
 
+// handleDeploymentCancel cancels a queued or running deployment.
 func (s *supervisor) handleDeploymentCancel(w http.ResponseWriter, _ *http.Request, name, id string) {
 	info, err := s.deployments.info(name, id)
 	if err != nil {
