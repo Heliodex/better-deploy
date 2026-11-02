@@ -25,7 +25,7 @@ The first request for a precompiled Go component is tens of milliseconds on a la
   - `example/hello` – returns the method and path.
   - `example/notes` – JSON notes persisted in a real `notes` table through the supervisor's SQLite service.
   - `example/shelf` – link shelf with tags, search, pagination and click analytics.
-  - `example/ticker` – logs a `ticker beat` line every 10 seconds from an `app.json` schedule, so the supervisor log tail has a steady stream to show.
+  - `example/ticker` – logs a `ticker beat` line every 10 seconds from an `app.json` schedule and enqueues a durable `/jobs/beat` job with a payload, so the supervisor log tail and job queue have steady activity to show.
   - `example/guestbook` – SvelteKit static frontend with a Go JSON API; the frontend is served from the bundle's `static/` directory, not embedded in the component.
   - `example/pulse` – SvelteKit uptime dashboard over a Go API that probes URLs on a supervisor schedule, keeps latency history in SQLite and streams each cycle over the event bus.
 - `supervisor/` – runs apps, proxies by `Host`, deploys bundles blue/green.
@@ -65,6 +65,11 @@ The `wt-deploy` binary also acts as the operator CLI. Every command accepts `--h
 wt-deploy apps
 wt-deploy logs notes --tail 200 --level warn --source app
 wt-deploy logs notes --follow
+wt-deploy jobs ticker list --status dead
+wt-deploy jobs ticker show <id>
+wt-deploy jobs ticker enqueue --path /jobs/beat --body '{"slot":1}' --max-attempts 5
+wt-deploy jobs ticker cancel <id>
+wt-deploy jobs ticker retry <id>
 wt-deploy deploy --dir ./notes --app-host notes.example.com
 wt-deploy build --dir ./notes --out notes.tar.gz
 wt-deploy rollback notes 20261101T120000.000000000Z
@@ -495,19 +500,31 @@ The supervisor starts one goroutine per entry once the app is serving, restarts 
 
 ### Durable jobs
 
-`schedule` repeats one endpoint forever. For work that needs a payload, retries, a future run time or dead-letter handling, enqueue a job:
+`schedule` repeats one endpoint forever. For work that needs a payload, retries, a future run time or dead-letter handling, enqueue a job. The SDK posts through the storage loopback service, so the app does not need the admin API:
 
-```json
-{
-  "path": "/jobs/email",
-  "method": "POST",
-  "body": "{\"to\":\"one@example.com\"}",
-  "headers": {"Content-Type": "application/json"},
-  "runAt": "2026-11-01T09:00:00Z",
-  "maxAttempts": 5,
-  "idempotencyKey": "welcome-one"
-}
+```go
+job, created, err := app.EnqueueJob(ctx, wasihttp.NewClient(), app.JobRequest{
+	Path:           "/jobs/email",
+	Method:         http.MethodPost,
+	Body:           `{"to":"one@example.com"}`,
+	Headers:        map[string]string{"Content-Type": "application/json"},
+	RunAt:          time.Now().Add(10 * time.Minute),
+	MaxAttempts:    5,
+	IdempotencyKey: "welcome-one",
+})
 ```
+
+`created` is false when an idempotency key matched an existing job. `app.ListJobs(ctx, client, status)`, `app.GetJob`, `app.CancelJob` and `app.RetryJob` wrap the rest of the queue. The same queue is reachable from the CLI:
+
+```sh
+wt-deploy jobs ticker list --status dead
+wt-deploy jobs ticker show <id>
+wt-deploy jobs ticker enqueue --path /jobs/beat --body '{"slot":1}' --max-attempts 5
+wt-deploy jobs ticker cancel <id>
+wt-deploy jobs ticker retry <id>
+```
+
+The app-facing endpoint is `POST /v1/jobs` on `WT_STORAGE_URL` with the storage token, plus `GET /v1/jobs`, `GET /v1/jobs/<id>`, `POST /v1/jobs/<id>/cancel` and `POST /v1/jobs/<id>/retry`. The supervisor's admin API and CLI use `/apps/<name>/jobs`; `wt-deploy jobs` prints a table unless `--json` is set. `example/ticker` enqueues a small `/jobs/beat` job on every schedule tick.
 
 Jobs are stored one JSON file per app under `WT_STATE_DIR/.jobs/<app>.json` (`0700` directory, `0600` file), so they survive restarts. The worker calls the app through its loopback port only while the app is ready, waits for `runAt`, leases a running job for two minutes, retries failures with exponential backoff up to `maxAttempts` (default 3, maximum 20), and moves exhausted jobs to `dead`. `job_concurrency` (default 1, maximum 16) caps simultaneous jobs per app. `idempotencyKey` returns the existing job instead of creating a duplicate. A canceled running job may still have reached the app; delivery is at-least-once. The queue is a host-driven HTTP call, not a `wt:job` WIT export, and a job payload is capped at 64 KiB.
 

@@ -3,6 +3,7 @@
 	"build_component": "../../packages/generate.sh && go tool componentize-go -d ../../packages/wit -w wt:app/app build",
 	"health": "/healthz",
 	"host": "ticker.localhost",
+	"job_concurrency": 1,
 	"memory_mb": 128,
 	"name": "ticker",
 	"schedule": [
