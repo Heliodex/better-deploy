@@ -27,6 +27,7 @@ The first request for a precompiled Go component is tens of milliseconds on a la
   - `example/shelf` – link shelf with tags, search, pagination and click analytics.
   - `example/ticker` – logs a `ticker beat` line every 10 seconds from an `app.json` schedule, so the supervisor log tail has a steady stream to show.
   - `example/guestbook` – SvelteKit static frontend with a Go JSON API; the frontend is served from the bundle's `static/` directory, not embedded in the component.
+  - `example/pulse` – SvelteKit uptime dashboard over a Go API that probes URLs on a supervisor schedule, keeps latency history in SQLite and streams each cycle over the event bus.
 - `supervisor/` – runs apps, proxies by `Host`, deploys bundles blue/green.
   - `supervisor/web` – SvelteKit admin panel, embedded into the supervisor binary (not tracked: `web/build`, `web/node_modules`, `web/.svelte-kit`).
 - `deploy/` – builds, precompiles and uploads an app.
@@ -34,7 +35,7 @@ The first request for a precompiled Go component is tens of milliseconds on a la
 ## Requirements
 
 - Go 1.27.1 or newer. `componentize-go` is declared as a tool in both `packages/go.mod` (binding generation) and `example/go.mod` (app builds); it downloads the patched Go it needs for async components.
-- The `example/guestbook` build also needs Bun. It runs `bun install` and `bun run build` in `example/guestbook/web`, then copies the static output into `example/guestbook/static`, which `wt-deploy` packs beside the component. `example/guestbook/contract/generate.go` turns the Valibot request and response schemas into JSON Schema and generated Go request and response types. `go generate ./contract/` runs it as part of the build; the generated schema and Go files are not tracked.
+- The `example/guestbook` and `example/pulse` builds also need Bun. It runs `bun install` and `bun run build` in their `web` directories, then copies the static output into the app's `static`, which `wt-deploy` packs beside the component. `example/guestbook/contract/generate.go` turns the Valibot request and response schemas into JSON Schema and generated Go request and response types. `go generate ./contract/` runs it as part of the build; the generated schema and Go files are not tracked.
 - wasmtime **50.0.0** is optional on the machine running `wt-deploy`: bundles always carry `main.wasm` and an `artifact.json` with the wasm digest, size, compiler version and target. An uploaded `main.cwasm` is only a precompiled hint and is accepted when its recorded runtime, target, epoch flag and wasm digest match. The supervisor keeps compiled modules in `WT_CACHE_DIR` keyed by those values, and can compile from `main.wasm` when `WT_WASMTIME_COMPILER` has the `compile` subcommand. The client and supervisor both default to `x86_64-unknown-linux-musl`, which is what the runtime-only image can execute; a different target needs a matching runtime build.
 - The WIT in `packages/wit` is the final `wasi:http@0.3.0` from wasmtime v50 (`crates/wasi-http/src/p3/wit`), plus `wasi:cli/imports`.
 

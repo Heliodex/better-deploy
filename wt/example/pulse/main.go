@@ -1,0 +1,491 @@
+// Command pulse is a small uptime monitor: it probes URLs on a supervisor schedule, keeps a short latency history in SQLite and pushes each cycle over the event bus.
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"math"
+	"net/http"
+	"net/url"
+	"strings"
+	"sync"
+	"time"
+	"unicode/utf8"
+
+	"wt.packages/app"
+	"wt.packages/storage"
+	wasihttp "wt.packages/wasihttp"
+)
+
+const (
+	maxBody       = 8 << 10
+	maxName       = 60
+	maxURL        = 500
+	maxMonitors   = 12
+	historyLimit  = 24
+	storedHistory = 40
+	probeTimeout  = 4 * time.Second
+	eventTopic    = "checks"
+)
+
+// check is one probe result, kept in the database and served as latency history.
+type check struct {
+	CheckedAt string `json:"checkedAt"`
+	OK        bool   `json:"ok"`
+	Status    int    `json:"status"`
+	LatencyMS int64  `json:"latencyMs"`
+	Error     string `json:"error"`
+}
+
+// monitor is a watched URL with its newest check first in line on the dashboard.
+type monitor struct {
+	ID        string  `json:"id"`
+	Name      string  `json:"name"`
+	URL       string  `json:"url"`
+	CreatedAt string  `json:"createdAt"`
+	Last      *check  `json:"last"`
+	History   []check `json:"history"`
+	Uptime    float64 `json:"uptime"`
+}
+
+// stats summarises the board for the header tiles.
+type stats struct {
+	Monitors     int    `json:"monitors"`
+	Up           int    `json:"up"`
+	Down         int    `json:"down"`
+	AvgLatencyMS int64  `json:"avgLatencyMs"`
+	Checks24h    int64  `json:"checks24h"`
+	LastCheckAt  string `json:"lastCheckAt"`
+}
+
+// cycleResult is returned by a manual or scheduled check and published as the event payload.
+type cycleResult struct {
+	Checked int    `json:"checked"`
+	Up      int    `json:"up"`
+	Down    int    `json:"down"`
+	At      string `json:"at"`
+}
+
+// createMonitorRequest is the body of POST /api/monitors.
+type createMonitorRequest struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
+}
+
+var (
+	store    *storage.Client
+	storeErr error
+	cycleMu  sync.Mutex
+)
+
+// migrate creates the schema and seeds a few public endpoints on first run.
+func migrate(ctx context.Context) error {
+	err := store.Migrate(ctx, 1,
+		storage.Statement{SQL: `create table if not exists monitors (
+			id text primary key,
+			name text not null,
+			url text not null,
+			created_at text not null
+		)`},
+		storage.Statement{SQL: `create table if not exists checks (
+			id integer primary key autoincrement,
+			monitor_id text not null,
+			checked_at text not null,
+			ok integer not null,
+			status integer not null,
+			latency_ms integer not null,
+			error text not null default ''
+		)`},
+		storage.Statement{SQL: `create index if not exists checks_monitor_idx on checks(monitor_id, id desc)`},
+	)
+	if err != nil {
+		return err
+	}
+	return seed(ctx)
+}
+
+// seed adds a few reachable endpoints once, so a fresh deployment has something to show.
+func seed(ctx context.Context) error {
+	return app.SeedOnce(ctx, store, "monitors", func(ctx context.Context) error {
+		now := time.Now().UTC()
+		seeds := []struct{ id, name, url string }{
+			{"example", "Example", "https://example.com"},
+			{"github", "GitHub API", "https://api.github.com/zen"},
+			{"httpbin", "HTTPBin", "https://httpbin.org/status/204"},
+		}
+		statements := make([]storage.Statement, 0, len(seeds))
+		for i, entry := range seeds {
+			createdAt := now.Add(-time.Duration(i) * time.Minute).Format(app.TimestampFormat)
+			statements = append(statements, storage.Statement{
+				SQL:  `insert or ignore into monitors (id, name, url, created_at) values (?, ?, ?, ?)`,
+				Args: []any{entry.id, entry.name, entry.url, createdAt},
+			})
+		}
+		_, err := store.Batch(ctx, statements...)
+		return err
+	})
+}
+
+// loadHistory returns the newest checks per monitor, oldest first, so the sparkline reads left to right.
+func loadHistory(ctx context.Context) (map[string][]check, error) {
+	rows, err := store.Query(ctx, `select monitor_id, checked_at, ok, status, latency_ms, error from (
+		select id, monitor_id, checked_at, ok, status, latency_ms, error,
+			row_number() over (partition by monitor_id order by id desc) as position
+		from checks
+	) where position <= ?
+	order by id asc`, historyLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	history := map[string][]check{}
+	for rows.Next() {
+		var id string
+		var entry check
+		if err := rows.Scan(&id, &entry.CheckedAt, &entry.OK, &entry.Status, &entry.LatencyMS, &entry.Error); err != nil {
+			return nil, err
+		}
+		history[id] = append(history[id], entry)
+	}
+	return history, rows.Err()
+}
+
+// loadMonitors joins each monitor with its short history and computed uptime.
+func loadMonitors(ctx context.Context) ([]monitor, error) {
+	history, err := loadHistory(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := store.Query(ctx, `select id, name, url, created_at from monitors order by created_at asc, id asc`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]monitor, 0)
+	for rows.Next() {
+		var entry monitor
+		if err := rows.Scan(&entry.ID, &entry.Name, &entry.URL, &entry.CreatedAt); err != nil {
+			return nil, err
+		}
+		entry.History = history[entry.ID]
+		if entry.History == nil {
+			entry.History = []check{}
+		}
+		if n := len(entry.History); n > 0 {
+			last := entry.History[n-1]
+			entry.Last = &last
+		}
+		entry.Uptime = uptimePercent(entry.History)
+		out = append(out, entry)
+	}
+	return out, rows.Err()
+}
+
+// uptimePercent counts successful checks in the stored window, rounded to one decimal.
+func uptimePercent(history []check) float64 {
+	if len(history) == 0 {
+		return 0
+	}
+	up := 0
+	for _, entry := range history {
+		if entry.OK {
+			up++
+		}
+	}
+	return math.Round(float64(up)*1000/float64(len(history))) / 10
+}
+
+// loadStats counts current states and the last day of checks.
+func loadStats(ctx context.Context) (stats, error) {
+	monitors, err := loadMonitors(ctx)
+	if err != nil {
+		return stats{}, err
+	}
+	out := stats{Monitors: len(monitors)}
+	var latencyTotal, latencyCount int64
+	for _, entry := range monitors {
+		if entry.Last == nil {
+			continue
+		}
+		if entry.Last.CheckedAt > out.LastCheckAt {
+			out.LastCheckAt = entry.Last.CheckedAt
+		}
+		if !entry.Last.OK {
+			out.Down++
+			continue
+		}
+		out.Up++
+		latencyTotal += entry.Last.LatencyMS
+		latencyCount++
+	}
+	if latencyCount > 0 {
+		out.AvgLatencyMS = latencyTotal / latencyCount
+	}
+	cutoff := time.Now().UTC().Add(-24 * time.Hour).Format(app.TimestampFormat)
+	if err := store.QueryRow(ctx, `select count(*) from checks where checked_at >= ?`, cutoff).Scan(&out.Checks24h); err != nil {
+		return stats{}, err
+	}
+	return out, nil
+}
+
+// probe fetches one URL and records the final status and elapsed milliseconds.
+func probe(ctx context.Context, target string) check {
+	entry := check{CheckedAt: time.Now().UTC().Format(app.TimestampFormat)}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		entry.Error = "invalid request"
+		return entry
+	}
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("User-Agent", "wt-pulse/1.0")
+	client := wasihttp.NewClient()
+	client.Timeout = probeTimeout
+	start := time.Now()
+	resp, err := client.Do(req)
+	entry.LatencyMS = time.Since(start).Milliseconds()
+	if err != nil {
+		entry.Error = trimError(err.Error())
+		return entry
+	}
+	defer resp.Body.Close()
+	// Drain a bounded amount so the adapter can reuse the connection without buffering a whole page.
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+	entry.Status = resp.StatusCode
+	entry.OK = resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusBadRequest
+	if !entry.OK {
+		entry.Error = http.StatusText(resp.StatusCode)
+	}
+	return entry
+}
+
+// trimError keeps a probe's failure readable in one log line and one card.
+func trimError(message string) string {
+	message = strings.Join(strings.Fields(message), " ")
+	if len(message) > 200 {
+		return message[:200]
+	}
+	return message
+}
+
+// saveCheck stores a probe and prunes the monitor's history to the newest entries in one transaction.
+func saveCheck(ctx context.Context, monitorID string, entry check) error {
+	_, err := store.Batch(ctx,
+		storage.Statement{
+			SQL:  `insert into checks (monitor_id, checked_at, ok, status, latency_ms, error) values (?, ?, ?, ?, ?, ?)`,
+			Args: []any{monitorID, entry.CheckedAt, entry.OK, entry.Status, entry.LatencyMS, entry.Error},
+		},
+		storage.Statement{
+			SQL:  `delete from checks where monitor_id = ? and id not in (select id from checks where monitor_id = ? order by id desc limit ?)`,
+			Args: []any{monitorID, monitorID, storedHistory},
+		},
+	)
+	return err
+}
+
+// runCycle probes every monitor once and reports the split. A dead URL is a result, not an error.
+func runCycle(ctx context.Context) (cycleResult, error) {
+	monitors, err := loadMonitors(ctx)
+	if err != nil {
+		return cycleResult{}, err
+	}
+	result := cycleResult{At: time.Now().UTC().Format(app.TimestampFormat)}
+	for _, entry := range monitors {
+		checked := probe(ctx, entry.URL)
+		if err := saveCheck(ctx, entry.ID, checked); err != nil {
+			return result, err
+		}
+		result.Checked++
+		if checked.OK {
+			result.Up++
+			continue
+		}
+		result.Down++
+	}
+	publishCycle(ctx, result)
+	return result, nil
+}
+
+// publishCycle wakes every open dashboard through the platform event bus. A failed publish must not fail the cycle.
+func publishCycle(ctx context.Context, result cycleResult) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	_, err := app.Publish(ctx, wasihttp.NewClient(), eventTopic, result)
+	if err != nil {
+		log.Printf("pulse: publish cycle: %v", err)
+	}
+}
+
+// normalizeName trims and validates a monitor label.
+func normalizeName(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", errors.New("name is required")
+	}
+	if utf8.RuneCountInString(value) > maxName {
+		return "", fmt.Errorf("name must be %d characters or fewer", maxName)
+	}
+	return value, nil
+}
+
+// normalizeURL accepts http and https only and adds https when the scheme is missing.
+func normalizeURL(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", errors.New("url is required")
+	}
+	if !strings.Contains(value, "://") {
+		value = "https://" + value
+	}
+	if len(value) > maxURL {
+		return "", fmt.Errorf("url must be %d characters or fewer", maxURL)
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Host == "" {
+		return "", errors.New("url must be a valid http or https address")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", errors.New("only http and https urls are supported")
+	}
+	return parsed.String(), nil
+}
+
+// handleListMonitors returns the board in one request so the client needs one round trip.
+func handleListMonitors(w http.ResponseWriter, r *http.Request) {
+	monitors, err := loadMonitors(r.Context())
+	if err != nil {
+		app.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	app.WriteJSON(w, http.StatusOK, map[string]any{"monitors": monitors})
+}
+
+// handleCreateMonitor validates, inserts and immediately probes a new monitor.
+func handleCreateMonitor(w http.ResponseWriter, r *http.Request) {
+	var request createMonitorRequest
+	if !app.ReadJSON(w, r, maxBody, "name", &request) {
+		return
+	}
+	name, err := normalizeName(request.Name)
+	if err != nil {
+		app.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	target, err := normalizeURL(request.URL)
+	if err != nil {
+		app.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var count int
+	if err := store.QueryRow(r.Context(), `select count(*) from monitors`).Scan(&count); err != nil {
+		app.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if count >= maxMonitors {
+		app.WriteError(w, http.StatusConflict, fmt.Sprintf("monitor limit of %d reached", maxMonitors))
+		return
+	}
+
+	entry := monitor{ID: app.NewID(), Name: name, URL: target, CreatedAt: time.Now().UTC().Format(app.TimestampFormat)}
+	if _, err := store.Exec(r.Context(), `insert into monitors (id, name, url, created_at) values (?, ?, ?, ?)`,
+		entry.ID, entry.Name, entry.URL, entry.CreatedAt); err != nil {
+		app.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	checked := probe(r.Context(), entry.URL)
+	if err := saveCheck(r.Context(), entry.ID, checked); err != nil {
+		app.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	entry.Last = &checked
+	entry.History = []check{checked}
+	entry.Uptime = uptimePercent(entry.History)
+	result := cycleResult{Checked: 1, At: checked.CheckedAt}
+	if checked.OK {
+		result.Up = 1
+	} else {
+		result.Down = 1
+	}
+	publishCycle(r.Context(), result)
+	app.WriteJSON(w, http.StatusCreated, entry)
+}
+
+// handleDeleteMonitor removes a monitor and its history together.
+func handleDeleteMonitor(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		app.WriteError(w, http.StatusNotFound, "monitor not found")
+		return
+	}
+	results, err := store.Batch(r.Context(),
+		storage.Statement{SQL: `delete from checks where monitor_id = ?`, Args: []any{id}},
+		storage.Statement{SQL: `delete from monitors where id = ?`, Args: []any{id}},
+	)
+	if err != nil {
+		app.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if len(results) < 2 || results[1].RowsAffected == 0 {
+		app.WriteError(w, http.StatusNotFound, "monitor not found")
+		return
+	}
+	publishCycle(r.Context(), cycleResult{At: time.Now().UTC().Format(app.TimestampFormat)})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleCheck runs one full cycle. The supervisor calls it from app.json's schedule; the dashboard can call it too.
+func handleCheck(w http.ResponseWriter, r *http.Request) {
+	cycleMu.Lock()
+	defer cycleMu.Unlock()
+	result, err := runCycle(r.Context())
+	if err != nil {
+		app.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	app.WriteJSON(w, http.StatusOK, result)
+}
+
+// handleStats returns the header totals.
+func handleStats(w http.ResponseWriter, r *http.Request) {
+	out, err := loadStats(r.Context())
+	if err != nil {
+		app.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	app.WriteJSON(w, http.StatusOK, out)
+}
+
+// handleRoot documents the API for non-browser clients; the supervisor serves the dashboard for text/html.
+func handleRoot(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	fmt.Fprintln(w, "pulse: a Wasm uptime monitor")
+	fmt.Fprintln(w, "GET    /api/monitors")
+	fmt.Fprintln(w, "POST   /api/monitors      {\"name\": \"...\", \"url\": \"https://...\"}")
+	fmt.Fprintln(w, "DELETE /api/monitors/{id}")
+	fmt.Fprintln(w, "POST   /api/check")
+	fmt.Fprintln(w, "GET    /api/stats")
+	fmt.Fprintln(w, "GET    /v1/events?topic=checks   (server-sent events)")
+}
+
+func init() {
+	store, storeErr = storage.New(wasihttp.NewClient())
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{$}", handleRoot)
+	mux.HandleFunc("GET /api/monitors", handleListMonitors)
+	mux.HandleFunc("POST /api/monitors", handleCreateMonitor)
+	mux.HandleFunc("DELETE /api/monitors/{id}", handleDeleteMonitor)
+	mux.HandleFunc("POST /api/check", handleCheck)
+	mux.HandleFunc("GET /api/stats", handleStats)
+	wasihttp.Handle(app.ServeStorage(storeErr, migrate, mux).ServeHTTP)
+}
+
+func main() {}

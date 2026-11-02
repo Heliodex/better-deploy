@@ -1,0 +1,9 @@
+/static/
+web/build/
+web/.svelte-kit/
+web/node_modules/
+web/.wt-dev.vite.config.ts
+main.wasm
+main.cwasm
+
+.wt-build.json

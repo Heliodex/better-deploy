@@ -1,0 +1,21 @@
+{
+	"build": "cd web && bun install --frozen-lockfile && bun run build && cd .. && rm -rf static && cp -r web/build static && ../../packages/generate.sh && go tool componentize-go -d ../../packages/wit -w wt:app/app build",
+	"dev": {
+		"build": "../../packages/generate.sh && go tool componentize-go -d ../../packages/wit -w wt:app/app build",
+		"command": "bun run dev",
+		"proxy": ["/api"],
+		"watch": ["web/src/lib/api.ts"]
+	},
+	"health": "/healthz",
+	"host": "pulse.localhost",
+	"memory_mb": 128,
+	"name": "pulse",
+	"request_timeout": "60s",
+	"schedule": [
+		{
+			"every": "30s",
+			"method": "POST",
+			"path": "/api/check"
+		}
+	]
+}
