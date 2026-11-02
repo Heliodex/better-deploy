@@ -118,6 +118,21 @@ func (s *supervisor) handleDeploymentCreate(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusServiceUnavailable, "deployment history unavailable")
 		return
 	}
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if len(idempotencyKey) > 128 {
+		writeError(w, http.StatusBadRequest, "Idempotency-Key must be at most 128 bytes")
+		return
+	}
+	if entry, ok := s.replayDeploy(name, idempotencyKey, time.Now()); ok {
+		s.replayDeployResponse(w, entry)
+		return
+	}
+	var recorder *deployRecorder
+	if idempotencyKey != "" {
+		recorder = &deployRecorder{ResponseWriter: w}
+		w = recorder
+		defer func() { s.storeDeployReplay(name, idempotencyKey, recorder) }()
+	}
 	if s.rejectOverBudget(w) {
 		return
 	}
@@ -139,6 +154,7 @@ func (s *supervisor) handleDeploymentCreate(w http.ResponseWriter, r *http.Reque
 			return
 		}
 	}
+	w.Header().Set("ETag", staged.etag)
 	if match := r.Header.Get("If-None-Match"); match != "" && etagMatches(match, staged.etag) {
 		staged.cleanup()
 		w.Header().Set("X-WT-Wasm-Digest", staged.digest)

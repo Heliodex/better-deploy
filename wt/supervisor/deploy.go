@@ -155,7 +155,7 @@ func extractTarGz(src, dst string) error {
 }
 
 // receiveBundle parses an uploaded bundle into a temporary directory and returns its app config.
-func (s *supervisor) receiveBundle(w http.ResponseWriter, r *http.Request, name string, allowMissingComponent bool) (dir string, cfg appConfig, cleanup func(), ok bool) {
+func (s *supervisor) receiveBundle(w http.ResponseWriter, r *http.Request, name string) (dir string, cfg appConfig, cleanup func(), ok bool) {
 	cleanup = func() {}
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
 	if err := r.ParseMultipartForm(16 << 20); err != nil {
@@ -203,12 +203,6 @@ func (s *supervisor) receiveBundle(w http.ResponseWriter, r *http.Request, name 
 	if err := extractTarGz(archiveName, dir); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return "", appConfig{}, cleanup, false
-	}
-	if !allowMissingComponent {
-		if _, err := os.Stat(filepath.Join(dir, "main.wasm")); err != nil {
-			writeError(w, http.StatusBadRequest, "archive must contain main.wasm")
-			return "", appConfig{}, cleanup, false
-		}
 	}
 
 	cfg, err = readAppConfig(dir, name, s.cfg.domain, s.cfg.tenantMode)
@@ -455,27 +449,26 @@ func (s *supervisor) replayDeployResponse(w http.ResponseWriter, entry deployRep
 
 // stagedDeploy is an uploaded bundle that has passed parsing and the static-only checks but is not installed yet.
 type stagedDeploy struct {
-	dir        string
-	cfg        appConfig
-	digest     string
-	etag       string
-	staticOnly bool
-	cleanup    func()
+	dir     string
+	cfg     appConfig
+	digest  string
+	etag    string
+	cleanup func()
 }
 
 // stageDeploy parses the uploaded bundle and resolves the static-only and digest cases shared by the sync and async paths.
 func (s *supervisor) stageDeploy(w http.ResponseWriter, r *http.Request, name string) (*stagedDeploy, bool) {
-	staticOnly := r.URL.Query().Get("static_only") == "1" || strings.TrimSpace(r.Header.Get("X-WT-Static-Only")) == "1"
-	dir, cfg, cleanup, ok := s.receiveBundle(w, r, name, staticOnly)
+	dir, cfg, cleanup, ok := s.receiveBundle(w, r, name)
 	if !ok {
 		return nil, false
 	}
-	staged := &stagedDeploy{dir: dir, cfg: cfg, staticOnly: staticOnly, cleanup: cleanup}
-	if staticOnly {
+	staged := &stagedDeploy{dir: dir, cfg: cfg, cleanup: cleanup}
+	// A bundle without a component keeps the running one, which makes a frontend-only deploy cheap.
+	if !exists(dir, "main.wasm") {
 		a := s.lookup(name)
 		if a == nil {
 			cleanup()
-			writeError(w, http.StatusNotFound, "app not found")
+			writeError(w, http.StatusBadRequest, "bundle has no main.wasm and the app is not running")
 			return nil, false
 		}
 		a.mu.Lock()
@@ -500,66 +493,4 @@ func (s *supervisor) stageDeploy(w http.ResponseWriter, r *http.Request, name st
 	}
 	staged.etag = `"` + bundleDigest(dir) + `"`
 	return staged, true
-}
-
-func (s *supervisor) deploy(w http.ResponseWriter, r *http.Request, name string) {
-	defer s.lockApp(name)()
-
-	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
-	if len(idempotencyKey) > 128 {
-		writeError(w, http.StatusBadRequest, "Idempotency-Key must be at most 128 bytes")
-		return
-	}
-	if entry, ok := s.replayDeploy(name, idempotencyKey, time.Now()); ok {
-		s.replayDeployResponse(w, entry)
-		return
-	}
-	var recorder *deployRecorder
-	if idempotencyKey != "" {
-		recorder = &deployRecorder{ResponseWriter: w}
-		w = recorder
-		defer func() { s.storeDeployReplay(name, idempotencyKey, recorder) }()
-	}
-
-	if s.rejectOverBudget(w) {
-		return
-	}
-	staged, ok := s.stageDeploy(w, r, name)
-	if !ok {
-		return
-	}
-	defer staged.cleanup()
-
-	if value := r.URL.Query().Get("dry_run"); value != "" {
-		dryRun, err := strconv.ParseBool(value)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "dry_run must be a boolean")
-			return
-		}
-		if dryRun {
-			w.Header().Set("X-WT-Wasm-Digest", staged.digest)
-			writeJSON(w, http.StatusOK, deployValidationResponse{Valid: true, Config: configResponse(staged.cfg), Digest: staged.digest})
-			return
-		}
-	}
-
-	digest := staged.digest
-	etag := staged.etag
-	w.Header().Set("ETag", etag)
-	if match := r.Header.Get("If-None-Match"); match != "" && etagMatches(match, etag) {
-		w.Header().Set("X-WT-Wasm-Digest", digest)
-		w.WriteHeader(http.StatusNotModified)
-		return
-	}
-	next, mode, err := s.installBundle(w, name, staged.cfg, staged.dir, digest, "deployed")
-	if err != nil {
-		s.metrics.observeDeploy(name, "failed")
-		s.recordDeploymentFailure(name, digest, err)
-		return
-	}
-	s.metrics.observeDeploy(name, "success")
-	s.recordDeployment(name, next.dir)
-	w.Header().Set("X-WT-Wasm-Digest", next.digest)
-	w.Header().Set("X-WT-Deploy-Mode", mode)
-	writeJSON(w, http.StatusOK, s.info(next))
 }

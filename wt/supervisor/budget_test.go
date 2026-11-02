@@ -102,11 +102,12 @@ func TestDeployRejectedOverBudget(t *testing.T) {
 	s.cfg.appsDir = filepath.Join(root, "apps")
 	s.cfg.stateDir = filepath.Join(root, "state")
 	s.cfg.diskBudgetBytes = 10
+	s.deployments = newDeploymentManager(t.TempDir())
 	writeSizedFile(t, filepath.Join(s.cfg.appsDir, "existing", "code.wasm"), 100)
 
-	req := httptest.NewRequest(http.MethodPost, "/apps/demo", nil)
+	req := httptest.NewRequest(http.MethodPost, "/apps/demo/deployments", nil)
 	rec := httptest.NewRecorder()
-	s.deploy(rec, req, "demo")
+	s.handleDeploymentCreate(rec, req, "demo")
 	if rec.Code != http.StatusInsufficientStorage {
 		t.Fatalf("over-budget deploy status = %d, want 507: %s", rec.Code, rec.Body.String())
 	}

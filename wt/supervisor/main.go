@@ -350,15 +350,10 @@ func (s *supervisor) handleAppRoot(w http.ResponseWriter, r *http.Request, name 
 		}
 		a.sampleResources(time.Now())
 		writeJSON(w, http.StatusOK, s.info(a))
-	case http.MethodPost:
-		if !s.requireAuth(w, r) {
-			return
-		}
-		s.deploy(w, r, name)
 	case http.MethodDelete:
 		s.handleDelete(w, r, name)
 	default:
-		w.Header().Set("Allow", "GET, POST, DELETE")
+		w.Header().Set("Allow", "GET, DELETE")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }

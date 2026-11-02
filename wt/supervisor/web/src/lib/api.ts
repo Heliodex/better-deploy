@@ -1,3 +1,4 @@
+import { routes } from "./routes.gen"
 import {
 	array,
 	boolean,
@@ -78,7 +79,7 @@ export const getToken = (): string | null => localStorage.getItem(tokenKey)
 /** Store the token for bearer requests and ask the supervisor for its HttpOnly cookie, which EventSource needs. */
 export async function setToken(token: string): Promise<void> {
 	localStorage.setItem(tokenKey, token)
-	await fetch("/login", {
+	await fetch(routes.login, {
 		body: JSON.stringify({ token }),
 		headers: { "content-type": "application/json" },
 		method: "POST",
@@ -87,7 +88,7 @@ export async function setToken(token: string): Promise<void> {
 
 export async function forgetToken(): Promise<void> {
 	localStorage.removeItem(tokenKey)
-	await fetch("/logout", { method: "POST" }).catch(() => undefined)
+	await fetch(routes.logout, { method: "POST" }).catch(() => undefined)
 }
 
 interface RequestOptions {
@@ -128,10 +129,10 @@ async function request<T>(path: string, options: RequestOptions, schema: Generic
 	return parseJSON(response, schema)
 }
 
-export const fetchApps = (token: string): Promise<AppInfo[]> => request("/apps", { token }, appsResponseSchema)
+export const fetchApps = (token: string): Promise<AppInfo[]> => request(routes.apps, { token }, appsResponseSchema)
 
 export function subscribe(onSnapshot: (apps: AppInfo[]) => void, onStatus: (live: boolean) => void): () => void {
-	const source = new EventSource("/events")
+	const source = new EventSource(routes.events)
 	source.addEventListener("open", () => onStatus(true))
 	source.addEventListener("error", () => onStatus(false))
 	source.addEventListener("message", event => {
@@ -158,7 +159,7 @@ export function subscribe(onSnapshot: (apps: AppInfo[]) => void, onStatus: (live
 }
 
 export const fetchApp = (token: string, name: string): Promise<AppInfo> =>
-	request(`/apps/${encodeURIComponent(name)}`, { token }, appInfoSchema)
+	request(routes.app(name), { token }, appInfoSchema)
 
 const resourceSampleSchema = object({
 	at: pipe(string(), minLength(1)),
@@ -173,7 +174,7 @@ const resourceHistorySchema = object({
 })
 
 export async function fetchResourceHistory(token: string, name: string): Promise<ResourceSample[]> {
-	const data = await request(`/apps/${encodeURIComponent(name)}/resources`, { token }, resourceHistorySchema)
+	const data = await request(routes.appResources(name), { token }, resourceHistorySchema)
 	return data.samples
 }
 
@@ -226,6 +227,16 @@ const deploymentInfoSchema = object({
 })
 
 export type DeploymentInfo = InferOutput<typeof deploymentInfoSchema>
+
+const deploymentRunSchema = object({
+	digest: string(),
+	error: optional(string()),
+	id: pipe(string(), minLength(1)),
+	mode: optional(string()),
+	status: picklist(["queued", "running", "success", "failed", "canceled"]),
+})
+
+export type DeploymentRun = InferOutput<typeof deploymentRunSchema>
 
 const deploymentsSchema = array(deploymentInfoSchema)
 
@@ -309,7 +320,7 @@ const logStreamSchema = union([
 ])
 
 export async function fetchLogs(token: string, name: string, tail: number): Promise<LogEntry[]> {
-	const data = await request(`/apps/${encodeURIComponent(name)}/logs?tail=${tail}`, { token }, logsResponseSchema)
+	const data = await request(`${routes.appLogs(name)}?tail=${tail}`, { token }, logsResponseSchema)
 	return data.logs
 }
 
@@ -319,7 +330,7 @@ export function subscribeLogs(
 	onBacklog: (logs: LogEntry[]) => void,
 	onLine: (entry: LogEntry) => void,
 ): () => void {
-	const source = new EventSource(`/apps/${encodeURIComponent(name)}/logs/stream?tail=${tail}`)
+	const source = new EventSource(`${routes.appLogsStream(name)}?tail=${tail}`)
 	source.addEventListener("message", event => {
 		if (typeof event.data !== "string") return
 		let data: unknown
@@ -341,13 +352,13 @@ export function subscribeLogs(
 }
 
 export const restartApp = (token: string, name: string): Promise<AppInfo> =>
-	request(`/apps/${encodeURIComponent(name)}/restart`, { method: "POST", token }, appInfoSchema)
+	request(routes.appRestart(name), { method: "POST", token }, appInfoSchema)
 
 export const stopApp = (token: string, name: string): Promise<AppInfo> =>
-	request(`/apps/${encodeURIComponent(name)}/stop`, { method: "POST", token }, appInfoSchema)
+	request(routes.appStop(name), { method: "POST", token }, appInfoSchema)
 
 export const startApp = (token: string, name: string): Promise<AppInfo> =>
-	request(`/apps/${encodeURIComponent(name)}/start`, { method: "POST", token }, appInfoSchema)
+	request(routes.appStart(name), { method: "POST", token }, appInfoSchema)
 
 const deleteAppSchema = object({
 	name: pipe(string(), minLength(1)),
@@ -356,7 +367,7 @@ const deleteAppSchema = object({
 
 export const deleteApp = (token: string, name: string, purge: boolean): Promise<boolean> =>
 	request(
-		`/apps/${encodeURIComponent(name)}${purge ? "?purge=1" : ""}`,
+		`${routes.app(name)}${purge ? "?purge=1" : ""}`,
 		{ method: "DELETE", token },
 		deleteAppSchema,
 	).then(result => result.purged)
@@ -410,10 +421,10 @@ export interface AppConfigPatch {
 }
 
 export const fetchAppConfig = (token: string, name: string): Promise<AppConfig> =>
-	request(`/apps/${encodeURIComponent(name)}/config`, { token }, appConfigSchema)
+	request(routes.appConfig(name), { token }, appConfigSchema)
 
 export const saveAppConfig = (token: string, name: string, patch: AppConfigPatch): Promise<AppConfig> =>
-	request(`/apps/${encodeURIComponent(name)}/config`, { json: patch, method: "PATCH", token }, appConfigSchema)
+	request(routes.appConfig(name), { json: patch, method: "PATCH", token }, appConfigSchema)
 
 const secretKeysSchema = object({
 	keys: array(string()),
@@ -425,44 +436,51 @@ const secretMutationSchema = object({
 })
 
 export const fetchSecretKeys = (token: string, name: string): Promise<string[]> =>
-	request(`/apps/${encodeURIComponent(name)}/secrets`, { token }, secretKeysSchema).then(result => result.keys)
+	request(routes.appSecrets(name), { token }, secretKeysSchema).then(result => result.keys)
 
 export const setAppSecret = (token: string, name: string, key: string, value: string): Promise<boolean> =>
 	request(
-		`/apps/${encodeURIComponent(name)}/secrets/${encodeURIComponent(key)}`,
+		routes.appSecret(name, key),
 		{ json: { value }, method: "PUT", token },
 		secretMutationSchema,
 	).then(result => result.restart_required)
 
 export const deleteAppSecret = (token: string, name: string, key: string): Promise<boolean> =>
 	request(
-		`/apps/${encodeURIComponent(name)}/secrets/${encodeURIComponent(key)}`,
+		routes.appSecret(name, key),
 		{ method: "DELETE", token },
 		secretMutationSchema,
 	).then(result => result.restart_required)
 
-export function deployBundle(token: string, name: string, file: File): Promise<AppInfo> {
+export async function deployBundle(token: string, name: string, file: File): Promise<AppInfo> {
 	const body = new FormData()
 	body.append("artifact", file)
-	return request(`/apps/${encodeURIComponent(name)}`, { body, method: "POST", token }, appInfoSchema)
+	const path = routes.appDeployments(name)
+	let run = await request(path, { body, method: "POST", token }, deploymentRunSchema)
+	while (run.status === "queued" || run.status === "running") {
+		await new Promise(resolve => setTimeout(resolve, 500))
+		run = await request(`${path}/${encodeURIComponent(run.id)}`, { token }, deploymentRunSchema)
+	}
+	if (run.status !== "success") throw new Error(run.error ?? `deployment ${run.status}`)
+	return fetchApp(token, name)
 }
 
 export const fetchBackups = (token: string, name: string): Promise<BackupsResult> =>
-	request(`/apps/${encodeURIComponent(name)}/backups`, { token }, backupsResponseSchema)
+	request(routes.appBackup(name), { token }, backupsResponseSchema)
 
 export const createBackup = (token: string, name: string): Promise<BackupsResult> =>
-	request(`/apps/${encodeURIComponent(name)}/backups`, { method: "POST", token }, backupsResponseSchema)
+	request(routes.appBackup(name), { method: "POST", token }, backupsResponseSchema)
 
 export const saveBackupSettings = (token: string, name: string, settings: BackupSettings): Promise<BackupsResult> =>
 	request(
-		`/apps/${encodeURIComponent(name)}/backups/config`,
+		routes.appBackup(name, "config"),
 		{ json: settings, method: "PUT", token },
 		backupsResponseSchema,
 	)
 
 export const restoreBackup = (token: string, name: string, backup: string): Promise<BackupsResult> =>
 	request(
-		`/apps/${encodeURIComponent(name)}/backups/${encodeURIComponent(backup)}/restore`,
+		routes.appBackup(name, `${encodeURIComponent(backup)}/restore`),
 		{ method: "POST", token },
 		backupsResponseSchema,
 	)
@@ -471,30 +489,30 @@ export const importBackup = (token: string, name: string, file: File): Promise<B
 	const body = new FormData()
 	body.append("snapshot", file)
 	return request(
-		`/apps/${encodeURIComponent(name)}/backups/import`,
+		routes.appBackup(name, "import"),
 		{ body, method: "POST", token },
 		backupsResponseSchema,
 	)
 }
 
 export const fetchDeployments = (token: string, name: string): Promise<DeploymentInfo[]> =>
-	request(`/apps/${encodeURIComponent(name)}/deployments`, { token }, deploymentsSchema)
+	request(routes.appDeployments(name), { token }, deploymentsSchema)
 
 export const rollbackDeployment = (token: string, name: string, id: string): Promise<AppInfo> =>
 	request(
-		`/apps/${encodeURIComponent(name)}/rollback/${encodeURIComponent(id)}`,
+		routes.appRollback(name, id),
 		{ method: "POST", token },
 		appInfoSchema,
 	)
 
 export const fetchDatabase = (token: string, name: string, stats = false): Promise<DatabaseOverview> =>
-	request(`/apps/${encodeURIComponent(name)}/database${stats ? "?stats=1" : ""}`, { token }, databaseOverviewSchema)
+	request(`${routes.appDatabase(name)}${stats ? "?stats=1" : ""}`, { token }, databaseOverviewSchema)
 
 export const importDatabase = (token: string, name: string, file: File): Promise<boolean> => {
 	const body = new FormData()
 	body.append("database", file)
 	return request(
-		`/apps/${encodeURIComponent(name)}/database/import`,
+		routes.appDatabasePath(name, "import"),
 		{ body, method: "POST", token },
 		databaseImportSchema,
 	).then(result => result.imported)
@@ -502,7 +520,7 @@ export const importDatabase = (token: string, name: string, file: File): Promise
 
 export const maintainDatabase = (token: string, name: string, op: string): Promise<DatabaseMaintenance> =>
 	request(
-		`/apps/${encodeURIComponent(name)}/database/maintenance`,
+		routes.appDatabasePath(name, "maintenance"),
 		{ json: { op }, method: "POST", token },
 		databaseMaintenanceSchema,
 	)
@@ -515,13 +533,13 @@ export function fetchDatabaseRows(
 	offset: number,
 ): Promise<DatabaseRows> {
 	const query = new URLSearchParams({ limit: `${limit}`, offset: `${offset}`, table })
-	return request(`/apps/${encodeURIComponent(name)}/database/rows?${query}`, { token }, databaseRowsSchema)
+	return request(`${routes.appDatabasePath(name, "rows")}?${query}`, { token }, databaseRowsSchema)
 }
 
 export function fetchChanges(token: string, name: string, limit = 200): Promise<StorageChangesResult> {
 	const query = new URLSearchParams({ limit: `${limit}` })
 	return request(
-		`/apps/${encodeURIComponent(name)}/database/changes?${query}`,
+		`${routes.appDatabasePath(name, "changes")}?${query}`,
 		{ token },
 		storageChangesResponseSchema,
 	)

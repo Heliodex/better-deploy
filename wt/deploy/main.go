@@ -80,9 +80,9 @@ const (
 )
 
 type deployConfig struct {
-	dir, app, host, token, wasmtime, target, appHost, out   string
-	buildCommand                                            string
-	skipBuild, skipCompile, jsonOut, forceBuild, staticOnly bool
+	dir, app, host, token, wasmtime, target, appHost, out string
+	buildCommand                                          string
+	skipBuild, skipCompile, jsonOut, forceBuild           bool
 }
 
 // uploadProgress prints a coarse percentage while a bundle uploads, without buffering it a second time.
@@ -516,7 +516,7 @@ func upload(cfg *deployConfig, m manifest, bundle []byte) error {
 		return err
 	}
 
-	url := baseURL(cfg.host) + "/apps/" + m.Name
+	url := baseURL(cfg.host) + "/apps/" + m.Name + "/deployments"
 	req, err := http.NewRequest(http.MethodPost, url, &body)
 	if err != nil {
 		return err
@@ -525,9 +525,6 @@ func upload(cfg *deployConfig, m manifest, bundle []byte) error {
 		req.Header.Set("Authorization", "Bearer "+cfg.token)
 	}
 	req.Header.Set("Content-Type", form.FormDataContentType())
-	if cfg.staticOnly {
-		req.Header.Set("X-WT-Static-Only", "1")
-	}
 	size := int64(body.Len())
 	req.ContentLength = size
 	progress := &uploadProgress{reader: bytes.NewReader(body.Bytes()), total: size}
@@ -546,14 +543,79 @@ func upload(cfg *deployConfig, m manifest, bundle []byte) error {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("deploy failed with status %s: %s", resp.Status, strings.TrimSpace(string(respBody)))
 	}
+	if resp.StatusCode != http.StatusAccepted {
+		return printDeployResult(cfg, m.Name, respBody)
+	}
+	location := resp.Header.Get("Location")
+	var queued deploymentState
+	if err := json.Unmarshal(respBody, &queued); err != nil {
+		return fmt.Errorf("read deployment: %w", err)
+	}
+	if location == "" {
+		location = "/apps/" + m.Name + "/deployments/" + queued.ID
+	}
+	if queued.ID == "" {
+		queued.ID = filepath.Base(location)
+	}
+	return waitDeploy(cfg, m.Name, location)
+}
+
+// deploymentState is the subset of a deployment resource the CLI needs.
+type deploymentState struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+	Mode   string `json:"mode"`
+	Digest string `json:"digest"`
+	Error  string `json:"error"`
+}
+
+// waitDeploy polls a queued deployment until it succeeds or fails, then prints the app.
+func waitDeploy(cfg *deployConfig, name, location string) error {
+	client := clientOptions{host: cfg.host, token: cfg.token, jsonOut: cfg.jsonOut, timeout: 30 * time.Second}
+	for {
+		status, _, body, err := apiDo(client, http.MethodGet, location, nil, "")
+		if err != nil {
+			return err
+		}
+		if status != http.StatusOK {
+			return fmt.Errorf("deployment status %d: %s", status, strings.TrimSpace(string(body)))
+		}
+		var state deploymentState
+		if err := json.Unmarshal(body, &state); err != nil {
+			return fmt.Errorf("read deployment status: %w", err)
+		}
+		switch state.Status {
+		case "queued", "running":
+			time.Sleep(250 * time.Millisecond)
+		case "success":
+			return printDeployResult(cfg, name, nil)
+		default:
+			if state.Error != "" {
+				return fmt.Errorf("deploy %s: %s", state.Status, state.Error)
+			}
+			return fmt.Errorf("deploy %s", state.Status)
+		}
+	}
+}
+
+// printDeployResult prints the app info from a fresh GET, or the provided response body.
+func printDeployResult(cfg *deployConfig, name string, body []byte) error {
+	if body == nil {
+		client := clientOptions{host: cfg.host, token: cfg.token, jsonOut: cfg.jsonOut, timeout: 30 * time.Second}
+		status, _, data, err := apiDo(client, http.MethodGet, "/apps/"+name, nil, "")
+		if err != nil {
+			return err
+		}
+		if status != http.StatusOK {
+			return fmt.Errorf("app info status %d: %s", status, strings.TrimSpace(string(data)))
+		}
+		body = data
+	}
 	if cfg.jsonOut {
-		fmt.Println(strings.TrimSpace(string(respBody)))
+		fmt.Println(strings.TrimSpace(string(body)))
 		return nil
 	}
-	fmt.Println(strings.TrimSpace(string(respBody)))
-	if digest := resp.Header.Get("X-WT-Wasm-Digest"); digest != "" {
-		fmt.Printf("digest: %s deploy mode: %s\n", digest, resp.Header.Get("X-WT-Deploy-Mode"))
-	}
+	fmt.Println(strings.TrimSpace(string(body)))
 	return nil
 }
 
@@ -604,12 +666,13 @@ func deploy(args []string) error {
 	if err != nil {
 		return err
 	}
+	keepComponent := false
 	if reused && !cfg.forceBuild {
 		if digest, err := fileDigest(filepath.Join(cfg.dir, "main.wasm")); err == nil && digest != "" && digest == serverDigest(cfg, m.Name) {
-			cfg.staticOnly = true
+			keepComponent = true
 		}
 	}
-	data, err := bundle(cfg.dir, m, !cfg.staticOnly)
+	data, err := bundle(cfg.dir, m, !keepComponent)
 	if err != nil {
 		return err
 	}

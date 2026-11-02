@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func deployArchive(t *testing.T, s *supervisor, name, archive string, query string) *httptest.ResponseRecorder {
@@ -16,7 +17,8 @@ func deployArchive(t *testing.T, s *supervisor, name, archive string, query stri
 	return deployArchiveHeaders(t, s, name, archive, query, nil)
 }
 
-func deployArchiveHeaders(t *testing.T, s *supervisor, name, archive string, query string, headers map[string]string) *httptest.ResponseRecorder {
+// deployQueued posts an archive to the queued deployment endpoint and returns its immediate response.
+func deployQueued(t *testing.T, s *supervisor, name, archive string, query string, headers map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 	data, err := os.ReadFile(archive)
 	if err != nil {
@@ -36,7 +38,7 @@ func deployArchiveHeaders(t *testing.T, s *supervisor, name, archive string, que
 		t.Fatal(err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/apps/"+name+query, &body)
+	req := httptest.NewRequest(http.MethodPost, "/apps/"+name+"/deployments"+query, &body)
 	req.Header.Set("Content-Type", form.FormDataContentType())
 	req.Header.Set("Authorization", "Bearer secret")
 	for key, value := range headers {
@@ -45,6 +47,77 @@ func deployArchiveHeaders(t *testing.T, s *supervisor, name, archive string, que
 	rec := httptest.NewRecorder()
 	s.handleApp(rec, req)
 	return rec
+}
+
+// deploymentID returns the id from a queued response's Location or body.
+func deploymentID(t *testing.T, rec *httptest.ResponseRecorder) string {
+	t.Helper()
+	if location := rec.Header().Get("Location"); location != "" {
+		return filepath.Base(location)
+	}
+	var info deploymentInfo
+	if err := json.Unmarshal(rec.Body.Bytes(), &info); err != nil {
+		t.Fatal(err)
+	}
+	return info.ID
+}
+
+// waitDeployment polls one deployment until it reaches a terminal state.
+func waitDeployment(t *testing.T, s *supervisor, name, id string) deploymentInfo {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		req := httptest.NewRequest(http.MethodGet, "/apps/"+name+"/deployments/"+id, nil)
+		req.Header.Set("Authorization", "Bearer secret")
+		rec := httptest.NewRecorder()
+		s.handleApp(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("deployment info = %d: %s", rec.Code, rec.Body.String())
+		}
+		var info deploymentInfo
+		if err := json.Unmarshal(rec.Body.Bytes(), &info); err != nil {
+			t.Fatal(err)
+		}
+		if info.Status != deploymentStatusQueued && info.Status != deploymentStatusRunning {
+			return info
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("deployment %s did not finish", id)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// deployArchiveHeaders uploads through the queued resource, waits for the result and returns a sync-shaped recorder.
+func deployArchiveHeaders(t *testing.T, s *supervisor, name, archive string, query string, headers map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := deployQueued(t, s, name, archive, query, headers)
+	if rec.Code != http.StatusAccepted {
+		return rec
+	}
+	etag := rec.Header().Get("ETag")
+	info := waitDeployment(t, s, name, deploymentID(t, rec))
+	result := httptest.NewRecorder()
+	if info.Status != deploymentStatusOK {
+		data, _ := json.Marshal(map[string]string{"error": info.Error})
+		result.WriteHeader(http.StatusBadGateway)
+		result.Body.Write(data)
+		return result
+	}
+	a := s.lookup(name)
+	if a == nil {
+		t.Fatal("successful deployment did not register the app")
+	}
+	result.Header().Set("ETag", etag)
+	result.Header().Set("X-WT-Wasm-Digest", info.Digest)
+	result.Header().Set("X-WT-Deploy-Mode", info.Mode)
+	data, err := json.Marshal(s.info(a))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result.WriteHeader(http.StatusOK)
+	result.Body.Write(data)
+	return result
 }
 
 func appPID(a *app) int {
@@ -65,6 +138,7 @@ func TestDeployDryRunValidatesWithoutInstalling(t *testing.T) {
 	s := testSupervisor()
 	s.cfg.appsDir = t.TempDir()
 	s.cfg.domain = "localhost"
+	s.deployments = newDeploymentManager(t.TempDir())
 	rec := deployArchive(t, s, "demo", archive, "?dry_run=1")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("dry run status = %d: %s", rec.Code, rec.Body.String())
@@ -192,15 +266,15 @@ func TestDeploySameDigestKeepsProcessAndUpdatesStatic(t *testing.T) {
 		"app.json":          appJSON,
 		"static/index.html": "static-only",
 	})
-	rec = deployArchiveHeaders(t, s, "demo", staticOnly, "", map[string]string{"X-WT-Static-Only": "1"})
+	rec = deployArchive(t, s, "demo", staticOnly, "")
 	if rec.Code != http.StatusOK || rec.Header().Get("X-WT-Deploy-Mode") != "static" {
-		t.Fatalf("static-only deploy = %d mode %q: %s", rec.Code, rec.Header().Get("X-WT-Deploy-Mode"), rec.Body.String())
+		t.Fatalf("component-less deploy = %d mode %q: %s", rec.Code, rec.Header().Get("X-WT-Deploy-Mode"), rec.Body.String())
 	}
 	if got := appPID(s.lookup("demo")); got != pid {
-		t.Errorf("static-only deploy restarted the app: pid %d, want %d", got, pid)
+		t.Errorf("component-less deploy restarted the app: pid %d, want %d", got, pid)
 	}
 	if static, err := os.ReadFile(filepath.Join(s.cfg.appsDir, "demo", "static", "index.html")); err != nil || string(static) != "static-only" {
-		t.Errorf("static-only content = %q, %v", static, err)
+		t.Errorf("component-less content = %q, %v", static, err)
 	}
 
 	old := s.lookup("demo")
@@ -316,13 +390,14 @@ func TestDeployConditionalAndIdempotent(t *testing.T) {
 		"app.json":  `{"name":"demo","host":"demo.localhost"}`,
 		"main.wasm": "wasm-idempotent",
 	})
-	rec = deployArchiveHeaders(t, s, "demo", other, "", map[string]string{"Idempotency-Key": "deploy-1"})
-	if rec.Code != http.StatusOK {
+	rec = deployQueued(t, s, "demo", other, "", map[string]string{"Idempotency-Key": "deploy-1"})
+	if rec.Code != http.StatusAccepted {
 		t.Fatalf("idempotent first deploy = %d: %s", rec.Code, rec.Body.String())
 	}
 	first := rec.Body.String()
-	rec = deployArchiveHeaders(t, s, "demo", archive, "", map[string]string{"Idempotency-Key": "deploy-1"})
-	if rec.Code != http.StatusOK || rec.Header().Get("Idempotency-Replayed") != "true" {
+	waitDeployment(t, s, "demo", deploymentID(t, rec))
+	rec = deployQueued(t, s, "demo", archive, "", map[string]string{"Idempotency-Key": "deploy-1"})
+	if rec.Code != http.StatusAccepted || rec.Header().Get("Idempotency-Replayed") != "true" {
 		t.Fatalf("idempotent replay = %d, header %q: %s", rec.Code, rec.Header().Get("Idempotency-Replayed"), rec.Body.String())
 	}
 	if rec.Body.String() != first {
@@ -333,8 +408,8 @@ func TestDeployConditionalAndIdempotent(t *testing.T) {
 	restarted := testSupervisor()
 	restarted.cfg.stateDir = s.cfg.stateDir
 	restarted.deployments = newDeploymentManager(filepath.Join(s.cfg.stateDir, ".deployments"))
-	rec = deployArchiveHeaders(t, restarted, "demo", archive, "", map[string]string{"Idempotency-Key": "deploy-1"})
-	if rec.Code != http.StatusOK || rec.Header().Get("Idempotency-Replayed") != "true" {
+	rec = deployQueued(t, restarted, "demo", archive, "", map[string]string{"Idempotency-Key": "deploy-1"})
+	if rec.Code != http.StatusAccepted || rec.Header().Get("Idempotency-Replayed") != "true" {
 		t.Fatalf("replay after restart = %d, header %q: %s", rec.Code, rec.Header().Get("Idempotency-Replayed"), rec.Body.String())
 	}
 	if rec.Body.String() != first {

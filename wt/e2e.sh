@@ -70,6 +70,28 @@ json_field() {
 	python3 -c 'import json,sys; print(json.load(sys.stdin)[sys.argv[1]])' "$1"
 }
 
+deploy() {
+	archive=$1
+	name=$2
+	response=$(api -X POST -F "artifact=@$archive" "http://127.0.0.1:$port/apps/$name/deployments")
+	id=$(printf '%s' "$response" | json_field id)
+	while :; do
+		response=$(api "http://127.0.0.1:$port/apps/$name/deployments/$id")
+		status=$(printf '%s' "$response" | json_field status)
+		case "$status" in
+		success)
+			return 0
+			;;
+		failed | canceled)
+			message=$(printf '%s' "$response" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("error", ""))')
+			echo "deploy $name $status: $message" >&2
+			return 1
+			;;
+		esac
+		sleep 0.25
+	done
+}
+
 echo "e2e: building supervisor and deploy tool"
 (cd "$root/wt/supervisor" && go build -o "$work/wt-supervisor" .)
 (cd "$root/wt/deploy" && go build -o "$work/wt-deploy" .)
@@ -82,18 +104,18 @@ start_supervisor
 wait_healthy
 
 echo "e2e: deploying hello"
-api -X POST -F "artifact=@$work/hello.tar.gz" "http://127.0.0.1:$port/apps/hello" >/dev/null
+deploy "$work/hello.tar.gz" hello
 body=$(curl -fsS -H "Host: hello.localhost" "http://127.0.0.1:$port/")
 echo "$body" | grep -q "hello from wt"
 echo "$body" | grep -q "path=/"
 
 echo "e2e: bundling and deploying a second app"
 "$work/wt-deploy" bundle --dir "$root/wt/example/ticker" --out "$work/ticker.tar.gz" --wasmtime "$wasmtime" --target "$target"
-api -X POST -F "artifact=@$work/ticker.tar.gz" "http://127.0.0.1:$port/apps/ticker" >/dev/null
+deploy "$work/ticker.tar.gz" ticker
 curl -fsS -H "Host: ticker.localhost" "http://127.0.0.1:$port/" | grep -q "ticker logs a beat"
 
 echo "e2e: rejecting a colliding host"
-code=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $token" -X POST -F "artifact=@$work/hello.tar.gz" "http://127.0.0.1:$port/apps/collision")
+code=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $token" -X POST -F "artifact=@$work/hello.tar.gz" "http://127.0.0.1:$port/apps/collision/deployments")
 if [ "$code" != "409" ]; then
 	echo "host collision returned $code, want 409" >&2
 	exit 1
@@ -144,12 +166,12 @@ if [ "${WT_E2E_EXAMPLES:-0}" = "1" ]; then
 	echo "e2e: scaffolding a standalone app"
 	"$work/wt-deploy" new --dir "$work/scaffolded"
 	"$work/wt-deploy" bundle --dir "$work/scaffolded" --out "$work/scaffolded.tar.gz" --wasmtime "$wasmtime" --target "$target"
-	api -X POST -F "artifact=@$work/scaffolded.tar.gz" "http://127.0.0.1:$port/apps/scaffolded" >/dev/null
+	deploy "$work/scaffolded.tar.gz" scaffolded
 	curl -fsS -H "Host: scaffolded.localhost" "http://127.0.0.1:$port/" | grep -q "A tiny notes app"
 
 	echo "e2e: bundling and deploying the guestbook"
 	"$work/wt-deploy" bundle --dir "$root/wt/example/guestbook" --out "$work/guestbook.tar.gz" --wasmtime "$wasmtime" --target "$target"
-	api -X POST -F "artifact=@$work/guestbook.tar.gz" "http://127.0.0.1:$port/apps/guestbook" >/dev/null
+	deploy "$work/guestbook.tar.gz" guestbook
 	curl -fsS -H "Host: guestbook.localhost" "http://127.0.0.1:$port/" | grep -q "Guestbook"
 fi
 

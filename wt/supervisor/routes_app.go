@@ -130,7 +130,7 @@ func (s *supervisor) handleRestartRoute(w http.ResponseWriter, r *http.Request, 
 // handleValidateRoute runs a deploy in dry-run mode.
 func (s *supervisor) handleValidateRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
 	r.URL.RawQuery = "dry_run=1"
-	s.deploy(w, r, params["name"])
+	s.handleDeploymentCreate(w, r, params["name"])
 }
 
 // handleRollbackRoute adapts the rollback handler to the route table.
@@ -142,7 +142,6 @@ func (s *supervisor) handleRollbackRoute(w http.ResponseWriter, r *http.Request,
 func (s *supervisor) buildAppRoutes() *routeTable {
 	rt := newRouteTable()
 	rt.addApp(http.MethodGet, "/apps/{name}", constantAction(""), s.handleAppRootRoute)
-	rt.addApp(http.MethodPost, "/apps/{name}", constantAction(""), s.handleAppRootRoute)
 	rt.addApp(http.MethodDelete, "/apps/{name}", constantAction(""), s.handleAppRootRoute)
 	rt.addApp(http.MethodGet, "/apps/{name}/config", constantAction("config"), s.handleAppConfigRoute)
 	rt.addApp(http.MethodPatch, "/apps/{name}/config", constantAction("config"), s.handleAppConfigRoute)
