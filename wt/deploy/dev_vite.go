@@ -64,6 +64,11 @@ func resolveViteDev(appDir string, m manifest, host string) (*viteDev, bool, err
 	if len(proxy) == 0 {
 		proxy = []string{"/api"}
 	}
+	supervisorProxy := dev.SupervisorProxy
+	if supervisorProxy == nil {
+		supervisorProxy = defaultSupervisorProxy
+	}
+	proxy = mergeProxyPrefixes(proxy, supervisorProxy)
 	return &viteDev{
 		appDir:  appDir,
 		webDir:  webDir,
@@ -76,7 +81,23 @@ func resolveViteDev(appDir string, m manifest, host string) (*viteDev, bool, err
 	}, true, nil
 }
 
-// writeViteDevConfig writes a config that keeps the app's own Vite config and adds the API proxy.
+// mergeProxyPrefixes appends groups without duplicating a prefix, preserving the app prefixes first.
+func mergeProxyPrefixes(groups ...[]string) []string {
+	seen := map[string]struct{}{}
+	var out []string
+	for _, group := range groups {
+		for _, prefix := range group {
+			if _, ok := seen[prefix]; ok {
+				continue
+			}
+			seen[prefix] = struct{}{}
+			out = append(out, prefix)
+		}
+	}
+	return out
+}
+
+// writeViteDevConfig writes a config that keeps the app's own Vite config and adds the app and supervisor proxies.
 func writeViteDevConfig(dev *viteDev, supervisorPort int) error {
 	baseImport := ""
 	for _, name := range []string{"vite.config.ts", "vite.config.mts", "vite.config.js", "vite.config.mjs"} {

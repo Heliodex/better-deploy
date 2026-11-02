@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -22,18 +23,42 @@ func TestNormalizeDevConfig(t *testing.T) {
 	if len(dev.Proxy) != 1 || dev.Proxy[0] != "/api" {
 		t.Errorf("default proxy = %v, want [/api]", dev.Proxy)
 	}
+	if len(dev.SupervisorProxy) != len(defaultSupervisorProxy) {
+		t.Errorf("default supervisor proxy = %v", dev.SupervisorProxy)
+	}
+	for _, prefix := range defaultSupervisorProxy {
+		found := false
+		for _, got := range dev.SupervisorProxy {
+			if got == prefix {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("default supervisor proxy is missing %s", prefix)
+		}
+	}
 	for name, bad := range map[string]*appDevConfig{
-		"absolute web":   {Web: "/tmp/web"},
-		"parent web":     {Web: "../web"},
-		"absolute watch": {Watch: []string{"/tmp/file"}},
-		"parent watch":   {Watch: []string{"../file"}},
-		"relative proxy": {Proxy: []string{"api"}},
-		"parent proxy":   {Proxy: []string{"/../api"}},
-		"large port":     {Port: 70000},
+		"absolute web":              {Web: "/tmp/web"},
+		"parent web":                {Web: "../web"},
+		"absolute watch":            {Watch: []string{"/tmp/file"}},
+		"parent watch":              {Watch: []string{"../file"}},
+		"relative proxy":            {Proxy: []string{"api"}},
+		"parent proxy":              {Proxy: []string{"/../api"}},
+		"relative supervisor proxy": {SupervisorProxy: []string{"v1/events"}},
+		"parent supervisor proxy":   {SupervisorProxy: []string{"/../events"}},
+		"large port":                {Port: 70000},
 	} {
 		if err := normalizeDevConfig(bad); err == nil {
 			t.Errorf("%s was accepted", name)
 		}
+	}
+	empty := &appDevConfig{SupervisorProxy: []string{}}
+	if err := normalizeDevConfig(empty); err != nil {
+		t.Fatal(err)
+	}
+	if len(empty.SupervisorProxy) != 0 {
+		t.Errorf("explicit empty supervisor proxy = %v, want none", empty.SupervisorProxy)
 	}
 }
 
@@ -78,11 +103,50 @@ func TestViteDevConfigIncludesProxy(t *testing.T) {
 		"port: 5199",
 		`"/api"`,
 		`"/v1"`,
+		`"/v1/events"`,
+		`"/_wt/events"`,
+		`"/_wt/blobs"`,
+		`"/_wt/identity"`,
 		"strictPort: true",
 	} {
 		if !strings.Contains(config, want) {
 			t.Errorf("config is missing %q:\n%s", want, config)
 		}
+	}
+}
+
+func TestViteDevConfigCanDisableSupervisorProxy(t *testing.T) {
+	appDir := t.TempDir()
+	webDir := filepath.Join(appDir, "web")
+	if err := os.MkdirAll(webDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(webDir, "package.json"), []byte(`{}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := manifest{Name: "demo", Dev: &appDevConfig{Port: 5199, SupervisorProxy: []string{}}}
+	if err := normalizeDevConfig(m.Dev); err != nil {
+		t.Fatal(err)
+	}
+	vite, ok, err := resolveViteDev(appDir, m, "demo.localhost")
+	if err != nil || !ok {
+		t.Fatalf("resolveViteDev = %v, %t, %v", vite, ok, err)
+	}
+	if err := writeViteDevConfig(vite, 18080); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(vite.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := string(data)
+	for _, unexpected := range defaultSupervisorProxy {
+		if strings.Contains(config, strconv.Quote(unexpected)) {
+			t.Errorf("config still contains %q:\n%s", unexpected, config)
+		}
+	}
+	if !strings.Contains(config, `"/api"`) {
+		t.Errorf("config is missing the app proxy:\n%s", config)
 	}
 }
 
@@ -171,7 +235,19 @@ func TestViteDevProxy(t *testing.T) {
 		case hostSeen <- r.Host:
 		default:
 		}
-		w.WriteHeader(http.StatusOK)
+		switch r.URL.Path {
+		case "/v1/events":
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: hello\n\n"))
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+		case "/_wt/blobs/test":
+			w.Header().Set("Content-Type", "application/octet-stream")
+			_, _ = w.Write([]byte("blob"))
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
 	}))
 	defer target.Close()
 	parsed, err := url.Parse(target.URL)
@@ -183,17 +259,13 @@ func TestViteDevProxy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	vite := &viteDev{
-		appDir:  filepath.Dir(webDir),
-		webDir:  webDir,
-		command: "bun run dev",
-		proxy:   []string{"/api"},
-		port:    0,
-		host:    "guestbook.localhost",
-	}
-	vite.port, err = freeLocalPort()
-	if err != nil {
+	m := manifest{Name: "guestbook", Dev: &appDevConfig{Proxy: []string{"/api"}}}
+	if err := normalizeDevConfig(m.Dev); err != nil {
 		t.Fatal(err)
+	}
+	vite, ok, err := resolveViteDev(filepath.Dir(webDir), m, "guestbook.localhost")
+	if err != nil || !ok {
+		t.Fatalf("resolveViteDev = %v, %t, %v", vite, ok, err)
 	}
 	if err := writeViteDevConfig(vite, targetPort); err != nil {
 		t.Fatal(err)
@@ -239,6 +311,32 @@ func TestViteDevProxy(t *testing.T) {
 	response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("proxied API status = %d", response.StatusCode)
+	}
+
+	response, err = client.Get(base + "/v1/events?topic=checks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventBody, err := io.ReadAll(response.Body)
+	response.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || !strings.Contains(string(eventBody), "data: hello") {
+		t.Errorf("proxied event stream = %d %q", response.StatusCode, eventBody)
+	}
+
+	response, err = client.Get(base + "/_wt/blobs/test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	blobBody, err := io.ReadAll(response.Body)
+	response.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || string(blobBody) != "blob" {
+		t.Errorf("proxied blob = %d %q", response.StatusCode, blobBody)
 	}
 	select {
 	case host := <-hostSeen:

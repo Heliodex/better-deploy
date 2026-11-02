@@ -66,8 +66,10 @@ type appDevConfig struct {
 	Command string `json:"command,omitempty"`
 	// Build rebuilds only the component; default app.json build_component.
 	Build string `json:"build,omitempty"`
-	// Proxy lists path prefixes forwarded to the wasm app; default /api.
+	// Proxy lists app path prefixes forwarded to the supervisor; default /api.
 	Proxy []string `json:"proxy,omitempty"`
+	// SupervisorProxy lists supervisor-owned app-host prefixes; defaults to the event, blob and identity routes. Set [] to disable them.
+	SupervisorProxy []string `json:"supervisor_proxy,omitempty"`
 	// Watch lists extra files or directories that trigger a component rebuild.
 	Watch []string `json:"watch,omitempty"`
 	// Port fixes the frontend dev port; default is a free port.
@@ -226,7 +228,10 @@ func validInputPath(value string) bool {
 	return clean != "." && clean != ".." && clean != string(filepath.Separator)
 }
 
-// normalizeDevConfig validates dev paths and fills the default proxy prefix.
+// defaultSupervisorProxy lists the supervisor-owned app-host routes the Vite dev server must forward in addition to the app API.
+var defaultSupervisorProxy = []string{"/v1/events", "/_wt/events", "/_wt/blobs", "/_wt/identity"}
+
+// normalizeDevConfig validates dev paths and fills the default proxy prefixes.
 func normalizeDevConfig(dev *appDevConfig) error {
 	if !validAppRelative(dev.Web) {
 		return fmt.Errorf("dev.web %q must stay inside the app directory", dev.Web)
@@ -239,13 +244,27 @@ func normalizeDevConfig(dev *appDevConfig) error {
 	if len(dev.Proxy) == 0 {
 		dev.Proxy = []string{"/api"}
 	}
-	for _, prefix := range dev.Proxy {
-		if !strings.HasPrefix(prefix, "/") || strings.Contains(prefix, "..") {
-			return fmt.Errorf("dev.proxy %q must be an absolute path prefix such as /api", prefix)
-		}
+	if dev.SupervisorProxy == nil {
+		dev.SupervisorProxy = append([]string(nil), defaultSupervisorProxy...)
+	}
+	if err := validateDevPrefixes("dev.proxy", dev.Proxy); err != nil {
+		return err
+	}
+	if err := validateDevPrefixes("dev.supervisor_proxy", dev.SupervisorProxy); err != nil {
+		return err
 	}
 	if dev.Port < 0 || dev.Port > 65535 {
 		return fmt.Errorf("dev.port must be between 1 and 65535, or 0 for a free port")
+	}
+	return nil
+}
+
+// validateDevPrefixes checks absolute proxy prefixes and rejects traversal.
+func validateDevPrefixes(name string, prefixes []string) error {
+	for _, prefix := range prefixes {
+		if !strings.HasPrefix(prefix, "/") || strings.Contains(prefix, "..") {
+			return fmt.Errorf("%s %q must be an absolute path prefix such as /api", name, prefix)
+		}
 	}
 	return nil
 }
