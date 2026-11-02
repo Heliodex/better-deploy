@@ -250,70 +250,37 @@ func (r *runnerServer) snapshotApps() []runnerAppInfo {
 	return out
 }
 
-func (r *runnerServer) start(request runnerStartRequest) {
-	if request.Name == "" || request.Path == "" {
-		r.send(runnerEvent{Op: "error", App: request.Name, Error: "name and path are required"})
-		return
-	}
-	outputRead, outputWrite, err := os.Pipe()
-	if err != nil {
-		r.send(runnerEvent{Op: "error", App: request.Name, Error: "output pipe: " + err.Error()})
-		return
-	}
-
-	var cmd *exec.Cmd
-	var goWriter, pidReader *os.File
+// newRunnerCommand builds the wasmtime or namespace-helper command and its pipes.
+func newRunnerCommand(request runnerStartRequest, output *os.File) (*exec.Cmd, *os.File, *os.File, error) {
 	if request.Namespaced {
 		pidRead, pidWrite, err := os.Pipe()
 		if err != nil {
-			_ = outputRead.Close()
-			_ = outputWrite.Close()
-			r.send(runnerEvent{Op: "error", App: request.Name, Error: "pid pipe: " + err.Error()})
-			return
+			return nil, nil, nil, fmt.Errorf("pid pipe: %w", err)
 		}
 		goRead, goWrite, err := os.Pipe()
 		if err != nil {
 			_ = pidRead.Close()
 			_ = pidWrite.Close()
-			_ = outputRead.Close()
-			_ = outputWrite.Close()
-			r.send(runnerEvent{Op: "error", App: request.Name, Error: "start pipe: " + err.Error()})
-			return
+			return nil, nil, nil, fmt.Errorf("start pipe: %w", err)
 		}
-		cmd = exec.Command("/proc/self/exe", append([]string{nsInitArg}, request.Args...)...)
+		cmd := exec.Command("/proc/self/exe", append([]string{nsInitArg}, request.Args...)...)
 		cmd.Env = append(stripEnv(request.Env, nsPlanEnv), nsPlanEnv+"="+string(request.Plan))
 		cmd.SysProcAttr = namespaceSysProcAttr(request.HostID, request.HostGID, request.AllowSetgroups)
 		cmd.ExtraFiles = []*os.File{pidWrite, goRead}
-		goWriter = goWrite
-		pidReader = pidRead
-	} else {
-		cmd = exec.Command(request.Path, request.Args...)
-		cmd.Env = request.Env
-		cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGTERM}
+		cmd.Stdout = output
+		cmd.Stderr = output
+		return cmd, goWrite, pidRead, nil
 	}
-	cmd.Stdout = outputWrite
-	cmd.Stderr = outputWrite
-	if err := cmd.Start(); err != nil {
-		_ = outputRead.Close()
-		_ = outputWrite.Close()
-		if goWriter != nil {
-			_ = goWriter.Close()
-		}
-		if pidReader != nil {
-			_ = pidReader.Close()
-		}
-		for _, file := range cmd.ExtraFiles {
-			_ = file.Close()
-		}
-		r.send(runnerEvent{Op: "error", App: request.Name, Error: "start app: " + err.Error()})
-		return
-	}
-	_ = outputWrite.Close()
-	for _, file := range cmd.ExtraFiles {
-		_ = file.Close()
-	}
-	cmd.ExtraFiles = nil
+	cmd := exec.Command(request.Path, request.Args...)
+	cmd.Env = request.Env
+	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGTERM}
+	cmd.Stdout = output
+	cmd.Stderr = output
+	return cmd, nil, nil, nil
+}
 
+// registerProcess records the started app before its output and exit watchers begin.
+func (r *runnerServer) registerProcess(request runnerStartRequest, cmd *exec.Cmd, goWriter, pidReader *os.File) *runnerProcess {
 	app := &runnerProcess{
 		info: runnerAppInfo{
 			Name:         request.Name,
@@ -336,6 +303,49 @@ func (r *runnerServer) start(request runnerStartRequest) {
 	r.mu.Lock()
 	r.apps[request.Name] = app
 	r.mu.Unlock()
+	return app
+}
+
+func (r *runnerServer) start(request runnerStartRequest) {
+	if request.Name == "" || request.Path == "" {
+		r.send(runnerEvent{Op: "error", App: request.Name, Error: "name and path are required"})
+		return
+	}
+	outputRead, outputWrite, err := os.Pipe()
+	if err != nil {
+		r.send(runnerEvent{Op: "error", App: request.Name, Error: "output pipe: " + err.Error()})
+		return
+	}
+
+	cmd, goWriter, pidReader, err := newRunnerCommand(request, outputWrite)
+	if err != nil {
+		_ = outputRead.Close()
+		_ = outputWrite.Close()
+		r.send(runnerEvent{Op: "error", App: request.Name, Error: err.Error()})
+		return
+	}
+	if err := cmd.Start(); err != nil {
+		_ = outputRead.Close()
+		_ = outputWrite.Close()
+		if goWriter != nil {
+			_ = goWriter.Close()
+		}
+		if pidReader != nil {
+			_ = pidReader.Close()
+		}
+		for _, file := range cmd.ExtraFiles {
+			_ = file.Close()
+		}
+		r.send(runnerEvent{Op: "error", App: request.Name, Error: "start app: " + err.Error()})
+		return
+	}
+	_ = outputWrite.Close()
+	for _, file := range cmd.ExtraFiles {
+		_ = file.Close()
+	}
+	cmd.ExtraFiles = nil
+
+	app := r.registerProcess(request, cmd, goWriter, pidReader)
 	r.send(runnerEvent{Op: "started", App: request.Name, PID: cmd.Process.Pid, WorkPID: app.info.WorkPID})
 	go r.readOutput(app, outputRead)
 	go r.waitApp(app)
