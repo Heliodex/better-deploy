@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -22,6 +23,7 @@ func encodeParam(arg any) any {
 		if value {
 			return int64(1)
 		}
+
 		return int64(0)
 	case int:
 		return int64(value)
@@ -49,10 +51,12 @@ func encodeParams(args []any) []any {
 	if len(args) == 0 {
 		return nil
 	}
+
 	params := make([]any, len(args))
 	for i, arg := range args {
 		params[i] = encodeParam(arg)
 	}
+
 	return params
 }
 
@@ -60,16 +64,19 @@ func encodeParams(args []any) []any {
 func decodeBlobValue(raw jsontext.Value) ([]byte, error) {
 	var object map[string]string
 	if err := json.Unmarshal(raw, &object); err != nil {
-		return nil, fmt.Errorf("blob must be {\"$b64\": \"...\"}")
+		return nil, errors.New("blob must be {\"$b64\": \"...\"}")
 	}
+
 	encoded, ok := object["$b64"]
 	if !ok {
-		return nil, fmt.Errorf("blob must be {\"$b64\": \"...\"}")
+		return nil, errors.New("blob must be {\"$b64\": \"...\"}")
 	}
+
 	value, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		return nil, fmt.Errorf("invalid base64: %w", err)
 	}
+
 	return value, nil
 }
 
@@ -78,6 +85,7 @@ func decodeNumberValue(text string) (any, error) {
 	if strings.ContainsAny(text, ".eE") {
 		return strconv.ParseFloat(text, 64)
 	}
+
 	return strconv.ParseInt(text, 10, 64)
 }
 
@@ -85,11 +93,12 @@ func decodeNumberValue(text string) (any, error) {
 func decodeValue(raw jsontext.Value) (any, error) {
 	text := strings.TrimSpace(string(raw))
 	if text == "" {
-		return nil, fmt.Errorf("empty value")
+		return nil, errors.New("empty value")
 	}
+
 	switch text[0] {
 	case 'n':
-		return nil, nil
+		return nil, nil //nolint:nilnil // JSON null is a valid decoded value.
 	case 't':
 		return true, nil
 	case 'f':
@@ -99,6 +108,7 @@ func decodeValue(raw jsontext.Value) (any, error) {
 		if err := json.Unmarshal(raw, &value); err != nil {
 			return nil, err
 		}
+
 		return value, nil
 	case '{':
 		return decodeBlobValue(raw)
@@ -116,11 +126,13 @@ func int64Value(value any) (int64, error) {
 		if value != math.Trunc(value) || value < math.MinInt64 || value > math.MaxInt64 {
 			return 0, fmt.Errorf("cannot convert %v to int64", value)
 		}
+
 		return int64(value), nil
 	case bool:
 		if value {
 			return 1, nil
 		}
+
 		return 0, nil
 	case string:
 		return strconv.ParseInt(value, 10, 64)
@@ -166,9 +178,10 @@ func boolValue(value any) (bool, error) {
 
 // scanValue scans a storage value into common pointer types, delegating to sql.Scanner when dest implements it.
 func scanValue(dest, value any) error {
-	if scanner, ok := dest.(interface{ Scan(any) error }); ok {
+	if scanner, ok := dest.(interface{ Scan(dest any) error }); ok {
 		return scanner.Scan(value)
 	}
+
 	switch dest := dest.(type) {
 	case *any:
 		*dest = value
@@ -199,40 +212,48 @@ func scanValue(dest, value any) error {
 		if err != nil {
 			return err
 		}
+
 		*dest = value
 	case *int:
 		value, err := int64Value(value)
 		if err != nil {
 			return err
 		}
+
 		if int64(int(value)) != value {
 			return fmt.Errorf("integer %d overflows int", value)
 		}
+
 		*dest = int(value)
 	case *float64:
 		value, err := float64Value(value)
 		if err != nil {
 			return err
 		}
+
 		*dest = value
 	case *bool:
 		value, err := boolValue(value)
 		if err != nil {
 			return err
 		}
+
 		*dest = value
 	case *time.Time:
 		text, ok := value.(string)
 		if !ok {
 			return fmt.Errorf("cannot scan %T into *time.Time", value)
 		}
+
 		parsed, err := time.Parse(time.RFC3339Nano, text)
 		if err != nil {
 			return err
 		}
+
 		*dest = parsed
 	default:
 		return fmt.Errorf("cannot scan into %T", dest)
 	}
+
 	return nil
 }

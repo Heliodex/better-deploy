@@ -8,7 +8,7 @@ import (
 	wasi "wt.packages/binding/imports/wasi_http_0_3_0_types"
 )
 
-// Assert `bodyReader` implements the required interfaces
+// Assert `bodyReader` implements the required interfaces.
 var _ io.Reader = &bodyReader{}
 
 var _ io.ReadCloser = &bodyReader{}
@@ -22,11 +22,13 @@ type bodyReader struct {
 func (r *bodyReader) takeError() error {
 	if r.trailers != nil {
 		trailers := r.trailers.Read()
+
 		r.trailers = nil
 		if trailers.IsErr() {
 			return fmt.Errorf("failed to read from HTTP body stream: %s", errorString(trailers.Err()))
 		}
 	}
+
 	return io.EOF
 }
 
@@ -47,9 +49,11 @@ func (r *bodyReader) Close() error {
 	if r.stream != nil {
 		r.stream.Drop()
 	}
+
 	if r.trailers != nil {
 		r.trailers.Drop()
 	}
+
 	return nil
 }
 

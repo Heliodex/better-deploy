@@ -87,7 +87,7 @@ type linkInput struct {
 }
 
 type rowScanner interface {
-	Scan(...any) error
+	Scan(dest ...any) error
 }
 
 var (
@@ -127,8 +127,10 @@ func seed(ctx context.Context) error {
 		}
 
 		statements := make([]storage.Statement, 0, 64)
+
 		for i, seed := range seeds {
 			createdAt := now.Add(-time.Duration(i*2) * 24 * time.Hour).Format(app.TimestampFormat)
+
 			statements = append(statements, storage.Statement{
 				SQL:  `insert or ignore into links (id, url, title, description, created_at) values (?, ?, ?, ?, ?)`,
 				Args: []any{seed.id, seed.url, seed.title, seed.description, createdAt},
@@ -139,6 +141,7 @@ func seed(ctx context.Context) error {
 					Args: []any{seed.id, tag},
 				})
 			}
+
 			for n := range seed.clicks {
 				clickedAt := now.Add(-time.Duration(((n/2)*3+i)%14) * 24 * time.Hour).Add(time.Duration(n) * time.Hour).Format(app.TimestampFormat)
 				statements = append(statements, storage.Statement{
@@ -147,7 +150,9 @@ func seed(ctx context.Context) error {
 				})
 			}
 		}
+
 		_, err := store.Batch(ctx, statements...)
+
 		return err
 	})
 }
@@ -178,15 +183,18 @@ func migrate(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
 	return seed(ctx)
 }
 
 func loadStats(ctx context.Context) (appStats, error) {
 	var stats appStats
+
 	err := store.QueryRow(ctx, `select
 		(select count(*) from links),
 		(select count(*) from clicks),
 		(select count(distinct tag) from tags)`).Scan(&stats.Links, &stats.Clicks, &stats.Tags)
+
 	return stats, err
 }
 
@@ -196,6 +204,7 @@ func handleDelete(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+
 	_, err := store.Batch(r.Context(),
 		storage.Statement{SQL: `delete from tags where link_id = ?`, Args: []any{id}},
 		storage.Statement{SQL: `delete from clicks where link_id = ?`, Args: []any{id}},
@@ -205,6 +214,7 @@ func handleDelete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "delete link: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
 	http.Redirect(w, r, "/?deleted=1", http.StatusSeeOther)
 }
 
@@ -214,21 +224,26 @@ func handleGo(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+
 	var target string
+
 	err := store.QueryRow(r.Context(), `select url from links where id = ?`, id).Scan(&target)
 	if errors.Is(err, storage.ErrNoRows) {
 		http.NotFound(w, r)
 		return
 	}
+
 	if err != nil {
 		http.Error(w, "load link: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
 	if _, err := store.Exec(r.Context(), `insert into clicks (id, link_id, clicked_at) values (?, ?, ?)`,
 		app.NewID(), id, time.Now().UTC().Format(app.TimestampFormat)); err != nil {
 		http.Error(w, "record click: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
 	http.Redirect(w, r, target, http.StatusFound)
 }
 
@@ -238,14 +253,18 @@ func loadClicks(ctx context.Context, id string) ([]click, error) {
 		return nil, err
 	}
 	defer rows.Close()
+
 	clicks := []click{}
+
 	for rows.Next() {
 		var item click
 		if err := rows.Scan(&item.At); err != nil {
 			return nil, err
 		}
+
 		clicks = append(clicks, item)
 	}
+
 	return clicks, rows.Err()
 }
 
@@ -258,31 +277,39 @@ func loadDays(ctx context.Context, id string) ([]dayCount, error) {
 	defer rows.Close()
 
 	days := []dayCount{}
+
 	for rows.Next() {
 		var item dayCount
 		if err := rows.Scan(&item.Day, &item.Count); err != nil {
 			return nil, err
 		}
+
 		days = append(days, item)
 	}
+
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+
 	slices.Reverse(days)
+
 	var maxCount int64
 	for _, day := range days {
 		if day.Count > maxCount {
 			maxCount = day.Count
 		}
 	}
+
 	for i := range days {
 		if maxCount > 0 {
 			days[i].Percent = int(days[i].Count * 100 / maxCount)
 		}
+
 		if days[i].Count > 0 && days[i].Percent < 4 {
 			days[i].Percent = 4
 		}
 	}
+
 	return days, nil
 }
 
@@ -295,6 +322,7 @@ func validTag(tag string) bool {
 	if len(tag) == 0 || len(tag) > 24 {
 		return false
 	}
+
 	for i, r := range tag {
 		switch {
 		case r >= 'a' && r <= 'z':
@@ -304,45 +332,56 @@ func validTag(tag string) bool {
 			return false
 		}
 	}
+
 	return true
 }
 
 func parseTags(raw string) ([]string, error) {
 	seen := map[string]bool{}
 	tags := []string{}
+
 	for part := range strings.SplitSeq(raw, ",") {
 		tag := normalizeTag(part)
 		if tag == "" || seen[tag] {
 			continue
 		}
+
 		if !validTag(tag) {
 			return nil, fmt.Errorf("tag %q must be 1-24 lowercase letters, digits, or dashes", tag)
 		}
+
 		seen[tag] = true
 		tags = append(tags, tag)
 	}
+
 	if len(tags) > maxTags {
 		return nil, fmt.Errorf("use at most %d tags", maxTags)
 	}
+
 	sort.Strings(tags)
+
 	return tags, nil
 }
 
 func parseLinkInput(r *http.Request) (linkInput, error) {
 	rawURL := strings.TrimSpace(r.FormValue("url"))
 	if rawURL == "" {
-		return linkInput{}, fmt.Errorf("URL is required")
+		return linkInput{}, errors.New("URL is required")
 	}
+
 	if len(rawURL) > maxURL {
-		return linkInput{}, fmt.Errorf("URL is too long")
+		return linkInput{}, errors.New("URL is too long")
 	}
+
 	if !strings.Contains(rawURL, "://") {
 		rawURL = "https://" + rawURL
 	}
+
 	parsed, err := url.Parse(rawURL)
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return linkInput{}, fmt.Errorf("URL must be an http or https address")
+		return linkInput{}, errors.New("URL must be an http or https address")
 	}
+
 	parsed.Scheme = strings.ToLower(parsed.Scheme)
 	parsed.Host = strings.ToLower(parsed.Host)
 
@@ -350,17 +389,21 @@ func parseLinkInput(r *http.Request) (linkInput, error) {
 	if title == "" {
 		title = parsed.Host
 	}
+
 	if len(title) > maxTitle {
-		return linkInput{}, fmt.Errorf("title is too long")
+		return linkInput{}, errors.New("title is too long")
 	}
+
 	description := strings.TrimSpace(r.FormValue("description"))
 	if len(description) > maxDescription {
-		return linkInput{}, fmt.Errorf("description is too long")
+		return linkInput{}, errors.New("description is too long")
 	}
+
 	tags, err := parseTags(r.FormValue("tags"))
 	if err != nil {
 		return linkInput{}, err
 	}
+
 	return linkInput{URL: parsed.String(), Title: title, Description: description, Tags: tags}, nil
 }
 
@@ -368,24 +411,32 @@ func splitTags(raw string) []string {
 	if raw == "" {
 		return []string{}
 	}
+
 	tags := slices.Collect(strings.SplitSeq(raw, ","))
 	for i := range tags {
 		tags[i] = strings.TrimSpace(tags[i])
 	}
+
 	sort.Strings(tags)
+
 	return tags
 }
 
 func scanLink(scanner rowScanner) (link, error) {
-	var item link
-	var tags string
+	var (
+		item link
+		tags string
+	)
 	if err := scanner.Scan(&item.ID, &item.URL, &item.Title, &item.Description, &item.CreatedAt, &item.Clicks, &item.LastClickedAt, &tags); err != nil {
 		return link{}, err
 	}
+
 	if parsed, err := url.Parse(item.URL); err == nil {
 		item.Host = parsed.Host
 	}
+
 	item.Tags = splitTags(tags)
+
 	return item, nil
 }
 
@@ -398,15 +449,19 @@ func pageURL(q, tag string, page int) string {
 	if q != "" {
 		values.Set("q", q)
 	}
+
 	if tag != "" {
 		values.Set("tag", tag)
 	}
+
 	if page > 1 {
 		values.Set("page", strconv.Itoa(page))
 	}
+
 	if len(values) == 0 {
 		return "/"
 	}
+
 	return "/?" + values.Encode()
 }
 
@@ -422,34 +477,42 @@ func loadTags(ctx context.Context, q string) ([]tagCount, error) {
 	defer rows.Close()
 
 	tags := []tagCount{}
+
 	for rows.Next() {
 		var item tagCount
 		if err := rows.Scan(&item.Tag, &item.Count); err != nil {
 			return nil, err
 		}
+
 		item.URL = tagPageURL(q, item.Tag)
 		tags = append(tags, item)
 	}
+
 	return tags, rows.Err()
 }
 
 func loadIndex(ctx context.Context, q, tag string, page int) (indexData, error) {
 	args := []any{q, q, q, q, tag, tag}
+
 	var total int64
 	if err := store.QueryRow(ctx, `select count(*) from links l `+linkFilter, args...).Scan(&total); err != nil {
 		return indexData{}, err
 	}
 
 	pages := max(int((total+pageSize-1)/pageSize), 1)
+
 	if page < 1 {
 		page = 1
 	}
+
 	if page > pages {
 		page = pages
 	}
+
 	offset := (page - 1) * pageSize
 
 	listArgs := slices.Concat(args, []any{pageSize, offset})
+
 	rows, err := store.Query(ctx, `select `+linkColumns+` from links l `+linkFilter+`
 		order by l.created_at desc, l.id desc
 		limit ? offset ?`, listArgs...)
@@ -459,13 +522,16 @@ func loadIndex(ctx context.Context, q, tag string, page int) (indexData, error) 
 	defer rows.Close()
 
 	links := []link{}
+
 	for rows.Next() {
 		item, err := scanLink(rows)
 		if err != nil {
 			return indexData{}, err
 		}
+
 		links = append(links, item)
 	}
+
 	if err := rows.Err(); err != nil {
 		return indexData{}, err
 	}
@@ -474,6 +540,7 @@ func loadIndex(ctx context.Context, q, tag string, page int) (indexData, error) 
 	if err != nil {
 		return indexData{}, err
 	}
+
 	stats, err := loadStats(ctx)
 	if err != nil {
 		return indexData{}, err
@@ -495,9 +562,11 @@ func loadIndex(ctx context.Context, q, tag string, page int) (indexData, error) 
 	if page > 1 {
 		data.PrevURL = pageURL(q, tag, page-1)
 	}
+
 	if page < pages {
 		data.NextURL = pageURL(q, tag, page+1)
 	}
+
 	return data, nil
 }
 
@@ -511,6 +580,7 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "load shelf: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
 	data.Added = r.URL.Query().Get("added") == "1"
 	data.Deleted = r.URL.Query().Get("deleted") == "1"
 	render(w, http.StatusOK, indexTmpl, data)
@@ -521,6 +591,7 @@ func handleCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "parse form: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+
 	input, err := parseLinkInput(r)
 	if err != nil {
 		data, loadErr := loadIndex(r.Context(), "", "", 1)
@@ -528,13 +599,16 @@ func handleCreate(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "load shelf: "+loadErr.Error(), http.StatusInternalServerError)
 			return
 		}
+
 		data.Error = err.Error()
 		render(w, http.StatusBadRequest, indexTmpl, data)
+
 		return
 	}
 
 	id := app.NewID()
 	statements := make([]storage.Statement, 0, 1+len(input.Tags))
+
 	statements = append(statements, storage.Statement{
 		SQL:  `insert into links (id, url, title, description, created_at) values (?, ?, ?, ?, ?)`,
 		Args: []any{id, input.URL, input.Title, input.Description, time.Now().UTC().Format(app.TimestampFormat)},
@@ -545,10 +619,12 @@ func handleCreate(w http.ResponseWriter, r *http.Request) {
 			Args: []any{id, tag},
 		})
 	}
+
 	if _, err := store.Batch(r.Context(), statements...); err != nil {
 		http.Error(w, "add link: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
 	http.Redirect(w, r, "/?added=1", http.StatusSeeOther)
 }
 
@@ -558,25 +634,30 @@ func handleDetail(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+
 	item, err := loadLink(r.Context(), id)
 	if errors.Is(err, storage.ErrNoRows) {
 		http.NotFound(w, r)
 		return
 	}
+
 	if err != nil {
 		http.Error(w, "load link: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
 	clicks, err := loadClicks(r.Context(), id)
 	if err != nil {
 		http.Error(w, "load clicks: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
 	days, err := loadDays(r.Context(), id)
 	if err != nil {
 		http.Error(w, "load days: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
 	render(w, http.StatusOK, detailTmpl, detailData{
 		Title:  item.Title,
 		Link:   item,

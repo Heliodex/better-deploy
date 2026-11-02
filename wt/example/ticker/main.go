@@ -40,6 +40,7 @@ func handleTick(w http.ResponseWriter, r *http.Request) {
 	} else if created {
 		app.Infof("ticker queued %s", job.ID)
 	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -50,8 +51,8 @@ func handleJobBeat(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func handleIndex(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("content-type", "text/plain; charset=utf-8")
+func handleIndex(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	fmt.Fprintln(w, "ticker logs a beat every 10s from the supervisor's schedule,")
 	fmt.Fprintln(w, "cycling TRACE, DEBUG, INFO, WARN, ERROR and FATAL.")
 	fmt.Fprintln(w, "each slot also enqueues a durable /jobs/beat job with a payload.")

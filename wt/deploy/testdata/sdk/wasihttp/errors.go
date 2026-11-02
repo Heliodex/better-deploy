@@ -12,14 +12,17 @@ import (
 func fieldSizeString(p wasi.FieldSizePayload) string {
 	var parts []string
 	if p.FieldName.IsSome() {
-		parts = append(parts, fmt.Sprintf("field-name=%s", p.FieldName.Some()))
+		parts = append(parts, "field-name="+p.FieldName.Some())
 	}
+
 	if p.FieldSize.IsSome() {
 		parts = append(parts, fmt.Sprintf("field-size=%d", p.FieldSize.Some()))
 	}
+
 	if len(parts) == 0 {
 		return ""
 	}
+
 	return "(" + strings.Join(parts, ", ") + ")"
 }
 
@@ -75,6 +78,7 @@ func simpleErrorString(tag uint8) (string, bool) {
 	case wasi.ErrorCodeConfigurationError:
 		return "configuration error", true
 	}
+
 	return "", false
 }
 
@@ -83,6 +87,7 @@ func optionErrorString[T any](prefix string, value wit.Option[T]) string {
 	if value.IsSome() {
 		return fmt.Sprintf("%s: %v", prefix, value.Some())
 	}
+
 	return prefix
 }
 
@@ -91,6 +96,7 @@ func fieldSizeOptionString(prefix string, value wit.Option[wasi.FieldSizePayload
 	if value.IsSome() {
 		return prefix + " " + fieldSizeString(value.Some())
 	}
+
 	return prefix
 }
 
@@ -98,14 +104,17 @@ func fieldSizeOptionString(prefix string, value wit.Option[wasi.FieldSizePayload
 func dnsErrorString(p wasi.DnsErrorPayload) string {
 	var parts []string
 	if p.Rcode.IsSome() {
-		parts = append(parts, fmt.Sprintf("rcode=%s", p.Rcode.Some()))
+		parts = append(parts, "rcode="+p.Rcode.Some())
 	}
+
 	if p.InfoCode.IsSome() {
 		parts = append(parts, fmt.Sprintf("info-code=%d", p.InfoCode.Some()))
 	}
+
 	if len(parts) == 0 {
 		return "DNS error"
 	}
+
 	return "DNS error (" + strings.Join(parts, ", ") + ")"
 }
 
@@ -115,12 +124,15 @@ func tlsAlertString(p wasi.TlsAlertReceivedPayload) string {
 	if p.AlertId.IsSome() {
 		parts = append(parts, fmt.Sprintf("alert-id=%d", p.AlertId.Some()))
 	}
+
 	if p.AlertMessage.IsSome() {
-		parts = append(parts, fmt.Sprintf("alert-message=%s", p.AlertMessage.Some()))
+		parts = append(parts, "alert-message="+p.AlertMessage.Some())
 	}
+
 	if len(parts) == 0 {
 		return "TLS alert received"
 	}
+
 	return "TLS alert received (" + strings.Join(parts, ", ") + ")"
 }
 
@@ -129,6 +141,7 @@ func errorString(code wasi.ErrorCode) string {
 	if message, ok := simpleErrorString(code.Tag()); ok {
 		return message
 	}
+
 	switch code.Tag() {
 	case wasi.ErrorCodeDnsError:
 		return dnsErrorString(code.DnsError())

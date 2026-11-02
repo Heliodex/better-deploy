@@ -50,6 +50,9 @@ linters:
                   - noctx
               path: _test\.go
             - linters:
+                  - unqueryvet
+              path: _test\.go
+            - linters:
                   - unparam
               path: _test\.go
     settings:
@@ -77,11 +80,13 @@ linters:
                         - golang.org/x/sys/unix
                         - modernc.org/sqlite
                         - modernc.org/sqlite/lib
+                        - wt.example
                         - wt.packages
         canonicalheader:
             exclusions:
                 - X-WT-App-Body-SHA256
                 - X-WT-App-Caller
+                - X-WT-App-Signature
                 - X-WT-App-Signature-V2
                 - X-WT-App-Timestamp
                 - X-WT-User-Email
@@ -94,6 +99,8 @@ linters:
         goconst:
             ignore-tests: true
             min-occurrences: 10
+        gomoddirectives:
+            replace-local: true
         gosec:
             excludes:
                 - G104
@@ -124,6 +131,7 @@ linters:
                 - "10"
                 - "12"
                 - "13"
+                - "14"
                 - "16"
                 - "20"
                 - "30"
@@ -143,6 +151,7 @@ linters:
                 - "10001"
                 - "20000"
                 - "0xff"
+                - "400"
                 - "0o111"
                 - "0o600"
                 - "0o644"
@@ -151,10 +160,20 @@ linters:
                 - "0o700"
         nestif:
             min-complexity: 15
+        revive:
+            enable-default-rules: true
+            rules:
+                - name: exported
+                  disabled: true
+                - name: package-comments
+                  disabled: true
         nolintlint:
             require-explanation: true
             require-specific: true
         wrapcheck:
+            ignore-interface-regexps:
+                - Scan
+                - Err
             ignore-sigs:
                 - .Errorf(
                 - errors.New(
@@ -168,6 +187,9 @@ linters:
                 - modernc.org/sqlite.
                 - strconv.
                 - strings.
+                - wt.packages/
+                - time.
+                - context.
                 - archive/tar.
                 - bufio.
                 - compress/gzip.

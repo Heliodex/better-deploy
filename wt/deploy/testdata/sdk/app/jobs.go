@@ -64,10 +64,12 @@ type jobsResponse struct {
 // jobEndpoint reads the storage loopback URL and token that guard an app's job queue.
 func jobEndpoint() (string, string, error) {
 	base := strings.TrimSuffix(os.Getenv(storageURLEnv), "/")
+
 	token := os.Getenv(storageTokenEnv)
 	if base == "" || token == "" {
 		return "", "", fmt.Errorf("%s and %s are not set", storageURLEnv, storageTokenEnv)
 	}
+
 	return base, token, nil
 }
 
@@ -77,46 +79,59 @@ func jobDo(ctx context.Context, client *http.Client, method, path string, body, 
 	if err != nil {
 		return 0, err
 	}
+
 	var reader io.Reader
+
 	if body != nil {
 		data, err := json.Marshal(body)
 		if err != nil {
 			return 0, err
 		}
+
 		reader = bytes.NewReader(data)
 	}
+
 	req, err := http.NewRequestWithContext(ctx, method, base+jobsPath+path, reader)
 	if err != nil {
 		return 0, err
 	}
+
 	req.Header.Set("Authorization", "Bearer "+token)
+
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return 0, err
 	}
 	defer resp.Body.Close()
+
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return resp.StatusCode, err
 	}
+
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return resp.StatusCode, fmt.Errorf("job request %s %s returned %s: %s", method, path, resp.Status, strings.TrimSpace(string(data)))
 	}
+
 	if out != nil {
 		if err := json.Unmarshal(data, out); err != nil {
 			return resp.StatusCode, fmt.Errorf("decode job response: %w", err)
 		}
 	}
+
 	return resp.StatusCode, nil
 }
 
 // EnqueueJob adds a job to the current app's durable queue. created is false when an idempotency key matched an existing job.
 func EnqueueJob(ctx context.Context, client *http.Client, request JobRequest) (Job, bool, error) {
 	var job Job
+
 	status, err := jobDo(ctx, client, http.MethodPost, "", request, &job)
+
 	return job, status == http.StatusCreated, err
 }
 
@@ -126,30 +141,38 @@ func ListJobs(ctx context.Context, client *http.Client, status string) ([]Job, e
 	if status != "" {
 		path = "?status=" + url.QueryEscape(status)
 	}
+
 	var result jobsResponse
 	if _, err := jobDo(ctx, client, http.MethodGet, path, nil, &result); err != nil {
 		return nil, err
 	}
+
 	return result.Jobs, nil
 }
 
 // GetJob returns one job by ID.
 func GetJob(ctx context.Context, client *http.Client, id string) (Job, error) {
 	var job Job
+
 	_, err := jobDo(ctx, client, http.MethodGet, "/"+url.PathEscape(id), nil, &job)
+
 	return job, err
 }
 
 // CancelJob cancels a pending or running job.
 func CancelJob(ctx context.Context, client *http.Client, id string) (Job, error) {
 	var job Job
+
 	_, err := jobDo(ctx, client, http.MethodPost, "/"+url.PathEscape(id)+"/cancel", nil, &job)
+
 	return job, err
 }
 
 // RetryJob requeues a dead, failed or canceled job.
 func RetryJob(ctx context.Context, client *http.Client, id string) (Job, error) {
 	var job Job
+
 	_, err := jobDo(ctx, client, http.MethodPost, "/"+url.PathEscape(id)+"/retry", nil, &job)
+
 	return job, err
 }

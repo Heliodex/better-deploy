@@ -47,18 +47,22 @@ func loadNotes(ctx context.Context) ([]note, error) {
 	defer rows.Close()
 
 	notes := []note{}
+
 	for rows.Next() {
 		var entry note
 		if err := rows.Scan(&entry.ID, &entry.Body, &entry.CreatedAt); err != nil {
 			return nil, err
 		}
+
 		notes = append(notes, entry)
 	}
+
 	return notes, rows.Err()
 }
 
 func addNote(ctx context.Context, body string) (note, error) {
 	entry := note{ID: app.NewID(), Body: body, CreatedAt: time.Now().UTC()}
+
 	_, err := store.Batch(ctx,
 		storage.Statement{
 			SQL:  `insert into notes (id, body, created_at) values (?, ?, ?)`,
@@ -72,26 +76,30 @@ func addNote(ctx context.Context, body string) (note, error) {
 	if err != nil {
 		return note{}, err
 	}
+
 	return entry, nil
 }
 
 func handle(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/" || r.URL.Path == "":
-		w.Header().Set("content-type", "text/plain; charset=utf-8")
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		fmt.Fprintln(w, "notes example")
 		fmt.Fprintln(w, "GET /notes")
 		fmt.Fprintln(w, "POST /notes (body is the note text)")
 
 	case r.URL.Path == "/notes" && r.Method == http.MethodGet:
 		ctx := r.Context()
+
 		mu.Lock()
 		defer mu.Unlock()
+
 		notes, err := loadNotes(ctx)
 		if err != nil {
 			http.Error(w, "load notes: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
+
 		app.WriteJSON(w, http.StatusOK, notes)
 
 	case r.URL.Path == "/notes" && r.Method == http.MethodPost:
@@ -100,6 +108,7 @@ func handle(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "read note", http.StatusBadRequest)
 			return
 		}
+
 		text := strings.TrimSpace(string(body))
 		if text == "" {
 			http.Error(w, "note is empty", http.StatusBadRequest)
@@ -107,13 +116,16 @@ func handle(w http.ResponseWriter, r *http.Request) {
 		}
 
 		ctx := r.Context()
+
 		mu.Lock()
 		defer mu.Unlock()
+
 		entry, err := addNote(ctx, text)
 		if err != nil {
 			http.Error(w, "save notes: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
+
 		app.WriteJSON(w, http.StatusCreated, entry)
 
 	default:

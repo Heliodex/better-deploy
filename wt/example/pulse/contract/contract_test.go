@@ -17,6 +17,7 @@ func TestMonitorOmitsEmptyLast(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if strings.Contains(string(data), `"last"`) {
 		t.Errorf("empty last was not omitted: %s", data)
 	}

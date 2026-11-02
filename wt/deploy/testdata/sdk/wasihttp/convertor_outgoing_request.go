@@ -43,20 +43,23 @@ func outgoingRequestOptions(ctx context.Context) wit.Option[*wasi.RequestOptions
 	if !ok {
 		return wit.None[*wasi.RequestOptions]()
 	}
+
 	remaining := time.Until(deadline)
 	if remaining <= 0 {
 		remaining = time.Nanosecond
 	}
+
 	options := wasi.MakeRequestOptions()
 	duration := wit.Some(uint64(remaining))
 	options.SetConnectTimeout(duration)
 	options.SetFirstByteTimeout(duration)
 	options.SetBetweenBytesTimeout(duration)
+
 	return wit.Some(options)
 }
 
-// newOutgoingHttpRequest converts an http.Request to a wasi.Request. The body copier stops when the request context is cancelled.
-func newOutgoingHttpRequest(req *http.Request) (*wasi.Request, error) {
+// newOutgoingHTTPRequest converts an http.Request to a wasi.Request. The body copier stops when the request context is cancelled.
+func newOutgoingHTTPRequest(req *http.Request) (*wasi.Request, error) {
 	headers, err := toWasiHeaders(req.Header)
 	if err != nil {
 		return nil, err
@@ -64,28 +67,34 @@ func newOutgoingHttpRequest(req *http.Request) (*wasi.Request, error) {
 	defer headers.Drop()
 
 	ctx := req.Context()
+
 	var body wit.Option[*wit.StreamReader[uint8]]
 	if req.Body == nil {
 		body = wit.None[*wit.StreamReader[uint8]]()
 	} else {
 		tx, rx := wasi.MakeStreamU8()
 		body = wit.Some(rx)
+
 		go func() {
 			defer tx.Drop()
 			defer req.Body.Close()
 
 			buffer := make([]uint8, 16*1024)
+
 			for !tx.ReaderDropped() {
 				if ctx.Err() != nil {
 					return
 				}
+
 				count, err := req.Body.Read(buffer)
 				if err != nil {
 					if err != io.EOF {
 						fmt.Printf("error reading request body: %v", err)
 					}
+
 					return
 				}
+
 				tx.WriteAll(buffer[:count])
 			}
 		}()
@@ -94,14 +103,16 @@ func newOutgoingHttpRequest(req *http.Request) (*wasi.Request, error) {
 	request, send := wasi.RequestNew(
 		headers,
 		body,
-		trailersFuture(), // TODO: support trailers
+		trailersFuture(), // Trailers are not supported yet.
 		outgoingRequestOptions(ctx),
 	)
 	send.Drop()
+
 	authority := req.Host
 	if authority == "" {
 		authority = req.URL.Host
 	}
+
 	request.SetMethod(toWasiMethod(req.Method))
 	request.SetAuthority(wit.Some(authority))
 	request.SetPathWithQuery(wit.Some(req.URL.RequestURI()))

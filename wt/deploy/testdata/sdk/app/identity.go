@@ -13,7 +13,7 @@ import (
 const (
 	// IdentityPrefix is the reserved app-host path for platform login, logout, me and password.
 	IdentityPrefix              = "/_wt/identity"
-	identitySecretEnv           = "WT_IDENTITY_SECRET"
+	identitySecretEnv           = "WT_IDENTITY_SECRET" //nolint:gosec // Environment variable name, not a credential.
 	identityUserIDHeader        = "X-WT-User-Id"
 	identityUserEmailHeader     = "X-WT-User-Email"
 	identityUserNameHeader      = "X-WT-User-Name"
@@ -33,6 +33,7 @@ type User struct {
 func identitySignature(secret, id, email, name, groups string) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = fmt.Fprintf(mac, "%s\n%s\n%s\n%s", id, email, name, groups)
+
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
@@ -43,28 +44,35 @@ func UserFromRequest(r *http.Request) (User, bool) {
 	if secret == "" {
 		return User{}, false
 	}
+
 	id := r.Header.Get(identityUserIDHeader)
 	email := r.Header.Get(identityUserEmailHeader)
 	name := r.Header.Get(identityUserNameHeader)
 	groupsHeader := r.Header.Get(identityUserGroupsHeader)
+
 	signature := r.Header.Get(identityUserSignatureHeader)
 	if id == "" || len(signature) != sha256.Size*2 {
 		return User{}, false
 	}
+
 	want, err := hex.DecodeString(identitySignature(secret, id, email, name, groupsHeader))
 	if err != nil {
 		return User{}, false
 	}
+
 	got, err := hex.DecodeString(signature)
 	if err != nil || !hmac.Equal(got, want) {
 		return User{}, false
 	}
+
 	var groups []string
+
 	for group := range strings.SplitSeq(groupsHeader, ",") {
 		group = strings.TrimSpace(group)
 		if group != "" {
 			groups = append(groups, group)
 		}
 	}
+
 	return User{ID: id, Email: email, Name: name, Groups: groups}, true
 }

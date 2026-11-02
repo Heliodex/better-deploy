@@ -25,6 +25,7 @@ var output io.Writer = os.Stderr
 // Logf writes one line per message line as "<LEVEL> <message>". The supervisor stamps it with the receive time and strips the level, so the app adds neither a timestamp nor a prefix of its own.
 func Logf(level Level, format string, args ...any) {
 	message := fmt.Sprintf(format, args...)
+
 	var builder strings.Builder
 	for line := range strings.Lines(message) {
 		builder.WriteString(string(level))
@@ -32,6 +33,7 @@ func Logf(level Level, format string, args ...any) {
 		builder.WriteString(strings.TrimSuffix(line, "\n"))
 		builder.WriteByte('\n')
 	}
+
 	_, _ = io.WriteString(output, builder.String())
 }
 
@@ -65,7 +67,9 @@ func (w levelWriter) Write(p []byte) (int, error) {
 		if line == "\n" {
 			continue
 		}
+
 		Logf(w.level, "%s", strings.TrimSuffix(line, "\n"))
 	}
+
 	return len(p), nil
 }

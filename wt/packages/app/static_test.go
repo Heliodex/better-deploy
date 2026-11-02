@@ -22,10 +22,12 @@ func TestStaticFilesCachesHashedAssets(t *testing.T) {
 	for _, tc := range cases {
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tc.path, nil))
+
 		if rec.Code != http.StatusOK {
 			t.Errorf("%s status = %d, want 200", tc.path, rec.Code)
 		}
-		if got := rec.Header().Get("cache-control"); got != tc.cache {
+
+		if got := rec.Header().Get("Cache-Control"); got != tc.cache {
 			t.Errorf("%s cache-control = %q, want %q", tc.path, got, tc.cache)
 		}
 	}

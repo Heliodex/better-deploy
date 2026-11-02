@@ -3,6 +3,7 @@ package wasihttp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -11,7 +12,7 @@ import (
 
 	wit "go.bytecodealliance.org/pkg/wit/types"
 	handler "wt.packages/binding/exports/export_wasi_http_0_3_0_handler"
-	_ "wt.packages/binding/exports/wit_exports"
+	_ "wt.packages/binding/exports/wit_exports" // Registers generated WIT exports.
 	wasi "wt.packages/binding/imports/wasi_http_0_3_0_types"
 )
 
@@ -20,8 +21,8 @@ const (
 	HeaderBasePath = "spin-base-path"
 	// HeaderComponentRoot is the component route pattern matched, excluding any wildcard indicator.
 	HeaderComponentRoot = "spin-component-route"
-	// HeaderFullUrl is the full URL of the request, including full host and scheme information.
-	HeaderFullUrl = "spin-full-url"
+	// HeaderFullURL is the full URL of the request, including full host and scheme information.
+	HeaderFullURL = "spin-full-url"
 	// HeaderMatchedRoute is the part of the request path that was matched by the route, including the base and wildcard indicator if present.
 	HeaderMatchedRoute = "spin-matched-route"
 	// HeaderPathInfo is the request path relative to the component route, including any base.
@@ -31,7 +32,7 @@ const (
 	// HeaderClientAddr is the client address for the request.
 	HeaderClientAddr = "spin-client-addr"
 	// HeaderRequestID carries a request identifier across proxied and outbound requests.
-	HeaderRequestID = "x-request-id"
+	HeaderRequestID = "X-Request-ID"
 )
 
 // defaultHandler is a placeholder for returning a useful error to stderr when the handler is not set.
@@ -57,7 +58,7 @@ var handleErr = wit.Err[*wasi.Response, wasi.ErrorCode]
 
 var wasiHandle = func(request *wasi.Request) wit.Result[*wasi.Response, wasi.ErrorCode] {
 	ctx, cancel := context.WithCancel(context.Background())
-	httpRes := newHttpResponseWriter(cancel)
+	httpRes := newHTTPResponseWriter(cancel)
 
 	go func() {
 		defer cancel()
@@ -67,17 +68,20 @@ var wasiHandle = func(request *wasi.Request) wit.Result[*wasi.Response, wasi.Err
 			if recovered == nil {
 				return
 			}
+
 			fmt.Fprintf(os.Stderr, "http handler panic: %v\n%s", recovered, debug.Stack())
+
 			if httpRes.channel != nil {
 				httpRes.channel <- handleErr(
 					wasi.MakeErrorCodeInternalError(wit.Some(fmt.Sprintf("panic: %v", recovered))),
 				)
+
 				httpRes.channel = nil
 			}
 		}()
 
 		// convert the incoming request to go's net/http type
-		httpReq, err := newHttpRequest(request, ctx)
+		httpReq, err := newHTTPRequest(ctx, request)
 		if err != nil {
 			httpRes.channel <- handleErr(
 				wasi.MakeErrorCodeInternalError(wit.Some(fmt.Sprintf(
@@ -85,6 +89,7 @@ var wasiHandle = func(request *wasi.Request) wit.Result[*wasi.Response, wasi.Err
 					err,
 				))),
 			)
+
 			return
 		}
 		defer httpReq.Body.Close()
@@ -122,6 +127,7 @@ func toWasiHeaders(headers http.Header) (*wasi.Fields, error) {
 
 		if result := fields.Set(key, fieldVals); result.IsErr() {
 			fields.Drop()
+
 			switch result.Err().Tag() {
 			case wasi.HeaderErrorInvalidSyntax:
 				return nil, fmt.Errorf(
@@ -132,7 +138,7 @@ func toWasiHeaders(headers http.Header) (*wasi.Fields, error) {
 			case wasi.HeaderErrorForbidden:
 				return nil, fmt.Errorf("failed to set forbidden header key %s", key)
 			case wasi.HeaderErrorImmutable:
-				return nil, fmt.Errorf("failed to set header on immutable header fields")
+				return nil, errors.New("failed to set header on immutable header fields")
 			default:
 				return nil, fmt.Errorf("error setting header %s", key)
 			}
@@ -146,6 +152,7 @@ func toWasiHeaders(headers http.Header) (*wasi.Fields, error) {
 func trailersFuture() *wit.FutureReader[wit.Result[wit.Option[*wasi.Fields], wasi.ErrorCode]] {
 	tx, rx := wasi.MakeFutureResultOptionFieldsErrorCode()
 	go tx.Write(wit.Ok[wit.Option[*wasi.Fields], wasi.ErrorCode](wit.None[*wasi.Fields]()))
+
 	return rx
 }
 
@@ -153,5 +160,6 @@ func trailersFuture() *wit.FutureReader[wit.Result[wit.Option[*wasi.Fields], was
 func unitFuture() *wit.FutureReader[wit.Result[wit.Unit, wasi.ErrorCode]] {
 	tx, rx := wasi.MakeFutureResultUnitErrorCode()
 	go tx.Write(wit.Ok[wit.Unit, wasi.ErrorCode](wit.Unit{}))
+
 	return rx
 }

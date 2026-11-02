@@ -9,7 +9,7 @@ import (
 	wasi "wt.packages/binding/imports/wasi_http_0_3_0_types"
 )
 
-// Assert that `responseWriter` implements the required interface
+// Assert that `responseWriter` implements the required interface.
 var _ http.ResponseWriter = &responseWriter{}
 var _ http.Flusher = &responseWriter{}
 
@@ -28,7 +28,7 @@ type responseWriter struct {
 	cancel context.CancelFunc
 }
 
-func newHttpResponseWriter(cancel context.CancelFunc) *responseWriter {
+func newHTTPResponseWriter(cancel context.CancelFunc) *responseWriter {
 	return &responseWriter{
 		channel:    make(chan wit.Result[*wasi.Response, wasi.ErrorCode]),
 		headers:    http.Header{},
@@ -61,11 +61,11 @@ func (w *responseWriter) send() error {
 	response, send := wasi.ResponseNew(
 		fields,
 		wit.Some(rx),
-		trailersFuture(), // TODO: support trailers
+		trailersFuture(), // Trailers are not supported yet.
 	)
 	w.streamResult = send
 
-	response.SetStatusCode(uint16(w.statusCode))
+	response.SetStatusCode(uint16(w.statusCode)) //nolint:gosec // HTTP status codes fit in uint16.
 
 	channel <- wit.Ok[*wasi.Response, wasi.ErrorCode](response)
 
@@ -73,10 +73,11 @@ func (w *responseWriter) send() error {
 }
 
 // takeError consumes the body stream result and reports a transport error once writing has finished.
-func (r *responseWriter) takeError() error {
-	if r.streamResult != nil {
-		streamResult := r.streamResult.Read()
-		r.streamResult = nil
+func (w *responseWriter) takeError() error {
+	if w.streamResult != nil {
+		streamResult := w.streamResult.Read()
+
+		w.streamResult = nil
 		if streamResult.IsErr() {
 			return fmt.Errorf(
 				"failed to read from HTTP body stream: %s",
@@ -84,6 +85,7 @@ func (r *responseWriter) takeError() error {
 			)
 		}
 	}
+
 	return nil
 }
 
@@ -123,9 +125,11 @@ func (w *responseWriter) stop() {
 // close cancels the request context and drops the body stream.
 func (w *responseWriter) close() {
 	w.stop()
+
 	if w.stream != nil {
 		w.stream.Drop()
 	}
+
 	if w.streamResult != nil {
 		w.streamResult.Drop()
 	}

@@ -6,8 +6,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json/v2"
-	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -19,15 +19,17 @@ const TimestampFormat = "2006-01-02T15:04:05.000000000Z07:00"
 func NewID() string {
 	var b [8]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		return fmt.Sprintf("%d", time.Now().UnixNano())
+		return strconv.FormatInt(time.Now().UnixNano(), 10)
 	}
+
 	return hex.EncodeToString(b[:])
 }
 
 // WriteJSON writes value as JSON with the given status.
 func WriteJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("content-type", "application/json; charset=utf-8")
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
+
 	data, _ := json.Marshal(value)
 	_, _ = w.Write(append(data, '\n'))
 }
@@ -75,12 +77,14 @@ func ErrorCode(status int) string {
 	case http.StatusGatewayTimeout:
 		return "timeout"
 	}
+
 	switch {
 	case status >= 500:
 		return "internal"
 	case status >= 400:
 		return "invalid"
 	}
+
 	return "error"
 }
 
@@ -94,6 +98,7 @@ func WriteErrorCode(w http.ResponseWriter, status int, code, message string) {
 	if code == "" {
 		code = ErrorCode(status)
 	}
+
 	WriteJSON(w, status, ErrorResponse{Error: message, Code: code})
 }
 
@@ -102,6 +107,7 @@ func WriteErrorField(w http.ResponseWriter, status int, code, field, message str
 	if code == "" {
 		code = ErrorCode(status)
 	}
+
 	WriteJSON(w, status, ErrorResponse{Error: message, Code: code, Field: field})
 }
 
@@ -115,10 +121,12 @@ const MigratePath = "/_wt/migrate"
 // ServeStorage runs next behind the storage service. It answers 503 while the storage client is unavailable, and 500 until the migration succeeds; a failed migration is retried on the next request, a successful one runs only once.
 func ServeStorage(storeErr error, migrate func(context.Context) error, next http.Handler) http.Handler {
 	var mu sync.Mutex
+
 	ready := false
 	ensureReady := func(ctx context.Context) error {
 		mu.Lock()
 		defer mu.Unlock()
+
 		if ready {
 			return nil
 		}
@@ -127,27 +135,36 @@ func ServeStorage(storeErr error, migrate func(context.Context) error, next http
 		if err := migrate(context.WithoutCancel(ctx)); err != nil {
 			return err
 		}
+
 		ready = true
+
 		return nil
 	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if storeErr != nil {
 			http.Error(w, "storage unavailable: "+storeErr.Error(), http.StatusServiceUnavailable)
 			return
 		}
+
 		if r.URL.Path == MigratePath {
 			if r.Method != http.MethodPost {
 				w.Header().Set("Allow", "POST")
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 				return
 			}
+
 			if err := ensureReady(r.Context()); err != nil {
 				http.Error(w, "storage schema: "+err.Error(), http.StatusInternalServerError)
 				return
 			}
+
 			w.WriteHeader(http.StatusNoContent)
+
 			return
 		}
+
 		if err := ensureReady(r.Context()); err != nil {
 			http.Error(w, "storage schema: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -157,6 +174,7 @@ func ServeStorage(storeErr error, migrate func(context.Context) error, next http
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+
 		next.ServeHTTP(w, r)
 	})
 }

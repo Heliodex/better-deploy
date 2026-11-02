@@ -11,9 +11,11 @@ import (
 func TestAppURLUsesPerAppAndBaseEnv(t *testing.T) {
 	t.Setenv("WT_APP_URL_NOTES", "http://127.0.0.1:9001/apps/notes/")
 	t.Setenv("WT_APP_FETCH_URL", "http://127.0.0.1:9000")
+
 	if got := AppURL("notes"); got != "http://127.0.0.1:9001/apps/notes" {
 		t.Errorf("known app URL = %q", got)
 	}
+
 	if got := AppURL("later-app"); got != "http://127.0.0.1:9000/apps/later-app" {
 		t.Errorf("fallback app URL = %q", got)
 	}
@@ -22,13 +24,16 @@ func TestAppURLUsesPerAppAndBaseEnv(t *testing.T) {
 func TestNewAppRequestAddsIdentity(t *testing.T) {
 	t.Setenv("WT_APP_URL_NOTES", "http://127.0.0.1:9001/apps/notes")
 	t.Setenv("WT_APP_TOKEN", "caller-token")
+
 	req, err := NewAppRequest(t.Context(), http.MethodPost, "notes", "/v1/items", strings.NewReader("{}"))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if req.URL.String() != "http://127.0.0.1:9001/apps/notes/v1/items" {
 		t.Errorf("URL = %q", req.URL)
 	}
+
 	if got := req.Header.Get("Authorization"); got != "Bearer caller-token" {
 		t.Errorf("Authorization = %q", got)
 	}
@@ -36,8 +41,10 @@ func TestNewAppRequestAddsIdentity(t *testing.T) {
 
 func TestCallerVerifiesSupervisorSignature(t *testing.T) {
 	t.Setenv("WT_APP_TOKEN", "target-token")
+
 	req := httptest.NewRequest(http.MethodGet, "/v1/items?limit=1", nil)
 	timestamp := time.Now().UTC().Format(time.RFC3339Nano)
+
 	req.Header.Set(AppCallerHeader, "frontend")
 	req.Header.Set(AppTimestampHeader, timestamp)
 	req.Header.Set(AppBodyHashHeader, appBodySHA256(nil))
@@ -49,6 +56,7 @@ func TestCallerVerifiesSupervisorSignature(t *testing.T) {
 	}
 
 	req.URL.Path = "/v1/other"
+
 	req.URL.RawQuery = ""
 	if caller, ok := Caller(req); ok {
 		t.Errorf("tampered path verified as %q", caller)
@@ -57,16 +65,19 @@ func TestCallerVerifiesSupervisorSignature(t *testing.T) {
 
 func TestCallerRejectsStaleAndMissingHeaders(t *testing.T) {
 	t.Setenv("WT_APP_TOKEN", "target-token")
+
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	if _, ok := Caller(req); ok {
 		t.Error("missing headers verified")
 	}
 
 	timestamp := time.Now().Add(-10 * time.Minute).UTC().Format(time.RFC3339Nano)
+
 	req.Header.Set(AppCallerHeader, "frontend")
 	req.Header.Set(AppTimestampHeader, timestamp)
 	req.Header.Set(AppBodyHashHeader, appBodySHA256(nil))
 	req.Header.Set(AppSignatureV2Header, appCallSignatureV2("target-token", "frontend", http.MethodGet, "/", timestamp, appBodySHA256(nil)))
+
 	if _, ok := Caller(req); ok {
 		t.Error("stale signature verified")
 	}

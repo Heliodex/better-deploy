@@ -14,6 +14,7 @@ func TestIdentitySignatureVector(t *testing.T) {
 
 func TestUserFromRequest(t *testing.T) {
 	t.Setenv(identitySecretEnv, "identity-secret")
+
 	groups := "admins,beta"
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set(identityUserIDHeader, "usr_1")
@@ -26,15 +27,19 @@ func TestUserFromRequest(t *testing.T) {
 	if !ok || user.ID != "usr_1" || user.Email != "ada@example.com" || user.Name != "Ada" {
 		t.Fatalf("UserFromRequest = %+v, %v", user, ok)
 	}
+
 	if len(user.Groups) != 2 || user.Groups[0] != "admins" || user.Groups[1] != "beta" {
 		t.Errorf("groups = %v", user.Groups)
 	}
 
 	req.Header.Set(identityUserNameHeader, "Mallory")
+
 	if _, ok := UserFromRequest(req); ok {
 		t.Error("modified header was accepted")
 	}
+
 	req.Header.Del(identityUserIDHeader)
+
 	if _, ok := UserFromRequest(req); ok {
 		t.Error("missing id was accepted")
 	}
@@ -42,6 +47,7 @@ func TestUserFromRequest(t *testing.T) {
 
 func TestUserFromRequestWithoutSecret(t *testing.T) {
 	t.Setenv(identitySecretEnv, "")
+
 	if _, ok := UserFromRequest(httptest.NewRequest(http.MethodGet, "/", nil)); ok {
 		t.Error("request without a secret was accepted")
 	}

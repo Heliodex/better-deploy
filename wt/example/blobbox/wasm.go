@@ -18,12 +18,17 @@ func clientForBlob() *http.Client {
 
 func init() {
 	store, storeErr := storage.New(wasihttp.NewClient())
-	var handler http.Handler
-	var migrate func(context.Context) error
+
+	var (
+		handler http.Handler
+		migrate func(context.Context) error
+	)
+
 	if storeErr == nil {
 		application := newBlobApp(store, clientForBlob())
 		handler = application.handler()
 		migrate = application.migrate
 	}
+
 	wasihttp.Handle(app.ServeStorage(storeErr, migrate, handler).ServeHTTP)
 }

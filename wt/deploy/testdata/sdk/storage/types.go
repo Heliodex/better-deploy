@@ -24,6 +24,7 @@ func (e *Error) Error() string {
 	if e.Code != "" {
 		return fmt.Sprintf("storage: %s: %s", e.Code, e.Message)
 	}
+
 	return fmt.Sprintf("storage: HTTP %d: %s", e.Status, e.Message)
 }
 

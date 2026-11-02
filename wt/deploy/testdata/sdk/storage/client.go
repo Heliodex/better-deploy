@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,28 +17,36 @@ const maxResponseBytes = 16 << 20
 // New creates a client using the supplied transport. A wasi:http transport is used in components; tests can pass a normal http.Client.
 func New(httpClient *http.Client) (*Client, error) {
 	baseURL := strings.TrimSuffix(os.Getenv("WT_STORAGE_URL"), "/")
+
 	token := os.Getenv("WT_STORAGE_TOKEN")
 	if baseURL == "" || token == "" {
-		return nil, fmt.Errorf("WT_STORAGE_URL and WT_STORAGE_TOKEN must be set")
+		return nil, errors.New("WT_STORAGE_URL and WT_STORAGE_TOKEN must be set")
 	}
+
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
+
 	return &Client{baseURL: baseURL, token: token, http: httpClient}, nil
 }
 
 // responseError reads the flat error body, preferring its message and falling back to the raw body.
 func responseError(resp *http.Response) error {
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+
 	var body errorResponse
+
 	_ = json.Unmarshal(raw, &body)
+
 	message := strings.TrimSpace(body.Error)
 	if message == "" {
 		message = strings.TrimSpace(string(raw))
 	}
+
 	if message == "" {
 		message = resp.Status
 	}
+
 	return &Error{
 		Status:     resp.StatusCode,
 		Code:       body.Code,
@@ -52,10 +61,12 @@ func (c *Client) post(ctx context.Context, path string, body, out any) error {
 	if err != nil {
 		return fmt.Errorf("storage: encode request: %w", err)
 	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(data))
 	if err != nil {
 		return err
 	}
+
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.token)
 
@@ -64,12 +75,15 @@ func (c *Client) post(ctx context.Context, path string, body, out any) error {
 		return err
 	}
 	defer resp.Body.Close()
+
 	if resp.StatusCode != http.StatusOK {
 		return responseError(resp)
 	}
+
 	if err := json.UnmarshalRead(io.LimitReader(resp.Body, maxResponseBytes), out); err != nil {
 		return fmt.Errorf("storage: decode response: %w", err)
 	}
+
 	return nil
 }
 
@@ -78,6 +92,7 @@ func (c *Client) get(ctx context.Context, path string, out any) error {
 	if err != nil {
 		return err
 	}
+
 	req.Header.Set("Authorization", "Bearer "+c.token)
 
 	resp, err := c.http.Do(req)
@@ -85,12 +100,15 @@ func (c *Client) get(ctx context.Context, path string, out any) error {
 		return err
 	}
 	defer resp.Body.Close()
+
 	if resp.StatusCode != http.StatusOK {
 		return responseError(resp)
 	}
+
 	if err := json.UnmarshalRead(io.LimitReader(resp.Body, maxResponseBytes), out); err != nil {
 		return fmt.Errorf("storage: decode response: %w", err)
 	}
+
 	return nil
 }
 
@@ -100,16 +118,20 @@ func decodeResponseRows(resp response) ([][]any, error) {
 		if len(rawRow) != len(resp.Columns) {
 			return nil, fmt.Errorf("storage: row %d has %d values for %d columns", i+1, len(rawRow), len(resp.Columns))
 		}
+
 		row := make([]any, len(rawRow))
 		for j, raw := range rawRow {
 			value, err := decodeValue(raw)
 			if err != nil {
 				return nil, fmt.Errorf("storage: row %d column %q: %w", i+1, resp.Columns[j], err)
 			}
+
 			row[j] = value
 		}
+
 		rows[i] = row
 	}
+
 	return rows, nil
 }
 
@@ -121,14 +143,17 @@ func (c *Client) Query(ctx context.Context, query string, args ...any) (*Rows, e
 // QueryOptions runs one query with per-query options, such as a row cap sent to the server as max_rows.
 func (c *Client) QueryOptions(ctx context.Context, query string, opts QueryOptions, args ...any) (*Rows, error) {
 	var resp response
+
 	req := request{SQL: query, Params: encodeParams(args), MaxRows: opts.MaxRows}
 	if err := c.post(ctx, "/v1/query", req, &resp); err != nil {
 		return nil, err
 	}
+
 	rows, err := decodeResponseRows(resp)
 	if err != nil {
 		return nil, err
 	}
+
 	return &Rows{Columns: resp.Columns, Truncated: resp.Truncated, rows: rows}, nil
 }
 
@@ -142,24 +167,29 @@ func (c *Client) QueryN(ctx context.Context, n int, query string, args ...any) (
 // The page is recorded on the returned rows, so NextPage can continue through the result. Paging is offset-based: a concurrent write can shift rows between pages, so give the query a stable ORDER BY. Build keyset pagination on top if a stable snapshot matters.
 func (c *Client) QueryPage(ctx context.Context, query string, page Page, args ...any) (*Rows, error) {
 	if page.Limit <= 0 {
-		return nil, fmt.Errorf("storage: page limit must be positive")
+		return nil, errors.New("storage: page limit must be positive")
 	}
+
 	if page.Offset < 0 {
-		return nil, fmt.Errorf("storage: page offset must not be negative")
+		return nil, errors.New("storage: page offset must not be negative")
 	}
+
 	query = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(query), ";"))
 	pageArgs := make([]any, 0, len(args)+2)
 	pageArgs = append(pageArgs, args...)
 	pageArgs = append(pageArgs, page.Limit, page.Offset)
-	rows, err := c.QueryOptions(ctx, "select * from ("+query+") limit ? offset ?", QueryOptions{MaxRows: page.Limit}, pageArgs...)
+
+	rows, err := c.QueryOptions(ctx, "select * from ("+query+") limit ? offset ?", QueryOptions{MaxRows: page.Limit}, pageArgs...) //nolint:unqueryvet // The caller supplies the projected query.
 	if err != nil {
 		return nil, err
 	}
+
 	rows.page = page
 	// A full offset page may have more rows behind it; an exactly-full final page simply yields one empty follow-up page.
 	if len(rows.rows) >= page.Limit {
 		rows.Truncated = true
 	}
+
 	return rows, nil
 }
 
@@ -169,10 +199,12 @@ func (c *Client) WriteReturning(ctx context.Context, query string, args ...any) 
 	if err := c.post(ctx, "/v1/write", request{SQL: query, Params: encodeParams(args)}, &resp); err != nil {
 		return nil, err
 	}
+
 	rows, err := decodeResponseRows(resp)
 	if err != nil {
 		return nil, err
 	}
+
 	return &Rows{Columns: resp.Columns, Truncated: resp.Truncated, rows: rows}, nil
 }
 
@@ -182,6 +214,7 @@ func (c *Client) QueryRow(ctx context.Context, query string, args ...any) *Row {
 	if err != nil {
 		return &Row{rows: &Rows{err: err}}
 	}
+
 	return &Row{rows: rows}
 }
 
@@ -191,6 +224,7 @@ func (c *Client) Exec(ctx context.Context, query string, args ...any) (Result, e
 	if err := c.post(ctx, "/v1/exec", request{SQL: query, Params: encodeParams(args)}, &resp); err != nil {
 		return Result{}, err
 	}
+
 	return Result{RowsAffected: resp.RowsAffected, LastInsertID: resp.LastInsertID}, nil
 }
 
@@ -199,20 +233,24 @@ func (c *Client) Transaction(ctx context.Context, statements ...TransactionState
 	if len(statements) == 0 {
 		return nil, nil
 	}
+
 	req := transactionRequest{Statements: make([]transactionStatement, len(statements))}
 	for i, statement := range statements {
 		req.Statements[i] = transactionStatement{SQL: statement.SQL, Params: encodeParams(statement.Args), Query: statement.Query}
 	}
+
 	var resp transactionResponse
 	if err := c.post(ctx, "/v1/transaction", req, &resp); err != nil {
 		return nil, err
 	}
+
 	results := make([]TransactionResult, len(resp.Results))
 	for i, result := range resp.Results {
 		rows, err := decodeResponseRows(result)
 		if err != nil {
 			return nil, err
 		}
+
 		results[i] = TransactionResult{
 			Columns:      result.Columns,
 			Rows:         rows,
@@ -221,6 +259,7 @@ func (c *Client) Transaction(ctx context.Context, statements ...TransactionState
 			Truncated:    result.Truncated,
 		}
 	}
+
 	return results, nil
 }
 
@@ -240,10 +279,12 @@ func (c *Client) SchemaWithOptions(ctx context.Context, options SchemaOptions) (
 	if options.Stats {
 		path += "?stats=1"
 	}
+
 	var schema Schema
 	if err := c.get(ctx, path, &schema); err != nil {
 		return Schema{}, err
 	}
+
 	return schema, nil
 }
 
@@ -253,7 +294,9 @@ func (c *Client) Migrate(ctx context.Context, version int, statements ...Stateme
 	for i, statement := range statements {
 		req.Statements[i] = batchStatement{SQL: statement.SQL, Params: encodeParams(statement.Args)}
 	}
+
 	var resp migrationResponse
+
 	return c.post(ctx, "/v1/migrate", req, &resp)
 }
 
@@ -262,17 +305,21 @@ func (c *Client) Batch(ctx context.Context, statements ...Statement) ([]Result, 
 	if len(statements) == 0 {
 		return nil, nil
 	}
+
 	req := batchRequest{Statements: make([]batchStatement, len(statements))}
 	for i, statement := range statements {
 		req.Statements[i] = batchStatement{SQL: statement.SQL, Params: encodeParams(statement.Args)}
 	}
+
 	var resp batchResponse
 	if err := c.post(ctx, "/v1/batch", req, &resp); err != nil {
 		return nil, err
 	}
+
 	results := make([]Result, len(resp.Results))
 	for i, result := range resp.Results {
 		results[i] = Result{RowsAffected: result.RowsAffected, LastInsertID: result.LastInsertID}
 	}
+
 	return results, nil
 }

@@ -65,8 +65,10 @@ func seed(ctx context.Context) error {
 		}
 
 		statements := make([]storage.Statement, 0, 16)
+
 		for i, seed := range seeds {
 			createdAt := now.Add(-time.Duration(i*3+1) * time.Hour).Format(app.TimestampFormat)
+
 			statements = append(statements, storage.Statement{
 				SQL:  `insert or ignore into messages (id, name, body, created_at) values (?, ?, ?, ?)`,
 				Args: []any{seed.id, seed.name, seed.body, createdAt},
@@ -78,7 +80,9 @@ func seed(ctx context.Context) error {
 				})
 			}
 		}
+
 		_, err := store.Batch(ctx, statements...)
+
 		return err
 	})
 }
@@ -102,17 +106,20 @@ func migrate(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
 	return seed(ctx)
 }
 
 func handleListMessages(w http.ResponseWriter, r *http.Request) {
 	limit := defaultLimit
+
 	if value := r.URL.Query().Get("limit"); value != "" {
 		parsed, err := strconv.Atoi(value)
 		if err != nil || parsed < 1 {
 			app.WriteError(w, http.StatusBadRequest, "limit must be a positive integer")
 			return
 		}
+
 		limit = min(parsed, maxLimit)
 	}
 
@@ -134,6 +141,7 @@ func handleListMessages(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	out := []contract.Message{}
+
 	for rows.Next() {
 		var item contract.Message
 		if err := rows.Scan(
@@ -144,12 +152,15 @@ func handleListMessages(w http.ResponseWriter, r *http.Request) {
 			app.WriteError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+
 		out = append(out, item)
 	}
+
 	if err := rows.Err(); err != nil {
 		app.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	app.WriteJSON(w, http.StatusOK, contract.MessagesResponse{Messages: out})
 }
 
@@ -170,6 +181,7 @@ func handleCreateMessage(w http.ResponseWriter, r *http.Request) {
 		app.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	app.WriteJSON(w, http.StatusCreated, item)
 }
 
@@ -179,25 +191,31 @@ func handleReact(w http.ResponseWriter, r *http.Request) {
 		app.WriteError(w, http.StatusNotFound, "message not found")
 		return
 	}
+
 	var request contract.ReactMessageRequest
 	if !app.ReadJSON(w, r, maxBody, "reaction", &request) {
 		return
 	}
+
 	reaction := string(request.Reaction)
 
 	var count int
+
 	err := store.WithTx(r.Context(), func(tx *storage.Tx) error {
 		var exists int64
 		if err := tx.QueryRow(r.Context(), `select count(*) from messages where id = ?`, id).Scan(&exists); err != nil {
 			return err
 		}
+
 		if exists == 0 {
 			return errMessageNotFound
 		}
+
 		if _, err := tx.Exec(r.Context(), `insert into reactions (message_id, reaction, count) values (?, ?, 1)
 			on conflict(message_id, reaction) do update set count = count + 1`, id, reaction); err != nil {
 			return err
 		}
+
 		return tx.QueryRow(r.Context(), `select count from reactions where message_id = ? and reaction = ?`,
 			id, reaction).Scan(&count)
 	})
@@ -205,15 +223,18 @@ func handleReact(w http.ResponseWriter, r *http.Request) {
 		app.WriteError(w, http.StatusNotFound, "message not found")
 		return
 	}
+
 	if err != nil {
 		app.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	app.WriteJSON(w, http.StatusOK, contract.ReactResponse{Reaction: contract.ReactResponseReaction(reaction), Count: count})
 }
 
 func handleStats(w http.ResponseWriter, r *http.Request) {
 	var stats contract.StatsResponse
+
 	err := store.QueryRow(r.Context(), `select
 		(select count(*) from messages),
 		(select coalesce(sum(count), 0) from reactions)`).Scan(&stats.Messages, &stats.Reactions)
@@ -221,6 +242,7 @@ func handleStats(w http.ResponseWriter, r *http.Request) {
 		app.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	app.WriteJSON(w, http.StatusOK, stats)
 }
 

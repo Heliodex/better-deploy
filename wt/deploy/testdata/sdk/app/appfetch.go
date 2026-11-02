@@ -30,7 +30,7 @@ const (
 
 	appFetchURLEnv  = "WT_APP_FETCH_URL"
 	appNameEnv      = "WT_APP_NAME"
-	appTokenEnv     = "WT_APP_TOKEN"
+	appTokenEnv     = "WT_APP_TOKEN" //nolint:gosec // Environment variable name, not a credential.
 	appURLEnvPrefix = "WT_APP_URL_"
 	appCallMaxSkew  = 5 * time.Minute
 	// maxAppCallBody matches the supervisor's app-fetch body cap.
@@ -47,6 +47,7 @@ func AppToken() string {
 	if token := os.Getenv(appTokenEnv); token != "" {
 		return token
 	}
+
 	return os.Getenv("WT_STORAGE_TOKEN")
 }
 
@@ -55,10 +56,12 @@ func AppURL(name string) string {
 	if value := os.Getenv(appURLEnvName(name)); value != "" {
 		return strings.TrimSuffix(value, "/")
 	}
+
 	base := strings.TrimSuffix(os.Getenv(appFetchURLEnv), "/")
 	if base == "" {
 		return ""
 	}
+
 	return base + "/apps/" + name
 }
 
@@ -68,14 +71,18 @@ func NewAppRequest(ctx context.Context, method, target, path string, body io.Rea
 	if base == "" {
 		return nil, fmt.Errorf("no internal URL for app %q", target)
 	}
+
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
 	}
+
 	req, err := http.NewRequestWithContext(ctx, method, base+path, body)
 	if err != nil {
 		return nil, err
 	}
+
 	req.Header.Set("Authorization", "Bearer "+AppToken())
+
 	return req, nil
 }
 
@@ -84,34 +91,43 @@ func NewAppRequest(ctx context.Context, method, target, path string, body io.Rea
 func Caller(r *http.Request) (string, bool) {
 	caller := r.Header.Get(AppCallerHeader)
 	timestamp := r.Header.Get(AppTimestampHeader)
+
 	v2 := r.Header.Get(AppSignatureV2Header)
 	if caller == "" || timestamp == "" || v2 == "" {
 		return "", false
 	}
+
 	stamp, err := time.Parse(time.RFC3339Nano, timestamp)
 	if err != nil {
 		return "", false
 	}
+
 	if skew := time.Since(stamp); skew > appCallMaxSkew || skew < -appCallMaxSkew {
 		return "", false
 	}
+
 	key := AppToken()
 	if key == "" {
 		return "", false
 	}
+
 	var body []byte
 	if r.Body != nil {
 		body, err = io.ReadAll(io.LimitReader(r.Body, maxAppCallBody+1))
 		if err != nil || len(body) > maxAppCallBody {
 			return "", false
 		}
+
 		r.Body = io.NopCloser(bytes.NewReader(body))
 	}
+
 	bodyHash := appBodySHA256(body)
 	if !hmac.Equal([]byte(r.Header.Get(AppBodyHashHeader)), []byte(bodyHash)) {
 		return "", false
 	}
+
 	expected := appCallSignatureV2(key, caller, r.Method, r.URL.RequestURI(), timestamp, bodyHash)
+
 	return caller, hmac.Equal([]byte(v2), []byte(expected))
 }
 
@@ -119,6 +135,7 @@ func Caller(r *http.Request) (string, bool) {
 func appCallSignatureV2(key, caller, method, path, timestamp, bodyHash string) string {
 	mac := hmac.New(sha256.New, []byte(key))
 	_, _ = io.WriteString(mac, caller+"\n"+method+"\n"+path+"\n"+timestamp+"\n"+bodyHash)
+
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
@@ -131,6 +148,7 @@ func appBodySHA256(body []byte) string {
 func appURLEnvName(name string) string {
 	var key strings.Builder
 	key.WriteString(appURLEnvPrefix)
+
 	for _, char := range strings.ToUpper(name) {
 		switch {
 		case char >= 'A' && char <= 'Z', char >= '0' && char <= '9':
@@ -139,5 +157,6 @@ func appURLEnvName(name string) string {
 			key.WriteByte('_')
 		}
 	}
+
 	return key.String()
 }

@@ -3,7 +3,7 @@ package wasihttp
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -34,14 +34,14 @@ func methodToString(m wasi.Method) (string, error) {
 	case wasi.MethodTrace:
 		return "TRACE", nil
 	case wasi.MethodOther:
-		return m.Other(), fmt.Errorf("unknown http method 'other'")
+		return m.Other(), errors.New("unknown http method 'other'")
 	default:
-		return "", fmt.Errorf("failed to convert http method")
+		return "", errors.New("failed to convert http method")
 	}
 }
 
-// toHttpHeader appends wasi header pairs to dest, preserving repeated fields.
-func toHttpHeader(src []wit.Tuple2[string, []uint8], dest *http.Header) {
+// toHTTPHeader appends wasi header pairs to dest, preserving repeated fields.
+func toHTTPHeader(src []wit.Tuple2[string, []uint8], dest *http.Header) {
 	for _, pair := range src {
 		key := pair.F0
 		value := string(pair.F1)
@@ -49,8 +49,8 @@ func toHttpHeader(src []wit.Tuple2[string, []uint8], dest *http.Header) {
 	}
 }
 
-// newHttpRequest converts a wasi.Request to an http.Request. The request uses the handler's context so a disconnect can cancel the app's work.
-func newHttpRequest(ir *wasi.Request, ctx context.Context) (*http.Request, error) {
+// newHTTPRequest converts a wasi.Request to an http.Request. The request uses the handler's context so a disconnect can cancel the app's work.
+func newHTTPRequest(ctx context.Context, ir *wasi.Request) (*http.Request, error) {
 	defer ir.Drop()
 
 	method, err := methodToString(ir.GetMethod())
@@ -66,17 +66,20 @@ func newHttpRequest(ir *wasi.Request, ctx context.Context) (*http.Request, error
 	headerResource := ir.GetHeaders()
 	rawHeaders := headerResource.CopyAll()
 	headerResource.Drop()
+
 	headers := make(http.Header, len(rawHeaders))
-	toHttpHeader(rawHeaders, &headers)
+	toHTTPHeader(rawHeaders, &headers)
 
 	rx, trailers := wasi.RequestConsumeBody(ir, unitFuture())
 	body := newReader(rx, trailers)
 
 	scheme, host, requestPath, remote := httpmeta.IncomingTarget(pathWithQuery, headers)
+
 	rawURL := requestPath
 	if rawURL == "" {
 		rawURL = "/"
 	}
+
 	req, err := http.NewRequestWithContext(ctx, method, rawURL, body)
 	if err != nil {
 		body.Close()
@@ -89,12 +92,14 @@ func newHttpRequest(ir *wasi.Request, ctx context.Context) (*http.Request, error
 	req.URL.Host = host
 	req.Host = host
 	req.RequestURI = req.URL.RequestURI()
+
 	req.RemoteAddr = remote
 	if value := req.Header.Get("Content-Length"); value != "" {
 		if length, err := strconv.ParseInt(value, 10, 64); err == nil {
 			req.ContentLength = length
 		}
 	}
+
 	if scheme == "https" && req.TLS == nil {
 		req.TLS = &tls.ConnectionState{}
 	}
