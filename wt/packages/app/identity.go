@@ -59,7 +59,7 @@ func UserFromRequest(r *http.Request) (User, bool) {
 		return User{}, false
 	}
 	var groups []string
-	for _, group := range strings.Split(groupsHeader, ",") {
+	for group := range strings.SplitSeq(groupsHeader, ",") {
 		group = strings.TrimSpace(group)
 		if group != "" {
 			groups = append(groups, group)
