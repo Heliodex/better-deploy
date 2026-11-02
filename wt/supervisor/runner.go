@@ -83,6 +83,7 @@ func runnerMain() {
 	r.acceptLoop()
 }
 
+// watchLiveness shuts the runner down when the supervisor's liveness pipe closes.
 func (r *runnerServer) watchLiveness(liveness *os.File) {
 	var byte [1]byte
 	for {
@@ -93,6 +94,7 @@ func (r *runnerServer) watchLiveness(liveness *os.File) {
 	}
 }
 
+// acceptLoop accepts supervisor connections until the listener closes.
 func (r *runnerServer) acceptLoop() {
 	for {
 		conn, err := r.listener.Accept()
@@ -103,6 +105,7 @@ func (r *runnerServer) acceptLoop() {
 	}
 }
 
+// handleConnection installs the newest supervisor connection, sends a snapshot and reads requests until it closes.
 func (r *runnerServer) handleConnection(conn net.Conn) {
 	r.mu.Lock()
 	old := r.conn
@@ -134,6 +137,7 @@ func (r *runnerServer) handleConnection(conn net.Conn) {
 	_ = conn.Close()
 }
 
+// handleRequest dispatches one runner protocol request.
 func (r *runnerServer) handleRequest(_ net.Conn, request runnerRequest) {
 	id := runnerKey(request.ID, request.App)
 	switch request.Op {
@@ -159,6 +163,7 @@ func (r *runnerServer) handleRequest(_ net.Conn, request runnerRequest) {
 	}
 }
 
+// send writes one event to the current supervisor connection.
 func (r *runnerServer) send(event runnerEvent) {
 	r.mu.Lock()
 	conn := r.conn
@@ -185,6 +190,7 @@ func (r *runnerServer) send(event runnerEvent) {
 	}
 }
 
+// snapshotApps returns a name-sorted copy of every app the runner owns.
 func (r *runnerServer) snapshotApps() []runnerAppInfo {
 	r.mu.Lock()
 	apps := make([]*runnerProcess, 0, len(r.apps))
@@ -259,6 +265,7 @@ func (r *runnerServer) registerProcess(request runnerStartRequest, cmd *exec.Cmd
 	return app
 }
 
+// start launches one app process and begins streaming its output and exit.
 func (r *runnerServer) start(request runnerStartRequest) {
 	id := runnerKey(request.ID, request.Name)
 	sendError := func(message string) {
@@ -311,6 +318,7 @@ func (r *runnerServer) start(request runnerStartRequest) {
 	}
 }
 
+// readOutput forwards process output and reports a detected serve port.
 func (r *runnerServer) readOutput(app *runnerProcess, output *os.File) {
 	defer output.Close()
 	defer close(app.outputDone)
@@ -330,6 +338,7 @@ func (r *runnerServer) readOutput(app *runnerProcess, output *os.File) {
 	}
 }
 
+// readWorkPID reads the namespace helper's work PID and announces it.
 func (r *runnerServer) readWorkPID(app *runnerProcess, reader *os.File) {
 	defer reader.Close()
 	data, _ := io.ReadAll(io.LimitReader(reader, 64))
@@ -343,6 +352,7 @@ func (r *runnerServer) readWorkPID(app *runnerProcess, reader *os.File) {
 	r.send(runnerEvent{Op: runnerOpWork, ID: app.info.ID, App: app.info.Name, WorkPID: pid})
 }
 
+// waitApp reaps one app process, closes its pipes and announces the exit.
 func (r *runnerServer) waitApp(app *runnerProcess) {
 	err := app.cmd.Wait()
 	<-app.outputDone
@@ -378,6 +388,7 @@ func (r *runnerServer) waitApp(app *runnerProcess) {
 	r.send(runnerEvent{Op: runnerOpExited, ID: id, App: name, Code: code, Error: message})
 }
 
+// release signals a namespaced start that setup succeeded, letting the helper exec the runtime.
 func (r *runnerServer) release(id string) {
 	r.mu.Lock()
 	app := r.apps[id]
@@ -412,6 +423,7 @@ func (r *runnerServer) signal(id string, signal syscall.Signal) {
 	_ = syscall.Kill(pid, signal)
 }
 
+// shutdown stops every app and closes the runner listener.
 func (r *runnerServer) shutdown() {
 	r.mu.Lock()
 	if r.closing {

@@ -116,6 +116,7 @@ func (m *egressManager) rules6For(uid int) [][]string {
 	}
 }
 
+// deleteRules deletes rules in order, returning the first failure after trying the rest.
 func deleteRules(run egressRun, chain string, rules [][]string) error {
 	var firstErr error
 	for _, rule := range rules {
@@ -127,6 +128,7 @@ func deleteRules(run egressRun, chain string, rules [][]string) error {
 	return firstErr
 }
 
+// appendRules appends rules and rolls back those it already added on failure.
 func appendRules(run egressRun, chain string, rules [][]string) ([][]string, error) {
 	appended := make([][]string, 0, len(rules))
 	for _, rule := range rules {

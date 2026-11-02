@@ -48,6 +48,7 @@ func inheritedListener(key string) (net.Listener, bool, error) {
 	return listener, true, nil
 }
 
+// listenerFile returns a dupable file for a TCP or Unix listener.
 func listenerFile(listener net.Listener) (*os.File, error) {
 	switch value := listener.(type) {
 	case *net.TCPListener:
@@ -59,6 +60,7 @@ func listenerFile(listener net.Listener) (*os.File, error) {
 	}
 }
 
+// clearCloseOnExec keeps a file open across the handover exec.
 func clearCloseOnExec(file *os.File) error {
 	if _, err := unix.FcntlInt(file.Fd(), unix.F_SETFD, 0); err != nil {
 		return fmt.Errorf("clear close-on-exec on %s: %w", file.Name(), err)
@@ -147,6 +149,7 @@ func (s *supervisor) startRunner() error {
 	return nil
 }
 
+// reapRunner waits for an inherited runner process so it does not become a zombie.
 func (s *supervisor) reapRunner(pid int) {
 	if pid <= 0 {
 		return

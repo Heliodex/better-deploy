@@ -130,6 +130,7 @@ func cpuMax(millicores int) string {
 	return fmt.Sprintf("%d %d", quota, cgroupCPUPeriod)
 }
 
+// memoryMax renders cgroup v2 memory.max, or "max" when no limit is set.
 func memoryMax(memoryMB int) string {
 	if memoryMB <= 0 {
 		return "max"

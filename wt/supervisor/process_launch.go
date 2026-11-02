@@ -57,6 +57,7 @@ func appServeArgs(target string, cfg appConfig, epoch bool) []string {
 }
 
 // appEnv builds the --env pairs and the process environment, resolving secret references first.
+// appEnv resolves secret references and adds the storage, identity and app-fetch settings.
 func (s *supervisor) appEnv(a *app, cfg appConfig, namespaced bool) (extraArgs, env []string, err error) {
 	index := map[string]int{}
 	set := func(key, value string) {
@@ -123,6 +124,7 @@ func (s *supervisor) appEnv(a *app, cfg appConfig, namespaced bool) (extraArgs, 
 
 // appArgsFor rewrites the bundle, /data and tmp paths for a namespace launch.
 // The helper pivots into a root where the bundle is /app and the state dir is /data, so the host paths must not leak into wasmtime's argv.
+// appArgsFor builds the wasmtime argv and environment, rewriting paths for a namespace launch.
 func (s *supervisor) appArgsFor(a *app, source string, namespaced bool) (args []string, env []string, err error) {
 	a.mu.Lock()
 	cfg := a.cfg
@@ -147,6 +149,7 @@ func (s *supervisor) appArgsFor(a *app, source string, namespaced bool) (args []
 
 // appArgs builds the wasmtime argv and the process environment separately.
 // Only secret names go into argv, so values are not visible in /proc/<pid>/cmdline.
+// appArgs builds argv and environment for the direct, un-namespaced launch path.
 func (s *supervisor) appArgs(a *app, source string) (args []string, env []string, err error) {
 	return s.appArgsFor(a, source, false)
 }

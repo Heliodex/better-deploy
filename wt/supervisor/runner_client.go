@@ -43,6 +43,7 @@ func newRunnerClient(conn net.Conn) *runnerClient {
 	return c
 }
 
+// dialRunner retries the runner socket until it accepts and sends its snapshot.
 func dialRunner(path string, timeout time.Duration) (*runnerClient, []runnerAppInfo, int, error) {
 	deadline := time.Now().Add(timeout)
 	var lastErr error
@@ -73,6 +74,7 @@ func dialRunner(path string, timeout time.Duration) (*runnerClient, []runnerAppI
 	}
 }
 
+// readLoop decodes events until the connection fails.
 func (c *runnerClient) readLoop() {
 	scanner := bufio.NewScanner(c.conn)
 	scanner.Buffer(make([]byte, 64<<10), runnerScanBytes)
@@ -91,6 +93,7 @@ func (c *runnerClient) readLoop() {
 	c.fail(err)
 }
 
+// dispatch routes events to the matching app stream and records the initial snapshot.
 func (c *runnerClient) dispatch(event runnerEvent) {
 	switch event.Op {
 	case runnerOpSnapshot:
@@ -145,6 +148,7 @@ func (c *runnerClient) dispatch(event runnerEvent) {
 	}
 }
 
+// fail closes the client once and turns every open stream into an exit event.
 func (c *runnerClient) fail(err error) {
 	c.closeOnce.Do(func() {
 		c.mu.Lock()
@@ -178,6 +182,7 @@ func (c *runnerClient) Close() {
 	c.fail(errors.New("runner client closed"))
 }
 
+// send writes one request to the runner connection.
 func (c *runnerClient) send(request runnerRequest) error {
 	data, err := json.Marshal(request)
 	if err != nil {
@@ -207,6 +212,7 @@ func (c *runnerClient) RunnerPID() int {
 	return c.runnerPID
 }
 
+// newStream returns the existing stream or creates one for a known app.
 func (c *runnerClient) newStream(id string) *runnerStream {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -239,6 +245,7 @@ func (c *runnerClient) Stream(id string) *runnerStream {
 	return c.newStream(id)
 }
 
+// Start sends a start request and waits for the runner's started event.
 func (c *runnerClient) Start(request runnerStartRequest) (*runnerStream, runnerEvent, error) {
 	stream := c.startStream(runnerKey(request.ID, request.Name))
 	if err := c.send(runnerRequest{Op: runnerOpStart, Start: &request}); err != nil {
@@ -258,14 +265,17 @@ func (c *runnerClient) Start(request runnerStartRequest) (*runnerStream, runnerE
 	}
 }
 
+// Go releases a started app past its setup handshake.
 func (c *runnerClient) Go(id string) error {
 	return c.send(runnerRequest{Op: runnerOpGo, ID: id})
 }
 
+// Stop asks the runner to terminate one app.
 func (c *runnerClient) Stop(id string) error {
 	return c.send(runnerRequest{Op: runnerOpStop, ID: id})
 }
 
+// Shutdown asks the runner to exit and closes the client.
 func (c *runnerClient) Shutdown() error {
 	err := c.send(runnerRequest{Op: runnerOpShutdown})
 	c.Close()

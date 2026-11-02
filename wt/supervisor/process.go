@@ -16,6 +16,7 @@ import (
 	"time"
 )
 
+// waitForPort waits for wasmtime to report its serve port and stores it on the app.
 func (s *supervisor) waitForPort(a *app, finder *portFinder, done <-chan struct{}, deadline time.Time) error {
 	timer := time.NewTimer(time.Until(deadline))
 	defer timer.Stop()
@@ -32,6 +33,7 @@ func (s *supervisor) waitForPort(a *app, finder *portFinder, done <-chan struct{
 	}
 }
 
+// waitReady applies the app's startup limit to waitReadyUntil.
 func (s *supervisor) waitReady(a *app, done <-chan struct{}) error {
 	a.mu.Lock()
 	limit := a.cfg.startupLimit()
@@ -39,6 +41,7 @@ func (s *supervisor) waitReady(a *app, done <-chan struct{}) error {
 	return s.waitReadyUntil(a, done, time.Now().Add(limit))
 }
 
+// waitReadyUntil polls the health path with exponential backoff until the deadline or process exit.
 func (s *supervisor) waitReadyUntil(a *app, done <-chan struct{}, deadline time.Time) error {
 	a.mu.Lock()
 	health := a.cfg.Health
@@ -104,6 +107,7 @@ func (a *app) markDraining() {
 	a.mu.Unlock()
 }
 
+// kill sends SIGTERM and escalates to SIGKILL after the stop timeout.
 func (s *supervisor) kill(a *app) {
 	a.mu.Lock()
 	cmd := a.cmd
@@ -123,6 +127,7 @@ func (s *supervisor) kill(a *app) {
 	}
 }
 
+// stop retires the app, cancels its restart timer and closes its isolation resources.
 func (s *supervisor) stop(a *app) {
 	if a == nil {
 		return
@@ -158,6 +163,7 @@ func (s *supervisor) drainAndStop(a *app, action string) {
 	s.stop(a)
 }
 
+// cancelRestart stops a pending restart timer.
 func (s *supervisor) cancelRestart(a *app) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -167,6 +173,7 @@ func (s *supervisor) cancelRestart(a *app) {
 	}
 }
 
+// register installs the app in the routing tables and starts its job queue.
 func (s *supervisor) register(a *app) {
 	s.mu.Lock()
 	if old := s.apps[a.name]; old != nil {
@@ -186,6 +193,7 @@ func (s *supervisor) register(a *app) {
 	s.broadcast()
 }
 
+// scheduleRestart runs restart after delay unless the app is retired or the supervisor is stopping.
 func (s *supervisor) scheduleRestart(a *app, delay time.Duration) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -202,6 +210,7 @@ func (s *supervisor) scheduleRestart(a *app, delay time.Duration) {
 	})
 }
 
+// scheduleRetry uses the current backoff delay, with a one-second floor.
 func (s *supervisor) scheduleRetry(a *app) {
 	a.mu.Lock()
 	delay := max(a.delay, time.Second)
@@ -209,6 +218,7 @@ func (s *supervisor) scheduleRetry(a *app) {
 	s.scheduleRestart(a, delay)
 }
 
+// restart ensures the artifact and launches a new process under the app lock.
 func (s *supervisor) restart(a *app) {
 	defer s.lockApp(a.name)()
 	a.mu.Lock()
@@ -239,6 +249,7 @@ func (s *supervisor) restart(a *app) {
 	}
 }
 
+// spawn creates an app from a bundle and starts its process and schedule.
 func (s *supervisor) spawn(name, dir string, cfg appConfig) (*app, error) {
 	if err := os.MkdirAll(filepath.Join(s.cfg.stateDir, name), 0o755); err != nil {
 		return nil, fmt.Errorf("state dir: %w", err)
@@ -316,6 +327,7 @@ func (s *supervisor) finishExit(a *app, cmd *exec.Cmd, done chan struct{}, exitE
 }
 
 // finishRunnerExit runs the same bookkeeping as a directly waited process, but the exit comes from the runner after it reaps the app.
+// finishRunnerExit clears the app's namespace root and runs the normal exit bookkeeping.
 func (s *supervisor) finishRunnerExit(a *app, cmd *exec.Cmd, done chan struct{}, nsRoot string, exitErr error) {
 	if nsRoot != "" {
 		_ = os.RemoveAll(nsRoot)
@@ -324,6 +336,7 @@ func (s *supervisor) finishRunnerExit(a *app, cmd *exec.Cmd, done chan struct{},
 }
 
 // consumeRunnerStream feeds one app's output into its log writers and turns the runner's exit event into the normal restart bookkeeping.
+// consumeRunnerStream forwards runner events into logs, PIDs, ports and restart handling.
 func (s *supervisor) consumeRunnerStream(a *app, cmd *exec.Cmd, done chan struct{}, stream *runnerStream, out io.Writer, nsRoot string) {
 	for event := range stream.events {
 		switch event.Op {
@@ -355,6 +368,7 @@ func (s *supervisor) consumeRunnerStream(a *app, cmd *exec.Cmd, done chan struct
 }
 
 // adoptApp rebuilds the in-memory app around a process the runner already owns.
+// adoptApp rebuilds supervisor state around a process that survived handover in the runner.
 func (s *supervisor) adoptApp(name, dir string, cfg appConfig, info runnerAppInfo) (*app, error) {
 	if s.storage != nil {
 		s.storage.setQuota(name, int64(cfg.DiskMB)<<20)
@@ -407,6 +421,7 @@ func (s *supervisor) adoptApp(name, dir string, cfg appConfig, info runnerAppInf
 	return a, nil
 }
 
+// loadApps reads the apps directory, adopts runner processes and starts the rest.
 func (s *supervisor) loadApps() error {
 	entries, err := os.ReadDir(s.cfg.appsDir)
 	if os.IsNotExist(err) {
