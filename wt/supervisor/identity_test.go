@@ -117,7 +117,7 @@ func TestIdentityLoginMeLogout(t *testing.T) {
 		t.Errorf("login response = %+v", me)
 	}
 
-	rec = identityCall(t, s, http.MethodGet, "/v1/me", "", cookies[0], "")
+	rec = identityCall(t, s, http.MethodGet, identityAppPrefix+"/me", "", cookies[0], "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("me = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -135,7 +135,7 @@ func TestIdentityLoginMeLogout(t *testing.T) {
 		t.Fatalf("logout = %d: %s", rec.Code, rec.Body.String())
 	}
 
-	rec = identityCall(t, s, http.MethodGet, "/v1/me", "", cookies[0], "")
+	rec = identityCall(t, s, http.MethodGet, identityAppPrefix+"/me", "", cookies[0], "")
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("me after logout = %d, want 401", rec.Code)
 	}
@@ -240,7 +240,7 @@ func TestIdentityProxyRouting(t *testing.T) {
 	if len(cookies) == 0 {
 		t.Fatal("proxied login set no cookie")
 	}
-	req = httptest.NewRequest(http.MethodGet, "http://demo.localhost/v1/me", nil)
+	req = httptest.NewRequest(http.MethodGet, "http://demo.localhost"+identityAppPrefix+"/me", nil)
 	req.AddCookie(cookies[0])
 	rec = httptest.NewRecorder()
 	s.handleProxy(rec, req)

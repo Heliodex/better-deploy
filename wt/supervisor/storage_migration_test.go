@@ -112,7 +112,7 @@ func TestStorageMigrationChecksums(t *testing.T) {
 	}
 }
 
-func TestStorageLegacyMigrationVersionWithoutChecksum(t *testing.T) {
+func TestStorageRejectsLegacyMigrationVersionWithoutChecksum(t *testing.T) {
 	s, err := newStorageServer(t.TempDir(), "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -153,19 +153,12 @@ func TestStorageLegacyMigrationVersionWithoutChecksum(t *testing.T) {
 		"version":    2,
 		"statements": []map[string]any{{"sql": `create table must_not_exist (id integer primary key)`}},
 	})
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("legacy no-op = %d %s", resp.StatusCode, readBody(t, resp))
-	}
-	var result storageMigrationResponse
-	if err := json.UnmarshalRead(resp.Body, &result); err != nil {
-		t.Fatal(err)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("legacy migration = %d %s, want 409", resp.StatusCode, readBody(t, resp))
 	}
 	resp.Body.Close()
-	if result.Applied {
-		t.Error("legacy same-version migration was applied")
-	}
 	if schema = schemaOf(); len(schema.Migrations) != 0 {
-		t.Errorf("legacy no-op invented checksums: %+v", schema.Migrations)
+		t.Errorf("rejected legacy migration invented checksums: %+v", schema.Migrations)
 	}
 
 	resp = storageSQL(t, s, token, "/v1/migrate", map[string]any{

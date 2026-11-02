@@ -145,7 +145,7 @@ func TestEnsureArtifactKeepsMatchingArtifact(t *testing.T) {
 	counter := filepath.Join(t.TempDir(), "compiles")
 	compiler := writeCompilerWithCounter(t, "wasmtime-cli 51.0.0", "rebuilt", counter, false)
 	wasm := "wasm"
-	artifact := fmt.Sprintf(`{"wasmtime":"wasmtime-cli 51.0.0","target":"x86_64-test","epoch_interruption":true,"wasm_sha256":"%s","wasm_bytes":%d}`, digestText(wasm), len(wasm))
+	artifact := fmt.Sprintf(`{"wasmtime":"wasmtime-cli 51.0.0","target":"x86_64-test","epoch_interruption":true,"wasm_sha256":"%s","wasm_bytes":%d,"cpu":"baseline"}`, digestText(wasm), len(wasm))
 	dir := writeBundleDir(t, wasm, "current", artifact)
 
 	epoch, err := artifactSupervisor(t, compiler).ensureArtifact(dir, true)
@@ -167,9 +167,9 @@ func TestEnsureArtifactKeepsMatchingArtifact(t *testing.T) {
 	}
 }
 
-func TestEnsureArtifactImportsLegacyCwasmWithoutDigest(t *testing.T) {
+func TestEnsureArtifactIgnoresLegacyArtifactWithoutDigest(t *testing.T) {
 	counter := filepath.Join(t.TempDir(), "compiles")
-	compiler := writeCompilerWithCounter(t, "wasmtime-cli 51.0.0", "", counter, true)
+	compiler := writeCompilerWithCounter(t, "wasmtime-cli 51.0.0", "rebuilt", counter, false)
 	cache := t.TempDir()
 	dir := writeBundleDir(t, "wasm", "legacy", `{"wasmtime":"wasmtime-cli 51.0.0","target":"x86_64-test","epoch_interruption":true}`)
 	s := artifactSupervisorWithCache(t, compiler, cache)
@@ -179,28 +179,24 @@ func TestEnsureArtifactImportsLegacyCwasmWithoutDigest(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !epoch {
-		t.Error("legacy cwasm did not report its recorded epoch support")
+		t.Error("rebuilt artifact did not report epoch support")
 	}
-	if got := compileCount(t, counter); got != 0 {
-		t.Errorf("compile calls = %d, want no compile for a matching legacy cwasm", got)
+	if got := compileCount(t, counter); got != 1 {
+		t.Errorf("compile calls = %d, want a rebuild for an artifact without digest or CPU", got)
 	}
 	cwasm, err := os.ReadFile(filepath.Join(dir, "main.cwasm"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(cwasm) != "legacy" {
-		t.Errorf("main.cwasm = %q, want the uploaded legacy artifact", cwasm)
+	if string(cwasm) != "rebuilt" {
+		t.Errorf("main.cwasm = %q, want rebuilt", cwasm)
 	}
 	artifact, err := readArtifact(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if artifact.WasmSHA256 != digestText("wasm") || artifact.WasmBytes != int64(len("wasm")) {
-		t.Errorf("artifact = %+v, want the wasm digest and size", artifact)
-	}
-	key := artifactKey{WasmSHA256: digestText("wasm"), Wasmtime: "wasmtime-cli 51.0.0", Target: "x86_64-test", CPU: artifactCPUFeatures, Epoch: true}
-	if _, err := os.Stat(s.artifactCachePath(key)); err != nil {
-		t.Errorf("legacy cwasm was not imported into the cache: %v", err)
+	if artifact.WasmSHA256 != digestText("wasm") || artifact.CPU != artifactCPUFeatures {
+		t.Errorf("artifact = %+v, want wasm digest and CPU policy", artifact)
 	}
 }
 
@@ -287,11 +283,11 @@ func TestArtifactMatches(t *testing.T) {
 		{"same", current, current, true},
 		{"older runtime", artifactInfo{Wasmtime: "wasmtime-cli 50.0.0", Target: "x86_64-test", Epoch: true, WasmSHA256: digest}, current, false},
 		{"other target", artifactInfo{Wasmtime: "wasmtime-cli 51.0.0", Target: "aarch64-test", Epoch: true, WasmSHA256: digest}, current, false},
-		{"no digest", artifactInfo{Wasmtime: "wasmtime-cli 51.0.0", Target: "x86_64-test", Epoch: true}, current, true},
+		{"no digest", artifactInfo{Wasmtime: "wasmtime-cli 51.0.0", Target: "x86_64-test", Epoch: true}, current, false},
 		{"other wasm", artifactInfo{Wasmtime: "wasmtime-cli 51.0.0", Target: "x86_64-test", Epoch: true, WasmSHA256: digestText("other")}, current, false},
 		{"no epoch", artifactInfo{Wasmtime: "wasmtime-cli 51.0.0", Target: "x86_64-test", WasmSHA256: digest}, current, false},
-		{"unknown recorded version", artifactInfo{Target: "x86_64-test", Epoch: true, WasmSHA256: digest}, current, true},
-		{"unknown current version", artifactInfo{Wasmtime: "wasmtime-cli 50.0.0", Target: "x86_64-test", Epoch: true, WasmSHA256: digest}, artifactInfo{Target: "x86_64-test", Epoch: true, WasmSHA256: digest}, true},
+		{"unknown recorded version", artifactInfo{Target: "x86_64-test", Epoch: true, WasmSHA256: digest}, current, false},
+		{"unknown current version", artifactInfo{Wasmtime: "wasmtime-cli 50.0.0", Target: "x86_64-test", Epoch: true, WasmSHA256: digest}, artifactInfo{Target: "x86_64-test", Epoch: true, WasmSHA256: digest}, false},
 	}
 	for _, tc := range cases {
 		if got := artifactMatches(tc.recorded, tc.current); got != tc.want {
@@ -432,8 +428,8 @@ func TestArtifactMatchesCPU(t *testing.T) {
 	}
 	legacy := base
 	legacy.CPU = ""
-	if !artifactMatches(legacy, base) {
-		t.Error("a legacy artifact without a CPU field was rejected")
+	if artifactMatches(legacy, base) {
+		t.Error("an artifact without a CPU field matched")
 	}
 }
 

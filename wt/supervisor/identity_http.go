@@ -53,11 +53,9 @@ type identityUsersResponse struct {
 func (s *supervisor) identityAppRoutes() *routeTable {
 	return s.identityRoutesCache.get(func() *routeTable {
 		rt := newRouteTable()
-		for _, prefix := range []string{identityAppPrefix, "/v1"} {
-			rt.add(http.MethodPost, prefix+"/login", plainHandler(s.handleIdentityLogin))
-			rt.add(http.MethodPost, prefix+"/logout", plainHandler(s.handleIdentityLogout))
-			rt.add(http.MethodGet, prefix+"/me", plainHandler(s.handleIdentityMe))
-		}
+		rt.add(http.MethodPost, identityAppPrefix+"/login", plainHandler(s.handleIdentityLogin))
+		rt.add(http.MethodPost, identityAppPrefix+"/logout", plainHandler(s.handleIdentityLogout))
+		rt.add(http.MethodGet, identityAppPrefix+"/me", plainHandler(s.handleIdentityMe))
 		rt.add(http.MethodPost, identityAppPrefix+"/password", plainHandler(s.handleIdentityPassword))
 		return rt
 	})

@@ -40,7 +40,8 @@ func TestCallerVerifiesSupervisorSignature(t *testing.T) {
 	timestamp := time.Now().UTC().Format(time.RFC3339Nano)
 	req.Header.Set(AppCallerHeader, "frontend")
 	req.Header.Set(AppTimestampHeader, timestamp)
-	req.Header.Set(AppSignatureHeader, appCallSignature("target-token", "frontend", http.MethodGet, "/v1/items?limit=1", timestamp))
+	req.Header.Set(AppBodyHashHeader, appBodySHA256(nil))
+	req.Header.Set(AppSignatureV2Header, appCallSignatureV2("target-token", "frontend", http.MethodGet, "/v1/items?limit=1", timestamp, appBodySHA256(nil)))
 
 	caller, ok := Caller(req)
 	if !ok || caller != "frontend" {
@@ -64,7 +65,8 @@ func TestCallerRejectsStaleAndMissingHeaders(t *testing.T) {
 	timestamp := time.Now().Add(-10 * time.Minute).UTC().Format(time.RFC3339Nano)
 	req.Header.Set(AppCallerHeader, "frontend")
 	req.Header.Set(AppTimestampHeader, timestamp)
-	req.Header.Set(AppSignatureHeader, appCallSignature("target-token", "frontend", http.MethodGet, "/", timestamp))
+	req.Header.Set(AppBodyHashHeader, appBodySHA256(nil))
+	req.Header.Set(AppSignatureV2Header, appCallSignatureV2("target-token", "frontend", http.MethodGet, "/", timestamp, appBodySHA256(nil)))
 	if _, ok := Caller(req); ok {
 		t.Error("stale signature verified")
 	}

@@ -238,8 +238,8 @@ func TestDeployFailureIsRecorded(t *testing.T) {
 	s.cfg.wasmtime = filepath.Join(t.TempDir(), "missing-wasmtime")
 	s.deployments = newDeploymentManager(filepath.Join(s.cfg.stateDir, ".deployments"))
 	archive := writeTarGz(t, map[string]string{
-		"app.json":   `{"name":"demo","host":"demo.localhost"}`,
-		"main.cwasm": "cwasm",
+		"app.json":  `{"name":"demo","host":"demo.localhost"}`,
+		"main.wasm": "wasm",
 	})
 	rec := deployArchive(t, s, "demo", archive, "")
 	if rec.Code != http.StatusBadGateway {
@@ -253,7 +253,7 @@ func TestDeployFailureIsRecorded(t *testing.T) {
 		t.Fatalf("history length = %d, want 1 failed attempt", len(history))
 	}
 	failed := history[0]
-	if failed.Status != deploymentStatusFail || failed.Error == "" || failed.Digest != digestText("cwasm") {
+	if failed.Status != deploymentStatusFail || failed.Error == "" || failed.Digest != digestText("wasm") {
 		t.Errorf("failed record = %+v, want a failed attempt with its digest and error", failed)
 	}
 	if _, err := s.deployments.bundle("demo", failed.ID); err == nil {
@@ -264,14 +264,11 @@ func TestDeployFailureIsRecorded(t *testing.T) {
 	}
 }
 
-func TestLegacyCwasmOnlyBundleStarts(t *testing.T) {
+func TestCwasmOnlyBundleStarts(t *testing.T) {
 	s := newLifecycleSupervisor(t)
 	a := spawnTestApp(t, s, "legacy")
 	if got := appPID(a); got == 0 {
-		t.Fatal("legacy cwasm-only app is not running")
-	}
-	if a.digest == "" {
-		t.Error("legacy app has no current digest")
+		t.Fatal("cwasm-only app is not running")
 	}
 }
 

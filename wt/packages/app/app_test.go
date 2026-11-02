@@ -41,21 +41,16 @@ func TestCallerVerifiesBodySignature(t *testing.T) {
 	}
 }
 
-func TestCallerAcceptsLegacySignature(t *testing.T) {
+func TestCallerRejectsLegacySignature(t *testing.T) {
 	t.Setenv("WT_APP_TOKEN", "key")
 	body := []byte(`legacy`)
 	timestamp := time.Now().UTC().Format(time.RFC3339Nano)
 	request := httptest.NewRequest(http.MethodPost, "http://target.localhost/v1/items", bytes.NewReader(body))
 	request.Header.Set(AppCallerHeader, "caller")
 	request.Header.Set(AppTimestampHeader, timestamp)
-	request.Header.Set(AppSignatureHeader, appCallSignature("key", "caller", request.Method, request.URL.RequestURI(), timestamp))
-	caller, ok := Caller(request)
-	if !ok || caller != "caller" {
-		t.Fatalf("Caller = %q, %t", caller, ok)
-	}
-	restored, _ := io.ReadAll(request.Body)
-	if !bytes.Equal(restored, body) {
-		t.Errorf("restored body = %q, want %q", restored, body)
+	request.Header.Set("X-WT-App-Signature", "legacy-signature")
+	if _, ok := Caller(request); ok {
+		t.Error("legacy signature accepted")
 	}
 }
 

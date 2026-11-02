@@ -103,20 +103,11 @@ func (s *supervisor) wasmtimeVersion() string {
 
 // artifactMatches reports whether a recorded artifact was built for the current runtime, target and wasm.
 func artifactMatches(recorded, current artifactInfo) bool {
-	if recorded.Target != current.Target {
-		return false
-	}
-	if recorded.CPU != "" && current.CPU != "" && recorded.CPU != current.CPU {
-		return false
-	}
-	if current.Epoch && !recorded.Epoch {
-		return false
-	}
-	// An empty recorded digest is legacy metadata. Reject only a digest we know points at another wasm.
-	if recorded.WasmSHA256 != "" && current.WasmSHA256 != "" && recorded.WasmSHA256 != current.WasmSHA256 {
-		return false
-	}
-	return recorded.Wasmtime == "" || current.Wasmtime == "" || recorded.Wasmtime == current.Wasmtime
+	return recorded.Target == current.Target &&
+		recorded.CPU == current.CPU &&
+		recorded.Epoch == current.Epoch &&
+		recorded.WasmSHA256 == current.WasmSHA256 &&
+		recorded.Wasmtime == current.Wasmtime
 }
 
 func (s *supervisor) artifactCacheDir() string {
@@ -402,16 +393,8 @@ func (s *supervisor) ensureArtifact(dir string, requireEpoch bool) (bool, error)
 	return s.finishArtifact(dir, path, current, time.Now().UTC(), true)
 }
 
-// sourceDigest returns the digest a deploy and running app are compared by: the wasm when present, else the legacy cwasm.
+// sourceDigest returns the digest a deploy and running app are compared by.
 func sourceDigest(dir string) string {
-	if digest, err := fileDigest(filepath.Join(dir, "main.wasm")); err == nil {
-		return digest
-	}
-	if info, err := readArtifact(dir); err == nil && info.WasmSHA256 != "" {
-		return info.WasmSHA256
-	}
-	if digest, err := fileDigest(filepath.Join(dir, "main.cwasm")); err == nil {
-		return digest
-	}
-	return ""
+	digest, _ := fileDigest(filepath.Join(dir, "main.wasm"))
+	return digest
 }

@@ -420,7 +420,7 @@ func ensureStorageMigrationsTable(ctx context.Context, tx *sql.Tx) error {
 	return err
 }
 
-// storedMigrationChecksum returns the checksum recorded for a version. ok is false for a legacy database with user_version but no bookkeeping row.
+// storedMigrationChecksum returns the checksum recorded for a version. ok is false when the version has no bookkeeping row.
 func storedMigrationChecksum(ctx context.Context, tx *sql.Tx, version int) (checksum string, ok bool, err error) {
 	err = tx.QueryRowContext(ctx, "select checksum from "+quoteSQLiteIdentifier(storageMigrationsTable)+" where version = ?", version).Scan(&checksum)
 	switch {
@@ -466,7 +466,10 @@ func applyMigration(ctx context.Context, conn *sql.Conn, version int, statements
 		if err != nil {
 			return false, err
 		}
-		if ok && stored != checksum {
+		if !ok {
+			return false, fmt.Errorf("%w: version %d has no bookkeeping row", errStorageMigrationChecksum, version)
+		}
+		if stored != checksum {
 			return false, fmt.Errorf("%w: version %d was applied with a different checksum", errStorageMigrationChecksum, version)
 		}
 		return false, nil

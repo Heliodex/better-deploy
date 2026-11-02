@@ -205,11 +205,9 @@ func (s *supervisor) receiveBundle(w http.ResponseWriter, r *http.Request, name 
 		return "", appConfig{}, cleanup, false
 	}
 	if !allowMissingComponent {
-		if _, err := os.Stat(filepath.Join(dir, "main.cwasm")); err != nil {
-			if _, wasmErr := os.Stat(filepath.Join(dir, "main.wasm")); wasmErr != nil {
-				writeError(w, http.StatusBadRequest, "archive must contain main.cwasm or main.wasm")
-				return "", appConfig{}, cleanup, false
-			}
+		if _, err := os.Stat(filepath.Join(dir, "main.wasm")); err != nil {
+			writeError(w, http.StatusBadRequest, "archive must contain main.wasm")
+			return "", appConfig{}, cleanup, false
 		}
 	}
 
@@ -497,7 +495,7 @@ func (s *supervisor) stageDeploy(w http.ResponseWriter, r *http.Request, name st
 	staged.digest = sourceDigest(dir)
 	if staged.digest == "" {
 		cleanup()
-		writeError(w, http.StatusBadRequest, "static-only deploy needs a running component")
+		writeError(w, http.StatusBadRequest, "bundle has no main.wasm")
 		return nil, false
 	}
 	staged.etag = `"` + bundleDigest(dir) + `"`

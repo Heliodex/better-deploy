@@ -21,8 +21,6 @@ const (
 	AppCallerHeader = "X-WT-App-Caller"
 	// AppTimestampHeader carries the signature timestamp.
 	AppTimestampHeader = "X-WT-App-Timestamp"
-	// AppSignatureHeader carries the legacy HMAC over caller, method, path and timestamp.
-	AppSignatureHeader = "X-WT-App-Signature"
 	// AppSignatureV2Header carries the HMAC over the caller, method, path, timestamp and body digest.
 	AppSignatureV2Header = "X-WT-App-Signature-V2"
 	// AppBodyHashHeader carries the SHA-256 of the forwarded body.
@@ -86,9 +84,8 @@ func NewAppRequest(ctx context.Context, method, target, path string, body io.Rea
 func Caller(r *http.Request) (string, bool) {
 	caller := r.Header.Get(AppCallerHeader)
 	timestamp := r.Header.Get(AppTimestampHeader)
-	legacy := r.Header.Get(AppSignatureHeader)
 	v2 := r.Header.Get(AppSignatureV2Header)
-	if caller == "" || timestamp == "" || (legacy == "" && v2 == "") {
+	if caller == "" || timestamp == "" || v2 == "" {
 		return "", false
 	}
 	stamp, err := time.Parse(time.RFC3339Nano, timestamp)
@@ -111,21 +108,11 @@ func Caller(r *http.Request) (string, bool) {
 		r.Body = io.NopCloser(bytes.NewReader(body))
 	}
 	bodyHash := appBodySHA256(body)
-	if v2 != "" {
-		if !hmac.Equal([]byte(r.Header.Get(AppBodyHashHeader)), []byte(bodyHash)) {
-			return "", false
-		}
-		expected := appCallSignatureV2(key, caller, r.Method, r.URL.RequestURI(), timestamp, bodyHash)
-		return caller, hmac.Equal([]byte(v2), []byte(expected))
+	if !hmac.Equal([]byte(r.Header.Get(AppBodyHashHeader)), []byte(bodyHash)) {
+		return "", false
 	}
-	expected := appCallSignature(key, caller, r.Method, r.URL.RequestURI(), timestamp)
-	return caller, hmac.Equal([]byte(legacy), []byte(expected))
-}
-
-func appCallSignature(key, caller, method, path, timestamp string) string {
-	mac := hmac.New(sha256.New, []byte(key))
-	_, _ = io.WriteString(mac, caller+"\n"+method+"\n"+path+"\n"+timestamp)
-	return hex.EncodeToString(mac.Sum(nil))
+	expected := appCallSignatureV2(key, caller, r.Method, r.URL.RequestURI(), timestamp, bodyHash)
+	return caller, hmac.Equal([]byte(v2), []byte(expected))
 }
 
 func appCallSignatureV2(key, caller, method, path, timestamp, bodyHash string) string {
