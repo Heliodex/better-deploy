@@ -72,6 +72,7 @@ func newAuditStore(path string) (*auditStore, error) {
 	return store, nil
 }
 
+// append writes one JSON line, rotating the log once at the size cap.
 func (a *auditStore) append(entry auditEntry) error {
 	if a == nil {
 		return nil
@@ -191,6 +192,7 @@ func auditAction(method, action string) string {
 	}
 }
 
+// remoteHost strips the port from a request's remote address.
 func remoteHost(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err == nil {
@@ -199,6 +201,7 @@ func remoteHost(r *http.Request) string {
 	return r.RemoteAddr
 }
 
+// auditError extracts the error field from a response body.
 func auditError(body []byte) string {
 	var result struct {
 		Error string `json:"error"`
@@ -209,6 +212,7 @@ func auditError(body []byte) string {
 	return ""
 }
 
+// appendAudit records one operator action after redacting app secrets.
 func (s *supervisor) appendAudit(identity authIdentity, r *http.Request, action, app string, status int, cause string) {
 	if s.audit == nil {
 		return

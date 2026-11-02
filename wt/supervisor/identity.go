@@ -145,6 +145,7 @@ func (s *identityStore) sessionsPath() string {
 	return filepath.Join(s.dir, identitySessionsName)
 }
 
+// loadUsers loads and validates the user file, rejecting duplicate emails.
 func (s *identityStore) loadUsers() error {
 	data, err := os.ReadFile(s.usersPath())
 	if os.IsNotExist(err) {
@@ -180,6 +181,7 @@ func (s *identityStore) loadUsers() error {
 	return nil
 }
 
+// loadSessions loads unexpired sessions and drops entries for missing users.
 func (s *identityStore) loadSessions() error {
 	data, err := os.ReadFile(s.sessionsPath())
 	if os.IsNotExist(err) {
@@ -224,6 +226,7 @@ func (s *identityStore) loadSessions() error {
 	return nil
 }
 
+// saveUsersLocked writes users atomically in id order; the caller holds the lock.
 func (s *identityStore) saveUsersLocked() error {
 	ids := make([]string, 0, len(s.users))
 	for id := range s.users {
@@ -241,6 +244,7 @@ func (s *identityStore) saveUsersLocked() error {
 	return writeFileAtomicMode(s.usersPath(), append(data, '\n'), 0o600)
 }
 
+// saveSessionsLocked writes sessions atomically in id order; the caller holds the lock.
 func (s *identityStore) saveSessionsLocked() error {
 	hashes := make([]string, 0, len(s.sessions))
 	for hash := range s.sessions {
@@ -258,6 +262,7 @@ func (s *identityStore) saveSessionsLocked() error {
 	return writeFileAtomicMode(s.sessionsPath(), append(data, '\n'), 0o600)
 }
 
+// normalizeIdentityEmail lowercases and validates a platform user email.
 func normalizeIdentityEmail(value string) (string, error) {
 	value = strings.ToLower(strings.TrimSpace(value))
 	if len(value) < 3 || len(value) > identityEmailMax || strings.Count(value, "@") != 1 {
@@ -270,6 +275,7 @@ func normalizeIdentityEmail(value string) (string, error) {
 	return value, nil
 }
 
+// normalizeIdentityName trims and bounds a display name.
 func normalizeIdentityName(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" || len(value) > identityNameMax {
@@ -278,6 +284,7 @@ func normalizeIdentityName(value string) (string, error) {
 	return value, nil
 }
 
+// normalizeIdentityGroups trims, deduplicates and sorts group names.
 func normalizeIdentityGroups(groups []string) ([]string, error) {
 	if len(groups) > identityGroupMax {
 		return nil, errIdentityGroups
@@ -302,6 +309,7 @@ func normalizeIdentityGroups(groups []string) ([]string, error) {
 	return out, nil
 }
 
+// validateIdentityPassword enforces the password length bounds.
 func validateIdentityPassword(password string) error {
 	if len(password) < identityPasswordMin || len(password) > identityPasswordMax {
 		return errIdentityPassword
@@ -309,6 +317,7 @@ func validateIdentityPassword(password string) error {
 	return nil
 }
 
+// hashIdentityPassword derives a salted PBKDF2-SHA256 hash in the stored format.
 func hashIdentityPassword(password string) (string, error) {
 	if err := validateIdentityPassword(password); err != nil {
 		return "", err
@@ -325,6 +334,7 @@ func hashIdentityPassword(password string) (string, error) {
 		base64.RawStdEncoding.EncodeToString(salt), base64.RawStdEncoding.EncodeToString(key)), nil
 }
 
+// verifyIdentityPassword checks a password against the stored PBKDF2 encoding in constant time.
 func verifyIdentityPassword(encoded, password string) bool {
 	parts := strings.Split(encoded, "$")
 	if len(parts) != 4 || parts[0] != "pbkdf2-sha256" {
@@ -349,6 +359,7 @@ func verifyIdentityPassword(encoded, password string) bool {
 	return subtle.ConstantTimeCompare(got, want) == 1
 }
 
+// newIdentityToken returns n random bytes as hex.
 func newIdentityToken(bytes int) (string, error) {
 	value := make([]byte, bytes)
 	if _, err := rand.Read(value); err != nil {
@@ -357,6 +368,7 @@ func newIdentityToken(bytes int) (string, error) {
 	return hex.EncodeToString(value), nil
 }
 
+// identityTokenHash is the SHA-256 hex digest stored for a session token.
 func identityTokenHash(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
@@ -494,6 +506,7 @@ func (s *identityStore) deleteUser(id string) error {
 	return s.saveSessionsLocked()
 }
 
+// deleteUserSessionsLocked removes every session for one user; the caller holds the lock.
 func (s *identityStore) deleteUserSessionsLocked(userID string) {
 	for hash, session := range s.sessions {
 		if session.UserID == userID {
@@ -565,6 +578,7 @@ func (s *identityStore) newSession(userID string) (string, *identitySession, err
 	return token, session, nil
 }
 
+// session resolves a raw token to its session and user, dropping expired or disabled entries.
 func (s *identityStore) session(token string) (identitySession, identityUserInfo, error) {
 	if token == "" {
 		return identitySession{}, identityUserInfo{}, errIdentityNoSession
@@ -597,6 +611,7 @@ func (s *identityStore) session(token string) (identitySession, identityUserInfo
 	return copy, info, nil
 }
 
+// deleteSession removes a session by its raw token.
 func (s *identityStore) deleteSession(token string) error {
 	if token == "" {
 		return nil
@@ -673,6 +688,7 @@ func (s *supervisor) identityProxyHeaders(r *http.Request, appName string, enabl
 	r.Header.Set(identityUserSignatureHeader, identityUserSignature(secret, user.ID, user.Email, user.Name, groups))
 }
 
+// stripIdentityCookie removes only the supervisor session cookie before proxying.
 func stripIdentityCookie(r *http.Request) {
 	raw := r.Header.Get("Cookie")
 	if raw == "" {

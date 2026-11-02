@@ -53,6 +53,7 @@ func newEventBus() *eventBus {
 	return &eventBus{apps: map[string]*appEventLog{}}
 }
 
+// log returns the app's event log, creating it on first use.
 func (b *eventBus) log(app string) *appEventLog {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -131,10 +132,12 @@ func (b *eventBus) subscribe(app, topic string, since *int64) (sub *busSubscribe
 	return sub, replay, oldest, gap
 }
 
+// topics normalises an optional topic filter.
 func topics(topic string) string {
 	return strings.TrimSpace(topic)
 }
 
+// unsubscribe removes a live subscriber from an app's event log.
 func (b *eventBus) unsubscribe(app string, sub *busSubscriber) {
 	if b == nil || sub == nil {
 		return

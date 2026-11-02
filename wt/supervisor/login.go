@@ -49,6 +49,7 @@ func (l *loginLimiter) allow(key string, now time.Time) (bool, time.Duration) {
 	return true, 0
 }
 
+// fail records one failed attempt and starts a lockout at the threshold.
 func (l *loginLimiter) fail(key string, now time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -63,6 +64,7 @@ func (l *loginLimiter) fail(key string, now time.Time) {
 	l.attempts[key] = attempt
 }
 
+// reset clears an address's failure window after a successful login.
 func (l *loginLimiter) reset(key string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -110,6 +112,7 @@ func (s *supervisor) handleLogin(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleLogout clears the panel cookie.
 func (s *supervisor) handleLogout(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	s.setAuthCookie(w, r, "", -1)

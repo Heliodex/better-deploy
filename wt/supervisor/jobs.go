@@ -95,6 +95,7 @@ func (m *jobManager) path(app string) string {
 	return filepath.Join(m.dir, app+".json")
 }
 
+// start creates or updates an app's job store and starts its worker loop.
 func (m *jobManager) start(app string, concurrency int) error {
 	if m == nil {
 		return nil
@@ -114,6 +115,7 @@ func (m *jobManager) start(app string, concurrency int) error {
 	return nil
 }
 
+// setConcurrency updates a running app's job limit.
 func (m *jobManager) setConcurrency(app string, concurrency int) {
 	if m == nil {
 		return
@@ -126,6 +128,7 @@ func (m *jobManager) setConcurrency(app string, concurrency int) {
 	}
 }
 
+// stop removes and closes one app's job store.
 func (m *jobManager) stop(app string) {
 	if m == nil {
 		return
@@ -139,6 +142,7 @@ func (m *jobManager) stop(app string) {
 	}
 }
 
+// close shuts down every app's job store.
 func (m *jobManager) close() {
 	if m == nil {
 		return
@@ -155,6 +159,7 @@ func (m *jobManager) close() {
 	}
 }
 
+// store returns the job store for an app, or nil when it has none.
 func (m *jobManager) store(app string) *jobStore {
 	if m == nil {
 		return nil
@@ -202,6 +207,7 @@ func newJobStore(manager *jobManager, app, path string, concurrency int) (*jobSt
 	return store, nil
 }
 
+// normalizeJobConcurrency clamps the requested worker limit to the supported range.
 func normalizeJobConcurrency(value int) int {
 	if value <= 0 {
 		return jobDefaultConcurrency
@@ -212,6 +218,7 @@ func normalizeJobConcurrency(value int) int {
 	return value
 }
 
+// load reads the queue, dropping invalid entries and requeueing jobs left running by a restart.
 func (s *jobStore) load() error {
 	data, err := os.ReadFile(s.path)
 	if os.IsNotExist(err) {
@@ -261,6 +268,7 @@ func validJobStatus(status string) bool {
 	}
 }
 
+// saveLocked writes the queue atomically; the caller holds the lock.
 func (s *jobStore) saveLocked() error {
 	data, err := json.Marshal(jobFile{Jobs: s.jobs})
 	if err != nil {
@@ -272,6 +280,7 @@ func (s *jobStore) saveLocked() error {
 	return nil
 }
 
+// signal wakes the worker loop without blocking.
 func (s *jobStore) signal() {
 	select {
 	case s.wake <- struct{}{}:
@@ -279,6 +288,7 @@ func (s *jobStore) signal() {
 	}
 }
 
+// setConcurrency clamps and applies a new worker limit.
 func (s *jobStore) setConcurrency(value int) {
 	if s == nil {
 		return
@@ -289,6 +299,7 @@ func (s *jobStore) setConcurrency(value int) {
 	s.signal()
 }
 
+// close cancels the worker loop.
 func (s *jobStore) close() {
 	s.mu.Lock()
 	if s.closed {
@@ -300,6 +311,7 @@ func (s *jobStore) close() {
 	s.cancelFunc()
 }
 
+// enqueue validates and persists a new job, deduplicating by idempotency key.
 func (s *jobStore) enqueue(req jobEnqueueRequest) (appJob, bool, error) {
 	now := time.Now().UTC()
 	path := strings.TrimSpace(req.Path)
@@ -382,6 +394,7 @@ func newJobID() string {
 	return hex.EncodeToString(value[:])
 }
 
+// list returns the newest jobs first, optionally filtered by status.
 func (s *jobStore) list(status string, limit int) []appJob {
 	if limit <= 0 || limit > jobMaxJobs {
 		limit = 100
@@ -409,6 +422,7 @@ func (s *jobStore) get(id string) (appJob, bool) {
 	return appJob{}, false
 }
 
+// cancel marks an unfinished job canceled and saves the queue.
 func (s *jobStore) cancel(id string) (appJob, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -433,6 +447,7 @@ func (s *jobStore) cancel(id string) (appJob, error) {
 	return appJob{}, fmt.Errorf("job not found")
 }
 
+// retry resets a dead, failed or canceled job to pending and clears its attempts.
 func (s *jobStore) retry(id string) (appJob, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -463,6 +478,7 @@ func (s *jobStore) retry(id string) (appJob, error) {
 	return appJob{}, fmt.Errorf("job not found")
 }
 
+// loop dispatches due jobs while the app is ready.
 func (s *jobStore) loop() {
 	for {
 		select {
@@ -485,6 +501,7 @@ func (s *jobStore) loop() {
 	}
 }
 
+// wait sleeps until the duration, context cancellation or a wake signal.
 func (s *jobStore) wait(duration time.Duration) bool {
 	timer := time.NewTimer(duration)
 	defer timer.Stop()
@@ -498,6 +515,7 @@ func (s *jobStore) wait(duration time.Duration) bool {
 	}
 }
 
+// appReady reports whether the app is registered and serving.
 func (s *jobStore) appReady() bool {
 	a := s.manager.s.lookup(s.app)
 	if a == nil {
@@ -507,6 +525,7 @@ func (s *jobStore) appReady() bool {
 	return ready
 }
 
+// dispatch claims due jobs up to the concurrency limit and starts one goroutine per job.
 // dispatch claims due jobs up to the concurrency limit and starts one goroutine per job.
 func (s *jobStore) dispatch() bool {
 	now := time.Now().UTC()
@@ -546,12 +565,14 @@ func (s *jobStore) dispatch() bool {
 	return true
 }
 
+// execute runs one job and records its outcome.
 func (s *jobStore) execute(job appJob) {
 	defer s.finished(job.ID)
 	status, failure := s.runJob(job)
 	s.complete(job.ID, status, failure)
 }
 
+// runJob sends the job to the app's loopback port and treats a non-2xx response as failure.
 func (s *jobStore) runJob(job appJob) (int, error) {
 	a := s.manager.s.lookup(s.app)
 	if a == nil {
@@ -588,6 +609,7 @@ func (s *jobStore) runJob(job appJob) (int, error) {
 	return response.StatusCode, nil
 }
 
+// finished frees a worker slot and wakes the dispatcher.
 func (s *jobStore) finished(_ string) {
 	s.mu.Lock()
 	if s.running > 0 {
@@ -597,6 +619,7 @@ func (s *jobStore) finished(_ string) {
 	s.signal()
 }
 
+// complete marks a job succeeded, schedules a retry or marks it dead after the final attempt.
 func (s *jobStore) complete(id string, status int, failure error) {
 	now := time.Now().UTC()
 	s.mu.Lock()
@@ -636,6 +659,7 @@ func (s *jobStore) complete(id string, status int, failure error) {
 	}
 }
 
+// jobBackoff doubles the delay per attempt and caps it at five minutes.
 func jobBackoff(attempt int) time.Duration {
 	if attempt < 1 {
 		attempt = 1

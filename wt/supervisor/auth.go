@@ -182,6 +182,7 @@ func newAuthStore(path string) (*authStore, error) {
 	return store, nil
 }
 
+// validateStoredToken rejects an auth file entry with a missing field, bad hash or invalid role or apps.
 func validateStoredToken(token authToken) error {
 	if token.ID == "" || token.Name == "" {
 		return fmt.Errorf("token has an empty id or name")
@@ -201,6 +202,7 @@ func validateStoredToken(token authToken) error {
 	return nil
 }
 
+// validateRole accepts only the admin, deploy and read roles.
 func validateRole(role string) error {
 	switch role {
 	case roleAdmin, roleDeploy, roleRead:
@@ -241,11 +243,13 @@ func normalizeTokenApps(role string, apps []string) ([]string, error) {
 	return out, nil
 }
 
+// tokenHash is the SHA-256 hex digest stored in the auth file.
 func tokenHash(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
 }
 
+// secureEqual compares two strings in constant time.
 func secureEqual(a, b string) bool {
 	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
@@ -280,6 +284,7 @@ func (s *authStore) count() int {
 	return len(s.tokens)
 }
 
+// list returns token metadata without hashes, sorted by creation time.
 func (s *authStore) list() []authTokenInfo {
 	if s == nil {
 		return []authTokenInfo{}
@@ -367,6 +372,7 @@ func (s *authStore) create(name, role string, apps []string, expiresAt time.Time
 	return token, authTokenInfo{ID: stored.ID, Name: stored.Name, Role: stored.Role, Apps: append([]string(nil), stored.Apps...), CreatedAt: stored.CreatedAt, ExpiresAt: expiresInfo}, nil
 }
 
+// remove deletes a token by id and rolls the in-memory list back when saving fails.
 func (s *authStore) remove(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -392,6 +398,7 @@ func (s *authStore) remove(id string) error {
 	return nil
 }
 
+// saveLocked writes the auth file atomically; the caller holds the write lock.
 func (s *authStore) saveLocked() error {
 	data, err := json.Marshal(authTokenFile{Version: authFileVersion, Tokens: s.tokens})
 	if err != nil {
@@ -533,6 +540,7 @@ func (s *supervisor) handleAuthTokens(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// parseTokenExpiry accepts a bounded duration, or empty and "never" for no expiry.
 func parseTokenExpiry(value string) (time.Time, error) {
 	value = strings.TrimSpace(value)
 	if value == "" || value == "0" || strings.EqualFold(value, "never") {
@@ -545,6 +553,7 @@ func parseTokenExpiry(value string) (time.Time, error) {
 	return time.Now().UTC().Add(expires), nil
 }
 
+// handleAuthToken deletes one scoped token.
 func (s *supervisor) handleAuthToken(w http.ResponseWriter, r *http.Request, id string) {
 	identity, ok := s.requireAdmin(w, r)
 	if !ok {

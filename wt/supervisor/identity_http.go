@@ -75,6 +75,7 @@ func (s *supervisor) serveIdentityApp(w http.ResponseWriter, r *http.Request) bo
 	return true
 }
 
+// writeIdentityError maps identity errors to HTTP statuses.
 func writeIdentityError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, errIdentityNoSession):
@@ -94,6 +95,7 @@ func writeIdentityError(w http.ResponseWriter, err error) {
 	}
 }
 
+// handleIdentityLogin applies the login limiter, authenticates the user and starts a session.
 func (s *supervisor) handleIdentityLogin(w http.ResponseWriter, r *http.Request) {
 	limiter := s.loginGuard("identity")
 	key := s.loginKey(r)
@@ -127,6 +129,7 @@ func (s *supervisor) handleIdentityLogin(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, identityMeResponse{User: user, CSRFToken: session.CSRF})
 }
 
+// handleIdentityLogout deletes the session and clears the cookie.
 func (s *supervisor) handleIdentityLogout(w http.ResponseWriter, r *http.Request) {
 	session, _, token, ok := s.identityRequest(r)
 	if ok {
@@ -144,6 +147,7 @@ func (s *supervisor) handleIdentityLogout(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleIdentityMe returns the current user and CSRF token.
 func (s *supervisor) handleIdentityMe(w http.ResponseWriter, r *http.Request) {
 	session, user, _, ok := s.identityRequest(r)
 	if !ok {
@@ -154,6 +158,7 @@ func (s *supervisor) handleIdentityMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, identityMeResponse{User: user, CSRFToken: session.CSRF})
 }
 
+// handleIdentityPassword verifies the current password, changes it and starts a fresh session.
 func (s *supervisor) handleIdentityPassword(w http.ResponseWriter, r *http.Request) {
 	session, user, _, ok := s.identityRequest(r)
 	if !ok {
@@ -186,6 +191,7 @@ func (s *supervisor) handleIdentityPassword(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, identityMeResponse{User: user, CSRFToken: newSession.CSRF})
 }
 
+// identityCSRFMatches compares the request header with the session CSRF token in constant time.
 func identityCSRFMatches(r *http.Request, session identitySession) bool {
 	value := strings.TrimSpace(r.Header.Get(identityCSRFHeader))
 	if value == "" || len(value) != len(session.CSRF) {
@@ -206,6 +212,7 @@ func (s *supervisor) identityAdmin(w http.ResponseWriter, r *http.Request) bool 
 	return true
 }
 
+// handleIdentityUsers lists or creates platform users.
 func (s *supervisor) handleIdentityUsers(w http.ResponseWriter, r *http.Request) {
 	if !s.identityAdmin(w, r) {
 		return
@@ -296,6 +303,7 @@ func (s *supervisor) handleIdentityUserDelete(w http.ResponseWriter, id string) 
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleIdentityUser dispatches get, update, delete and password requests for one user.
 func (s *supervisor) handleIdentityUser(w http.ResponseWriter, r *http.Request, rest string) {
 	if !s.identityAdmin(w, r) {
 		return

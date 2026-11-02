@@ -25,6 +25,7 @@ func newSSEStream(w http.ResponseWriter, cacheControl string) (*sseStream, bool)
 	return &sseStream{w: w, flusher: flusher}, true
 }
 
+// write formats and flushes one frame, reporting whether the client is still connected.
 func (s *sseStream) write(format string, args ...any) bool {
 	if _, err := fmt.Fprintf(s.w, format, args...); err != nil {
 		return false
@@ -58,6 +59,7 @@ func (s *sseStream) retry(milliseconds int) bool {
 	return s.write("retry: %d\n\n", milliseconds)
 }
 
+// ping sends a keep-alive comment frame.
 func (s *sseStream) ping() bool {
 	return s.comment("ping")
 }

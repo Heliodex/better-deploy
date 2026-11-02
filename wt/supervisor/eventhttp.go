@@ -118,6 +118,7 @@ func (s *supervisor) handleAppEvents(w http.ResponseWriter, r *http.Request, a *
 	}
 }
 
+// writeBusEvent serialises and sends one bus event with its cursor id.
 func writeBusEvent(stream *sseStream, event busEvent) bool {
 	data := event.json()
 	if data == nil {
