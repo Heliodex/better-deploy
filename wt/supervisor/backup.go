@@ -185,6 +185,44 @@ func (m *backupManager) dataPath(app, name string) string {
 	return filepath.Join(m.appDir(app), base+backupDataSuffix)
 }
 
+// content returns the app's content-addressed backup store.
+func (m *backupManager) content(app string) *contentStore {
+	return newContentStore(filepath.Join(m.appDir(app), ".blobs"), m.appDir(app))
+}
+
+// adoptBackupFile moves a staged snapshot file into the content store and links it at its public name.
+func (m *backupManager) adoptBackupFile(app, source, dst string) error {
+	digest, _, _, err := m.content(app).adoptFile(source)
+	if err != nil {
+		return err
+	}
+	return m.content(app).link(digest, dst)
+}
+
+// gcBlobs removes stored snapshot files that no public snapshot name references.
+func (m *backupManager) gcBlobs(app string) error {
+	entries, err := os.ReadDir(m.appDir(app))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	referenced := map[string]struct{}{}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || (!strings.HasSuffix(name, backupFileSuffix) && !strings.HasSuffix(name, backupDataSuffix)) {
+			continue
+		}
+		digest, err := fileDigest(filepath.Join(m.appDir(app), name))
+		if err != nil {
+			continue
+		}
+		referenced[digest] = struct{}{}
+	}
+	return m.content(app).prune(referenced)
+}
+
 // settings reads an app's policy, falling back to the defaults when it has never been configured.
 func (m *backupManager) settings(app string) (backupSettings, error) {
 	settings := defaultBackupSettings()

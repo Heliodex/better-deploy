@@ -72,6 +72,31 @@ func (c *contentStore) putFile(source string) (string, int64, bool, error) {
 	return digest, info.Size(), true, nil
 }
 
+// adoptFile moves source into the store and reports its digest and size.
+// An identical blob already in the store is kept and the source is removed.
+func (c *contentStore) adoptFile(source string) (digest string, size int64, created bool, err error) {
+	info, err := os.Stat(source)
+	if err != nil {
+		return "", 0, false, err
+	}
+	digest, err = fileDigest(source)
+	if err != nil {
+		return "", 0, false, err
+	}
+	if err := os.MkdirAll(c.dir, 0o755); err != nil {
+		return "", 0, false, err
+	}
+	target := c.path(digest)
+	if existing, err := os.Stat(target); err == nil && existing.Size() == info.Size() {
+		_ = os.Remove(source)
+		return digest, info.Size(), false, nil
+	}
+	if err := os.Rename(source, target); err != nil {
+		return "", 0, false, err
+	}
+	return digest, info.Size(), true, nil
+}
+
 // putReader streams src into the store and reports its digest, size and whether it was new.
 // It reads at most maxBytes+1 to distinguish an oversized body without buffering it.
 func (c *contentStore) putReader(src io.Reader, maxBytes int64) (digest string, size int64, created, tooLarge bool, err error) {

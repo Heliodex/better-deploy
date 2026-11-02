@@ -287,8 +287,10 @@ func (m *backupManager) pruneLocked(app string, keep int) error {
 		}
 		changed = true
 	}
-	if !changed {
-		return nil
+	if changed {
+		if err := m.saveTreeLocked(app, tree); err != nil {
+			return err
+		}
 	}
-	return m.saveTreeLocked(app, tree)
+	return m.gcBlobs(app)
 }

@@ -90,17 +90,6 @@ func (m *backupManager) exportSnapshot(app, name string) (string, error) {
 	return output, nil
 }
 
-func moveFile(src, dst string) error {
-	if err := os.Rename(src, dst); err == nil {
-		return nil
-	}
-	if err := copyFile(src, dst); err != nil {
-		return err
-	}
-	return os.Remove(src)
-}
-
-// importSnapshot stores a snapshot from an export archive. It becomes a child of the current snapshot but does not become current until restored.
 // extractSnapshot unpacks an import archive and returns its database and data archive paths.
 func extractSnapshot(src, temp string) (database, archive string, err error) {
 	if err := extractTarGzLimited(src, temp, maxBackupExtractBytes, maxBackupTarFiles); err != nil {
@@ -144,12 +133,12 @@ func (m *backupManager) placeImportedSnapshot(app, name, database, archive strin
 	path = filepath.Join(m.appDir(app), name)
 	dataPath = m.dataPath(app, name)
 	if database != "" {
-		if err := moveFile(database, path); err != nil {
+		if err := m.adoptBackupFile(app, database, path); err != nil {
 			return "", "", err
 		}
 	}
 	if archive != "" {
-		if err := moveFile(archive, dataPath); err != nil {
+		if err := m.adoptBackupFile(app, archive, dataPath); err != nil {
 			_ = os.Remove(path)
 			return "", "", err
 		}

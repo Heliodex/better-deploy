@@ -313,6 +313,7 @@ func (m *backupManager) parentSnapshotHash(app, parent string, tree *backupTree)
 
 // snapshotCandidate is the temporary pair of files that becomes one snapshot.
 type snapshotCandidate struct {
+	app            string
 	path, dataPath string
 	temp, dataTemp string
 	hasDatabase    bool
@@ -342,15 +343,14 @@ func (m *backupManager) writeSnapshotCandidate(ctx context.Context, app string, 
 // installSnapshot renames the temporary files into place and reports their sizes.
 func (m *backupManager) installSnapshot(candidate snapshotCandidate) (size, dataSize int64, err error) {
 	if candidate.hasDatabase {
-		if err := os.Rename(candidate.temp, candidate.path); err != nil {
+		if err := m.adoptBackupFile(candidate.app, candidate.temp, candidate.path); err != nil {
 			_ = os.Remove(candidate.temp)
 			_ = os.Remove(candidate.dataTemp)
 			return 0, 0, fmt.Errorf("install backup: %w", err)
 		}
 	}
-	if err := os.Rename(candidate.dataTemp, candidate.dataPath); err != nil {
+	if err := m.adoptBackupFile(candidate.app, candidate.dataTemp, candidate.dataPath); err != nil {
 		_ = os.Remove(candidate.path)
-		_ = os.Remove(candidate.dataTemp)
 		return 0, 0, fmt.Errorf("install data backup: %w", err)
 	}
 	if candidate.hasDatabase {
@@ -388,6 +388,7 @@ func (m *backupManager) createLocked(ctx context.Context, app, kind string) (bac
 	now := time.Now().UTC()
 	name, now := m.backupName(app, now)
 	candidate := snapshotCandidate{
+		app:      app,
 		path:     filepath.Join(m.appDir(app), name),
 		dataPath: m.dataPath(app, name),
 	}
