@@ -38,7 +38,7 @@ Concrete evidence from this build:
 
    Implemented in `f830bc6` and `309b9f3`. `build_component` and `build_static` are separate cached phases; `build` remains the legacy single-command fallback. `.wt-build.json` now stores `componentHash` and `staticHash` independently. The component hash covers Go and WIT files, the nearest `go.mod`/`go.sum` (including a parent module above the app directory), every local `replace` target resolved from that module such as `../packages`, and explicit `component_inputs`. The static hash covers the `web` directory (or `dev.web`) and explicit `static_inputs`, excluding `web/build`, `static`, `*.gen.go`, `packages/binding` and `packages/tmp`. Deploy always computes the wasm digest and omits the component when the supervisor already runs it, even if the component was rebuilt. Verified on pulse: a `web/static/robots.txt` edit reused the component, rebuilt static and uploaded about 44 KB instead of the 12 MB component; a Go edit rebuilt only the component; a second build reused both phases. The unit tests cover the parent-module and `wt/packages` invalidation, explicit component inputs and the legacy fallback. The phase summary prints `component: reused|built`, `static: reused|built|skipped` and `component: already running; uploading static only`.
 
-2. [ ] **[P1] Add a supervisor capability endpoint and make the CLI preflight against it.**
+2. [x] **[P1] Add a supervisor capability endpoint and make the CLI preflight against it.**
 
    **Current behaviour.** The local supervisor predated the queued deployment resource, so `POST /apps/pulse/deployments` returned `405 Method Not Allowed`. The CLI reported the raw status only after building the bundle. The compile target also lives on the operator side: this machine needed `--target x86_64-unknown-linux-gnu` and a specific wasmtime binary to match the supervisor, while the defaults point at musl. Mismatches are recovered by a server-side recompile or a failed start, not by a clear preflight.
 
@@ -50,6 +50,8 @@ Concrete evidence from this build:
    - Include the same capability summary in `wt apps` or `wt config show` so an operator can see the negotiated target without reading process arguments.
 
    **Done when.** Deploying to an old supervisor fails before the build with an actionable message. A matching local deploy needs no manual `--target` or `--wasmtime` flags. The deploy result says whether the uploaded cwasm matched or the server will compile.
+
+   Implemented in `4fa8593` and `b73a602`. `GET /capabilities` requires the normal bearer token and returns `version`, `commit`, `goVersion`, `capabilitiesVersion`, `deployProtocol`, `wasmtime`, `wasmtimeTarget`, `compiler`, `epoch` and a feature map. `compiler` runs `wasmtime compile --help` once, so a runtime-only image reports false. `wt-deploy` reads the document before the build; a 404 or 405 fails with an upgrade message and suggests `--no-preflight`. The compile target comes from `wasmtimeTarget` unless `--target`, `WT_WASMTIME_TARGET` or the config file set one. Target or wasmtime version mismatches warn that the server will recompile, and a deploy that uploads the component prints `casm: matches supervisor runtime and target`, `casm: supervisor will recompile main.wasm` or a no-compiler warning. `wt apps` prints one summary line to stderr, and `--json` output is unchanged. Verified against the old local supervisor: the deploy failed with the actionable message before the build. After rebuilding it, the same deploy without `--target` negotiated `x86_64-unknown-linux-gnu` from the supervisor and reported a matching cwasm.
 
 3. [ ] **[P1] Give apps one source of truth for the wire contract and a standard error shape.**
 
@@ -153,7 +155,7 @@ Concrete evidence from this build:
 ## If I picked the next three
 
 1. [x] **Split component and static builds, and replace the cache key.** This is the biggest daily cost and the stale-SDK case is a correctness bug. Implemented in `f830bc6` and `309b9f3`.
-2. [ ] **Add the capability endpoint and deploy preflight.** It is small, removes the 405 class of failures and makes runtime and target matching automatic.
+2. [x] **Add the capability endpoint and deploy preflight.** It is small, removes the 405 class of failures and makes runtime and target matching automatic. Implemented in `4fa8593` and `b73a602`.
 3. [ ] **Add one-source contract generation and a standard error shape.** It is the biggest remaining authoring cost after the build loop.
 
 The dev proxy defaults from item 5 are a close fourth because they are cheap and make the realtime, blob and identity features testable in the normal loop. Every item above keeps the current invariants: ordinary Go over `wasi:http`, a static SvelteKit shell, per-app SQLite, one component per app and blue/green deploys.
