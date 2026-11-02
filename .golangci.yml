@@ -17,7 +17,6 @@ linters:
         - err113
         - exhaustruct_v5
         - forbidigo
-        - funcorder
         - gochecknoglobals
         - gochecknoinits
         - lll
@@ -96,6 +95,11 @@ linters:
                 - X-WT-User-Signature
         exhaustive:
             default-signifies-exhaustive: true
+        funcorder:
+            constructor: true
+            struct-method: false
+            alphabetical: false
+            function: false
         goconst:
             ignore-tests: true
             min-occurrences: 10
