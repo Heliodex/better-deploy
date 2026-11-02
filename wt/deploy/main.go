@@ -105,6 +105,7 @@ type deployConfig struct {
 	dir, app, host, token, wasmtime, target, appHost, out   string
 	buildComponentCommand                                   string
 	skipBuild, skipCompile, skipStatic, jsonOut, forceBuild bool
+	targetConfigured, noPreflight                           bool
 }
 
 // uploadProgress prints a coarse percentage while a bundle uploads, without buffering it a second time.
@@ -262,15 +263,24 @@ func resolveConfig(args []string) (*deployConfig, error) {
 	host := flags.String("host", firstNonEmpty(env("WT_DEPLOY_HOST", ""), fileCfg.Host), "supervisor URL, e.g. http://127.0.0.1:8080")
 	token := flags.String("token", firstNonEmpty(env("WT_TOKEN", ""), fileCfg.Token), "deploy bearer token")
 	wasmtime := flags.String("wasmtime", firstNonEmpty(env("WT_WASMTIME", ""), fileCfg.Wasmtime, "wasmtime"), "wasmtime binary")
-	target := flags.String("target", firstNonEmpty(env("WT_WASMTIME_TARGET", ""), fileCfg.Target, "x86_64-unknown-linux-musl"), "wasmtime compile target")
+	targetDefault := firstNonEmpty(env("WT_WASMTIME_TARGET", ""), fileCfg.Target)
+	targetConfigured := targetDefault != ""
+	if targetDefault == "" {
+		targetDefault = "x86_64-unknown-linux-musl"
+	}
+	target := flags.String("target", targetDefault, "wasmtime compile target (default: supervisor target or x86_64-unknown-linux-musl)")
 	appHost := flags.String("app-host", fileCfg.AppHost, "override the app host in the uploaded app.json")
 	config := flags.String("config", configPath, "config file (default ~/.config/wt/config.json)")
 	jsonOut := flags.Bool("json", false, "print only the raw API response")
 	forceBuild := flags.Bool("force-build", false, "rebuild the component and static phases even when their inputs are unchanged")
 	skipBuild := flags.Bool("skip-build", false, "skip running app.json's build commands")
 	skipCompile := flags.Bool("skip-compile", false, "do not compile; include main.cwasm only if it already exists")
+	noPreflight := flags.Bool("no-preflight", false, "skip the supervisor capability check and target discovery")
 	if err := flags.Parse(args); err != nil {
 		return nil, err
+	}
+	if *target != targetDefault {
+		targetConfigured = true
 	}
 	if flags.NArg() > 0 {
 		return nil, fmt.Errorf("unexpected argument %q", flags.Arg(0))
@@ -291,17 +301,19 @@ func resolveConfig(args []string) (*deployConfig, error) {
 		return nil, fmt.Errorf("set --host, WT_DEPLOY_HOST or host in the config file")
 	}
 	return &deployConfig{
-		dir:         *dir,
-		app:         *app,
-		host:        *host,
-		token:       *token,
-		wasmtime:    *wasmtime,
-		target:      *target,
-		skipBuild:   *skipBuild,
-		skipCompile: *skipCompile,
-		forceBuild:  *forceBuild,
-		appHost:     *appHost,
-		jsonOut:     *jsonOut,
+		dir:              *dir,
+		app:              *app,
+		host:             *host,
+		token:            *token,
+		wasmtime:         *wasmtime,
+		target:           *target,
+		skipBuild:        *skipBuild,
+		skipCompile:      *skipCompile,
+		forceBuild:       *forceBuild,
+		appHost:          *appHost,
+		jsonOut:          *jsonOut,
+		targetConfigured: targetConfigured,
+		noPreflight:      *noPreflight,
 	}, nil
 }
 
@@ -710,6 +722,13 @@ func deploy(args []string) error {
 	if cfg.appHost != "" {
 		m.Host = cfg.appHost
 	}
+	preflight, err := preflightDeploy(cfg)
+	if err != nil {
+		return err
+	}
+	if preflight.TargetFromServer {
+		fmt.Fprintf(os.Stderr, "target: %s (from supervisor)\n", cfg.target)
+	}
 	status, err := prepareBuilds(cfg, m)
 	if err != nil {
 		return err
@@ -724,6 +743,8 @@ func deploy(args []string) error {
 		fmt.Fprintln(os.Stderr, "component: already running; uploading static only")
 	} else if status.WasmDigest != "" {
 		fmt.Fprintln(os.Stderr, "component: uploading")
+		_, cwasmErr := os.Stat(filepath.Join(cfg.dir, "main.cwasm"))
+		printRuntimePlan(preflight, cwasmErr == nil)
 	}
 	data, err := bundle(cfg.dir, m, !keepComponent)
 	if err != nil {

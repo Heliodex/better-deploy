@@ -190,6 +190,12 @@ func runApps(args []string) error {
 	if len(rest) > 0 {
 		return fmt.Errorf("unexpected argument %q", rest[0])
 	}
+	if !cfg.jsonOut {
+		capClient := clientOptions{host: cfg.host, token: cfg.token, timeout: 5 * time.Second}
+		if caps, err := fetchCapabilities(capClient); err == nil {
+			fmt.Fprintln(os.Stderr, caps.summary())
+		}
+	}
 	status, _, body, err := apiDo(cfg, http.MethodGet, "/apps", nil, "")
 	if err != nil {
 		return err
