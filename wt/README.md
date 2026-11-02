@@ -111,7 +111,7 @@ go test -run '^$' -fuzz FuzzDecodeStorageValue -fuzztime 30s
 
 `BenchmarkProxyLatency` measures the reverse proxy against a loopback backend, `BenchmarkStorage*`/`BenchmarkSQLite*` cover the storage query path, and `BenchmarkManyAppsSnapshot` covers roster snapshots with 200 apps. The e2e script also checks two apps, a host collision and supervisor restart; set `WT_E2E_EXAMPLES=1` to include the scaffolded app and guestbook, `WT_HANDOVER_TEST=1` to run the real `SIGHUP` handover test, `WT_VITE_TEST=1` to run the Vite dev proxy test, and run `wt/e2e-image.sh` against the musl Containerfile with podman.
 
-`./wt/lint.sh` verifies the repository `.golangci.yml` and runs golangci-lint in every Go module. The deploy tool and supervisor use the host build; the shared packages and examples use `GOOS=wasip1 GOARCH=wasm`. Extra arguments are passed through, so `./wt/lint.sh --fix` applies the auto-fixes.
+`./wt/lint.sh` verifies the repository `.golangci.yml` and runs golangci-lint in every Go module. The deploy tool and supervisor use the host build; the shared packages and examples use `GOOS=wasip1 GOARCH=wasm`. Extra arguments are passed through, so `./wt/lint.sh --fix` applies the auto-fixes. Pass `--all` first to use `.golangci-all.yml`, the strict profile that enables every current linter; it reports the full backlog rather than the clean baseline.
 
 ## Run the supervisor
 

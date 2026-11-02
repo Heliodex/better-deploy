@@ -1,0 +1,24 @@
+version: "2"
+
+# Strict profile: every current linter, including the opinionated and overlapping ones.
+# The deprecated aliases are disabled in favour of their replacements:
+#   exhaustruct -> exhaustruct_v5, gomodguard -> gomodguard_v2, wsl -> wsl_v5
+linters:
+    default: all
+    disable:
+        - exhaustruct
+        - gomodguard
+        - wsl
+    exclusions:
+        generated: lax
+        rules:
+            - path: (^|/)binding/
+              text: .
+
+output:
+    formats:
+        text:
+            path: stdout
+            colors: true
+            print-linter-name: true
+            print-issued-lines: true
