@@ -53,7 +53,7 @@ Concrete evidence from this build:
 
    Implemented in `4fa8593` and `b73a602`. `GET /capabilities` requires the normal bearer token and returns `version`, `commit`, `goVersion`, `capabilitiesVersion`, `deployProtocol`, `wasmtime`, `wasmtimeTarget`, `compiler`, `epoch` and a feature map. `compiler` runs `wasmtime compile --help` once, so a runtime-only image reports false. `wt-deploy` reads the document before the build; a 404 or 405 fails with an upgrade message and suggests `--no-preflight`. The compile target comes from `wasmtimeTarget` unless `--target`, `WT_WASMTIME_TARGET` or the config file set one. Target or wasmtime version mismatches warn that the server will recompile, and a deploy that uploads the component prints `casm: matches supervisor runtime and target`, `casm: supervisor will recompile main.wasm` or a no-compiler warning. `wt apps` prints one summary line to stderr, and `--json` output is unchanged. Verified against the old local supervisor: the deploy failed with the actionable message before the build. After rebuilding it, the same deploy without `--target` negotiated `x86_64-unknown-linux-gnu` from the supervisor and reported a matching cwasm.
 
-3. [ ] **[P1] Give apps one source of truth for the wire contract and a standard error shape.**
+3. [x] **[P1] Give apps one source of truth for the wire contract and a standard error shape.**
 
    **Current behaviour.** Pulse hand-writes the TypeScript interfaces and validation in `web/src/lib/api.ts`, the Go response structs in `main.go`, and the trim and validation rules on both sides. Guestbook has a source-of-truth pipeline, but it is three steps: Valibot in `web/src/lib/contract.ts`, `web/scripts/contract.ts` to JSON Schema, then `go generate ./contract/` through `go-jsonschema`. It works, but it is a second build system for a small API, and a nullable nested history is enough friction to make skipping it the easier choice. Errors are a plain `{error: string}` with no stable code or field.
 
@@ -65,6 +65,10 @@ Concrete evidence from this build:
    - Generate or share request and response validation so the client rejects bad input before `fetch` and the server exposes the same field names.
 
    **Done when.** A field rename is one edit and both sides still compile. A test sends a missing field and an extra field and gets a stable code. The client can distinguish `invalid`, `not_found`, `conflict`, `limit` and `unavailable` without matching message text.
+
+   Implemented in `b0b22e4` and `1ec161a`. The chosen source stays Valibot and each app keeps its generated `web/scripts/contract.ts`, as decided. Pulse now has `web/src/lib/contract.ts`, generates `contract/schemas` and `contract/contract.gen.go`, and uses the generated `Check`, `Monitor`, `Stats`, `CycleResult` and `CreateMonitorRequest` types in `main.go`. The optional `last` is omitted from the Go response when there is no check and the client schema treats it as optional, so nested arrays and optional objects no longer require a hand-written struct. `component_inputs` includes `web/src/lib/contract.ts`, `web/package.json` and `web/bun.lock`; `build_component` installs the frontend dependencies before contract generation, so a clean checkout can build the component before the static phase. Guestbook, the scaffold and pulse all use the same generator flags, including URL/MS/OK capitalization.
+
+   Errors are `{"error": "...", "code": "...", "field": "..."}` with `field` omitted when it does not apply. `app.WriteError` derives a stable code from the status; `app.WriteErrorField` adds the field; `app.ReadJSON` extracts the field from generated validation messages. `ApiError` in the guestbook, scaffold and pulse clients carries `code` and `field`, and the forms attach a server field error to the named input. Verified with invalid requests returning `{"error":"field url ...","code":"invalid","field":"url"}` and `{"error":"field body ...","code":"invalid","field":"body"}`, plus successful pulse and guestbook deployments. Tests cover status codes, field extraction, the embedded SDK copy, and omission of an empty `last` in the pulse contract; Svelte checks and builds pass for all three frontends.
 
 4. [ ] **[P1] Add a typed durable-jobs SDK, a CLI and an example.**
 
@@ -156,6 +160,6 @@ Concrete evidence from this build:
 
 1. [x] **Split component and static builds, and replace the cache key.** This is the biggest daily cost and the stale-SDK case is a correctness bug. Implemented in `f830bc6` and `309b9f3`.
 2. [x] **Add the capability endpoint and deploy preflight.** It is small, removes the 405 class of failures and makes runtime and target matching automatic. Implemented in `4fa8593` and `b73a602`.
-3. [ ] **Add one-source contract generation and a standard error shape.** It is the biggest remaining authoring cost after the build loop.
+3. [x] **Add one-source contract generation and a standard error shape.** It is the biggest remaining authoring cost after the build loop. Implemented in `b0b22e4` and `1ec161a`.
 
 The dev proxy defaults from item 5 are a close fourth because they are cheap and make the realtime, blob and identity features testable in the normal loop. Every item above keeps the current invariants: ordinary Go over `wasi:http`, a static SvelteKit shell, per-app SQLite, one component per app and blue/green deploys.
