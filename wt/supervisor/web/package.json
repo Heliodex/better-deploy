@@ -10,7 +10,9 @@
 		"prepare": "svelte-kit sync || echo ''",
 		"preview": "vite preview",
 		"svelte:check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-		"svelte:check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
+		"svelte:check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+		"contract": "bun scripts/openapi.ts",
+		"contract:check": "bun scripts/openapi.ts --check"
 	},
 	"dependencies": {
 		"valibot": "^1.5.0"
@@ -20,6 +22,7 @@
 		"@sveltejs/kit": "^3.0.0",
 		"@sveltejs/vite-plugin-svelte": "^7.2.0",
 		"@tailwindcss/vite": "^4.3.3",
+		"@valibot/to-json-schema": "^1.8.0",
 		"svelte": "^5.57.1",
 		"svelte-check": "^4.6.0",
 		"tailwindcss": "^4.3.3",

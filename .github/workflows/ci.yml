@@ -134,7 +134,9 @@ jobs:
 
             - name: Check admin frontend
               working-directory: wt/supervisor/web
-              run: bun run svelte:check
+              run: |
+                  bun run contract:check
+                  bun run svelte:check
 
             - name: Check guestbook frontend
               working-directory: wt/example/guestbook/web

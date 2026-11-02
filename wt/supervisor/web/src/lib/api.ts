@@ -544,3 +544,26 @@ export function fetchChanges(token: string, name: string, limit = 200): Promise<
 		storageChangesResponseSchema,
 	)
 }
+
+// responseContracts is the source of truth for the OpenAPI component schemas.
+// Run `bun run contract` after changing one of these schemas.
+export const responseContracts = {
+	AppConfig: appConfigSchema,
+	AppInfo: appInfoSchema,
+	BackupInfo: backupInfoSchema,
+	BackupSettings: backupSettingsSchema,
+	BackupsResult: backupsResponseSchema,
+	DatabaseOverview: databaseOverviewSchema,
+	DatabaseRows: databaseRowsSchema,
+	DatabaseTableStat: databaseTableStatSchema,
+	Deployment: deploymentInfoSchema,
+	DeploymentRun: deploymentRunSchema,
+	ErrorResponse: errorResponseSchema,
+	LogEntry: logEntrySchema,
+	LogsResult: logsResponseSchema,
+	ResourceSample: resourceSampleSchema,
+	RowChange: rowChangeSchema,
+	Snapshot: snapshotSchema,
+	StorageChange: storageChangeSchema,
+	StorageChangesResult: storageChangesResponseSchema,
+}

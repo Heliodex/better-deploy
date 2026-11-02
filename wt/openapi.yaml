@@ -1,1246 +1,2078 @@
 openapi: 3.1.0
 info:
-    title: wt supervisor API
-    version: "0.1.0"
-    description: >
-        OpenAPI document for the supervisor's admin and app APIs. The path and method set is checked against the route tables; component schemas and descriptions are maintained here.
-        Newer resources use camelCase. Legacy config, backup and job-enqueue request
-        fields still use the snake_case spellings shown here.
+  title: wt supervisor API
+  version: 0.1.0
+  description: "OpenAPI document for the supervisor's admin and app APIs. The path and method set is checked against the route tables; component schemas and descriptions are maintained here. Newer resources use camelCase. Legacy config, backup and job-enqueue request fields still use the snake_case spellings shown here.\n"
 servers:
-    - url: http://127.0.0.1:8080
+  - url: http://127.0.0.1:8080
 security:
-    - bearerAuth: []
+  - bearerAuth: []
 paths:
-    /apps:
-        get:
-            summary: List visible apps
-            responses:
-                "200":
-                    description: Apps visible to the token
-                    content:
-                        application/json:
-                            schema:
-                                type: array
-                                items:
-                                    $ref: "#/components/schemas/AppInfo"
-    /apps/{name}:
-        parameters:
-            - $ref: "#/components/parameters/AppName"
-        get:
-            summary: Read one app
-            responses:
-                "200":
-                    description: App info
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/AppInfo"
-        delete:
-            summary: Remove an app, optionally purging state
-            parameters:
-                - name: purge
-                  in: query
-                  schema: { type: boolean, default: false }
-            responses:
-                "200":
-                    description: Removed
-    /apps/{name}/validate:
-        parameters:
-            - $ref: "#/components/parameters/AppName"
-        post:
-            summary: Validate a bundle without installing it
-            requestBody:
-                required: true
-                content:
-                    multipart/form-data:
-                        schema:
-                            type: object
-                            required: [artifact]
-                            properties:
-                                artifact:
-                                    type: string
-                                    format: binary
-            responses:
-                "200":
-                    description: Validation result
-    /apps/{name}/config:
-        parameters:
-            - $ref: "#/components/parameters/AppName"
-        get:
-            summary: Read runtime config
-            parameters:
-                - name: If-None-Match
-                  in: header
-                  schema: { type: string }
-            responses:
-                "200":
-                    description: Runtime config
-                    headers:
-                        ETag:
-                            schema: { type: string }
-                "304":
-                    description: Config matches If-None-Match
-        patch:
-            summary: Patch runtime config
-            parameters:
-                - name: If-Match
-                  in: header
-                  schema: { type: string }
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            type: object
-            responses:
-                "200":
-                    description: Updated config
-                "412":
-                    description: ETag did not match
-    /apps/{name}/deployments:
-        parameters:
-            - $ref: "#/components/parameters/AppName"
-        get:
-            summary: List deployment history
-            responses:
-                "200":
-                    description: Deployment entries
-                    content:
-                        application/json:
-                            schema:
-                                type: array
-                                items:
-                                    $ref: "#/components/schemas/Deployment"
-        post:
-            summary: Queue a deployment
-            description: >
-                Uploads and validates the bundle synchronously, then installs it in
-                the background. Follow Location for status, logs and cancel.
-            parameters:
-                - name: If-None-Match
-                  in: header
-                  schema: { type: string }
-            requestBody:
-                required: true
-                content:
-                    multipart/form-data:
-                        schema:
-                            type: object
-                            required: [artifact]
-                            properties:
-                                artifact:
-                                    type: string
-                                    format: binary
-            responses:
-                "202":
-                    description: Deployment queued
-                    headers:
-                        Location:
-                            schema: { type: string }
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/Deployment"
-                "304":
-                    description: Bundle already matches If-None-Match
-    /apps/{name}/deployments/{id}:
-        parameters:
-            - $ref: "#/components/parameters/AppName"
-            - name: id
-              in: path
-              required: true
-              schema: { type: string }
-        get:
-            summary: Read one deployment entry
-            responses:
-                "200":
-                    description: Deployment entry
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/Deployment"
-    /apps/{name}/deployments/{id}/cancel:
-        parameters:
-            - $ref: "#/components/parameters/AppName"
-            - name: id
-              in: path
-              required: true
-              schema: { type: string }
-        post:
-            summary: Cancel a queued or running deployment
-            responses:
-                "202":
-                    description: Cancellation requested
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/Deployment"
-                "409":
-                    description: Deployment already finished
-    /apps/{name}/deployments/{id}/logs:
-        parameters:
-            - $ref: "#/components/parameters/AppName"
-            - name: id
-              in: path
-              required: true
-              schema: { type: string }
-        get:
-            summary: Read a deployment log
-            responses:
-                "200":
-                    description: Plain-text deployment log
-                    content:
-                        text/plain:
-                            schema: { type: string }
-    /apps/{name}/deployments/{id}/logs/stream:
-        parameters:
-            - $ref: "#/components/parameters/AppName"
-            - name: id
-              in: path
-              required: true
-              schema: { type: string }
-        get:
-            summary: Stream a deployment log with SSE
-            responses:
-                "200":
-                    description: Server-sent events; a final done event carries the terminal status
-                    content:
-                        text/event-stream:
-                            schema: { type: string }
-    /apps/{name}/jobs:
-        parameters:
-            - $ref: "#/components/parameters/AppName"
-        get:
-            summary: List jobs
-            parameters:
-                - name: status
-                  in: query
-                  schema:
-                      type: string
-                      enum:
-                          [pending, running, succeeded, failed, dead, canceled]
-            responses:
-                "200":
-                    description: Jobs
-                    content:
-                        application/json:
-                            schema:
-                                type: object
-                                properties:
-                                    jobs:
-                                        type: array
-                                        items:
-                                            $ref: "#/components/schemas/Job"
-        post:
-            summary: Enqueue a durable job
-            requestBody:
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            $ref: "#/components/schemas/JobRequest"
-            responses:
-                "201":
-                    description: Created job
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/Job"
-    /apps/{name}/jobs/{id}:
-        parameters:
-            - $ref: "#/components/parameters/AppName"
-            - name: id
-              in: path
-              required: true
-              schema: { type: string }
-        get:
-            summary: Read one job
-            responses:
-                "200":
-                    description: Job
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/Job"
-    /apps/{name}/jobs/{id}/cancel:
-        parameters:
-            - $ref: "#/components/parameters/AppName"
-            - name: id
-              in: path
-              required: true
-              schema: { type: string }
-        post:
-            summary: Cancel a job
-            responses:
-                "200":
-                    description: Canceled job
-    /apps/{name}/jobs/{id}/retry:
-        parameters:
-            - $ref: "#/components/parameters/AppName"
-            - name: id
-              in: path
-              required: true
-              schema: { type: string }
-        post:
-            summary: Retry a failed, dead or canceled job
-            responses:
-                "200":
-                    description: Requeued job
-    /apps/{name}/logs:
-        parameters:
-            - $ref: "#/components/parameters/AppName"
-        get:
-            summary: Read a filtered log tail
-            parameters:
-                - $ref: "#/components/parameters/LogLevel"
-                - $ref: "#/components/parameters/LogSource"
-                - $ref: "#/components/parameters/LogQuery"
-            responses:
-                "200":
-                    description: Matching lines
-    /apps/{name}/logs/export:
-        parameters:
-            - $ref: "#/components/parameters/AppName"
-        get:
-            summary: Download all retained matching lines
-            parameters:
-                - $ref: "#/components/parameters/LogLevel"
-                - $ref: "#/components/parameters/LogSource"
-                - $ref: "#/components/parameters/LogQuery"
-                - name: format
-                  in: query
-                  schema: { type: string, enum: [text, jsonl], default: text }
-            responses:
-                "200":
-                    description: Log export
-    /metrics:
-        get:
-            summary: Prometheus metrics
-            responses:
-                "200":
-                    description: Prometheus text
-                    content:
-                        text/plain:
-                            schema: { type: string }
-    /auth/tokens:
-        get:
-            summary: List scoped token metadata
-            responses:
-                "200":
-                    description: Tokens
-        post:
-            summary: Create a scoped token
-            requestBody:
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            type: object
-                            required: [name, role]
-                            properties:
-                                name: { type: string }
-                                role:
-                                    {
-                                        type: string,
-                                        enum: [admin, deploy, read],
-                                    }
-                                apps:
-                                    type: array
-                                    items: { type: string }
-                                expires_in: { type: string, examples: ["720h"] }
-            responses:
-                "201":
-                    description: Created token; the bearer appears only here
-    /auth/tokens/{id}:
-        parameters:
-            - name: id
-              in: path
-              required: true
-              schema: { type: string }
-        delete:
-            summary: Revoke a scoped token
-            responses:
-                "204":
-                    description: Revoked
-    /audit:
-        get:
-            summary: Read the audit log
-            parameters:
-                - name: limit
-                  in: query
-                  schema:
-                      { type: integer, minimum: 1, maximum: 1000, default: 200 }
-            responses:
-                "200":
-                    description: Audit entries
-    /_wt/blobs:
-        put:
-            summary: Upload a blob through a signed app-host URL
-            description: >
-                Served by the supervisor on an app host, not the admin listener.
-                The app creates the URL with app.BlobUploadURL.
-            parameters:
-                - name: exp
-                  in: query
-                  required: true
-                  schema: { type: integer }
-                - name: max
-                  in: query
-                  required: true
-                  schema: { type: integer }
-                - name: ct
-                  in: query
-                  schema: { type: string }
-                - name: sig
-                  in: query
-                  required: true
-                  schema: { type: string }
-            requestBody:
-                required: true
-                content:
-                    application/octet-stream:
-                        schema: { type: string, format: binary }
-            responses:
-                "200":
-                    description: Blob already existed
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/BlobUploadResponse"
-                "201":
-                    description: Blob stored
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/BlobUploadResponse"
-                "403":
-                    description: Invalid or expired signature
-                "413":
-                    description: Body exceeds max
-                "507":
-                    description: App or global disk quota exceeded
-    /_wt/blobs/{digest}:
-        parameters:
-            - name: digest
-              in: path
-              required: true
-              schema: { type: string, pattern: "^[0-9a-f]{64}$" }
-            - name: exp
-              in: query
-              required: true
-              schema: { type: integer }
-            - name: sig
-              in: query
-              required: true
-              schema: { type: string }
-        get:
-            summary: Download a blob through a signed app-host URL
-            responses:
-                "200":
-                    description: Blob body
-                    content:
-                        application/octet-stream:
-                            schema: { type: string, format: binary }
-                "206":
-                    description: Partial content when Range is used
-                "403":
-                    description: Invalid or expired signature
-                "404":
-                    description: Blob not found
-        head:
-            summary: Read blob headers
-            responses:
-                "200":
-                    description: Blob metadata in headers
-        delete:
-            summary: Delete a blob through a signed app-host URL
-            responses:
-                "204":
-                    description: Blob removed
-                "403":
-                    description: Invalid or expired signature
-                "404":
-                    description: Blob not found
-    /identity/users:
-        get:
-            summary: List platform users (admin only)
-            responses:
-                "200":
-                    description: Users
-                    content:
-                        application/json:
-                            schema:
-                                type: object
-                                properties:
-                                    users:
-                                        type: array
-                                        items:
-                                            $ref: "#/components/schemas/IdentityUser"
-        post:
-            summary: Create a platform user (admin only)
-            requestBody:
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            type: object
-                            required: [email, name, password]
-                            properties:
-                                email: { type: string, format: email }
-                                name: { type: string }
-                                password: { type: string, minLength: 10 }
-                                groups:
-                                    type: array
-                                    items: { type: string }
-            responses:
-                "201":
-                    description: Created user
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/IdentityUser"
-    /identity/users/{id}:
-        parameters:
-            - name: id
-              in: path
-              required: true
-              schema: { type: string }
-        get:
-            summary: Read one platform user (admin only)
-            responses:
-                "200":
-                    description: User
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/IdentityUser"
-        patch:
-            summary: Update a platform user (admin only)
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            type: object
-                            properties:
-                                name: { type: string }
-                                groups:
-                                    type: array
-                                    items: { type: string }
-                                disabled: { type: boolean }
-            responses:
-                "200":
-                    description: Updated user
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/IdentityUser"
-        delete:
-            summary: Remove a platform user and sessions (admin only)
-            responses:
-                "204":
-                    description: Removed
-    /identity/users/{id}/password:
-        parameters:
-            - name: id
-              in: path
-              required: true
-              schema: { type: string }
-        post:
-            summary: Reset a platform user password (admin only)
-            requestBody:
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            type: object
-                            required: [password]
-                            properties:
-                                password: { type: string, minLength: 10 }
-            responses:
-                "204":
-                    description: Password reset and sessions revoked
-    /_wt/identity/login:
-        post:
-            summary: Sign in a platform user on an app host
-            description: Available only when the app sets identity to platform.
-            requestBody:
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            type: object
-                            required: [email, password]
-                            properties:
-                                email: { type: string, format: email }
-                                password: { type: string }
-            responses:
-                "200":
-                    description: Signed in; sets the wt_user cookie
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/IdentityMe"
-    /_wt/identity/logout:
-        post:
-            summary: Sign out a platform user
-            parameters:
-                - name: X-CSRF-Token
-                  in: header
-                  required: true
-                  schema: { type: string }
-            responses:
-                "204":
-                    description: Signed out
-    /_wt/identity/me:
-        get:
-            summary: Read the current platform user
-            responses:
-                "200":
-                    description: Current user and CSRF token
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/IdentityMe"
-                "401":
-                    description: Not signed in
-    /_wt/identity/password:
-        post:
-            summary: Change the current platform user password
-            parameters:
-                - name: X-CSRF-Token
-                  in: header
-                  required: true
-                  schema: { type: string }
-            requestBody:
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            type: object
-                            required: [currentPassword, newPassword]
-                            properties:
-                                currentPassword: { type: string }
-                                newPassword: { type: string, minLength: 10 }
-            responses:
-                "200":
-                    description: Password changed and a new session issued
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/IdentityMe"
-
-    /readyz:
-        get:
-            summary: Supervisor readiness
-            responses:
-                "200":
-                    description: Ready to serve
-                "503":
-                    description: Starting up or shutting down
-    /apps/{name}/maintenance:
-        parameters:
-            - $ref: "#/components/parameters/AppName"
-        get:
-            summary: Read the app maintenance flag
-            responses:
-                "200":
-                    description: Maintenance state
-                    content:
-                        application/json:
-                            schema:
-                                type: object
-                                properties:
-                                    enabled: { type: boolean }
-        post:
-            summary: Enable or disable app maintenance
-            requestBody:
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            type: object
-                            required: [enabled]
-                            properties:
-                                enabled: { type: boolean }
-            responses:
-                "200":
-                    description: Updated maintenance state
-                    content:
-                        application/json:
-                            schema:
-                                type: object
-                                properties:
-                                    enabled: { type: boolean }
-
-    /v1/publish:
-        post:
-            summary: Publish one host-bus event
-            description: >
-                Served by the storage loopback service (WT_STORAGE_URL) and
-                intercepted on the authenticated app-fetch path for another app.
-                The storage bearer token selects the app.
-            requestBody:
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            type: object
-                            required: [topic]
-                            properties:
-                                topic: { type: string, maxLength: 128 }
-                                data: {}
-            responses:
-                "202":
-                    description: Event accepted
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/Event"
-                "400":
-                    description: Invalid topic or body
-    /v1/events:
-        get:
-            summary: Subscribe to an app's host-bus events
-            description: >
-                Served by the supervisor on the app host, outside the wasm
-                component. No bearer token is required.
-            parameters:
-                - name: topic
-                  in: query
-                  schema: { type: string, maxLength: 128 }
-                - name: since
-                  in: query
-                  schema: { type: integer, minimum: 0 }
-                - name: Last-Event-ID
-                  in: header
-                  schema: { type: string }
-            responses:
-                "200":
-                    description: Server-sent events; data is an Event, and a gap event reports the oldest retained id
-                    content:
-                        text/event-stream:
-                            schema: { type: string }
-
-    /apps/{name}/secrets:
-        parameters:
-            - $ref: "#/components/parameters/AppName"
-        get:
-            summary: List secret names, never values
-            responses:
-                "200":
-                    description: OK
-                "400":
-                    description: Invalid request
-                "401":
-                    description: Unauthorized
-                "403":
-                    description: Forbidden
-                "404":
-                    description: Not found
-    /apps/{name}/secrets/{key}:
-        parameters:
-            - $ref: "#/components/parameters/AppName"
-            - name: key
-              in: path
-              required: true
-              schema: { type: string }
-        put:
-            summary: Set or rotate one secret
-            responses:
-                "200":
-                    description: OK
-                "400":
-                    description: Invalid request
-                "401":
-                    description: Unauthorized
-                "403":
-                    description: Forbidden
-                "404":
-                    description: Not found
-        delete:
-            summary: Delete one secret
-            responses:
-                "200":
-                    description: OK
-                "400":
-                    description: Invalid request
-                "401":
-                    description: Unauthorized
-                "403":
-                    description: Forbidden
-                "404":
-                    description: Not found
-    /apps/{name}/database:
-        parameters:
-            - $ref: "#/components/parameters/AppName"
-        get:
-            summary: Read the database overview
-            responses:
-                "200":
-                    description: OK
-                "400":
-                    description: Invalid request
-                "401":
-                    description: Unauthorized
-                "403":
-                    description: Forbidden
-                "404":
-                    description: Not found
-    /apps/{name}/logs/stream:
-        parameters:
-            - $ref: "#/components/parameters/AppName"
-        get:
-            summary: Stream app log lines over SSE
-            responses:
-                "200":
-                    description: OK
-                "400":
-                    description: Invalid request
-                "401":
-                    description: Unauthorized
-                "403":
-                    description: Forbidden
-                "404":
-                    description: Not found
-    /apps/{name}/resources:
-        parameters:
-            - $ref: "#/components/parameters/AppName"
-        get:
-            summary: Read app resource history
-            responses:
-                "200":
-                    description: OK
-                "400":
-                    description: Invalid request
-                "401":
-                    description: Unauthorized
-                "403":
-                    description: Forbidden
-                "404":
-                    description: Not found
-    /apps/{name}/stop:
-        parameters:
-            - $ref: "#/components/parameters/AppName"
-        post:
-            summary: Stop the app process
-            responses:
-                "200":
-                    description: OK
-                "400":
-                    description: Invalid request
-                "401":
-                    description: Unauthorized
-                "403":
-                    description: Forbidden
-                "404":
-                    description: Not found
-    /apps/{name}/start:
-        parameters:
-            - $ref: "#/components/parameters/AppName"
-        post:
-            summary: Start a stopped app
-            responses:
-                "200":
-                    description: OK
-                "400":
-                    description: Invalid request
-                "401":
-                    description: Unauthorized
-                "403":
-                    description: Forbidden
-                "404":
-                    description: Not found
-    /apps/{name}/restart:
-        parameters:
-            - $ref: "#/components/parameters/AppName"
-        post:
-            summary: Restart the app process
-            responses:
-                "200":
-                    description: OK
-                "400":
-                    description: Invalid request
-                "401":
-                    description: Unauthorized
-                "403":
-                    description: Forbidden
-                "404":
-                    description: Not found
-    /apps/{name}/rollback/{id}:
-        parameters:
-            - $ref: "#/components/parameters/AppName"
-            - name: id
-              in: path
-              required: true
-              schema: { type: string }
-        post:
-            summary: Roll back to a retained deployment
-            responses:
-                "200":
-                    description: OK
-                "400":
-                    description: Invalid request
-                "401":
-                    description: Unauthorized
-                "403":
-                    description: Forbidden
-                "404":
-                    description: Not found
-    /v1/sessions:
-        post:
-            summary: Create a pinned storage session
-            responses:
-                "200":
-                    description: OK
-                "400":
-                    description: Invalid request
-                "401":
-                    description: Unauthorized
-                "403":
-                    description: Forbidden
-                "404":
-                    description: Not found
-    /v1/sessions/{id}/query:
-        parameters:
-            - name: id
-              in: path
-              required: true
-              schema: { type: string }
-        post:
-            summary: Run a query on a storage session
-            responses:
-                "200":
-                    description: OK
-                "400":
-                    description: Invalid request
-                "401":
-                    description: Unauthorized
-                "403":
-                    description: Forbidden
-                "404":
-                    description: Not found
-    /v1/sessions/{id}/exec:
-        parameters:
-            - name: id
-              in: path
-              required: true
-              schema: { type: string }
-        post:
-            summary: Run a write on a storage session
-            responses:
-                "200":
-                    description: OK
-                "400":
-                    description: Invalid request
-                "401":
-                    description: Unauthorized
-                "403":
-                    description: Forbidden
-                "404":
-                    description: Not found
-    /v1/sessions/{id}/commit:
-        parameters:
-            - name: id
-              in: path
-              required: true
-              schema: { type: string }
-        post:
-            summary: Commit a storage session
-            responses:
-                "200":
-                    description: OK
-                "400":
-                    description: Invalid request
-                "401":
-                    description: Unauthorized
-                "403":
-                    description: Forbidden
-                "404":
-                    description: Not found
-    /v1/sessions/{id}/rollback:
-        parameters:
-            - name: id
-              in: path
-              required: true
-              schema: { type: string }
-        post:
-            summary: Roll back a storage session
-            responses:
-                "200":
-                    description: OK
-                "400":
-                    description: Invalid request
-                "401":
-                    description: Unauthorized
-                "403":
-                    description: Forbidden
-                "404":
-                    description: Not found
-    /v1/query:
-        post:
-            summary: Run a read-only query
-            responses:
-                "200":
-                    description: OK
-                "400":
-                    description: Invalid request
-                "401":
-                    description: Unauthorized
-                "403":
-                    description: Forbidden
-                "404":
-                    description: Not found
-    /v1/exec:
-        post:
-            summary: Run a write statement
-            responses:
-                "200":
-                    description: OK
-                "400":
-                    description: Invalid request
-                "401":
-                    description: Unauthorized
-                "403":
-                    description: Forbidden
-                "404":
-                    description: Not found
-    /v1/write:
-        post:
-            summary: Run a write and return rows
-            responses:
-                "200":
-                    description: OK
-                "400":
-                    description: Invalid request
-                "401":
-                    description: Unauthorized
-                "403":
-                    description: Forbidden
-                "404":
-                    description: Not found
-    /v1/batch:
-        post:
-            summary: Run a write batch
-            responses:
-                "200":
-                    description: OK
-                "400":
-                    description: Invalid request
-                "401":
-                    description: Unauthorized
-                "403":
-                    description: Forbidden
-                "404":
-                    description: Not found
-    /v1/transaction:
-        post:
-            summary: Run a transaction with optional queries
-            responses:
-                "200":
-                    description: OK
-                "400":
-                    description: Invalid request
-                "401":
-                    description: Unauthorized
-                "403":
-                    description: Forbidden
-                "404":
-                    description: Not found
-    /v1/schema:
-        get:
-            summary: Read the database schema
-            responses:
-                "200":
-                    description: OK
-                "400":
-                    description: Invalid request
-                "401":
-                    description: Unauthorized
-                "403":
-                    description: Forbidden
-                "404":
-                    description: Not found
-    /v1/migrate:
-        post:
-            summary: Apply a migration version
-            responses:
-                "200":
-                    description: OK
-                "400":
-                    description: Invalid request
-                "401":
-                    description: Unauthorized
-                "403":
-                    description: Forbidden
-                "404":
-                    description: Not found
-    /usage:
-        get:
-            summary: Read disk usage and the global budget
-            responses:
-                "200":
-                    description: OK
-                "400":
-                    description: Invalid request
-                "401":
-                    description: Unauthorized
-                "403":
-                    description: Forbidden
-                "404":
-                    description: Not found
-    /events:
-        get:
-            summary: Stream app snapshots over SSE
-            responses:
-                "200":
-                    description: OK
-                "400":
-                    description: Invalid request
-                "401":
-                    description: Unauthorized
-                "403":
-                    description: Forbidden
-                "404":
-                    description: Not found
-    /login:
-        post:
-            summary: Exchange a token for the panel cookie
-            responses:
-                "200":
-                    description: OK
-                "400":
-                    description: Invalid request
-                "401":
-                    description: Unauthorized
-                "403":
-                    description: Forbidden
-                "404":
-                    description: Not found
-    /logout:
-        post:
-            summary: Clear the panel cookie
-            responses:
-                "200":
-                    description: OK
-                "400":
-                    description: Invalid request
-                "401":
-                    description: Unauthorized
-                "403":
-                    description: Forbidden
-                "404":
-                    description: Not found
-components:
-    securitySchemes:
-        bearerAuth:
-            type: http
-            scheme: bearer
+  /apps:
+    get:
+      summary: List visible apps
+      responses:
+        "200":
+          description: Apps visible to the token
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AppInfo"
+  "/apps/{name}":
     parameters:
-        AppName:
-            name: name
-            in: path
-            required: true
-            schema: { type: string }
-        LogLevel:
-            name: level
-            in: query
+      - $ref: "#/components/parameters/AppName"
+    get:
+      summary: Read one app
+      responses:
+        "200":
+          description: App info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppInfo"
+    delete:
+      summary: "Remove an app, optionally purging state"
+      parameters:
+        - name: purge
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: Removed
+  "/apps/{name}/validate":
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+    post:
+      summary: Validate a bundle without installing it
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
             schema:
-                { type: string, enum: [trace, debug, info, warn, error, fatal] }
-        LogSource:
-            name: source
-            in: query
-            schema: { type: string, enum: [app, supervisor] }
-        LogQuery:
-            name: q
-            in: query
-            schema: { type: string }
-    schemas:
-        AppInfo:
-            type: object
-            properties:
-                name: { type: string }
-                host: { type: string }
-                status: { type: string }
-                ready: { type: boolean }
-                maintenance: { type: boolean }
-                currentDigest: { type: string }
-                lastError: { type: string }
-        IdentityUser:
-            type: object
-            properties:
-                id: { type: string }
-                email: { type: string, format: email }
-                name: { type: string }
-                groups:
+              type: object
+              required:
+                - artifact
+              properties:
+                artifact:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: Validation result
+  "/apps/{name}/config":
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+    get:
+      summary: Read runtime config
+      parameters:
+        - name: If-None-Match
+          in: header
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Runtime config
+          headers:
+            ETag:
+              schema:
+                type: string
+        "304":
+          description: Config matches If-None-Match
+    patch:
+      summary: Patch runtime config
+      parameters:
+        - name: If-Match
+          in: header
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Updated config
+        "412":
+          description: ETag did not match
+  "/apps/{name}/deployments":
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+    get:
+      summary: List deployment history
+      responses:
+        "200":
+          description: Deployment entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Deployment"
+    post:
+      summary: Queue a deployment
+      description: "Uploads and validates the bundle synchronously, then installs it in the background. Follow Location for status, logs and cancel.\n"
+      parameters:
+        - name: If-None-Match
+          in: header
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - artifact
+              properties:
+                artifact:
+                  type: string
+                  format: binary
+      responses:
+        "202":
+          description: Deployment queued
+          headers:
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Deployment"
+        "304":
+          description: Bundle already matches If-None-Match
+  "/apps/{name}/deployments/{id}":
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Read one deployment entry
+      responses:
+        "200":
+          description: Deployment entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Deployment"
+  "/apps/{name}/deployments/{id}/cancel":
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      summary: Cancel a queued or running deployment
+      responses:
+        "202":
+          description: Cancellation requested
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Deployment"
+        "409":
+          description: Deployment already finished
+  "/apps/{name}/deployments/{id}/logs":
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Read a deployment log
+      responses:
+        "200":
+          description: Plain-text deployment log
+          content:
+            text/plain:
+              schema:
+                type: string
+  "/apps/{name}/deployments/{id}/logs/stream":
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Stream a deployment log with SSE
+      responses:
+        "200":
+          description: Server-sent events; a final done event carries the terminal status
+          content:
+            text/event-stream:
+              schema:
+                type: string
+  "/apps/{name}/jobs":
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+    get:
+      summary: List jobs
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum:
+              - pending
+              - running
+              - succeeded
+              - failed
+              - dead
+              - canceled
+      responses:
+        "200":
+          description: Jobs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs:
                     type: array
-                    items: { type: string }
-                disabled: { type: boolean }
-                createdAt: { type: string, format: date-time }
-        IdentityMe:
-            type: object
-            properties:
-                user:
-                    $ref: "#/components/schemas/IdentityUser"
-                csrfToken: { type: string }
-        Event:
-            type: object
-            properties:
-                id: { type: integer }
-                topic: { type: string }
-                time: { type: string, format: date-time }
+                    items:
+                      $ref: "#/components/schemas/Job"
+    post:
+      summary: Enqueue a durable job
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JobRequest"
+      responses:
+        "201":
+          description: Created job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+  "/apps/{name}/jobs/{id}":
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Read one job
+      responses:
+        "200":
+          description: Job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+  "/apps/{name}/jobs/{id}/cancel":
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      summary: Cancel a job
+      responses:
+        "200":
+          description: Canceled job
+  "/apps/{name}/jobs/{id}/retry":
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      summary: "Retry a failed, dead or canceled job"
+      responses:
+        "200":
+          description: Requeued job
+  "/apps/{name}/logs":
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+    get:
+      summary: Read a filtered log tail
+      parameters:
+        - $ref: "#/components/parameters/LogLevel"
+        - $ref: "#/components/parameters/LogSource"
+        - $ref: "#/components/parameters/LogQuery"
+      responses:
+        "200":
+          description: Matching lines
+  "/apps/{name}/logs/export":
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+    get:
+      summary: Download all retained matching lines
+      parameters:
+        - $ref: "#/components/parameters/LogLevel"
+        - $ref: "#/components/parameters/LogSource"
+        - $ref: "#/components/parameters/LogQuery"
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum:
+              - text
+              - jsonl
+            default: text
+      responses:
+        "200":
+          description: Log export
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      responses:
+        "200":
+          description: Prometheus text
+          content:
+            text/plain:
+              schema:
+                type: string
+  /auth/tokens:
+    get:
+      summary: List scoped token metadata
+      responses:
+        "200":
+          description: Tokens
+    post:
+      summary: Create a scoped token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - role
+              properties:
+                name:
+                  type: string
+                role:
+                  type: string
+                  enum:
+                    - admin
+                    - deploy
+                    - read
+                apps:
+                  type: array
+                  items:
+                    type: string
+                expires_in:
+                  type: string
+                  examples:
+                    - 720h
+      responses:
+        "201":
+          description: Created token; the bearer appears only here
+  "/auth/tokens/{id}":
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      summary: Revoke a scoped token
+      responses:
+        "204":
+          description: Revoked
+  /audit:
+    get:
+      summary: Read the audit log
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 200
+      responses:
+        "200":
+          description: Audit entries
+  /_wt/blobs:
+    put:
+      summary: Upload a blob through a signed app-host URL
+      description: "Served by the supervisor on an app host, not the admin listener. The app creates the URL with app.BlobUploadURL.\n"
+      parameters:
+        - name: exp
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: max
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: ct
+          in: query
+          schema:
+            type: string
+        - name: sig
+          in: query
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Blob already existed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BlobUploadResponse"
+        "201":
+          description: Blob stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BlobUploadResponse"
+        "403":
+          description: Invalid or expired signature
+        "413":
+          description: Body exceeds max
+        "507":
+          description: App or global disk quota exceeded
+  "/_wt/blobs/{digest}":
+    parameters:
+      - name: digest
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+      - name: exp
+        in: query
+        required: true
+        schema:
+          type: integer
+      - name: sig
+        in: query
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Download a blob through a signed app-host URL
+      responses:
+        "200":
+          description: Blob body
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "206":
+          description: Partial content when Range is used
+        "403":
+          description: Invalid or expired signature
+        "404":
+          description: Blob not found
+    head:
+      summary: Read blob headers
+      responses:
+        "200":
+          description: Blob metadata in headers
+    delete:
+      summary: Delete a blob through a signed app-host URL
+      responses:
+        "204":
+          description: Blob removed
+        "403":
+          description: Invalid or expired signature
+        "404":
+          description: Blob not found
+  /identity/users:
+    get:
+      summary: List platform users (admin only)
+      responses:
+        "200":
+          description: Users
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  users:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/IdentityUser"
+    post:
+      summary: Create a platform user (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - name
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                name:
+                  type: string
+                password:
+                  type: string
+                  minLength: 10
+                groups:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "201":
+          description: Created user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdentityUser"
+  "/identity/users/{id}":
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Read one platform user (admin only)
+      responses:
+        "200":
+          description: User
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdentityUser"
+    patch:
+      summary: Update a platform user (admin only)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                groups:
+                  type: array
+                  items:
+                    type: string
+                disabled:
+                  type: boolean
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdentityUser"
+    delete:
+      summary: Remove a platform user and sessions (admin only)
+      responses:
+        "204":
+          description: Removed
+  "/identity/users/{id}/password":
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      summary: Reset a platform user password (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - password
+              properties:
+                password:
+                  type: string
+                  minLength: 10
+      responses:
+        "204":
+          description: Password reset and sessions revoked
+  /_wt/identity/login:
+    post:
+      summary: Sign in a platform user on an app host
+      description: Available only when the app sets identity to platform.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+      responses:
+        "200":
+          description: Signed in; sets the wt_user cookie
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdentityMe"
+  /_wt/identity/logout:
+    post:
+      summary: Sign out a platform user
+      parameters:
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Signed out
+  /_wt/identity/me:
+    get:
+      summary: Read the current platform user
+      responses:
+        "200":
+          description: Current user and CSRF token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdentityMe"
+        "401":
+          description: Not signed in
+  /_wt/identity/password:
+    post:
+      summary: Change the current platform user password
+      parameters:
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - currentPassword
+                - newPassword
+              properties:
+                currentPassword:
+                  type: string
+                newPassword:
+                  type: string
+                  minLength: 10
+      responses:
+        "200":
+          description: Password changed and a new session issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdentityMe"
+  /readyz:
+    get:
+      summary: Supervisor readiness
+      responses:
+        "200":
+          description: Ready to serve
+        "503":
+          description: Starting up or shutting down
+  "/apps/{name}/maintenance":
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+    get:
+      summary: Read the app maintenance flag
+      responses:
+        "200":
+          description: Maintenance state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enabled:
+                    type: boolean
+    post:
+      summary: Enable or disable app maintenance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - enabled
+              properties:
+                enabled:
+                  type: boolean
+      responses:
+        "200":
+          description: Updated maintenance state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enabled:
+                    type: boolean
+  /v1/publish:
+    post:
+      summary: Publish one host-bus event
+      description: "Served by the storage loopback service (WT_STORAGE_URL) and intercepted on the authenticated app-fetch path for another app. The storage bearer token selects the app.\n"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - topic
+              properties:
+                topic:
+                  type: string
+                  maxLength: 128
                 data: {}
-        BlobUploadResponse:
+      responses:
+        "202":
+          description: Event accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Event"
+        "400":
+          description: Invalid topic or body
+  /v1/events:
+    get:
+      summary: "Subscribe to an app's host-bus events"
+      description: "Served by the supervisor on the app host, outside the wasm component. No bearer token is required.\n"
+      parameters:
+        - name: topic
+          in: query
+          schema:
+            type: string
+            maxLength: 128
+        - name: since
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+        - name: Last-Event-ID
+          in: header
+          schema:
+            type: string
+      responses:
+        "200":
+          description: "Server-sent events; data is an Event, and a gap event reports the oldest retained id"
+          content:
+            text/event-stream:
+              schema:
+                type: string
+  "/apps/{name}/secrets":
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+    get:
+      summary: "List secret names, never values"
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+  "/apps/{name}/secrets/{key}":
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+      - name: key
+        in: path
+        required: true
+        schema:
+          type: string
+    put:
+      summary: Set or rotate one secret
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+    delete:
+      summary: Delete one secret
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+  "/apps/{name}/database":
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+    get:
+      summary: Read the database overview
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+  "/apps/{name}/logs/stream":
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+    get:
+      summary: Stream app log lines over SSE
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+  "/apps/{name}/resources":
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+    get:
+      summary: Read app resource history
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+  "/apps/{name}/stop":
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+    post:
+      summary: Stop the app process
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+  "/apps/{name}/start":
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+    post:
+      summary: Start a stopped app
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+  "/apps/{name}/restart":
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+    post:
+      summary: Restart the app process
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+  "/apps/{name}/rollback/{id}":
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      summary: Roll back to a retained deployment
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+  /v1/sessions:
+    post:
+      summary: Create a pinned storage session
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+  "/v1/sessions/{id}/query":
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      summary: Run a query on a storage session
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+  "/v1/sessions/{id}/exec":
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      summary: Run a write on a storage session
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+  "/v1/sessions/{id}/commit":
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      summary: Commit a storage session
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+  "/v1/sessions/{id}/rollback":
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      summary: Roll back a storage session
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+  /v1/query:
+    post:
+      summary: Run a read-only query
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+  /v1/exec:
+    post:
+      summary: Run a write statement
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+  /v1/write:
+    post:
+      summary: Run a write and return rows
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+  /v1/batch:
+    post:
+      summary: Run a write batch
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+  /v1/transaction:
+    post:
+      summary: Run a transaction with optional queries
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+  /v1/schema:
+    get:
+      summary: Read the database schema
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+  /v1/migrate:
+    post:
+      summary: Apply a migration version
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+  /usage:
+    get:
+      summary: Read disk usage and the global budget
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+  /events:
+    get:
+      summary: Stream app snapshots over SSE
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+  /login:
+    post:
+      summary: Exchange a token for the panel cookie
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+  /logout:
+    post:
+      summary: Clear the panel cookie
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    AppName:
+      name: name
+      in: path
+      required: true
+      schema:
+        type: string
+    LogLevel:
+      name: level
+      in: query
+      schema:
+        type: string
+        enum:
+          - trace
+          - debug
+          - info
+          - warn
+          - error
+          - fatal
+    LogSource:
+      name: source
+      in: query
+      schema:
+        type: string
+        enum:
+          - app
+          - supervisor
+    LogQuery:
+      name: q
+      in: query
+      schema:
+        type: string
+  schemas:
+    AppInfo:
+      type: object
+      properties:
+        cpuPercent:
+          type: number
+          minimum: 0
+        currentDigest:
+          type: string
+        diskBytes:
+          type: number
+          minimum: 0
+        diskLimitBytes:
+          type: number
+          minimum: 0
+        historyBytes:
+          type: number
+          minimum: 0
+        host:
+          type: string
+          minLength: 1
+        lastError:
+          type: string
+        lastHealthy:
+          type: string
+        memoryBytes:
+          type: number
+          minimum: 0
+        name:
+          type: string
+          minLength: 1
+        overQuota:
+          type: boolean
+        pid:
+          type: integer
+        port:
+          type: integer
+          minimum: 0
+        ready:
+          type: boolean
+        sampledAt:
+          type: string
+          minLength: 1
+        startedAt:
+          type: string
+          minLength: 1
+        status:
+          enum:
+            &enum3
+            - running
+            - stopped
+            - unhealthy
+            - restarting
+          type: string
+      required:
+        - cpuPercent
+        - historyBytes
+        - host
+        - memoryBytes
+        - name
+        - port
+        - sampledAt
+        - startedAt
+        - status
+      title: AppInfo
+    IdentityUser:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        groups:
+          type: array
+          items:
+            type: string
+        disabled:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+    IdentityMe:
+      type: object
+      properties:
+        user:
+          $ref: "#/components/schemas/IdentityUser"
+        csrfToken:
+          type: string
+    Event:
+      type: object
+      properties:
+        id:
+          type: integer
+        topic:
+          type: string
+        time:
+          type: string
+          format: date-time
+        data: {}
+    BlobUploadResponse:
+      type: object
+      properties:
+        digest:
+          type: string
+        size:
+          type: integer
+        contentType:
+          type: string
+        url:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    Deployment:
+      type: object
+      properties:
+        bytes:
+          type: number
+          minimum: 0
+        current:
+          type: boolean
+        deployedAt:
+          type: string
+          minLength: 1
+        digest:
+          type: string
+        error:
+          type: string
+        id:
+          type: string
+          minLength: 1
+        rebuildable:
+          type: boolean
+        runtime:
+          type: string
+        size:
+          type: number
+          minimum: 0
+        status:
+          enum:
+            - success
+            - failed
+          type: string
+        target:
+          type: string
+      required:
+        - bytes
+        - deployedAt
+        - digest
+        - id
+        - rebuildable
+        - size
+      title: Deployment
+    JobRequest:
+      type: object
+      required:
+        - path
+      properties:
+        path:
+          type: string
+          pattern: ^/
+        method:
+          type: string
+          enum:
+            - GET
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+          default: POST
+        body:
+          type: string
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        runAt:
+          type: string
+          format: date-time
+        maxAttempts:
+          type: integer
+          minimum: 1
+          maximum: 20
+          default: 3
+        idempotencyKey:
+          type: string
+    Job:
+      type: object
+      properties:
+        id:
+          type: string
+        path:
+          type: string
+        method:
+          type: string
+        status:
+          type: string
+        attempts:
+          type: integer
+        maxAttempts:
+          type: integer
+        runAt:
+          type: string
+          format: date-time
+        lastError:
+          type: string
+        statusCode:
+          type: integer
+    AppConfig:
+      type: object
+      properties:
+        allow_callers:
+          type: array
+          items:
+            type: string
+        disk_mb:
+          type: number
+          minimum: 0
+        egress:
+          type: array
+          items:
             type: object
             properties:
-                digest: { type: string }
-                size: { type: integer }
-                contentType: { type: string }
-                url: { type: string }
-                createdAt: { type: string, format: date-time }
-        Deployment:
+              cidr:
+                type: string
+                minLength: 1
+              port:
+                type: integer
+                minimum: 1
+            required:
+              - cidr
+              - port
+        env_keys:
+          type: array
+          items:
+            type: string
+        secret_keys:
+          type: array
+          items:
+            type: string
+        health:
+          type: string
+          minLength: 1
+        health_failures:
+          type: number
+          minimum: 1
+        health_interval:
+          type: string
+        host:
+          type: string
+          minLength: 1
+        job_concurrency:
+          type: number
+          minimum: 1
+        hosts:
+          type: array
+          items:
+            type: string
+        max_concurrency:
+          type: number
+          minimum: 0
+        memory_mb:
+          type: number
+          minimum: 0
+        name:
+          type: string
+          minLength: 1
+        network:
+          enum:
+            - inherit
+            - none
+            - storage
+          type: string
+        request_timeout:
+          type: string
+        restart_on_unhealthy:
+          type: boolean
+        restart_required:
+          type: boolean
+        schedule:
+          type: array
+          items: {}
+        startup_timeout:
+          type: string
+      required:
+        - allow_callers
+        - disk_mb
+        - egress
+        - env_keys
+        - health
+        - health_failures
+        - health_interval
+        - host
+        - job_concurrency
+        - hosts
+        - max_concurrency
+        - memory_mb
+        - name
+        - network
+        - request_timeout
+        - restart_on_unhealthy
+        - schedule
+        - startup_timeout
+      title: AppConfig
+    BackupInfo:
+      type: object
+      properties:
+        createdAt:
+          type: string
+          minLength: 1
+        dataSize:
+          type: number
+          minimum: 0
+        hasData:
+          type: boolean
+        kind:
+          enum:
+            &enum
+            - auto
+            - import
+            - manual
+            - ""
+          type: string
+        name:
+          type: string
+          minLength: 1
+        parent:
+          type: string
+        size:
+          type: number
+          minimum: 0
+      required:
+        - createdAt
+        - kind
+        - name
+        - parent
+        - size
+      title: BackupInfo
+    BackupSettings:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        every:
+          type: string
+          minLength: 1
+        keep:
+          type: integer
+          minimum: 1
+      required:
+        - enabled
+        - every
+        - keep
+      title: BackupSettings
+    BackupsResult:
+      type: object
+      properties:
+        backups:
+          type: array
+          items:
             type: object
             properties:
-                id: { type: string }
-                digest: { type: string }
-                status:
-                    {
-                        type: string,
-                        enum: [queued, running, success, failed, canceled],
-                    }
-                error: { type: string }
-                current: { type: boolean }
-                mode: { type: string, enum: [full, static] }
-                deployedAt: { type: string, format: date-time }
-                queuedAt: { type: string, format: date-time }
-                startedAt: { type: string, format: date-time }
-                finishedAt: { type: string, format: date-time }
-        JobRequest:
+              createdAt:
+                type: string
+                minLength: 1
+              dataSize:
+                type: number
+                minimum: 0
+              hasData:
+                type: boolean
+              kind:
+                enum:
+                  *enum
+                type: string
+              name:
+                type: string
+                minLength: 1
+              parent:
+                type: string
+              size:
+                type: number
+                minimum: 0
+            required:
+              - createdAt
+              - kind
+              - name
+              - parent
+              - size
+        created:
+          type: string
+        current:
+          type: string
+        database:
+          type: boolean
+        settings:
+          type: object
+          properties:
+            enabled:
+              type: boolean
+            every:
+              type: string
+              minLength: 1
+            keep:
+              type: integer
+              minimum: 1
+          required:
+            - enabled
+            - every
+            - keep
+      required:
+        - backups
+        - current
+        - database
+        - settings
+      title: BackupsResult
+    DatabaseOverview:
+      type: object
+      properties:
+        database:
+          type: boolean
+        tables:
+          type: array
+          items:
+            type: string
+        version:
+          type: number
+          minimum: 0
+        stats:
+          type: array
+          items:
             type: object
-            required: [path]
             properties:
-                path: { type: string, pattern: "^/" }
-                method:
-                    {
-                        type: string,
-                        enum: [GET, POST, PUT, PATCH, DELETE],
-                        default: POST,
-                    }
-                body: { type: string }
-                headers:
-                    type: object
-                    additionalProperties: { type: string }
-                runAt: { type: string, format: date-time }
-                maxAttempts:
-                    { type: integer, minimum: 1, maximum: 20, default: 3 }
-                idempotencyKey: { type: string }
-        Job:
+              bytes:
+                type: number
+                minimum: 0
+              name:
+                type: string
+                minLength: 1
+              rows:
+                type: number
+                minimum: 0
+            required:
+              - bytes
+              - name
+              - rows
+      required:
+        - database
+        - tables
+        - version
+      title: DatabaseOverview
+    DatabaseRows:
+      type: object
+      properties:
+        columns:
+          type: array
+          items:
+            type: string
+        limit:
+          type: integer
+          minimum: 1
+        offset:
+          type: integer
+          minimum: 0
+        rows:
+          type: array
+          items:
+            type: array
+            items: {}
+        table:
+          type: string
+          minLength: 1
+        total:
+          type: integer
+          minimum: 0
+        truncated:
+          type: boolean
+      required:
+        - columns
+        - limit
+        - offset
+        - rows
+        - table
+        - total
+        - truncated
+      title: DatabaseRows
+    DatabaseTableStat:
+      type: object
+      properties:
+        bytes:
+          type: number
+          minimum: 0
+        name:
+          type: string
+          minLength: 1
+        rows:
+          type: number
+          minimum: 0
+      required:
+        - bytes
+        - name
+        - rows
+      title: DatabaseTableStat
+    DeploymentRun:
+      type: object
+      properties:
+        digest:
+          type: string
+        error:
+          type: string
+        id:
+          type: string
+          minLength: 1
+        mode:
+          type: string
+        status:
+          enum:
+            - queued
+            - running
+            - success
+            - failed
+            - canceled
+          type: string
+      required:
+        - digest
+        - id
+        - status
+      title: DeploymentRun
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+      title: ErrorResponse
+    LogEntry:
+      type: object
+      properties:
+        level:
+          enum:
+            &enum1
+            - trace
+            - debug
+            - info
+            - warn
+            - error
+            - fatal
+          type: string
+        message:
+          type: string
+        source:
+          enum:
+            &enum2
+            - app
+            - supervisor
+          type: string
+        time:
+          type: string
+      required:
+        - level
+        - message
+        - source
+        - time
+      title: LogEntry
+    LogsResult:
+      type: object
+      properties:
+        logs:
+          type: array
+          items:
             type: object
             properties:
-                id: { type: string }
-                path: { type: string }
-                method: { type: string }
-                status: { type: string }
-                attempts: { type: integer }
-                maxAttempts: { type: integer }
-                runAt: { type: string, format: date-time }
-                lastError: { type: string }
-                statusCode: { type: integer }
+              level:
+                enum:
+                  *enum1
+                type: string
+              message:
+                type: string
+              source:
+                enum:
+                  *enum2
+                type: string
+              time:
+                type: string
+            required:
+              - level
+              - message
+              - source
+              - time
+      required:
+        - logs
+      title: LogsResult
+    ResourceSample:
+      type: object
+      properties:
+        at:
+          type: string
+          minLength: 1
+        cpuPercent:
+          type: number
+          minimum: 0
+        memoryBytes:
+          type: number
+          minimum: 0
+      required:
+        - at
+        - cpuPercent
+        - memoryBytes
+      title: ResourceSample
+    RowChange:
+      type: object
+      properties:
+        columns:
+          type: array
+          items:
+            type: string
+        new:
+          type: array
+          items: {}
+        old:
+          type: array
+          items: {}
+        op:
+          enum:
+            &enum4
+            - insert
+            - update
+            - delete
+          type: string
+        rowId:
+          type: integer
+          minimum: 0
+        table:
+          type: string
+          minLength: 1
+      required:
+        - columns
+        - op
+        - table
+      title: RowChange
+    Snapshot:
+      type: object
+      properties:
+        apps:
+          type: array
+          items:
+            type: object
+            properties:
+              cpuPercent:
+                type: number
+                minimum: 0
+              currentDigest:
+                type: string
+              diskBytes:
+                type: number
+                minimum: 0
+              diskLimitBytes:
+                type: number
+                minimum: 0
+              historyBytes:
+                type: number
+                minimum: 0
+              host:
+                type: string
+                minLength: 1
+              lastError:
+                type: string
+              lastHealthy:
+                type: string
+              memoryBytes:
+                type: number
+                minimum: 0
+              name:
+                type: string
+                minLength: 1
+              overQuota:
+                type: boolean
+              pid:
+                type: integer
+              port:
+                type: integer
+                minimum: 0
+              ready:
+                type: boolean
+              sampledAt:
+                type: string
+                minLength: 1
+              startedAt:
+                type: string
+                minLength: 1
+              status:
+                enum:
+                  *enum3
+                type: string
+            required:
+              - cpuPercent
+              - historyBytes
+              - host
+              - memoryBytes
+              - name
+              - port
+              - sampledAt
+              - startedAt
+              - status
+        type:
+          const: snapshot
+      required:
+        - apps
+        - type
+      title: Snapshot
+    StorageChange:
+      type: object
+      properties:
+        params:
+          type: array
+          items: {}
+        rows:
+          type: array
+          items:
+            type: object
+            properties:
+              columns:
+                type: array
+                items:
+                  type: string
+              new:
+                type: array
+                items: {}
+              old:
+                type: array
+                items: {}
+              op:
+                enum:
+                  *enum4
+                type: string
+              rowId:
+                type: integer
+                minimum: 0
+              table:
+                type: string
+                minLength: 1
+            required:
+              - columns
+              - op
+              - table
+        rowsAffected:
+          type: integer
+          minimum: 0
+        rowsTruncated:
+          type: boolean
+        sql:
+          type: string
+          minLength: 1
+        time:
+          type: string
+          minLength: 1
+      required:
+        - params
+        - rowsAffected
+        - sql
+        - time
+      title: StorageChange
+    StorageChangesResult:
+      type: object
+      properties:
+        changes:
+          type: array
+          items:
+            type: object
+            properties:
+              params:
+                type: array
+                items: {}
+              rows:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    columns:
+                      type: array
+                      items:
+                        type: string
+                    new:
+                      type: array
+                      items: {}
+                    old:
+                      type: array
+                      items: {}
+                    op:
+                      enum:
+                        *enum4
+                      type: string
+                    rowId:
+                      type: integer
+                      minimum: 0
+                    table:
+                      type: string
+                      minLength: 1
+                  required:
+                    - columns
+                    - op
+                    - table
+              rowsAffected:
+                type: integer
+                minimum: 0
+              rowsTruncated:
+                type: boolean
+              sql:
+                type: string
+                minLength: 1
+              time:
+                type: string
+                minLength: 1
+            required:
+              - params
+              - rowsAffected
+              - sql
+              - time
+      required:
+        - changes
+      title: StorageChangesResult

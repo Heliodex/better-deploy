@@ -59,13 +59,14 @@ func TestOpenAPIDocumentsRoutes(t *testing.T) {
 	path := ""
 	for line := range strings.SplitSeq(string(data), "\n") {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(line, "    /") && strings.HasSuffix(trimmed, ":") {
-			path = normalizeRoutePath(strings.TrimSuffix(trimmed, ":"))
+		if strings.HasPrefix(line, "  /") || strings.HasPrefix(line, "  \"/") {
+			raw := strings.Trim(strings.TrimSuffix(trimmed, ":"), "\"")
+			path = normalizeRoutePath(raw)
 			continue
 		}
 		switch trimmed {
 		case "get:", "post:", "put:", "patch:", "delete:", "head:", "options:":
-			if path != "" && strings.HasPrefix(line, "        ") {
+			if path != "" && strings.HasPrefix(line, "    ") {
 				documented[strings.ToUpper(strings.TrimSuffix(trimmed, ":"))+" "+path] = struct{}{}
 			}
 		}
