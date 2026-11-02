@@ -34,20 +34,15 @@ func (a *app) recordError(err error) {
 	a.mu.Unlock()
 }
 
-// appArgsFor rewrites the bundle, /data and tmp paths for a namespace launch.
-// The helper pivots into a root where the bundle is /app and the state dir is /data, so the host paths must not leak into wasmtime's argv.
-func (s *supervisor) appArgsFor(a *app, source string, namespaced bool) (args []string, env []string, err error) {
-	a.mu.Lock()
-	cfg := a.cfg
-	epoch := a.wasmEpoch
-	a.mu.Unlock()
-	args = []string{
+// appServeArgs builds the fixed wasmtime serve flags for one app.
+func appServeArgs(target string, cfg appConfig, epoch bool) []string {
+	args := []string{
 		"serve",
 		"-Scli",
 		"-Sp3",
 		"-W", "component-model-async=y",
 		"--allow-precompiled",
-		"--target", s.cfg.wasmtimeTarget,
+		"--target", target,
 		"--addr", serveAddr,
 	}
 	if cfg.Network != "none" {
@@ -59,26 +54,25 @@ func (s *supervisor) appArgsFor(a *app, source string, namespaced bool) (args []
 			args = append(args, "-W", "timeout="+cfg.requestTimeout.String())
 		}
 	}
-	dirSpec := filepath.Join(s.cfg.stateDir, a.name) + "::/data"
-	if namespaced {
-		dirSpec = "/data::/data"
-	}
-	args = append(args, "--dir", dirSpec)
+	return args
+}
 
-	envIndex := map[string]int{}
-	setEnv := func(key, value string) {
-		if index, ok := envIndex[key]; ok {
-			env[index] = key + "=" + value
+// appEnv builds the --env pairs and the process environment, resolving secret references first.
+func (s *supervisor) appEnv(a *app, cfg appConfig, namespaced bool) (extraArgs, env []string, err error) {
+	index := map[string]int{}
+	set := func(key, value string) {
+		if i, ok := index[key]; ok {
+			env[i] = key + "=" + value
 			return
 		}
-		envIndex[key] = len(env)
-		args = append(args, "--env", key)
+		index[key] = len(env)
+		extraArgs = append(extraArgs, "--env", key)
 		env = append(env, key+"="+value)
 	}
 	if namespaced {
 		// These paths exist inside the minimal root. App config can override them through the loop below.
-		setEnv("TMPDIR", "/tmp")
-		setEnv("HOME", "/data")
+		set("TMPDIR", "/tmp")
+		set("HOME", "/data")
 	}
 	for _, key := range sortedKeys(cfg.Env) {
 		value := cfg.Env[key]
@@ -89,30 +83,30 @@ func (s *supervisor) appArgsFor(a *app, source string, namespaced bool) (args []
 			}
 			value = secret
 		}
-		setEnv(key, value)
+		set(key, value)
 	}
 	if cfg.MemoryMB > 0 {
-		args = append(args, "-W", fmt.Sprintf("max-memory-size=%d", cfg.MemoryMB<<20))
+		extraArgs = append(extraArgs, "-W", fmt.Sprintf("max-memory-size=%d", cfg.MemoryMB<<20))
 	}
 	if s.storage != nil {
 		token := s.storage.tokenFor(a.name)
-		setEnv("WT_STORAGE_URL", s.storage.url())
-		setEnv("WT_STORAGE_TOKEN", token)
-		setEnv(appTokenEnv, token)
+		set("WT_STORAGE_URL", s.storage.url())
+		set("WT_STORAGE_TOKEN", token)
+		set(appTokenEnv, token)
 	}
 	if s.blobs != nil {
-		setEnv(appNameEnv, a.name)
-		setEnv(blobSecretEnv, s.blobs.secretFor(a.name))
-		setEnv(blobPrefixEnv, blobPrefix)
+		set(appNameEnv, a.name)
+		set(blobSecretEnv, s.blobs.secretFor(a.name))
+		set(blobPrefixEnv, blobPrefix)
 	}
 	if cfg.Identity == identityModePlatform {
 		if secret := s.identitySecretFor(a.name); secret != "" {
-			setEnv(identitySecretEnv, secret)
+			set(identitySecretEnv, secret)
 		}
 	}
 	if s.fetch != nil {
-		setEnv(appNameEnv, a.name)
-		setEnv(appFetchURLEnv, s.fetch.url())
+		set(appNameEnv, a.name)
+		set(appFetchURLEnv, s.fetch.url())
 		apps := s.allApps()
 		names := make([]string, 0, len(apps))
 		for _, other := range apps {
@@ -122,9 +116,30 @@ func (s *supervisor) appArgsFor(a *app, source string, namespaced bool) (args []
 		}
 		slices.Sort(names)
 		for _, name := range names {
-			setEnv(appURLEnvName(name), s.fetch.appURL(name))
+			set(appURLEnvName(name), s.fetch.appURL(name))
 		}
 	}
+	return extraArgs, env, nil
+}
+
+// appArgsFor rewrites the bundle, /data and tmp paths for a namespace launch.
+// The helper pivots into a root where the bundle is /app and the state dir is /data, so the host paths must not leak into wasmtime's argv.
+func (s *supervisor) appArgsFor(a *app, source string, namespaced bool) (args []string, env []string, err error) {
+	a.mu.Lock()
+	cfg := a.cfg
+	epoch := a.wasmEpoch
+	a.mu.Unlock()
+	args = appServeArgs(s.cfg.wasmtimeTarget, cfg, epoch)
+	dirSpec := filepath.Join(s.cfg.stateDir, a.name) + "::/data"
+	if namespaced {
+		dirSpec = "/data::/data"
+	}
+	args = append(args, "--dir", dirSpec)
+	extraArgs, env, err := s.appEnv(a, cfg, namespaced)
+	if err != nil {
+		return nil, nil, err
+	}
+	args = append(args, extraArgs...)
 	if namespaced {
 		source = "/app/main.cwasm"
 	}
