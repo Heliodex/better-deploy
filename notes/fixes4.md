@@ -160,7 +160,7 @@ Concrete evidence from this build:
 
    The supervisor still cannot infer which digests an app references, so GC requires a cutoff and accepts a keep list; the dry run is the safe default in the CLI workflow. Verified live: upload through the signed URL, metadata insert, download, normal file delete removed both row and blob, and an orphan uploaded without metadata appeared in the admin list and was removed by dry-run then real GC. Tests cover admin list/delete/GC, storage-loopback deletion, `app.DeleteBlob`, CLI requests, and the full supervisor suite.
 
-9. [ ] **[P2] Fill the platform-API example gap and publish a choose-the-API map.**
+9. [x] **[P2] Fill the platform-API example gap and publish a choose-the-API map.**
 
    **Current behaviour.** Several examples exercise storage, but no example exercises blobs, platform identity, durable jobs or app-to-app calls. Pulse adds SSE. Those documentation-only features feel riskier and more complex than they are, and the concept count is high for a new app author: storage, blobs, events, identity, jobs and app fetch.
 
@@ -172,6 +172,12 @@ Concrete evidence from this build:
    - Keep the examples in the pulse style: one Go file or one small Go package, a static SvelteKit shell and a short README section.
 
    **Done when.** Every platform feature either has a runnable example or is explicitly marked unsupported, and a new author can choose an API from one table.
+
+   Implemented in `a998e32`, `ba51971` and `adf929b`. `example/blobbox` is the authenticated blob board: `"identity": "platform"`, `app.UserFromRequest`, login/logout and a signed-in user for uploads and deletes. It stores blob metadata in SQLite, uses signed upload/download URLs and `app.DeleteBlob`, and demonstrates app-to-app fetch by calling `pulse` through `app.NewAppRequest`; pulse lists `blobbox` in `allow_callers`. `example/ticker` covers both `schedule` and durable jobs, and `example/pulse` covers scheduled outbound probes and realtime SSE.
+
+   Deploying blobbox exposed a separate correctness bug: the deploy tool re-marshalled only its own manifest subset and dropped `identity`, `allow_callers`, `job_concurrency` and any future fields. `adf929b` fixes it by bundling the original `app.json` and patching only name and host. This was required for the identity and app-to-app example to work on a real deploy.
+
+   The README now has a "Which platform API?" table mapping storage, jobs, events, blobs, identity, app fetch, schedules, static files, logs and operator commands to a runnable example. Verified live with a created platform user: login, upload, owner-attributed listing, authenticated delete and the pulse peer call. The e2e script still covers the original hello/guestbook paths; blobbox was verified manually because it needs a platform user and a second app.
 
 ## Not worth changing
 
