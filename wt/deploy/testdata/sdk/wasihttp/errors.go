@@ -8,6 +8,7 @@ import (
 	wasi "wt.packages/binding/imports/wasi_http_0_3_0_types"
 )
 
+// fieldSizeString formats an optional field name and size payload for error messages.
 func fieldSizeString(p wasi.FieldSizePayload) string {
 	var parts []string
 	if p.FieldName.IsSome() {
@@ -93,6 +94,7 @@ func fieldSizeOptionString(prefix string, value wit.Option[wasi.FieldSizePayload
 	return prefix
 }
 
+// dnsErrorString formats the optional resolver code and info code of a DNS failure.
 func dnsErrorString(p wasi.DnsErrorPayload) string {
 	var parts []string
 	if p.Rcode.IsSome() {
@@ -107,6 +109,7 @@ func dnsErrorString(p wasi.DnsErrorPayload) string {
 	return "DNS error (" + strings.Join(parts, ", ") + ")"
 }
 
+// tlsAlertString formats the optional alert ID and message of a TLS failure.
 func tlsAlertString(p wasi.TlsAlertReceivedPayload) string {
 	var parts []string
 	if p.AlertId.IsSome() {
@@ -121,6 +124,7 @@ func tlsAlertString(p wasi.TlsAlertReceivedPayload) string {
 	return "TLS alert received (" + strings.Join(parts, ", ") + ")"
 }
 
+// errorString renders a wasi:http error code and any payload for logs and errors.
 func errorString(code wasi.ErrorCode) string {
 	if message, ok := simpleErrorString(code.Tag()); ok {
 		return message

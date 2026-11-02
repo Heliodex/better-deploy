@@ -115,6 +115,7 @@ func Caller(r *http.Request) (string, bool) {
 	return caller, hmac.Equal([]byte(v2), []byte(expected))
 }
 
+// appCallSignatureV2 computes the v2 HMAC over newline-separated fields. It must stay byte-for-byte compatible with the supervisor verifier.
 func appCallSignatureV2(key, caller, method, path, timestamp, bodyHash string) string {
 	mac := hmac.New(sha256.New, []byte(key))
 	_, _ = io.WriteString(mac, caller+"\n"+method+"\n"+path+"\n"+timestamp+"\n"+bodyHash)
@@ -126,6 +127,7 @@ func appBodySHA256(body []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// appURLEnvName maps an app name to WT_APP_URL_<NAME>, replacing non-alphanumeric characters with underscores.
 func appURLEnvName(name string) string {
 	var key strings.Builder
 	key.WriteString(appURLEnvPrefix)

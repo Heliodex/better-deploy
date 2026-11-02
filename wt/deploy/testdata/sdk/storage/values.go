@@ -11,6 +11,7 @@ import (
 	"time"
 )
 
+// encodeParam normalises a Go parameter to the JSON form the storage service accepts: bytes as $b64, times as RFC 3339, bools as 0/1 and small integers as int64.
 func encodeParam(arg any) any {
 	switch value := arg.(type) {
 	case []byte:
@@ -43,6 +44,7 @@ func encodeParam(arg any) any {
 	}
 }
 
+// encodeParams applies encodeParam to every argument, returning nil for an empty list.
 func encodeParams(args []any) []any {
 	if len(args) == 0 {
 		return nil
@@ -79,6 +81,7 @@ func decodeNumberValue(text string) (any, error) {
 	return strconv.ParseInt(text, 10, 64)
 }
 
+// decodeValue decodes one storage value: null, bool, string, a $b64 blob or an exact integer or float.
 func decodeValue(raw jsontext.Value) (any, error) {
 	text := strings.TrimSpace(string(raw))
 	if text == "" {
@@ -104,6 +107,7 @@ func decodeValue(raw jsontext.Value) (any, error) {
 	}
 }
 
+// int64Value coerces a storage value to int64, rejecting fractional floats and out-of-range numbers.
 func int64Value(value any) (int64, error) {
 	switch value := value.(type) {
 	case int64:
@@ -125,6 +129,7 @@ func int64Value(value any) (int64, error) {
 	}
 }
 
+// float64Value coerces a storage integer, float or numeric string to float64.
 func float64Value(value any) (float64, error) {
 	switch value := value.(type) {
 	case float64:
@@ -138,6 +143,7 @@ func float64Value(value any) (float64, error) {
 	}
 }
 
+// boolValue coerces a storage bool, 0/1 integer or parseable string to bool.
 func boolValue(value any) (bool, error) {
 	switch value := value.(type) {
 	case bool:
@@ -158,6 +164,7 @@ func boolValue(value any) (bool, error) {
 	}
 }
 
+// scanValue scans a storage value into common pointer types, delegating to sql.Scanner when dest implements it.
 func scanValue(dest, value any) error {
 	if scanner, ok := dest.(interface{ Scan(any) error }); ok {
 		return scanner.Scan(value)

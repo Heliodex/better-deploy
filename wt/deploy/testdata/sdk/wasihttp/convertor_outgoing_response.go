@@ -41,6 +41,7 @@ func (w *responseWriter) Header() http.Header {
 	return w.headers
 }
 
+// send starts the response by handing its headers and body stream to the caller. Only the first call has an effect.
 func (w *responseWriter) send() error {
 	if w.channel == nil {
 		return nil
@@ -71,6 +72,7 @@ func (w *responseWriter) send() error {
 	return nil
 }
 
+// takeError consumes the body stream result and reports a transport error once writing has finished.
 func (r *responseWriter) takeError() error {
 	if r.streamResult != nil {
 		streamResult := r.streamResult.Read()
@@ -118,6 +120,7 @@ func (w *responseWriter) stop() {
 	}
 }
 
+// close cancels the request context and drops the body stream.
 func (w *responseWriter) close() {
 	w.stop()
 	if w.stream != nil {

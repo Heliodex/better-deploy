@@ -110,6 +110,7 @@ func init() {
 	handler.Exports.Handle = wasiHandle
 }
 
+// toWasiHeaders converts net/http headers, rejecting forbidden or malformed fields.
 func toWasiHeaders(headers http.Header) (*wasi.Fields, error) {
 	fields := wasi.MakeFields()
 
@@ -141,12 +142,14 @@ func toWasiHeaders(headers http.Header) (*wasi.Fields, error) {
 	return fields, nil
 }
 
+// trailersFuture returns an already-completed future with no trailers.
 func trailersFuture() *wit.FutureReader[wit.Result[wit.Option[*wasi.Fields], wasi.ErrorCode]] {
 	tx, rx := wasi.MakeFutureResultOptionFieldsErrorCode()
 	go tx.Write(wit.Ok[wit.Option[*wasi.Fields], wasi.ErrorCode](wit.None[*wasi.Fields]()))
 	return rx
 }
 
+// unitFuture returns an already-completed unit future.
 func unitFuture() *wit.FutureReader[wit.Result[wit.Unit, wasi.ErrorCode]] {
 	tx, rx := wasi.MakeFutureResultUnitErrorCode()
 	go tx.Write(wit.Ok[wit.Unit, wasi.ErrorCode](wit.Unit{}))
