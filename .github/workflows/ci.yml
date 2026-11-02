@@ -40,6 +40,35 @@ jobs:
                   (cd wt/supervisor/web && bun audit --production --audit-level=moderate)
                   (cd wt/example/guestbook/web && bun audit --production --audit-level=moderate)
 
+    lint:
+        runs-on: ubuntu-latest
+        timeout-minutes: 20
+        steps:
+            - uses: actions/checkout@v7
+
+            - uses: actions/setup-go@v7
+              with:
+                  go-version-file: wt/supervisor/go.mod
+                  cache-dependency-path: |
+                      wt/supervisor/go.sum
+                      wt/deploy/go.sum
+                      wt/example/go.sum
+                      wt/packages/go.sum
+
+            - uses: oven-sh/setup-bun@v2
+              with:
+                  bun-version: 1.4.4
+
+            - name: Build embedded admin panel
+              working-directory: wt/supervisor
+              run: go generate ./...
+
+            - name: Install golangci-lint
+              run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
+
+            - name: Lint every module
+              run: ./wt/lint.sh
+
     e2e:
         runs-on: ubuntu-latest
         timeout-minutes: 30
