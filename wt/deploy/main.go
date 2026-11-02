@@ -282,6 +282,11 @@ func resolveConfig(args []string) (*deployConfig, error) {
 	if *target != targetDefault {
 		targetConfigured = true
 	}
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == "target" {
+			targetConfigured = true
+		}
+	})
 	if flags.NArg() > 0 {
 		return nil, fmt.Errorf("unexpected argument %q", flags.Arg(0))
 	}
