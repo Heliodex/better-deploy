@@ -25,55 +25,6 @@ type diskUsageCache struct {
 	at    time.Time
 }
 
-func walkSize(root string, total *int64) error {
-	return filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			if os.IsNotExist(err) {
-				return nil
-			}
-			return err
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		if info.Mode().IsRegular() {
-			*total += info.Size()
-		}
-		return nil
-	})
-}
-
-// walkUsage adds the regular-file bytes and every non-root entry under root to the totals.
-func walkUsage(root string, bytes, entries *int64) error {
-	return filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			if os.IsNotExist(walkErr) {
-				return nil
-			}
-			return walkErr
-		}
-		if path == root {
-			return nil
-		}
-		*entries++
-		if entry.IsDir() {
-			return nil
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		if info.Mode().IsRegular() {
-			*bytes += info.Size()
-		}
-		return nil
-	})
-}
-
 // appDataUsage measures /data, the app's SQLite database files and its blob store, counting every non-root directory entry
 // so empty files and directories still count against the inode quota.
 func (s *supervisor) appDataUsage(name string) (bytes, entries int64, err error) {
@@ -191,6 +142,33 @@ type diskTotals struct {
 	appsBytes, stateBytes, totalBytes int64
 }
 
+// walkUsage adds the regular-file bytes and every non-root entry under root to the totals.
+func walkUsage(root string, bytes, entries *int64) error {
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if os.IsNotExist(walkErr) {
+				return nil
+			}
+			return walkErr
+		}
+		if path == root {
+			return nil
+		}
+		*entries++
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if info.Mode().IsRegular() {
+			*bytes += info.Size()
+		}
+		return nil
+	})
+}
+
 // treeBytes sums the regular files under root. A missing tree is empty rather than an error.
 func treeBytes(root string) (int64, error) {
 	if _, err := os.Stat(root); err != nil {
@@ -199,8 +177,8 @@ func treeBytes(root string) (int64, error) {
 		}
 		return 0, err
 	}
-	var total int64
-	if err := walkSize(root, &total); err != nil {
+	var total, entries int64
+	if err := walkUsage(root, &total, &entries); err != nil {
 		return 0, err
 	}
 	return total, nil
@@ -251,7 +229,7 @@ func (s *supervisor) overBudget() bool {
 		log.Printf("disk budget: %v", err)
 		return false
 	}
-	return totals.totalBytes > s.cfg.diskBudgetBytes
+	return overByteBudget(s.cfg.diskBudgetBytes, totals.totalBytes)
 }
 
 // rejectOverBudget writes 507 and reports true when the global budget is already exceeded.
@@ -265,7 +243,7 @@ func (s *supervisor) rejectOverBudget(w http.ResponseWriter) bool {
 		writeError(w, http.StatusInternalServerError, "measure disk usage: "+err.Error())
 		return true
 	}
-	if totals.totalBytes <= s.cfg.diskBudgetBytes {
+	if !overByteBudget(s.cfg.diskBudgetBytes, totals.totalBytes) {
 		return false
 	}
 	writeError(w, http.StatusInsufficientStorage, fmt.Sprintf(
@@ -298,7 +276,7 @@ func (s *supervisor) handleUsage(w http.ResponseWriter, r *http.Request) {
 		StateBytes:  totals.stateBytes,
 		TotalBytes:  totals.totalBytes,
 		BudgetBytes: budget,
-		OverBudget:  budget > 0 && totals.totalBytes > budget,
+		OverBudget:  overByteBudget(budget, totals.totalBytes),
 	})
 }
 
@@ -306,22 +284,16 @@ func (s *supervisor) handleUsage(w http.ResponseWriter, r *http.Request) {
 func (s *supervisor) monitorDiskBudget() {
 	ticker := time.NewTicker(diskBudgetInterval)
 	defer ticker.Stop()
-	over := false
+	var watch budgetWatch
 	for range ticker.C {
 		if s.stopping.Load() {
 			return
 		}
-		now := s.overBudget()
-		switch {
-		case now && !over:
-			if totals, err := s.diskTotals(); err == nil {
-				log.Printf("warning: disk budget exceeded: %d of %d bytes used", totals.totalBytes, s.cfg.diskBudgetBytes)
-			} else {
-				log.Printf("warning: disk budget exceeded")
-			}
-		case !now && over:
-			log.Printf("disk budget usage is back under the limit")
+		totals, err := s.diskTotals()
+		if err != nil {
+			log.Printf("disk budget: %v", err)
+			continue
 		}
-		over = now
+		watch.update(overByteBudget(s.cfg.diskBudgetBytes, totals.totalBytes), "disk budget", totals.totalBytes, s.cfg.diskBudgetBytes)
 	}
 }

@@ -85,6 +85,7 @@ type storageServer struct {
 	tempDir    string
 	tempBudget int64
 	tempOver   atomic.Bool
+	tempWatch  budgetWatch
 
 	sessionMu      sync.Mutex
 	sessionCond    *sync.Cond
@@ -224,30 +225,11 @@ func (s *storageServer) setTempDir(dir string, budget int64) error {
 
 // dirSize sums the regular files in a directory without following links.
 func dirSize(dir string) (int64, error) {
-	var total int64
-	err := filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			if os.IsNotExist(err) {
-				return nil
-			}
-			return err
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		if info.Mode().IsRegular() {
-			total += info.Size()
-		}
-		return nil
-	})
-	if os.IsNotExist(err) {
-		return 0, nil
+	var total, entries int64
+	if err := walkUsage(dir, &total, &entries); err != nil {
+		return 0, err
 	}
-	return total, err
+	return total, nil
 }
 
 // checkTemp updates the over-budget flag used to reject new storage requests. Existing queries finish under their own five-second deadline.
@@ -258,6 +240,7 @@ func (s *storageServer) checkTemp() {
 	s.mu.Unlock()
 	if dir == "" || budget <= 0 {
 		s.tempOver.Store(false)
+		s.tempWatch.update(false, "storage temp", 0, budget)
 		return
 	}
 	size, err := dirSize(dir)
@@ -265,14 +248,9 @@ func (s *storageServer) checkTemp() {
 		log.Printf("storage temp: measure %s: %v", dir, err)
 		return
 	}
-	over := size > budget
-	if over != s.tempOver.Swap(over) {
-		if over {
-			log.Printf("storage temp: %s is over its %d-byte budget", dir, budget)
-		} else {
-			log.Printf("storage temp: %s is under its budget again", dir)
-		}
-	}
+	over := overByteBudget(budget, size)
+	s.tempOver.Store(over)
+	s.tempWatch.update(over, "storage temp", size, budget)
 }
 
 func (s *storageServer) monitorTemp(ctx context.Context) {
