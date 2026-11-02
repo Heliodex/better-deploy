@@ -13,14 +13,14 @@ import (
 
 // Template placeholders substituted when scaffolding. Templates must not use these tokens otherwise.
 const (
-	newNameToken     = "__APP_NAME__"
-	newContractToken = "__CONTRACT_IMPORT__"
-	newModuleToken   = "__APP_MODULE__"
-	newSDKGenToken   = "__SDK_GENERATE__"
-	newSDKWITToken   = "__SDK_WIT__"
+	newNameToken     = "__APP_NAME__"        //nolint:gosec // Template placeholder, not a credential.
+	newContractToken = "__CONTRACT_IMPORT__" //nolint:gosec // Template placeholder, not a credential.
+	newModuleToken   = "__APP_MODULE__"      //nolint:gosec // Template placeholder, not a credential.
+	newSDKGenToken   = "__SDK_GENERATE__"    //nolint:gosec // Template placeholder, not a credential.
+	newSDKWITToken   = "__SDK_WIT__"         //nolint:gosec // Template placeholder, not a credential.
 )
 
-// Template files embedded into the binary. Listed explicitly so the template's own web/node_modules and web/bun.lock are never embedded, and therefore never copied into new apps. Run bun install there to materialize them instead. Keep this list in sync with testdata/template (TestNewMatchesTemplate fails if a template file is missing here).
+// Template files embedded into the binary. The template's web/node_modules and web/bun.lock are deliberately omitted so a new app starts without them. Keep this list in sync with testdata/template.
 //
 //go:embed all:testdata/template/app.json
 //go:embed all:testdata/template/biome.json
@@ -163,7 +163,7 @@ func copyEmbeddedDir(root, dst string) (int, error) {
 
 		target := filepath.Join(dst, filepath.FromSlash(rel))
 		if entry.IsDir() {
-			return os.MkdirAll(target, 0o755)
+			return os.MkdirAll(target, privateDirMode)
 		}
 
 		data, err := sdkFS.ReadFile(path)
@@ -171,11 +171,11 @@ func copyEmbeddedDir(root, dst string) (int, error) {
 			return err
 		}
 
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(target), privateDirMode); err != nil {
 			return err
 		}
 
-		mode := os.FileMode(0o644)
+		mode := os.FileMode(scaffoldFileMode)
 		if strings.HasSuffix(rel, ".sh") {
 			mode = 0o755
 		}
@@ -219,7 +219,7 @@ func copyLocalDir(src, dst string) (int, error) {
 
 		target := filepath.Join(dst, rel)
 		if entry.IsDir() {
-			return os.MkdirAll(target, 0o755)
+			return os.MkdirAll(target, privateDirMode)
 		}
 
 		data, err := os.ReadFile(path)
@@ -227,12 +227,12 @@ func copyLocalDir(src, dst string) (int, error) {
 			return err
 		}
 
-		mode := os.FileMode(0o644)
+		mode := os.FileMode(scaffoldFileMode)
 		if info, err := entry.Info(); err == nil && info.Mode()&0o111 != 0 {
 			mode = 0o755
 		}
 
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(target), privateDirMode); err != nil {
 			return err
 		}
 
@@ -256,13 +256,13 @@ func writeStandaloneGoMod(abs, module string) error {
 	}
 
 	text := strings.ReplaceAll(string(data), newModuleToken, module)
-	if err := os.WriteFile(filepath.Join(abs, "go.mod"), []byte(text), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(abs, "go.mod"), []byte(text), scaffoldFileMode); err != nil {
 		return err
 	}
 
 	sum, err := standaloneFS.ReadFile("testdata/standalone/go.sum")
 	if err == nil {
-		if err := os.WriteFile(filepath.Join(abs, "go.sum"), sum, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(abs, "go.sum"), sum, scaffoldFileMode); err != nil {
 			return err
 		}
 	}
@@ -272,13 +272,13 @@ func writeStandaloneGoMod(abs, module string) error {
 		return err
 	}
 
-	if err := os.WriteFile(filepath.Join(abs, "sdk", "go.mod"), sdkMod, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(abs, "sdk", "go.mod"), sdkMod, scaffoldFileMode); err != nil {
 		return err
 	}
 
 	sdkSum, err := standaloneFS.ReadFile("testdata/standalone/sdk.go.sum")
 	if err == nil {
-		if err := os.WriteFile(filepath.Join(abs, "sdk", "go.sum"), sdkSum, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(abs, "sdk", "go.sum"), sdkSum, scaffoldFileMode); err != nil {
 			return err
 		}
 	}
@@ -297,7 +297,7 @@ func prepareNewDir(display, abs string) error {
 
 		return nil
 	case os.IsNotExist(err):
-		if err := os.MkdirAll(abs, 0o755); err != nil {
+		if err := os.MkdirAll(abs, privateDirMode); err != nil {
 			return fmt.Errorf("create %s: %w", display, err)
 		}
 
@@ -324,7 +324,7 @@ func writeTemplateFiles(abs, name string, mode scaffoldMode) (int, error) {
 
 		dst := filepath.Join(abs, filepath.FromSlash(rel))
 		if entry.IsDir() {
-			return os.MkdirAll(dst, 0o755)
+			return os.MkdirAll(dst, privateDirMode)
 		}
 
 		data, err := templateFS.ReadFile(path)
@@ -337,7 +337,7 @@ func writeTemplateFiles(abs, name string, mode scaffoldMode) (int, error) {
 		out = strings.ReplaceAll(out, newSDKGenToken, mode.sdkGenerate)
 
 		out = strings.ReplaceAll(out, newSDKWITToken, mode.sdkWIT)
-		if err := os.WriteFile(dst, []byte(out), 0o644); err != nil {
+		if err := os.WriteFile(dst, []byte(out), scaffoldFileMode); err != nil {
 			return err
 		}
 
@@ -372,7 +372,7 @@ func appendStandaloneIgnore(abs string) error {
 	}
 
 	appendIgnore := "sdk/binding/\nsdk/tmp/\n"
-	if err := os.WriteFile(filepath.Join(abs, ".gitignore"), append(ignore, []byte(appendIgnore)...), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(abs, ".gitignore"), append(ignore, []byte(appendIgnore)...), scaffoldFileMode); err != nil {
 		return err
 	}
 

@@ -145,7 +145,7 @@ func findSupervisor(cfg *devConfig, workDir string) (string, error) {
 
 	fmt.Fprintln(os.Stderr, "dev: building supervisor from", src)
 
-	cmd := exec.Command("go", "build", "-o", out, ".")
+	cmd := exec.CommandContext(context.Background(), "go", "build", "-o", out, ".")
 	cmd.Dir = src
 	cmd.Stdout = os.Stderr
 
@@ -176,19 +176,19 @@ func detectTarget(wasmtime string) (string, error) {
 	defer os.RemoveAll(dir)
 
 	src := filepath.Join(dir, "probe.wat")
-	if err := os.WriteFile(src, []byte("(module)"), 0o644); err != nil {
+	if err := os.WriteFile(src, []byte("(module)"), privateFileMode); err != nil {
 		return "", err
 	}
 
 	artifact := filepath.Join(dir, "probe.cwasm")
 
-	cmd := exec.Command(wasmtime, "compile", "--target", devTargetProbes[0], src, "-o", artifact)
+	cmd := exec.CommandContext(context.Background(), wasmtime, "compile", "--target", devTargetProbes[0], src, "-o", artifact)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("wasmtime compile probe: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 
 	for _, target := range devTargetProbes {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), devProbeTimeout)
 		out, err := exec.CommandContext(ctx, wasmtime, "serve",
 			"--allow-precompiled", "--addr", "127.0.0.1:0", "--target", target, artifact).CombinedOutput()
 
@@ -213,7 +213,12 @@ func waitHealthy(url string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 
 	for {
-		resp, err := http.Get(url)
+		request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+		if err != nil {
+			return err
+		}
+
+		resp, err := http.DefaultClient.Do(request)
 		if err == nil {
 			resp.Body.Close()
 			return nil
@@ -223,7 +228,7 @@ func waitHealthy(url string, timeout time.Duration) error {
 			return fmt.Errorf("supervisor did not answer %s within %s", url, timeout)
 		}
 
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(devRetryDelay)
 	}
 }
 
@@ -321,12 +326,12 @@ func resolveDevDirs(cfg *devConfig) ([]string, error) {
 // resolveDevVite resolves the frontend dev server for a single app and explains when workspace mode ignores --vite.
 func resolveDevVite(cfg *devConfig, dirs []string) (*viteDev, error) {
 	if !cfg.vite {
-		return nil, nil
+		return nil, nil //nolint:nilnil // nil vite means Vite is disabled.
 	}
 
 	if len(dirs) > 1 {
 		fmt.Fprintln(os.Stderr, "dev: --vite is single-app; workspace mode uses the component rebuild loop")
-		return nil, nil
+		return nil, nil //nolint:nilnil // Workspace mode uses the component rebuild loop.
 	}
 
 	m, err := readManifest(dirs[0])
@@ -345,7 +350,7 @@ func resolveDevVite(cfg *devConfig, dirs []string) (*viteDev, error) {
 	}
 
 	if vite == nil {
-		return nil, nil
+		return nil, nil //nolint:nilnil // A nil result means the app has no Vite dev server.
 	}
 
 	fmt.Fprintf(os.Stderr, "dev: vite frontend in %s on 127.0.0.1:%d\n", vite.webDir, vite.port)
@@ -373,7 +378,7 @@ func prepareDevState(workDir string) (appsDir, stateDir string, err error) {
 
 	stateDir = filepath.Join(workDir, "state")
 	for _, dir := range []string{appsDir, stateDir} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, privateDirMode); err != nil {
 			return "", "", fmt.Errorf("create %s: %w", dir, err)
 		}
 	}
@@ -404,7 +409,7 @@ func devAddresses(cfg *devConfig) (addr, adminAddr string) {
 
 // startDevSupervisor starts the supervisor binary and waits for its health endpoint.
 func startDevSupervisor(supervisor string, cfg *devConfig, appsDir, stateDir, addr, adminAddr, target string) (*exec.Cmd, error) {
-	cmd := exec.Command(supervisor)
+	cmd := exec.CommandContext(context.Background(), supervisor)
 	cmd.Env = devEnv(appsDir, stateDir, addr, adminAddr, cfg.wasmtime, target)
 	cmd.Stdout = os.Stderr
 
@@ -413,7 +418,7 @@ func startDevSupervisor(supervisor string, cfg *devConfig, appsDir, stateDir, ad
 		return nil, fmt.Errorf("start supervisor: %w", err)
 	}
 
-	if err := waitHealthy("http://"+addr+"/healthz", 20*time.Second); err != nil {
+	if err := waitHealthy("http://"+addr+"/healthz", devProbeTimeout); err != nil {
 		_ = cmd.Process.Signal(syscall.SIGTERM)
 		_ = cmd.Wait()
 

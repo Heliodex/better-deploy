@@ -28,7 +28,7 @@ func TestRunJobsEnqueue(t *testing.T) {
 	defer server.Close()
 
 	if err := runJobs([]string{
-		"--host", server.URL, "--token", "secret", "demo", "enqueue",
+		testHostFlag, server.URL, "--token", "secret", testAppName, "enqueue",
 		"--path", "/jobs/run",
 		"--body", `{"value":"one"}`,
 		"--header", "X-Test: yes",
@@ -60,7 +60,7 @@ func TestRunJobsList(t *testing.T) {
 	}))
 	defer server.Close()
 
-	if err := runJobs([]string{"--host", server.URL, "demo", "list", "--status", "pending"}); err != nil {
+	if err := runJobs([]string{testHostFlag, server.URL, testAppName, "list", "--status", "pending"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -70,7 +70,7 @@ func TestRunJobsList(t *testing.T) {
 }
 
 func TestRunJobsRejectsInvalidAction(t *testing.T) {
-	err := runJobs([]string{"--host", "http://127.0.0.1:1", "demo", "explode"})
+	err := runJobs([]string{testHostFlag, "http://127.0.0.1:1", testAppName, "explode"})
 	if err == nil || !strings.Contains(err.Error(), "unknown jobs action") {
 		t.Errorf("error = %v", err)
 	}

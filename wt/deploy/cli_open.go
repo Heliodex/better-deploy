@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -104,5 +105,5 @@ func runOpen(args []string) error {
 		command = "xdg-open"
 	}
 
-	return exec.Command(command, append(commandArgs, target)...).Start()
+	return exec.CommandContext(context.Background(), command, append(commandArgs, target)...).Start()
 }

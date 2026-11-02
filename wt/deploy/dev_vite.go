@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -22,7 +23,9 @@ type viteDev struct {
 
 // freeLocalPort asks the kernel for an unused loopback port.
 func freeLocalPort() (int, error) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	var listenConfig net.ListenConfig
+
+	listener, err := listenConfig.Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		return 0, err
 	}
@@ -158,7 +161,7 @@ func writeViteDevConfig(dev *viteDev, supervisorPort int) error {
 	content.WriteString("}\n")
 
 	dev.configPath = filepath.Join(dev.webDir, ".wt-dev.vite.config.ts")
-	if err := os.WriteFile(dev.configPath, []byte(content.String()), 0o644); err != nil {
+	if err := os.WriteFile(dev.configPath, []byte(content.String()), privateFileMode); err != nil {
 		return fmt.Errorf("write vite dev config: %w", err)
 	}
 
@@ -178,7 +181,7 @@ func startVite(dev *viteDev) (*exec.Cmd, error) {
 		command += " -- --config " + shellQuote(dev.configPath)
 	}
 
-	cmd := exec.Command("sh", "-c", command)
+	cmd := exec.CommandContext(context.Background(), "sh", "-c", command)
 	cmd.Dir = dev.webDir
 
 	cmd.Env = append(os.Environ(), "WT_DEV=1")
@@ -211,7 +214,7 @@ func ensureWebDeps(webDir string) error {
 
 	fmt.Fprintln(os.Stderr, "dev: installing web dependencies in", webDir)
 
-	cmd := exec.Command("bun", "install")
+	cmd := exec.CommandContext(context.Background(), "bun", "install")
 	cmd.Dir = webDir
 	cmd.Stdout = os.Stderr
 

@@ -17,19 +17,19 @@ import (
 func writeExampleLayout(t *testing.T, root string) {
 	t.Helper()
 
-	if err := os.MkdirAll(filepath.Join(root, "example"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "example"), privateDirMode); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(filepath.Join(root, "example", "go.mod"), []byte("module example.test\n\ngo 1.27.1\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "example", "go.mod"), []byte("module example.test\n\ngo 1.27.1\n"), privateFileMode); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := os.MkdirAll(filepath.Join(root, "packages"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "packages"), privateDirMode); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(filepath.Join(root, "packages", "go.mod"), []byte("module wt.packages\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "packages", "go.mod"), []byte("module wt.packages\n"), privateFileMode); err != nil {
 		t.Fatal(err)
 	}
 }

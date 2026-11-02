@@ -10,7 +10,7 @@ import (
 
 func TestClientFlagsReadConfigFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(path, []byte(`{"host":"http://config.example","token":"config-token"}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"host":"http://config.example","token":"config-token"}`), privateFileMode); err != nil {
 		t.Fatal(err)
 	}
 
@@ -25,7 +25,7 @@ func TestClientFlagsReadConfigFile(t *testing.T) {
 		t.Errorf("cfg = %+v, rest = %v", cfg, rest)
 	}
 
-	cfg, _, err = clientFlags([]string{"--host", "http://flag.example", "--token", "flag-token"}, true)
+	cfg, _, err = clientFlags([]string{testHostFlag, "http://flag.example", "--token", "flag-token"}, true)
 	if err != nil {
 		t.Fatal(err)
 	}

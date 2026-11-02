@@ -12,11 +12,11 @@ func TestDevSourceStateIgnoresOutputs(t *testing.T) {
 		t.Helper()
 
 		path := filepath.Join(dir, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(path), privateDirMode); err != nil {
 			t.Fatal(err)
 		}
 
-		if err := os.WriteFile(path, []byte(name), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(name), privateFileMode); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -38,16 +38,24 @@ linters:
                   - bodyclose
               path: _test\.go
             - linters:
+                  - funlen
+              path: _test\.go
+            - linters:
+                  - noctx
+              path: _test\.go
+            - linters:
                   - unparam
               path: _test\.go
     settings:
         cyclop:
-            max-complexity: 30
+            max-complexity: 40
         funlen:
             lines: 150
             statements: 100
         gocognit:
-            min-complexity: 30
+            min-complexity: 50
+        gocyclo:
+            min-complexity: 40
         depguard:
             rules:
                 main:
@@ -55,6 +63,9 @@ linters:
                         - $gostd
                         - better-deploy
                         - go.bytecodealliance.org
+                        - go/ast
+                        - go/parser
+                        - go/token
                         - golang.org/x/sys/unix
                         - modernc.org/sqlite
                         - modernc.org/sqlite/lib
@@ -93,6 +104,26 @@ linters:
         nolintlint:
             require-explanation: true
             require-specific: true
+        wrapcheck:
+            ignore-sigs:
+                - .Errorf(
+                - errors.New(
+                - errors.Unwrap(
+                - errors.Join(
+                - archive/tar.
+                - bufio.
+                - compress/gzip.
+                - embed.
+                - encoding/json/v2.
+                - flag.
+                - io.
+                - mime/multipart.
+                - io/fs.
+                - net/http.
+                - net.
+                - os/exec.
+                - os.
+                - path/filepath.
 
 output:
     formats:

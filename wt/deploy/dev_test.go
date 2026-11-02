@@ -66,20 +66,20 @@ func TestViteDevConfigIncludesProxy(t *testing.T) {
 	appDir := t.TempDir()
 
 	webDir := filepath.Join(appDir, "web")
-	if err := os.MkdirAll(filepath.Join(webDir, "src"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(webDir, "src"), privateDirMode); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(filepath.Join(webDir, "package.json"), []byte(`{"scripts":{"dev":"vite dev"}}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(webDir, "package.json"), []byte(`{"scripts":{"dev":"vite dev"}}`), privateFileMode); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(filepath.Join(webDir, "vite.config.ts"), []byte("export default {}\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(webDir, "vite.config.ts"), []byte("export default {}\n"), privateFileMode); err != nil {
 		t.Fatal(err)
 	}
 
 	m := manifest{
-		Name: "demo",
+		Name: testAppName,
 		Dev:  &appDevConfig{Port: 5199, Proxy: []string{"/api", "/v1"}},
 	}
 	if err := normalizeDevConfig(m.Dev); err != nil {
@@ -127,15 +127,15 @@ func TestViteDevConfigCanDisableSupervisorProxy(t *testing.T) {
 	appDir := t.TempDir()
 
 	webDir := filepath.Join(appDir, "web")
-	if err := os.MkdirAll(webDir, 0o755); err != nil {
+	if err := os.MkdirAll(webDir, privateDirMode); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(filepath.Join(webDir, "package.json"), []byte(`{}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(webDir, "package.json"), []byte(`{}`), privateFileMode); err != nil {
 		t.Fatal(err)
 	}
 
-	m := manifest{Name: "demo", Dev: &appDevConfig{Port: 5199, SupervisorProxy: []string{}}}
+	m := manifest{Name: testAppName, Dev: &appDevConfig{Port: 5199, SupervisorProxy: []string{}}}
 	if err := normalizeDevConfig(m.Dev); err != nil {
 		t.Fatal(err)
 	}
@@ -170,15 +170,15 @@ func TestViteDevConfigWithoutBase(t *testing.T) {
 	appDir := t.TempDir()
 
 	webDir := filepath.Join(appDir, "web")
-	if err := os.MkdirAll(webDir, 0o755); err != nil {
+	if err := os.MkdirAll(webDir, privateDirMode); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(filepath.Join(webDir, "package.json"), []byte(`{}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(webDir, "package.json"), []byte(`{}`), privateFileMode); err != nil {
 		t.Fatal(err)
 	}
 
-	vite, ok, err := resolveViteDev(appDir, manifest{Name: "demo"}, "demo.localhost")
+	vite, ok, err := resolveViteDev(appDir, manifest{Name: testAppName}, "demo.localhost")
 	if err != nil || !ok {
 		t.Fatalf("resolveViteDev = %v, %t, %v", vite, ok, err)
 	}
@@ -211,11 +211,11 @@ func TestComponentSourceState(t *testing.T) {
 	}
 	for _, name := range files {
 		path := filepath.Join(root, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(path), privateDirMode); err != nil {
 			t.Fatal(err)
 		}
 
-		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte("x"), privateFileMode); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -409,22 +409,22 @@ func TestCheckStaticSvelteKit(t *testing.T) {
 	appDir := t.TempDir()
 
 	routes := filepath.Join(appDir, "web", "src", "routes")
-	if err := os.MkdirAll(filepath.Join(routes, "about"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(routes, "about"), privateDirMode); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(filepath.Join(routes, "+page.svelte"), []byte("<h1>ok</h1>"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(routes, "+page.svelte"), []byte("<h1>ok</h1>"), privateFileMode); err != nil {
 		t.Fatal(err)
 	}
 
-	m := manifest{Name: "demo"}
+	m := manifest{Name: testAppName}
 	if err := checkStaticSvelteKit(appDir, m); err != nil {
 		t.Fatalf("prerenderable route rejected: %v", err)
 	}
 
 	for _, name := range []string{"+page.server.ts", "about/+layout.server.js", "+server.ts"} {
 		path := filepath.Join(routes, name)
-		if err := os.WriteFile(path, []byte("export {}"), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte("export {}"), privateFileMode); err != nil {
 			t.Fatal(err)
 		}
 
@@ -442,11 +442,11 @@ func TestCheckStaticSvelteKit(t *testing.T) {
 	extra := []string{"hooks.server.ts", "lib/server/db.ts"}
 	for _, name := range extra {
 		path := filepath.Join(src, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(path), privateDirMode); err != nil {
 			t.Fatal(err)
 		}
 
-		if err := os.WriteFile(path, []byte("export {}"), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte("export {}"), privateFileMode); err != nil {
 			t.Fatal(err)
 		}
 

@@ -16,11 +16,11 @@ func TestComponentInputHashIgnoresStaticAndOutputs(t *testing.T) {
 		t.Helper()
 
 		path := filepath.Join(dir, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(path), privateDirMode); err != nil {
 			t.Fatal(err)
 		}
 
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(body), privateFileMode); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -58,19 +58,19 @@ func TestComponentInputHashIgnoresStaticAndOutputs(t *testing.T) {
 
 func TestBundleCanOmitComponent(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(`{"name":"demo","host":"demo.localhost"}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(`{"name":"demo","host":"demo.localhost"}`), privateFileMode); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := os.MkdirAll(filepath.Join(dir, "static"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, "static"), privateDirMode); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(filepath.Join(dir, "static", "index.html"), []byte("spa"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "static", "index.html"), []byte("spa"), privateFileMode); err != nil {
 		t.Fatal(err)
 	}
 
-	data, err := bundle(dir, manifest{Name: "demo", Host: "demo.localhost"}, false)
+	data, err := bundle(dir, manifest{Name: testAppName, Host: "demo.localhost"}, false)
 	if err != nil {
 		t.Fatal(err)
 	}

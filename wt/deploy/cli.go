@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -200,7 +201,7 @@ func supervisorURL(host, path string) string {
 
 // apiDo performs one API request with the client timeout and returns at most 8 MiB of the response body.
 func apiDo(cfg clientOptions, method, path string, body io.Reader, contentType string) (int, http.Header, []byte, error) {
-	req, err := http.NewRequest(method, supervisorURL(cfg.host, path), body)
+	req, err := http.NewRequestWithContext(context.Background(), method, supervisorURL(cfg.host, path), body)
 	if err != nil {
 		return 0, nil, nil, err
 	}
@@ -221,7 +222,7 @@ func apiDo(cfg clientOptions, method, path string, body io.Reader, contentType s
 	}
 	defer resp.Body.Close()
 
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, largeResponseLimit))
 	if err != nil {
 		return resp.StatusCode, resp.Header, nil, err
 	}
@@ -308,8 +309,8 @@ func runApps(args []string) error {
 
 	for _, app := range apps {
 		digest := app.CurrentDigest
-		if len(digest) > 12 {
-			digest = digest[:12]
+		if len(digest) > shortHashLength {
+			digest = digest[:shortHashLength]
 		}
 
 		fmt.Printf("%-24s %-32s %-10s %-6v %-7d %s\n", app.Name, app.Host, app.Status, app.Ready, app.PID, digest)
@@ -335,7 +336,7 @@ func derefLog(entry *logLine) []logLine {
 
 // followLogs consumes the supervisor's SSE log stream and prints each decoded entry.
 func followLogs(cfg clientOptions, path string) error {
-	req, err := http.NewRequest(http.MethodGet, supervisorURL(cfg.host, path), nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, supervisorURL(cfg.host, path), nil)
 	if err != nil {
 		return err
 	}
@@ -349,7 +350,7 @@ func followLogs(cfg clientOptions, path string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, smallResponseLimit))
 		return fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
@@ -422,7 +423,7 @@ type logOptions struct {
 // parseLogOptions parses wt logs filters and defaults to the last 200 entries.
 func parseLogOptions(cfg *clientOptions, rest []string) (string, logOptions, error) {
 	name := rest[0]
-	opts := logOptions{tail: 200}
+	opts := logOptions{tail: defaultLogTail}
 
 	var err error
 

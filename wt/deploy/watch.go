@@ -219,7 +219,7 @@ func watchComponent(cfg *deployConfig, extra []string, done <-chan struct{}) {
 			continue
 		}
 
-		time.Sleep(400 * time.Millisecond)
+		time.Sleep(devRebuildDelay)
 		fmt.Fprintln(os.Stderr, "dev: component change, rebuilding")
 
 		m, data, status, err := buildBundle(cfg)
@@ -275,7 +275,7 @@ func watchDev(cfg *deployConfig, done <-chan struct{}) {
 			continue
 		}
 		// Let a build tool that is still writing its source files settle before rebuilding.
-		time.Sleep(400 * time.Millisecond)
+		time.Sleep(devRebuildDelay)
 
 		previous, _ = devSourceState(cfg.dir)
 

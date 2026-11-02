@@ -14,6 +14,12 @@ import (
 	"testing"
 )
 
+const (
+	testAppName  = "demo"
+	testTarget   = "x86_64-test"
+	testHostFlag = "--host"
+)
+
 func digestOf(body string) string {
 	sum := sha256.Sum256([]byte(body))
 	return hex.EncodeToString(sum[:])
@@ -29,11 +35,11 @@ func TestBundle(t *testing.T) {
 		"static/index.html": "<html>hello</html>",
 	} {
 		path := filepath.Join(dir, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(path), privateDirMode); err != nil {
 			t.Fatal(err)
 		}
 
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(body), privateFileMode); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -91,11 +97,11 @@ func TestBundlePreservesUnknownManifestFields(t *testing.T) {
 	dir := t.TempDir()
 
 	appJSON := `{"name":"demo","host":"old.localhost","identity":"platform","allow_callers":["peer"],"job_concurrency":2,"future_field":{"keep":true}}`
-	if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(appJSON), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(appJSON), privateFileMode); err != nil {
 		t.Fatal(err)
 	}
 
-	data, err := bundle(dir, manifest{Name: "demo", Host: "new.localhost"}, false)
+	data, err := bundle(dir, manifest{Name: testAppName, Host: "new.localhost"}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +145,7 @@ func TestBundlePreservesUnknownManifestFields(t *testing.T) {
 func TestBundleOmitsMissingCwasm(t *testing.T) {
 	dir := t.TempDir()
 	for name, body := range map[string]string{"app.json": `{"name":"hello"}`, "main.wasm": "wasm"} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), privateFileMode); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -182,11 +188,11 @@ func TestBundleOmitsMissingCwasm(t *testing.T) {
 
 func TestBundleRequiresWasm(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(`{"name":"hello"}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(`{"name":"hello"}`), privateFileMode); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(filepath.Join(dir, "main.cwasm"), []byte("cwasm"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "main.cwasm"), []byte("cwasm"), privateFileMode); err != nil {
 		t.Fatal(err)
 	}
 
@@ -197,11 +203,11 @@ func TestBundleRequiresWasm(t *testing.T) {
 
 func TestWriteArtifactRecordsWasm(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "main.wasm"), []byte("wasm"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "main.wasm"), []byte("wasm"), privateFileMode); err != nil {
 		t.Fatal(err)
 	}
 
-	cfg := &deployConfig{dir: dir, wasmtime: filepath.Join(dir, "missing-wasmtime"), target: "x86_64-test"}
+	cfg := &deployConfig{dir: dir, wasmtime: filepath.Join(dir, "missing-wasmtime"), target: testTarget}
 	if err := writeArtifact(cfg, true); err != nil {
 		t.Fatal(err)
 	}
@@ -215,18 +221,18 @@ func TestWriteArtifactRecordsWasm(t *testing.T) {
 		t.Errorf("artifact = %+v, want the wasm digest and size", info)
 	}
 
-	if info.Wasmtime != "" || info.Target != "x86_64-test" || !info.Epoch {
+	if info.Wasmtime != "" || info.Target != testTarget || !info.Epoch {
 		t.Errorf("artifact = %+v, want the target and epoch without a runtime version", info)
 	}
 }
 
 func TestRunCompileSkipCompileWithoutCwasm(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "main.wasm"), []byte("wasm"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "main.wasm"), []byte("wasm"), privateFileMode); err != nil {
 		t.Fatal(err)
 	}
 
-	cfg := &deployConfig{dir: dir, wasmtime: filepath.Join(dir, "missing-wasmtime"), target: "x86_64-test", skipCompile: true}
+	cfg := &deployConfig{dir: dir, wasmtime: filepath.Join(dir, "missing-wasmtime"), target: testTarget, skipCompile: true}
 	if err := runCompile(cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -247,20 +253,20 @@ func TestRunCompileSkipCompileWithoutCwasm(t *testing.T) {
 
 func TestRunCompileSkipCompileMovesStaleCwasm(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "main.wasm"), []byte("new"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "main.wasm"), []byte("new"), privateFileMode); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(filepath.Join(dir, "main.cwasm"), []byte("old"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "main.cwasm"), []byte("old"), privateFileMode); err != nil {
 		t.Fatal(err)
 	}
 
 	artifactJSON := `{"wasm_sha256":"` + digestOf("old") + `"}`
-	if err := os.WriteFile(filepath.Join(dir, artifactName), []byte(artifactJSON), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, artifactName), []byte(artifactJSON), privateFileMode); err != nil {
 		t.Fatal(err)
 	}
 
-	cfg := &deployConfig{dir: dir, wasmtime: filepath.Join(dir, "missing-wasmtime"), target: "x86_64-test", skipCompile: true}
+	cfg := &deployConfig{dir: dir, wasmtime: filepath.Join(dir, "missing-wasmtime"), target: testTarget, skipCompile: true}
 	if err := runCompile(cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -290,21 +296,21 @@ func TestRunCompileSkipCompileMovesUnverifiedCwasm(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
-			if err := os.WriteFile(filepath.Join(dir, "main.wasm"), []byte("wasm"), 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, "main.wasm"), []byte("wasm"), privateFileMode); err != nil {
 				t.Fatal(err)
 			}
 
-			if err := os.WriteFile(filepath.Join(dir, "main.cwasm"), []byte("unverified"), 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, "main.cwasm"), []byte("unverified"), privateFileMode); err != nil {
 				t.Fatal(err)
 			}
 
 			if artifactJSON != "" {
-				if err := os.WriteFile(filepath.Join(dir, artifactName), []byte(artifactJSON), 0o644); err != nil {
+				if err := os.WriteFile(filepath.Join(dir, artifactName), []byte(artifactJSON), privateFileMode); err != nil {
 					t.Fatal(err)
 				}
 			}
 
-			cfg := &deployConfig{dir: dir, wasmtime: filepath.Join(dir, "missing-wasmtime"), target: "x86_64-test", skipCompile: true}
+			cfg := &deployConfig{dir: dir, wasmtime: filepath.Join(dir, "missing-wasmtime"), target: testTarget, skipCompile: true}
 			if err := runCompile(cfg); err != nil {
 				t.Fatal(err)
 			}
@@ -331,20 +337,20 @@ func TestRunCompileSkipCompileMovesUnverifiedCwasm(t *testing.T) {
 
 func TestRunCompileKeepsOldCwasmOnFailure(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "main.wasm"), []byte("wasm"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "main.wasm"), []byte("wasm"), privateFileMode); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(filepath.Join(dir, "main.cwasm"), []byte("old"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "main.cwasm"), []byte("old"), privateFileMode); err != nil {
 		t.Fatal(err)
 	}
 
 	compiler := filepath.Join(t.TempDir(), "wasmtime")
-	if err := os.WriteFile(compiler, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+	if err := os.WriteFile(compiler, []byte("#!/bin/sh\nexit 1\n"), privateDirMode); err != nil {
 		t.Fatal(err)
 	}
 
-	cfg := &deployConfig{dir: dir, wasmtime: compiler, target: "x86_64-test"}
+	cfg := &deployConfig{dir: dir, wasmtime: compiler, target: testTarget}
 	if err := runCompile(cfg); err == nil {
 		t.Fatal("expected a compile error")
 	}
@@ -369,11 +375,11 @@ func TestRunBundle(t *testing.T) {
 		"static/app.js": "console.log('hi')",
 	} {
 		path := filepath.Join(dir, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(path), privateDirMode); err != nil {
 			t.Fatal(err)
 		}
 
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(body), privateFileMode); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -496,7 +502,7 @@ func TestResolveDevConfig(t *testing.T) {
 
 func TestFindSupervisor(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "wt-supervisor")
-	if err := os.WriteFile(bin, []byte("x"), 0o755); err != nil {
+	if err := os.WriteFile(bin, []byte("x"), privateDirMode); err != nil {
 		t.Fatal(err)
 	}
 
@@ -554,7 +560,7 @@ func TestReadManifestValidatesSchedule(t *testing.T) {
 	write := func(body string) {
 		t.Helper()
 
-		if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(body), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(body), privateFileMode); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -584,12 +590,12 @@ func TestWorkspaceAppDirs(t *testing.T) {
 	root := t.TempDir()
 	for _, name := range []string{"alpha", "beta", "not-an-app"} {
 		dir := filepath.Join(root, name)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, privateDirMode); err != nil {
 			t.Fatal(err)
 		}
 
 		if name != "not-an-app" {
-			if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(`{"name":"`+name+`"}`), 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(`{"name":"`+name+`"}`), privateFileMode); err != nil {
 				t.Fatal(err)
 			}
 		}

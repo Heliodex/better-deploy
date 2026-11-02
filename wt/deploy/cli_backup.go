@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -68,7 +69,7 @@ func backupImport(cfg clientOptions, name, archive string) error {
 		_ = writer.CloseWithError(multipartWriter.Close())
 	}()
 
-	req, err := http.NewRequest(http.MethodPost, supervisorURL(cfg.host, "/apps/"+name+"/backups/import"), reader)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, supervisorURL(cfg.host, "/apps/"+name+"/backups/import"), reader)
 	if err != nil {
 		return err
 	}
@@ -85,7 +86,7 @@ func backupImport(cfg clientOptions, name, archive string) error {
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, smallResponseLimit))
 	if err := checkAPI(resp.StatusCode, body); err != nil {
 		return err
 	}
@@ -97,7 +98,7 @@ func backupImport(cfg clientOptions, name, archive string) error {
 
 // backupDownload streams a snapshot archive to out without the client timeout, since snapshots can be large.
 func backupDownload(cfg clientOptions, name, snapshot, out string) error {
-	req, err := http.NewRequest(http.MethodGet, supervisorURL(cfg.host, "/apps/"+name+"/backups/"+snapshot+"/download"), nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, supervisorURL(cfg.host, "/apps/"+name+"/backups/"+snapshot+"/download"), nil)
 	if err != nil {
 		return err
 	}
@@ -113,7 +114,7 @@ func backupDownload(cfg clientOptions, name, snapshot, out string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, smallResponseLimit))
 		return fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 

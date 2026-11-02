@@ -17,7 +17,7 @@ func TestRunBlobsList(t *testing.T) {
 	}))
 	defer server.Close()
 
-	if err := runBlobs([]string{"blobbox", "list", "--host", server.URL, "--token", "secret"}); err != nil {
+	if err := runBlobs([]string{"blobbox", "list", testHostFlag, server.URL, "--token", "secret"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -49,7 +49,7 @@ func TestRunBlobsGC(t *testing.T) {
 		"--older-than", "24h",
 		"--dry-run",
 		"--keep", strings.Repeat("b", 64),
-		"--host", server.URL,
+		testHostFlag, server.URL,
 		"--token", "secret",
 	}); err != nil {
 		t.Fatal(err)
@@ -81,7 +81,7 @@ func TestRunBlobsDelete(t *testing.T) {
 
 	digest := strings.Repeat("a", 64)
 
-	if err := runBlobs([]string{"blobbox", "delete", digest, "--host", server.URL}); err != nil {
+	if err := runBlobs([]string{"blobbox", "delete", digest, testHostFlag, server.URL}); err != nil {
 		t.Fatal(err)
 	}
 

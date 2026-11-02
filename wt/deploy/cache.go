@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json/v2"
@@ -37,7 +38,7 @@ func writeBuildCache(dir string, cache buildCache) {
 		return
 	}
 
-	_ = os.WriteFile(filepath.Join(dir, buildCacheName), append(data, '\n'), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, buildCacheName), append(data, '\n'), privateFileMode)
 }
 
 // readBuildCache loads the last phase cache. A missing or malformed file reads as an empty cache, which forces a rebuild.
@@ -183,7 +184,7 @@ func walkFiles(root string, skipDir func(string, os.DirEntry) bool, include func
 }
 
 // isComponentSource keeps the files that can change a compiled Go component. Generated Go and tests are handled through their sources.
-func isComponentSource(path string, entry os.DirEntry) bool {
+func isComponentSource(_ string, entry os.DirEntry) bool {
 	name := entry.Name()
 	if strings.HasSuffix(name, "_test.go") || strings.HasSuffix(name, ".gen.go") {
 		return false
@@ -203,7 +204,7 @@ func isComponentSource(path string, entry os.DirEntry) bool {
 }
 
 // isModuleSource keeps the build files of a replaced local module, excluding tests and generated Go.
-func isModuleSource(path string, entry os.DirEntry) bool {
+func isModuleSource(_ string, entry os.DirEntry) bool {
 	name := entry.Name()
 	if strings.HasSuffix(name, "_test.go") || strings.HasSuffix(name, ".gen.go") {
 		return false
@@ -453,7 +454,7 @@ func collectStaticInputFiles(dir string, m manifest) ([]string, error) {
 
 	web := filepath.Join(dir, webDirName(m))
 	if info, err := os.Stat(web); err == nil && info.IsDir() {
-		more, err := walkFiles(web, staticSkipDir(web), func(path string, entry os.DirEntry) bool {
+		more, err := walkFiles(web, staticSkipDir(web), func(_ string, entry os.DirEntry) bool {
 			return entry.Name() != ".wt-dev.vite.config.ts"
 		})
 		if err != nil {
@@ -772,7 +773,7 @@ func serverDigest(cfg *deployConfig, name string) string {
 		return ""
 	}
 
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, smallResponseLimit))
 	if err != nil {
 		return ""
 	}
@@ -789,7 +790,7 @@ func serverDigest(cfg *deployConfig, name string) string {
 
 // httpRequest creates a supervisor API request, adding the bearer token and the base URL from the deploy config.
 func httpRequest(cfg *deployConfig, method, path string, body io.Reader) (*http.Request, error) {
-	req, err := http.NewRequest(method, baseURL(cfg.host)+path, body)
+	req, err := http.NewRequestWithContext(context.Background(), method, baseURL(cfg.host)+path, body)
 	if err != nil {
 		return nil, err
 	}

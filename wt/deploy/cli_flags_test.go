@@ -13,7 +13,7 @@ func TestClientFlagsAnywhere(t *testing.T) {
 
 	cfg, rest, err := clientFlags([]string{
 		"pulse",
-		"--host", "http://127.0.0.1:8080",
+		testHostFlag, "http://127.0.0.1:8080",
 		"--token", "secret",
 		"--json",
 		"--tail", "40",
@@ -34,7 +34,7 @@ func TestClientFlagsAnywhere(t *testing.T) {
 func TestClientFlagsDoubleDash(t *testing.T) {
 	t.Setenv("WT_DEPLOY_HOST", "http://default")
 
-	cfg, rest, err := clientFlags([]string{"--", "--host", "literal", "pulse"}, false)
+	cfg, rest, err := clientFlags([]string{"--", testHostFlag, "literal", "pulse"}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestRunLogsAcceptsClientFlagsAfterApp(t *testing.T) {
 	}))
 	defer server.Close()
 
-	if err := runLogs([]string{"pulse", "--host", server.URL, "--token", "secret", "--tail", "40"}); err != nil {
+	if err := runLogs([]string{"pulse", testHostFlag, server.URL, "--token", "secret", "--tail", "40"}); err != nil {
 		t.Fatal(err)
 	}
 

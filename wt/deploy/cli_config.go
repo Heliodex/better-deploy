@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -58,7 +59,7 @@ func configSetData(opts configSetOptions) (string, error) {
 
 // patchConfig sends one config patch and prints the result.
 func patchConfig(cfg clientOptions, name, data, ifMatch string) error {
-	req, err := http.NewRequest(http.MethodPatch, supervisorURL(cfg.host, "/apps/"+name+"/config"), strings.NewReader(data))
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPatch, supervisorURL(cfg.host, "/apps/"+name+"/config"), strings.NewReader(data))
 	if err != nil {
 		return err
 	}

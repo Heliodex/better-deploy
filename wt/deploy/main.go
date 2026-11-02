@@ -5,6 +5,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json/jsontext"
@@ -372,7 +373,7 @@ func runBuildPhase(cfg *deployConfig, phase, command string) error {
 		return fmt.Errorf("app.json has no %s build command; set one or pass --skip-build", phase)
 	}
 
-	cmd := exec.Command("sh", "-c", command)
+	cmd := exec.CommandContext(context.Background(), "sh", "-c", command)
 	cmd.Dir = cfg.dir
 	cmd.Stdout = os.Stderr
 
@@ -385,7 +386,7 @@ func runBuildPhase(cfg *deployConfig, phase, command string) error {
 }
 
 func wasmtimeVersion(bin string) (string, error) {
-	out, err := exec.Command(bin, "--version").Output()
+	out, err := exec.CommandContext(context.Background(), bin, "--version").Output()
 	if err != nil {
 		return "", fmt.Errorf("wasmtime --version: %w", err)
 	}
@@ -437,7 +438,7 @@ func writeArtifact(cfg *deployConfig, epoch bool) error {
 		return err
 	}
 
-	return os.WriteFile(filepath.Join(cfg.dir, artifactName), append(data, '\n'), 0o644)
+	return os.WriteFile(filepath.Join(cfg.dir, artifactName), append(data, '\n'), privateFileMode)
 }
 
 func readArtifactFile(dir string) (artifact, error) {
@@ -507,7 +508,7 @@ func runCompile(cfg *deployConfig) error {
 		return err
 	}
 
-	cmd := exec.Command(cfg.wasmtime, "compile", "--target", cfg.target, "-W", "component-model-async=y", "-W", "epoch-interruption=y", wasm, "-o", name)
+	cmd := exec.CommandContext(context.Background(), cfg.wasmtime, "compile", "--target", cfg.target, "-W", "component-model-async=y", "-W", "epoch-interruption=y", wasm, "-o", name)
 	cmd.Stdout = os.Stderr
 
 	cmd.Stderr = os.Stderr
@@ -525,7 +526,7 @@ func runCompile(cfg *deployConfig) error {
 }
 
 func writeTarFile(tw *tar.Writer, name string, data []byte) error {
-	if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(data))}); err != nil {
+	if err := tw.WriteHeader(&tar.Header{Name: name, Mode: tarFileMode, Size: int64(len(data))}); err != nil {
 		return fmt.Errorf("write %s: %w", name, err)
 	}
 
@@ -697,7 +698,7 @@ func upload(cfg *deployConfig, m manifest, bundle []byte) error {
 
 	url := baseURL(cfg.host) + "/apps/" + m.Name + "/deployments"
 
-	req, err := http.NewRequest(http.MethodPost, url, &body)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, &body)
 	if err != nil {
 		return err
 	}
@@ -721,7 +722,7 @@ func upload(cfg *deployConfig, m manifest, bundle []byte) error {
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, smallResponseLimit))
 	if err != nil {
 		return fmt.Errorf("read response: %w", err)
 	}
@@ -763,7 +764,7 @@ type deploymentState struct {
 
 // waitDeploy polls a queued deployment until it succeeds or fails, then prints the app.
 func waitDeploy(cfg *deployConfig, name, location string) error {
-	client := clientOptions{host: cfg.host, token: cfg.token, jsonOut: cfg.jsonOut, timeout: 30 * time.Second}
+	client := clientOptions{host: cfg.host, token: cfg.token, jsonOut: cfg.jsonOut, timeout: deployPollTimeout}
 	for {
 		status, _, body, err := apiDo(client, http.MethodGet, location, nil, "")
 		if err != nil {
@@ -781,7 +782,7 @@ func waitDeploy(cfg *deployConfig, name, location string) error {
 
 		switch state.Status {
 		case "queued", "running":
-			time.Sleep(250 * time.Millisecond)
+			time.Sleep(deployPollDelay)
 		case "success":
 			return printDeployResult(cfg, name, nil)
 		default:
@@ -797,7 +798,7 @@ func waitDeploy(cfg *deployConfig, name, location string) error {
 // printDeployResult prints the app info from a fresh GET, or the provided response body.
 func printDeployResult(cfg *deployConfig, name string, body []byte) error {
 	if body == nil {
-		client := clientOptions{host: cfg.host, token: cfg.token, jsonOut: cfg.jsonOut, timeout: 30 * time.Second}
+		client := clientOptions{host: cfg.host, token: cfg.token, jsonOut: cfg.jsonOut, timeout: deployPollTimeout}
 
 		status, _, data, err := apiDo(client, http.MethodGet, "/apps/"+name, nil, "")
 		if err != nil {
@@ -840,8 +841,8 @@ func printDeployResult(cfg *deployConfig, name string, body []byte) error {
 
 	if info.CurrentDigest != "" {
 		digest := info.CurrentDigest
-		if len(digest) > 12 {
-			digest = digest[:12]
+		if len(digest) > shortHashLength {
+			digest = digest[:shortHashLength]
 		}
 
 		fmt.Printf("  digest: %s\n", digest)
@@ -1016,7 +1017,7 @@ func runBundle(args []string) error {
 		out = m.Name + ".tar.gz"
 	}
 
-	if err := os.WriteFile(out, data, 0o644); err != nil {
+	if err := os.WriteFile(out, data, privateFileMode); err != nil {
 		return fmt.Errorf("write bundle: %w", err)
 	}
 

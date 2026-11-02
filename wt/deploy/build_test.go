@@ -10,11 +10,11 @@ import (
 func writeTestFile(t *testing.T, path, body string) {
 	t.Helper()
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), privateDirMode); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(body), privateFileMode); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -34,7 +34,7 @@ func fakeWasmtime(t *testing.T, dir string) string {
 	t.Helper()
 
 	path := filepath.Join(dir, "wasmtime")
-	if err := os.WriteFile(path, []byte("#!/bin/sh\necho wasmtime 50.0.0\n"), 0o755); err != nil {
+	if err := os.WriteFile(path, []byte("#!/bin/sh\necho wasmtime 50.0.0\n"), privateDirMode); err != nil {
 		t.Fatal(err)
 	}
 
@@ -180,11 +180,11 @@ func TestPrepareBuildsSplitsPhases(t *testing.T) {
 	writeTestFile(t, filepath.Join(dir, "web", "src", "+page.svelte"), "<h1>one</h1>")
 
 	m := manifest{
-		Name:           "demo",
+		Name:           testAppName,
 		BuildComponent: "printf 'component\\n' >> build.log; printf wasm > main.wasm",
 		BuildStatic:    "printf 'static\\n' >> build.log; mkdir -p static; printf html > static/index.html",
 	}
-	cfg := &deployConfig{dir: dir, skipCompile: true, wasmtime: fakeWasmtime(t, t.TempDir()), target: "x86_64-test"}
+	cfg := &deployConfig{dir: dir, skipCompile: true, wasmtime: fakeWasmtime(t, t.TempDir()), target: testTarget}
 	logPath := filepath.Join(dir, "build.log")
 
 	first, err := prepareBuilds(cfg, m)

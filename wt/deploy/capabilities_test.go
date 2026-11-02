@@ -40,7 +40,7 @@ func TestFetchCapabilities(t *testing.T) {
 		Commit:         "abcdef0123456789",
 		GoVersion:      "go1.27.1",
 		Wasmtime:       "wasmtime 50.0.0",
-		WasmtimeTarget: "x86_64-test",
+		WasmtimeTarget: testTarget,
 		Compiler:       true,
 	}
 
@@ -81,7 +81,7 @@ func TestPreflightDeployUsesServerTarget(t *testing.T) {
 	server := capabilityTestServer(t, supervisorCapabilities{
 		Version:        "1.2.3",
 		Wasmtime:       "wasmtime 50.0.0",
-		WasmtimeTarget: "x86_64-test",
+		WasmtimeTarget: testTarget,
 		Compiler:       true,
 	}, http.StatusOK)
 	defer server.Close()
@@ -93,7 +93,7 @@ func TestPreflightDeployUsesServerTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if cfg.target != "x86_64-test" || !pre.TargetFromServer {
+	if cfg.target != testTarget || !pre.TargetFromServer {
 		t.Errorf("target = %q, from server %v", cfg.target, pre.TargetFromServer)
 	}
 
@@ -108,7 +108,7 @@ func TestPreflightDeployKeepsExplicitTarget(t *testing.T) {
 	server := capabilityTestServer(t, supervisorCapabilities{
 		Version:        "1.2.3",
 		Wasmtime:       "wasmtime 50.0.0",
-		WasmtimeTarget: "x86_64-test",
+		WasmtimeTarget: testTarget,
 		Compiler:       true,
 	}, http.StatusOK)
 	defer server.Close()
@@ -133,7 +133,7 @@ func TestPreflightDeployRejectsOldSupervisor(t *testing.T) {
 	server := capabilityTestServer(t, supervisorCapabilities{}, http.StatusNotFound)
 	defer server.Close()
 
-	cfg := &deployConfig{host: server.URL, target: "x86_64-test"}
+	cfg := &deployConfig{host: server.URL, target: testTarget}
 	if _, err := preflightDeploy(cfg); err == nil || !strings.Contains(err.Error(), "404") {
 		t.Errorf("error = %v, want a missing-capabilities status", err)
 	}
@@ -143,7 +143,7 @@ func TestFakeWasmtimeTarget(t *testing.T) {
 	dir := t.TempDir()
 
 	bin := filepath.Join(dir, "wasmtime")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho wasmtime 50.0.0\n"), 0o755); err != nil {
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho wasmtime 50.0.0\n"), privateDirMode); err != nil {
 		t.Fatal(err)
 	}
 

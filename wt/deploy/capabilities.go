@@ -37,8 +37,8 @@ func (c supervisorCapabilities) displayVersion() string {
 	}
 
 	commit := strings.TrimSpace(c.Commit)
-	if len(commit) > 12 {
-		commit = commit[:12]
+	if len(commit) > shortHashLength {
+		commit = commit[:shortHashLength]
 	}
 
 	if commit == "" {
