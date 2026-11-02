@@ -967,6 +967,77 @@ paths:
           description: Forbidden
         "404":
           description: Not found
+  /v1/jobs:
+    get:
+      summary: List an app's durable jobs
+      description: "Served by the storage loopback service (WT_STORAGE_URL). The storage bearer token selects the app.\n"
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum:
+              - pending
+              - running
+              - succeeded
+              - failed
+              - dead
+              - canceled
+      responses:
+        "200":
+          description: Jobs, newest first
+        "401":
+          description: Unauthorized
+        "503":
+          description: Job queue unavailable
+    post:
+      summary: Enqueue a durable job
+      description: "Served by the storage loopback service (WT_STORAGE_URL). The storage bearer token selects the app. Delivery is at-least-once and the body is capped at 64 KiB.\n"
+      responses:
+        "201":
+          description: Job created
+        "200":
+          description: Existing job returned for an idempotency key
+        "400":
+          description: Invalid job
+        "401":
+          description: Unauthorized
+        "503":
+          description: Job queue unavailable
+  /v1/jobs/{id}:
+    get:
+      summary: Read one durable job
+      responses:
+        "200":
+          description: Job
+        "401":
+          description: Unauthorized
+        "404":
+          description: Job not found
+  /v1/jobs/{id}/cancel:
+    post:
+      summary: Cancel a pending or running job
+      responses:
+        "200":
+          description: Canceled job
+        "401":
+          description: Unauthorized
+        "404":
+          description: Job not found
+        "409":
+          description: Job already finished
+  /v1/jobs/{id}/retry:
+    post:
+      summary: Requeue a dead, failed or canceled job
+      responses:
+        "200":
+          description: Requeued job
+        "401":
+          description: Unauthorized
+        "404":
+          description: Job not found
+        "409":
+          description: Job is not retryable
   /v1/sessions:
     post:
       summary: Create a pinned storage session

@@ -97,6 +97,7 @@ func newSupervisorServices(cfg config) *supervisor {
 	s.metrics = newMetrics()
 	storage.metrics = s.metrics
 	storage.bus = s.bus
+	storage.jobs = s.jobs
 	s.fetch = newFetchServer(cfg, s)
 	return s
 }

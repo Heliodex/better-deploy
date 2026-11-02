@@ -32,6 +32,17 @@ func (s *storageServer) buildStorageRoutes() *routeTable {
 	rt.add(http.MethodPost, "/v1/publish", withStorageApp(func(w http.ResponseWriter, r *http.Request, app string) {
 		handleEventPublish(s.bus, w, r, app)
 	}))
+	rt.add(http.MethodGet, "/v1/jobs", withStorageApp(s.storageJobs))
+	rt.add(http.MethodPost, "/v1/jobs", withStorageApp(s.storageJobs))
+	rt.add(http.MethodGet, "/v1/jobs/{id}", withStorageID(func(w http.ResponseWriter, r *http.Request, app, id string) {
+		s.storageJob(w, r, app, id, "")
+	}))
+	rt.add(http.MethodPost, "/v1/jobs/{id}/cancel", withStorageID(func(w http.ResponseWriter, r *http.Request, app, id string) {
+		s.storageJob(w, r, app, id, "cancel")
+	}))
+	rt.add(http.MethodPost, "/v1/jobs/{id}/retry", withStorageID(func(w http.ResponseWriter, r *http.Request, app, id string) {
+		s.storageJob(w, r, app, id, "retry")
+	}))
 	rt.add(http.MethodPost, "/v1/sessions", withStorageApp(s.createSession))
 	rt.add(http.MethodPost, "/v1/sessions/{id}/query", withStorageID(s.sessionQuery))
 	rt.add(http.MethodPost, "/v1/sessions/{id}/exec", withStorageID(s.sessionExec))
