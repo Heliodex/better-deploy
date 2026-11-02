@@ -101,24 +101,14 @@ func moveFile(src, dst string) error {
 }
 
 // importSnapshot stores a snapshot from an export archive. It becomes a child of the current snapshot but does not become current until restored.
-func (m *backupManager) importSnapshot(app, src string) (backupInfo, error) {
-	m.lock(app)
-	defer m.unlock(app)
-
-	temp, err := os.MkdirTemp(m.dataDir, "."+app+".import-")
-	if err != nil {
-		return backupInfo{}, err
-	}
-	defer os.RemoveAll(temp)
+// extractSnapshot unpacks an import archive and returns its database and data archive paths.
+func extractSnapshot(src, temp string) (database, archive string, err error) {
 	if err := extractTarGzLimited(src, temp, maxBackupExtractBytes, maxBackupTarFiles); err != nil {
-		return backupInfo{}, err
+		return "", "", err
 	}
-
-	database := ""
-	archive := ""
 	entries, err := os.ReadDir(temp)
 	if err != nil {
-		return backupInfo{}, err
+		return "", "", err
 	}
 	for _, entry := range entries {
 		if entry.IsDir() {
@@ -128,44 +118,47 @@ func (m *backupManager) importSnapshot(app, src string) (backupInfo, error) {
 		switch {
 		case strings.HasSuffix(entry.Name(), backupFileSuffix):
 			if database != "" {
-				return backupInfo{}, fmt.Errorf("snapshot contains more than one database")
+				return "", "", fmt.Errorf("snapshot contains more than one database")
 			}
 			database = path
 		case strings.HasSuffix(entry.Name(), backupDataSuffix):
 			if archive != "" {
-				return backupInfo{}, fmt.Errorf("snapshot contains more than one data archive")
+				return "", "", fmt.Errorf("snapshot contains more than one data archive")
 			}
 			archive = path
 		}
 	}
 	if database == "" && archive == "" {
-		return backupInfo{}, fmt.Errorf("snapshot has no database or data archive")
+		return "", "", fmt.Errorf("snapshot has no database or data archive")
 	}
 	if database != "" {
 		if err := checkBackupDatabase(database); err != nil {
-			return backupInfo{}, fmt.Errorf("snapshot database: %w", err)
+			return "", "", fmt.Errorf("snapshot database: %w", err)
 		}
 	}
+	return database, archive, nil
+}
 
-	if err := os.MkdirAll(m.appDir(app), 0o755); err != nil {
-		return backupInfo{}, err
-	}
-	now := time.Now().UTC()
-	name, now := m.backupName(app, now)
-	path := filepath.Join(m.appDir(app), name)
-	dataPath := m.dataPath(app, name)
+// placeImportedSnapshot moves the extracted database and data archive into the backup directory.
+func (m *backupManager) placeImportedSnapshot(app, name, database, archive string) (path, dataPath string, err error) {
+	path = filepath.Join(m.appDir(app), name)
+	dataPath = m.dataPath(app, name)
 	if database != "" {
 		if err := moveFile(database, path); err != nil {
-			return backupInfo{}, err
+			return "", "", err
 		}
 	}
 	if archive != "" {
 		if err := moveFile(archive, dataPath); err != nil {
 			_ = os.Remove(path)
-			return backupInfo{}, err
+			return "", "", err
 		}
 	}
+	return path, dataPath, nil
+}
 
+// recordImportedSnapshot adds the imported snapshot to the backup tree and reports its size.
+func (m *backupManager) recordImportedSnapshot(app, name string, now time.Time, path, dataPath string) (backupInfo, error) {
 	state, err := m.stateLocked(app)
 	if err != nil {
 		_ = os.Remove(path)
@@ -193,4 +186,29 @@ func (m *backupManager) importSnapshot(app, src string) (backupInfo, error) {
 		info.HasData = true
 	}
 	return info, nil
+}
+
+func (m *backupManager) importSnapshot(app, src string) (backupInfo, error) {
+	m.lock(app)
+	defer m.unlock(app)
+
+	temp, err := os.MkdirTemp(m.dataDir, "."+app+".import-")
+	if err != nil {
+		return backupInfo{}, err
+	}
+	defer os.RemoveAll(temp)
+	database, archive, err := extractSnapshot(src, temp)
+	if err != nil {
+		return backupInfo{}, err
+	}
+	if err := os.MkdirAll(m.appDir(app), 0o755); err != nil {
+		return backupInfo{}, err
+	}
+	now := time.Now().UTC()
+	name, now := m.backupName(app, now)
+	path, dataPath, err := m.placeImportedSnapshot(app, name, database, archive)
+	if err != nil {
+		return backupInfo{}, err
+	}
+	return m.recordImportedSnapshot(app, name, now, path, dataPath)
 }

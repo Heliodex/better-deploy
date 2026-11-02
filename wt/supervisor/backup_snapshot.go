@@ -311,6 +311,62 @@ func (m *backupManager) parentSnapshotHash(app, parent string, tree *backupTree)
 	return hash
 }
 
+// snapshotCandidate is the temporary pair of files that becomes one snapshot.
+type snapshotCandidate struct {
+	path, dataPath string
+	temp, dataTemp string
+	hasDatabase    bool
+}
+
+// writeSnapshotCandidate writes the database dump and /data archive into their temporary files.
+func (m *backupManager) writeSnapshotCandidate(ctx context.Context, app string, candidate snapshotCandidate) (bool, string, error) {
+	hasDatabase := m.storage.hasDatabase(app)
+	if hasDatabase {
+		if err := m.storage.backupTo(ctx, app, candidate.temp); err != nil {
+			_ = os.Remove(candidate.temp)
+			return false, "", err
+		}
+	}
+	if err := archiveData(filepath.Join(m.dataDir, app), candidate.dataTemp); err != nil {
+		_ = os.Remove(candidate.temp)
+		_ = os.Remove(candidate.dataTemp)
+		return false, "", fmt.Errorf("archive data: %w", err)
+	}
+	hash, err := snapshotHash(candidate.temp, candidate.dataTemp)
+	if err != nil {
+		log.Printf("backup %s: hash candidate: %v", app, err)
+	}
+	return hasDatabase, hash, nil
+}
+
+// installSnapshot renames the temporary files into place and reports their sizes.
+func (m *backupManager) installSnapshot(candidate snapshotCandidate) (size, dataSize int64, err error) {
+	if candidate.hasDatabase {
+		if err := os.Rename(candidate.temp, candidate.path); err != nil {
+			_ = os.Remove(candidate.temp)
+			_ = os.Remove(candidate.dataTemp)
+			return 0, 0, fmt.Errorf("install backup: %w", err)
+		}
+	}
+	if err := os.Rename(candidate.dataTemp, candidate.dataPath); err != nil {
+		_ = os.Remove(candidate.path)
+		_ = os.Remove(candidate.dataTemp)
+		return 0, 0, fmt.Errorf("install data backup: %w", err)
+	}
+	if candidate.hasDatabase {
+		info, err := os.Stat(candidate.path)
+		if err != nil {
+			return 0, 0, err
+		}
+		size = info.Size()
+	}
+	dataInfo, err := os.Stat(candidate.dataPath)
+	if err != nil {
+		return 0, 0, err
+	}
+	return size, dataInfo.Size(), nil
+}
+
 // createLocked snapshots the live database as a child of the current node. Reverting moves the current node, so the next snapshot branches from there.
 func (m *backupManager) createLocked(ctx context.Context, app, kind string) (backupInfo, error) {
 	settings, err := m.settings(app)
@@ -331,28 +387,19 @@ func (m *backupManager) createLocked(ctx context.Context, app, kind string) (bac
 
 	now := time.Now().UTC()
 	name, now := m.backupName(app, now)
-	path := filepath.Join(m.appDir(app), name)
-	dataPath := m.dataPath(app, name)
-	temp := path + backupTempSuffix
-	dataTemp := dataPath + backupTempSuffix
-	_ = os.Remove(temp)
-	_ = os.Remove(dataTemp)
-	hasDatabase := m.storage.hasDatabase(app)
-	if hasDatabase {
-		if err := m.storage.backupTo(ctx, app, temp); err != nil {
-			_ = os.Remove(temp)
-			return backupInfo{}, err
-		}
+	candidate := snapshotCandidate{
+		path:     filepath.Join(m.appDir(app), name),
+		dataPath: m.dataPath(app, name),
 	}
-	if err := archiveData(filepath.Join(m.dataDir, app), dataTemp); err != nil {
-		_ = os.Remove(temp)
-		_ = os.Remove(dataTemp)
-		return backupInfo{}, fmt.Errorf("archive data: %w", err)
-	}
-	candidateHash, err := snapshotHash(temp, dataTemp)
+	candidate.temp = candidate.path + backupTempSuffix
+	candidate.dataTemp = candidate.dataPath + backupTempSuffix
+	_ = os.Remove(candidate.temp)
+	_ = os.Remove(candidate.dataTemp)
+	hasDatabase, candidateHash, err := m.writeSnapshotCandidate(ctx, app, candidate)
 	if err != nil {
-		log.Printf("backup %s: hash candidate: %v", app, err)
+		return backupInfo{}, err
 	}
+	candidate.hasDatabase = hasDatabase
 
 	tree := state.Tree
 	parentHash := ""
@@ -360,8 +407,8 @@ func (m *backupManager) createLocked(ctx context.Context, app, kind string) (bac
 		parentHash = m.parentSnapshotHash(app, parent, &tree)
 	}
 	if candidateHash != "" && candidateHash == parentHash {
-		_ = os.Remove(temp)
-		_ = os.Remove(dataTemp)
+		_ = os.Remove(candidate.temp)
+		_ = os.Remove(candidate.dataTemp)
 		tree.Checked = now
 		if err := m.saveTreeLocked(app, tree); err != nil {
 			log.Printf("backup %s: save tree: %v", app, err)
@@ -369,31 +416,10 @@ func (m *backupManager) createLocked(ctx context.Context, app, kind string) (bac
 		return backupInfo{}, errBackupUnchanged
 	}
 
-	if hasDatabase {
-		if err := os.Rename(temp, path); err != nil {
-			_ = os.Remove(temp)
-			_ = os.Remove(dataTemp)
-			return backupInfo{}, fmt.Errorf("install backup: %w", err)
-		}
-	}
-	if err := os.Rename(dataTemp, dataPath); err != nil {
-		_ = os.Remove(path)
-		_ = os.Remove(dataTemp)
-		return backupInfo{}, fmt.Errorf("install data backup: %w", err)
-	}
-	var size int64
-	if hasDatabase {
-		info, err := os.Stat(path)
-		if err != nil {
-			return backupInfo{}, err
-		}
-		size = info.Size()
-	}
-	dataInfo, err := os.Stat(dataPath)
+	size, dataSize, err := m.installSnapshot(candidate)
 	if err != nil {
 		return backupInfo{}, err
 	}
-
 	tree.Nodes[name] = backupNode{Parent: parent, Kind: kind, Hash: candidateHash}
 	tree.Current = name
 	tree.Checked = now
@@ -404,5 +430,5 @@ func (m *backupManager) createLocked(ctx context.Context, app, kind string) (bac
 	if err := m.pruneLocked(app, settings.Keep); err != nil {
 		log.Printf("backup %s: prune: %v", app, err)
 	}
-	return backupInfo{Name: name, Size: size, DataSize: dataInfo.Size(), HasData: true, CreatedAt: now, Parent: parent, Kind: kind}, nil
+	return backupInfo{Name: name, Size: size, DataSize: dataSize, HasData: true, CreatedAt: now, Parent: parent, Kind: kind}, nil
 }
