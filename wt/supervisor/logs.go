@@ -542,25 +542,18 @@ func (s *supervisor) handleLogStream(w http.ResponseWriter, r *http.Request, a *
 	if !ok {
 		return
 	}
-	flusher, ok := w.(http.Flusher)
+	stream, ok := newSSEStream(w, "no-cache")
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("X-Accel-Buffering", "no")
 
 	send := func(message logStreamMessage) bool {
 		data, err := json.Marshal(message)
 		if err != nil {
 			return false
 		}
-		if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
-			return false
-		}
-		flusher.Flush()
-		return true
+		return stream.data(data)
 	}
 
 	filter, ok := logFilterParam(w, r)
@@ -595,10 +588,9 @@ func (s *supervisor) handleLogStream(w http.ResponseWriter, r *http.Request, a *
 				return
 			}
 		case <-ticker.C:
-			if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
+			if !stream.ping() {
 				return
 			}
-			flusher.Flush()
 		case <-r.Context().Done():
 			return
 		}

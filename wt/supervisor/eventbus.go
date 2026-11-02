@@ -33,11 +33,15 @@ type busSubscriber struct {
 }
 
 type appEventLog struct {
-	mu     sync.Mutex
-	next   int64
-	bytes  int
-	events []busEvent
-	subs   map[*busSubscriber]struct{}
+	mu   sync.Mutex
+	next int64
+	ring *boundedRing[busEvent]
+	subs map[*busSubscriber]struct{}
+}
+
+// busEventSize approximates the memory one event occupies in the ring.
+func busEventSize(event busEvent) int {
+	return len(event.Data) + len(event.Topic) + 64
 }
 
 type eventBus struct {
@@ -54,7 +58,10 @@ func (b *eventBus) log(app string) *appEventLog {
 	defer b.mu.Unlock()
 	log := b.apps[app]
 	if log == nil {
-		log = &appEventLog{subs: map[*busSubscriber]struct{}{}}
+		log = &appEventLog{
+			subs: map[*busSubscriber]struct{}{},
+			ring: newBoundedRing(eventBusMaxEvents, eventBusMaxBytes, busEventSize),
+		}
 		b.apps[app] = log
 	}
 	return log
@@ -80,13 +87,7 @@ func (b *eventBus) publish(app, topic string, data jsontext.Value) (busEvent, er
 	log.mu.Lock()
 	log.next++
 	event.ID = log.next
-	log.events = append(log.events, event)
-	log.bytes += len(data) + len(topic) + 64
-	for len(log.events) > eventBusMaxEvents || (log.bytes > eventBusMaxBytes && len(log.events) > 1) {
-		dropped := log.events[0]
-		log.events = log.events[1:]
-		log.bytes -= len(dropped.Data) + len(dropped.Topic) + 64
-	}
+	log.ring.add(event)
 	for sub := range log.subs {
 		if sub.topic != "" && sub.topic != topic {
 			continue
@@ -108,14 +109,15 @@ func (b *eventBus) subscribe(app, topic string, since *int64) (sub *busSubscribe
 	sub = &busSubscriber{topic: topics(topic), ch: make(chan busEvent, eventSubBuffer)}
 	log.mu.Lock()
 	defer log.mu.Unlock()
-	if len(log.events) > 0 {
-		oldest = log.events[0].ID
+	if log.ring.len() > 0 {
+		oldest = log.ring.at(0).ID
 	}
 	if since != nil {
-		if len(log.events) > 0 && *since < oldest-1 {
+		if log.ring.len() > 0 && *since < oldest-1 {
 			gap = true
 		}
-		for _, event := range log.events {
+		for i := 0; i < log.ring.len(); i++ {
+			event := log.ring.at(i)
 			if event.ID <= *since {
 				continue
 			}
@@ -165,8 +167,7 @@ func (b *eventBus) remove(app string) {
 		close(sub.ch)
 		delete(log.subs, sub)
 	}
-	log.events = nil
-	log.bytes = 0
+	log.ring.reset()
 	log.mu.Unlock()
 }
 

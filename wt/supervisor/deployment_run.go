@@ -293,17 +293,11 @@ func (s *supervisor) handleDeploymentLogStream(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	flusher, ok := w.(http.Flusher)
+	stream, ok := newSSEStream(w, "no-store")
 	if !ok {
 		writeError(w, http.StatusInternalServerError, "streaming unsupported")
 		return
 	}
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
-	flusher.Flush()
 
 	offset := int64(0)
 	ticker := time.NewTicker(deploymentLogPoll)
@@ -315,15 +309,15 @@ func (s *supervisor) handleDeploymentLogStream(w http.ResponseWriter, r *http.Re
 				if line == "" {
 					continue
 				}
-				fmt.Fprintf(w, "data: %s\n\n", line)
+				if !stream.data([]byte(line)) {
+					return
+				}
 			}
 			offset = int64(len(data))
-			flusher.Flush()
 		}
 		info, err := s.deployments.info(name, id)
 		if err == nil && info.Status != deploymentStatusQueued && info.Status != deploymentStatusRunning {
-			fmt.Fprintf(w, "event: done\ndata: {\"status\":%q}\n\n", info.Status)
-			flusher.Flush()
+			stream.event("done", fmt.Appendf(nil, `{"status":%q}`, info.Status))
 			return
 		}
 		select {

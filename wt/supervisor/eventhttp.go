@@ -57,7 +57,7 @@ func (s *supervisor) handleAppEvents(w http.ResponseWriter, r *http.Request, a *
 		writeError(w, http.StatusServiceUnavailable, "event bus is unavailable")
 		return
 	}
-	flusher, ok := w.(http.Flusher)
+	stream, ok := newSSEStream(w, "no-cache")
 	if !ok {
 		writeError(w, http.StatusInternalServerError, "streaming unsupported")
 		return
@@ -85,20 +85,17 @@ func (s *supervisor) handleAppEvents(w http.ResponseWriter, r *http.Request, a *
 	sub, replay, oldest, gap := s.bus.subscribe(a.name, topic, since)
 	defer s.bus.unsubscribe(a.name, sub)
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
-	_, _ = fmt.Fprint(w, "retry: 3000\n\n")
-	if gap {
-		_, _ = fmt.Fprintf(w, "event: gap\ndata: {\"oldest\":%d}\n\n", oldest)
+	if !stream.retry(3000) {
+		return
+	}
+	if gap && !stream.event("gap", fmt.Appendf(nil, `{"oldest":%d}`, oldest)) {
+		return
 	}
 	for _, event := range replay {
-		if !writeBusEvent(w, event) {
+		if !writeBusEvent(stream, event) {
 			return
 		}
 	}
-	flusher.Flush()
 
 	ticker := time.NewTicker(eventKeepAlive)
 	defer ticker.Stop()
@@ -108,28 +105,25 @@ func (s *supervisor) handleAppEvents(w http.ResponseWriter, r *http.Request, a *
 			if !ok {
 				return
 			}
-			if !writeBusEvent(w, event) {
+			if !writeBusEvent(stream, event) {
 				return
 			}
-			flusher.Flush()
 		case <-ticker.C:
-			if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
+			if !stream.ping() {
 				return
 			}
-			flusher.Flush()
 		case <-r.Context().Done():
 			return
 		}
 	}
 }
 
-func writeBusEvent(w http.ResponseWriter, event busEvent) bool {
+func writeBusEvent(stream *sseStream, event busEvent) bool {
 	data := event.json()
 	if data == nil {
 		return true
 	}
-	_, err := fmt.Fprintf(w, "id: %d\nevent: message\ndata: %s\n\n", event.ID, data)
-	return err == nil
+	return stream.idEvent(event.ID, "message", data)
 }
 
 // appEventPath reports whether a path belongs to the host event bus rather than the app's wasm component.
