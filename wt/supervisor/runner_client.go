@@ -10,15 +10,6 @@ import (
 	"time"
 )
 
-// runnerConn is the supervisor side of the app runner.
-type runnerConn interface {
-	Start(runnerStartRequest) (*runnerStream, runnerEvent, error)
-	Go(name string) error
-	Stop(name string) error
-	Stream(name string) *runnerStream
-	Close()
-}
-
 type runnerStream struct {
 	name    string
 	events  chan runnerEvent
@@ -102,7 +93,7 @@ func (c *runnerClient) readLoop() {
 
 func (c *runnerClient) dispatch(event runnerEvent) {
 	switch event.Op {
-	case "snapshot":
+	case runnerOpSnapshot:
 		c.mu.Lock()
 		c.snapshot = append([]runnerAppInfo(nil), event.Snapshot...)
 		c.runnerPID = event.RunnerPID
@@ -118,7 +109,7 @@ func (c *runnerClient) dispatch(event runnerEvent) {
 		}
 		c.mu.Unlock()
 		c.snapshotOnce.Do(func() { close(c.snapshotCh) })
-	case "started", "error":
+	case runnerOpStarted, runnerOpError:
 		c.mu.Lock()
 		stream := c.streams[runnerKey(event.ID, event.App)]
 		c.mu.Unlock()
@@ -129,7 +120,7 @@ func (c *runnerClient) dispatch(event runnerEvent) {
 		case stream.started <- event:
 		default:
 		}
-	case "exited":
+	case runnerOpExited:
 		c.mu.Lock()
 		stream := c.streams[runnerKey(event.ID, event.App)]
 		c.mu.Unlock()
@@ -170,7 +161,7 @@ func (c *runnerClient) fail(err error) {
 		c.mu.Unlock()
 		for _, stream := range streams {
 			select {
-			case stream.events <- runnerEvent{Op: "exited", App: stream.name, Error: err.Error()}:
+			case stream.events <- runnerEvent{Op: runnerOpExited, App: stream.name, Error: err.Error()}:
 			default:
 			}
 		}
@@ -250,7 +241,7 @@ func (c *runnerClient) Stream(id string) *runnerStream {
 
 func (c *runnerClient) Start(request runnerStartRequest) (*runnerStream, runnerEvent, error) {
 	stream := c.startStream(runnerKey(request.ID, request.Name))
-	if err := c.send(runnerRequest{Op: "start", Start: &request}); err != nil {
+	if err := c.send(runnerRequest{Op: runnerOpStart, Start: &request}); err != nil {
 		return nil, runnerEvent{}, err
 	}
 	select {
@@ -260,7 +251,7 @@ func (c *runnerClient) Start(request runnerStartRequest) (*runnerStream, runnerE
 		}
 		return stream, event, nil
 	case <-time.After(runnerRequestTimeout):
-		_ = c.send(runnerRequest{Op: "stop", ID: stream.name})
+		_ = c.send(runnerRequest{Op: runnerOpStop, ID: stream.name})
 		return nil, runnerEvent{}, errors.New("timed out waiting for the runner to start the app")
 	case <-c.done:
 		return nil, runnerEvent{}, c.Err()
@@ -268,15 +259,15 @@ func (c *runnerClient) Start(request runnerStartRequest) (*runnerStream, runnerE
 }
 
 func (c *runnerClient) Go(id string) error {
-	return c.send(runnerRequest{Op: "go", ID: id})
+	return c.send(runnerRequest{Op: runnerOpGo, ID: id})
 }
 
 func (c *runnerClient) Stop(id string) error {
-	return c.send(runnerRequest{Op: "stop", ID: id})
+	return c.send(runnerRequest{Op: runnerOpStop, ID: id})
 }
 
 func (c *runnerClient) Shutdown() error {
-	err := c.send(runnerRequest{Op: "shutdown"})
+	err := c.send(runnerRequest{Op: runnerOpShutdown})
 	c.Close()
 	return err
 }

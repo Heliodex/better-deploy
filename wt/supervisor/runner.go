@@ -34,59 +34,6 @@ const (
 	runnerScanBytes      = 8 << 20
 )
 
-type runnerStartRequest struct {
-	ID             string   `json:"id,omitempty"`
-	Name           string   `json:"name"`
-	Dir            string   `json:"dir"`
-	Path           string   `json:"path"`
-	Args           []string `json:"args,omitempty"`
-	Env            []string `json:"env,omitempty"`
-	Config         []byte   `json:"config,omitempty"`
-	Namespaced     bool     `json:"namespaced,omitempty"`
-	Plan           []byte   `json:"plan,omitempty"`
-	HostID         int      `json:"hostID,omitempty"`
-	HostGID        int      `json:"hostGID,omitempty"`
-	AllowSetgroups bool     `json:"allowSetgroups,omitempty"`
-	UID            int      `json:"uid,omitempty"`
-	StorageToken   string   `json:"storageToken,omitempty"`
-}
-
-type runnerAppInfo struct {
-	ID           string    `json:"id,omitempty"`
-	Name         string    `json:"name"`
-	Dir          string    `json:"dir"`
-	PID          int       `json:"pid"`
-	WorkPID      int       `json:"workPid,omitempty"`
-	Port         int       `json:"port,omitempty"`
-	Started      time.Time `json:"started"`
-	UID          int       `json:"uid,omitempty"`
-	StorageToken string    `json:"storageToken,omitempty"`
-	Namespaced   bool      `json:"namespaced,omitempty"`
-	Config       []byte    `json:"config,omitempty"`
-}
-
-type runnerEvent struct {
-	Op        string          `json:"op"`
-	ID        string          `json:"id,omitempty"`
-	App       string          `json:"app,omitempty"`
-	PID       int             `json:"pid,omitempty"`
-	WorkPID   int             `json:"workPid,omitempty"`
-	Port      int             `json:"port,omitempty"`
-	Data      []byte          `json:"data,omitempty"`
-	Code      int             `json:"code,omitempty"`
-	Error     string          `json:"error,omitempty"`
-	Snapshot  []runnerAppInfo `json:"snapshot,omitempty"`
-	RunnerPID int             `json:"runnerPid,omitempty"`
-}
-
-type runnerRequest struct {
-	Op     string              `json:"op"`
-	ID     string              `json:"id,omitempty"`
-	App    string              `json:"app,omitempty"`
-	Start  *runnerStartRequest `json:"start,omitempty"`
-	Signal int                 `json:"signal,omitempty"`
-}
-
 type runnerProcess struct {
 	mu          sync.Mutex
 	info        runnerAppInfo
@@ -106,14 +53,6 @@ type runnerServer struct {
 	conn    net.Conn
 	apps    map[string]*runnerProcess
 	closing bool
-}
-
-// runnerKey is the runner's process key: the launch ID, or the app name for older requests.
-func runnerKey(id, name string) string {
-	if id != "" {
-		return id
-	}
-	return name
 }
 
 // runnerMain is the entry point for the --wt-runner process.
@@ -172,14 +111,14 @@ func (r *runnerServer) handleConnection(conn net.Conn) {
 	if old != nil {
 		_ = old.Close()
 	}
-	r.send(runnerEvent{Op: "snapshot", Snapshot: r.snapshotApps(), RunnerPID: os.Getpid()})
+	r.send(runnerEvent{Op: runnerOpSnapshot, Snapshot: r.snapshotApps(), RunnerPID: os.Getpid()})
 
 	scanner := bufio.NewScanner(conn)
 	scanner.Buffer(make([]byte, 64<<10), runnerScanBytes)
 	for scanner.Scan() {
 		var request runnerRequest
 		if err := json.Unmarshal(scanner.Bytes(), &request); err != nil {
-			r.send(runnerEvent{Op: "error", Error: "invalid request: " + err.Error()})
+			r.send(runnerEvent{Op: runnerOpError, Error: "invalid request: " + err.Error()})
 			continue
 		}
 		r.handleRequest(conn, request)
@@ -198,25 +137,25 @@ func (r *runnerServer) handleConnection(conn net.Conn) {
 func (r *runnerServer) handleRequest(_ net.Conn, request runnerRequest) {
 	id := runnerKey(request.ID, request.App)
 	switch request.Op {
-	case "start":
+	case runnerOpStart:
 		if request.Start == nil {
-			r.send(runnerEvent{Op: "error", ID: id, App: request.App, Error: "missing start request"})
+			r.send(runnerEvent{Op: runnerOpError, ID: id, App: request.App, Error: "missing start request"})
 			return
 		}
 		r.start(*request.Start)
-	case "go":
+	case runnerOpGo:
 		r.release(id)
-	case "stop":
+	case runnerOpStop:
 		r.stop(id)
-	case "signal":
+	case runnerOpSignal:
 		r.signal(id, syscall.Signal(request.Signal))
-	case "snapshot":
-		r.send(runnerEvent{Op: "snapshot", Snapshot: r.snapshotApps(), RunnerPID: os.Getpid()})
-	case "shutdown":
+	case runnerOpSnapshot:
+		r.send(runnerEvent{Op: runnerOpSnapshot, Snapshot: r.snapshotApps(), RunnerPID: os.Getpid()})
+	case runnerOpShutdown:
 		r.shutdown()
 		os.Exit(0)
 	default:
-		r.send(runnerEvent{Op: "error", ID: id, App: request.App, Error: "unknown request " + request.Op})
+		r.send(runnerEvent{Op: runnerOpError, ID: id, App: request.App, Error: "unknown request " + request.Op})
 	}
 }
 
@@ -323,7 +262,7 @@ func (r *runnerServer) registerProcess(request runnerStartRequest, cmd *exec.Cmd
 func (r *runnerServer) start(request runnerStartRequest) {
 	id := runnerKey(request.ID, request.Name)
 	sendError := func(message string) {
-		r.send(runnerEvent{Op: "error", ID: id, App: request.Name, Error: message})
+		r.send(runnerEvent{Op: runnerOpError, ID: id, App: request.Name, Error: message})
 	}
 	if request.Name == "" || request.Path == "" {
 		sendError("name and path are required")
@@ -364,7 +303,7 @@ func (r *runnerServer) start(request runnerStartRequest) {
 	cmd.ExtraFiles = nil
 
 	app := r.registerProcess(request, cmd, goWriter, pidReader)
-	r.send(runnerEvent{Op: "started", ID: app.info.ID, App: request.Name, PID: cmd.Process.Pid, WorkPID: app.info.WorkPID})
+	r.send(runnerEvent{Op: runnerOpStarted, ID: app.info.ID, App: request.Name, PID: cmd.Process.Pid, WorkPID: app.info.WorkPID})
 	go r.readOutput(app, outputRead)
 	go r.waitApp(app)
 	if pidReader != nil {
@@ -380,9 +319,9 @@ func (r *runnerServer) readOutput(app *runnerProcess, output *os.File) {
 		n, err := output.Read(buffer)
 		if n > 0 {
 			data := append([]byte(nil), buffer[:n]...)
-			r.send(runnerEvent{Op: "output", ID: app.info.ID, App: app.info.Name, Data: data})
+			r.send(runnerEvent{Op: runnerOpOutput, ID: app.info.ID, App: app.info.Name, Data: data})
 			if port := app.observePort(data); port != 0 {
-				r.send(runnerEvent{Op: "port", ID: app.info.ID, App: app.info.Name, Port: port})
+				r.send(runnerEvent{Op: runnerOpPort, ID: app.info.ID, App: app.info.Name, Port: port})
 			}
 		}
 		if err != nil {
@@ -401,7 +340,7 @@ func (r *runnerServer) readWorkPID(app *runnerProcess, reader *os.File) {
 	app.mu.Lock()
 	app.info.WorkPID = pid
 	app.mu.Unlock()
-	r.send(runnerEvent{Op: "work", ID: app.info.ID, App: app.info.Name, WorkPID: pid})
+	r.send(runnerEvent{Op: runnerOpWork, ID: app.info.ID, App: app.info.Name, WorkPID: pid})
 }
 
 func (r *runnerServer) waitApp(app *runnerProcess) {
@@ -436,7 +375,7 @@ func (r *runnerServer) waitApp(app *runnerProcess) {
 	r.mu.Lock()
 	delete(r.apps, id)
 	r.mu.Unlock()
-	r.send(runnerEvent{Op: "exited", ID: id, App: name, Code: code, Error: message})
+	r.send(runnerEvent{Op: runnerOpExited, ID: id, App: name, Code: code, Error: message})
 }
 
 func (r *runnerServer) release(id string) {
