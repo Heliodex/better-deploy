@@ -23,7 +23,6 @@ const (
 	deploymentReplayKeep = 64
 	// deploymentReplayTTL is how long a deploy response may be replayed.
 	deploymentReplayTTL      = 24 * time.Hour
-	deploymentReplayVersion  = 1
 	deploymentStatusOK       = "success"
 	deploymentStatusFail     = "failed"
 	deploymentStatusQueued   = "queued"
@@ -65,7 +64,6 @@ type deploymentInfo struct {
 
 // deploymentReplayFile is the on-disk form of one app's idempotency responses.
 type deploymentReplayFile struct {
-	Version int                          `json:"version"`
 	Entries map[string]deployReplayEntry `json:"entries"`
 }
 
@@ -156,12 +154,11 @@ func (m *deploymentManager) storeReplay(app, key string, entry deployReplayEntry
 	}
 	file, err := m.readReplayFile(app)
 	if err != nil {
-		file = deploymentReplayFile{Version: deploymentReplayVersion, Entries: map[string]deployReplayEntry{}}
+		file = deploymentReplayFile{Entries: map[string]deployReplayEntry{}}
 	}
 	if file.Entries == nil {
 		file.Entries = map[string]deployReplayEntry{}
 	}
-	file.Version = deploymentReplayVersion
 
 	now := time.Now()
 	for name, existing := range file.Entries {

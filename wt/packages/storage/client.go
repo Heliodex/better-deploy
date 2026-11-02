@@ -26,7 +26,7 @@ func New(httpClient *http.Client) (*Client, error) {
 	return &Client{baseURL: baseURL, token: token, http: httpClient}, nil
 }
 
-// responseError reads the flat error body and keeps both the legacy message and the typed fields.
+// responseError reads the flat error body, preferring its message and falling back to the raw body.
 func responseError(resp *http.Response) error {
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
 	var body errorResponse

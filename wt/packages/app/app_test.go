@@ -41,7 +41,7 @@ func TestCallerVerifiesBodySignature(t *testing.T) {
 	}
 }
 
-func TestCallerRejectsLegacySignature(t *testing.T) {
+func TestCallerRejectsUnknownSignature(t *testing.T) {
 	t.Setenv("WT_APP_TOKEN", "key")
 	body := []byte(`legacy`)
 	timestamp := time.Now().UTC().Format(time.RFC3339Nano)
