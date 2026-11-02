@@ -346,6 +346,10 @@ func (s *supervisor) keepExistingArtifact(dir, cwasm string, recorded artifactIn
 	if recordErr == nil && artifactMatches(recorded, current) {
 		return recorded.Epoch, nil
 	}
+	// The cwasm was kept, so launch with the epoch flag it was compiled with even when the cache key differs only by a runtime version suffix.
+	if recordErr == nil {
+		return recorded.Epoch, nil
+	}
 	return false, nil
 }
 
