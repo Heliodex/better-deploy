@@ -313,6 +313,53 @@ func (s *supervisor) pruneArtifactCache(keep string) {
 // ensureArtifact makes sure dir holds a main.cwasm built for this wasm and the configured runtime.
 // Bundles keep main.wasm and artifact.json so an upgraded wasmtime can rebuild the artifact instead of failing to load it.
 // requireEpoch asks for instrumentation that supports a per-request wasmtime timeout; the returned bool reports whether the artifact has it.
+// artifactForWasm reads the bundle wasm digest and the cache key it maps to.
+func (s *supervisor) artifactForWasm(dir, cwasm string, requireEpoch bool) (artifactInfo, artifactKey, bool, error) {
+	digest, size, err := wasmFileInfo(dir)
+	if err != nil {
+		if _, statErr := os.Stat(cwasm); statErr == nil {
+			if requireEpoch {
+				log.Printf("app artifact %s: request_timeout needs epoch interruption, but the bundle has no main.wasm to rebuild from", filepath.Base(dir))
+			}
+			return artifactInfo{}, artifactKey{}, false, nil
+		}
+		return artifactInfo{}, artifactKey{}, false, fmt.Errorf("%w: no main.wasm or main.cwasm", errNoComponent)
+	}
+	current := artifactInfo{Wasmtime: s.wasmtimeVersion(), Target: s.cfg.wasmtimeTarget, CPU: artifactCPUFeatures, Epoch: true, WasmSHA256: digest, WasmBytes: size}
+	key := artifactKey{WasmSHA256: digest, Wasmtime: current.Wasmtime, Target: current.Target, CPU: current.CPU, Epoch: true}
+	return current, key, true, nil
+}
+
+// finishArtifact records the installed artifact and prunes the cache to its limits.
+func (s *supervisor) finishArtifact(dir, path string, current artifactInfo, compiledAt time.Time, epoch bool) (bool, error) {
+	current.CompiledAt = compiledAt
+	if err := writeArtifact(dir, current); err != nil {
+		log.Printf("app artifact %s: write %s: %v", filepath.Base(dir), artifactName, err)
+	}
+	s.pruneArtifactCache(path)
+	return epoch, nil
+}
+
+// keepExistingArtifact handles a failed compile when the bundle already has a usable main.cwasm.
+func (s *supervisor) keepExistingArtifact(dir, cwasm string, recorded artifactInfo, recordErr error, current artifactInfo, requireEpoch bool, compileErr error) (bool, error) {
+	if _, statErr := os.Stat(cwasm); statErr != nil {
+		return false, fmt.Errorf("compile main.wasm: %w", compileErr)
+	}
+	// A runtime-only wasmtime cannot compile. Keep a precompiled artifact so upgrades still work when nothing changed.
+	if recordErr == nil && recorded.WasmSHA256 != "" && recorded.WasmSHA256 != current.WasmSHA256 {
+		return false, fmt.Errorf("main.cwasm is for wasm %s, not %s: %w", recorded.WasmSHA256, current.WasmSHA256, compileErr)
+	}
+	if requireEpoch && (recordErr != nil || !recorded.Epoch) {
+		log.Printf("app artifact %s: request_timeout needs epoch interruption, but rebuilding failed: %v", filepath.Base(dir), compileErr)
+	} else {
+		log.Printf("app artifact %s: keeping existing main.cwasm: %v", filepath.Base(dir), compileErr)
+	}
+	if recordErr == nil && artifactMatches(recorded, current) {
+		return recorded.Epoch, nil
+	}
+	return false, nil
+}
+
 func (s *supervisor) ensureArtifact(dir string, requireEpoch bool) (bool, error) {
 	// The cache is shared by every app, so a per-app deploy lock is not enough to protect lookups, installs and pruning.
 	s.artifactCacheMu.Lock()
@@ -320,29 +367,19 @@ func (s *supervisor) ensureArtifact(dir string, requireEpoch bool) (bool, error)
 
 	cwasm := filepath.Join(dir, "main.cwasm")
 	wasm := filepath.Join(dir, "main.wasm")
-	digest, size, err := wasmFileInfo(dir)
+	current, key, ok, err := s.artifactForWasm(dir, cwasm, requireEpoch)
 	if err != nil {
-		if _, statErr := os.Stat(cwasm); statErr == nil {
-			if requireEpoch {
-				log.Printf("app artifact %s: request_timeout needs epoch interruption, but the bundle has no main.wasm to rebuild from", filepath.Base(dir))
-			}
-			return false, nil
-		}
-		return false, fmt.Errorf("%w: no main.wasm or main.cwasm", errNoComponent)
+		return false, err
+	}
+	if !ok {
+		return false, nil
 	}
 
-	current := artifactInfo{Wasmtime: s.wasmtimeVersion(), Target: s.cfg.wasmtimeTarget, CPU: artifactCPUFeatures, Epoch: true, WasmSHA256: digest, WasmBytes: size}
-	key := artifactKey{WasmSHA256: digest, Wasmtime: current.Wasmtime, Target: current.Target, CPU: current.CPU, Epoch: true}
 	if path, modTime, ok := s.cachedArtifact(key); ok {
 		if err := installArtifact(path, cwasm); err != nil {
 			return false, fmt.Errorf("install cached main.cwasm: %w", err)
 		}
-		current.CompiledAt = modTime
-		if err := writeArtifact(dir, current); err != nil {
-			log.Printf("app artifact %s: write %s: %v", filepath.Base(dir), artifactName, err)
-		}
-		s.pruneArtifactCache(path)
-		return true, nil
+		return s.finishArtifact(dir, path, current, modTime, true)
 	}
 
 	recorded, recordErr := readArtifact(dir)
@@ -351,44 +388,18 @@ func (s *supervisor) ensureArtifact(dir string, requireEpoch bool) (bool, error)
 		if err != nil {
 			return false, fmt.Errorf("cache uploaded main.cwasm: %w", err)
 		}
-		current.CompiledAt = recorded.CompiledAt
-		if err := writeArtifact(dir, current); err != nil {
-			log.Printf("app artifact %s: write %s: %v", filepath.Base(dir), artifactName, err)
-		}
-		s.pruneArtifactCache(path)
-		return recorded.Epoch, nil
+		return s.finishArtifact(dir, path, current, recorded.CompiledAt, recorded.Epoch)
 	}
 
 	log.Printf("app artifact %s: compiling main.wasm for %s (%s)", filepath.Base(dir), current.Wasmtime, current.Target)
 	path, err := s.compileCachedArtifact(dir, wasm, key)
 	if err != nil {
-		// A runtime-only wasmtime cannot compile. Keep a precompiled artifact so upgrades still work when nothing changed.
-		if _, statErr := os.Stat(cwasm); statErr == nil {
-			if recordErr == nil && recorded.WasmSHA256 != "" && recorded.WasmSHA256 != digest {
-				return false, fmt.Errorf("main.cwasm is for wasm %s, not %s: %w", recorded.WasmSHA256, digest, err)
-			}
-			if requireEpoch && (recordErr != nil || !recorded.Epoch) {
-				log.Printf("app artifact %s: request_timeout needs epoch interruption, but rebuilding failed: %v", filepath.Base(dir), err)
-			} else {
-				log.Printf("app artifact %s: keeping existing main.cwasm: %v", filepath.Base(dir), err)
-			}
-			if recordErr == nil && artifactMatches(recorded, current) {
-				return recorded.Epoch, nil
-			}
-			return false, nil
-		}
-		return false, fmt.Errorf("compile main.wasm: %w", err)
+		return s.keepExistingArtifact(dir, cwasm, recorded, recordErr, current, requireEpoch, err)
 	}
 	if err := installArtifact(path, cwasm); err != nil {
 		return false, fmt.Errorf("install compiled main.cwasm: %w", err)
 	}
-
-	current.CompiledAt = time.Now().UTC()
-	if err := writeArtifact(dir, current); err != nil {
-		log.Printf("app artifact %s: write %s: %v", filepath.Base(dir), artifactName, err)
-	}
-	s.pruneArtifactCache(path)
-	return true, nil
+	return s.finishArtifact(dir, path, current, time.Now().UTC(), true)
 }
 
 // sourceDigest returns the digest a deploy and running app are compared by: the wasm when present, else the legacy cwasm.
