@@ -122,7 +122,7 @@ Concrete evidence from this build:
 
    The scaffold now keeps handlers on a `notesApp` struct with `newNotesApp(store)` and `handler()`. Its `main.go` has no `wasihttp` import, so host tests never compile the generated binding stub; `wasm.go` owns the `//go:build wasip1` storage construction, migration and `wasihttp.Handle` wiring. `main_test.go` creates a note, lists it, checks a `400` with `code=invalid, field=text`, then closes the storage server and checks a `500` failure. `go generate ./contract/ && go test ./...` passes in both a monorepo scaffold and a standalone scaffold, and both scaffolds still componentize successfully. The older examples keep their existing wiring; the scaffold is the reference layout for new apps.
 
-7. [ ] **[P2] Improve CLI flag parsing and deploy output.**
+7. [x] **[P2] Improve CLI flag parsing and deploy output.**
 
    **Current behaviour.** `clientFlags` uses `flag.NewFlagSet`, which stops at the first positional argument. `wt logs --host http://127.0.0.1:8080 pulse --tail 40` works, but `wt logs pulse --host http://127.0.0.1:8080 --tail 40` fails with "flag provided but not defined: -tail". Log-specific flags go after the app and client flags before it, which is easy to get wrong. `deploy` prints the raw app JSON on success, while `apps` prints a table.
 
@@ -134,6 +134,12 @@ Concrete evidence from this build:
    - Consider surfacing the capability preflight from item 2 in the deploy summary.
 
    **Done when.** The help examples run verbatim, including `wt logs pulse --host ... --tail 40`, and a successful deploy has a readable summary without losing the JSON output.
+
+   Implemented in `b7805b4`. `clientFlags` no longer uses the standard `flag` positional stop: it extracts `--host`, `--token`, `--config`, `--json` and `--timeout` from any position, including `-flag` and `--flag=value` forms, honours `--`, and leaves command-specific flags and positionals in order. `backup`, `config` and `open` now parse the action and app after that extraction, and `open --print` can appear before or after the app. `--json` works wherever it is placed.
+
+   A successful deploy now prints the app name, URL, short digest, status/readiness and elapsed time; build phase reuse/built and static details remain on stderr, and `--json` still prints only the raw app body. `wt apps` keeps its supervisor/runtime summary. `wt open` and the deploy summary now include the supervisor's port for local app hosts, so a loopback deploy prints `http://pulse.localhost:8080` rather than dropping `:8080`.
+
+   Tests cover flags after the app, `--`, the exact `wt logs pulse --host ... --tail 40` path, and local/remote app URLs. The README examples and the global-flag note now match the parser; no command needs a flag-order workaround.
 
 8. [ ] **[P2] Give blobs a lifecycle helper and a recovery path.**
 
