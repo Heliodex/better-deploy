@@ -114,23 +114,19 @@ func runConfigSet(cfg clientOptions, name string, rest []string) error {
 }
 
 func runConfig(args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: wt config <show|set> <app>")
-	}
-	action := args[0]
-	cfg, rest, err := clientFlags("config "+action, args[1:], true)
+	cfg, rest, err := clientFlags("config", args, true)
 	if err != nil {
 		return err
 	}
-	if len(rest) == 0 {
-		return fmt.Errorf("usage: wt config %s <app>", action)
+	if len(rest) < 2 {
+		return fmt.Errorf("usage: wt config <show|set> <app>")
 	}
-	name := rest[0]
+	action, name := rest[0], rest[1]
 	switch action {
 	case "show":
 		return runConfigShow(cfg, name)
 	case "set":
-		return runConfigSet(cfg, name, rest)
+		return runConfigSet(cfg, name, rest[1:])
 	default:
 		return fmt.Errorf("unknown config action %q", action)
 	}

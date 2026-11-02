@@ -108,6 +108,7 @@ type deployConfig struct {
 	buildComponentCommand                                   string
 	skipBuild, skipCompile, skipStatic, jsonOut, forceBuild bool
 	targetConfigured, noPreflight                           bool
+	start                                                   time.Time
 }
 
 // uploadProgress prints a coarse percentage while a bundle uploads, without buffering it a second time.
@@ -697,7 +698,42 @@ func printDeployResult(cfg *deployConfig, name string, body []byte) error {
 		fmt.Println(strings.TrimSpace(string(body)))
 		return nil
 	}
-	fmt.Println(strings.TrimSpace(string(body)))
+	var info struct {
+		Name          string `json:"name"`
+		Host          string `json:"host"`
+		Status        string `json:"status"`
+		Ready         bool   `json:"ready"`
+		CurrentDigest string `json:"currentDigest"`
+	}
+	if err := json.Unmarshal(body, &info); err != nil {
+		fmt.Println(strings.TrimSpace(string(body)))
+		return nil
+	}
+	if info.Name == "" {
+		info.Name = name
+	}
+	fmt.Printf("deployed %s\n", info.Name)
+	if info.Host != "" {
+		fmt.Printf("  url: %s\n", appURLForHost(cfg.host, info.Host))
+	}
+	if info.CurrentDigest != "" {
+		digest := info.CurrentDigest
+		if len(digest) > 12 {
+			digest = digest[:12]
+		}
+		fmt.Printf("  digest: %s\n", digest)
+	}
+	if info.Status != "" {
+		fmt.Printf("  status: %s", info.Status)
+		if info.Ready {
+			fmt.Print(" (ready)")
+		}
+		fmt.Println()
+	}
+	if !cfg.start.IsZero() {
+		fmt.Printf("  time: %s\n", time.Since(cfg.start).Round(time.Millisecond))
+	}
+	return nil
 	return nil
 }
 
@@ -733,6 +769,7 @@ func deploy(args []string) error {
 	if err != nil {
 		return err
 	}
+	cfg.start = time.Now()
 	m, err := readManifest(cfg.dir)
 	if err != nil {
 		return err

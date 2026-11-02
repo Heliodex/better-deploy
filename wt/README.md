@@ -50,7 +50,7 @@ For the local loop, `wt/supervisor/dev.sh` rebuilds the admin panel and binary a
 
 ## CLI
 
-The `wt-deploy` binary also acts as the operator CLI. Every command accepts `--host`, `--token` and `--config`, and most accept `--json` for raw output. Defaults come from environment variables and then an optional `~/.config/wt/config.json` (or `WT_CONFIG`):
+The `wt-deploy` binary also acts as the operator CLI. Every command accepts `--host`, `--token` and `--config`, and most accept `--json` for raw output. These global flags may appear before or after the app and action; command-specific flags stay with their command. Defaults come from environment variables and then an optional `~/.config/wt/config.json` (or `WT_CONFIG`):
 
 ```json
 {
@@ -83,7 +83,7 @@ wt-deploy open notes
 wt-deploy completion bash
 ```
 
-`build` and its `bundle` alias run the component and static build phases, precompile the component when wasmtime is available and write the upload tarball; they are the local build path for the pinned Containerfile. `--force-build` rebuilds both phases, and deploys automatically use the static-only path when the server already runs the same wasm, even if a component build just ran. `deploy` asks `GET /capabilities` before building, fails early when the supervisor predates the endpoint, and takes the compile target from the supervisor unless `--target` is set; `--no-preflight` skips the check. `apps` prints the supervisor build and runtime to stderr before the table. `logs --follow` consumes the same SSE stream as the panel, so it works through the proxy. `config show` prints the ETag on stderr. `open` launches the app host with the platform opener; `--print` prints the URL instead. `completion` emits a static bash, zsh or fish script.
+`build` and its `bundle` alias run the component and static build phases, precompile the component when wasmtime is available and write the upload tarball; they are the local build path for the pinned Containerfile. `--force-build` rebuilds both phases, and deploys automatically use the static-only path when the server already runs the same wasm, even if a component build just ran. `deploy` asks `GET /capabilities` before building, fails early when the supervisor predates the endpoint, and takes the compile target from the supervisor unless `--target` is set; `--no-preflight` skips the check. A successful deploy prints the app URL, digest, status and elapsed time; `--json` keeps the raw response. `apps` prints the supervisor build and runtime to stderr before the table. `logs --follow` consumes the same SSE stream as the panel, so it works through the proxy. `config show` prints the ETag on stderr. `open` launches the app host with the platform opener; `--print` prints the URL instead. `completion` emits a static bash, zsh or fish script.
 
 ## Test
 

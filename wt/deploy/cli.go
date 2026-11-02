@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"encoding/json/v2"
-	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -90,38 +89,84 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// clientFlags loads flags and falls back to WT_DEPLOY_HOST, WT_TOKEN and the config file for missing values.
+// clientFlagValues holds the global client flags extracted from any position.
+type clientFlagValues struct {
+	host, token, config string
+	jsonOut             bool
+	timeout             time.Duration
+}
+
+// extractClientFlags removes --host, --token, --config, --json and --timeout wherever they appear, leaving command flags and positionals in order.
+func extractClientFlags(args []string) (clientFlagValues, []string, error) {
+	values := clientFlagValues{timeout: defaultClientTimeout}
+	rest := make([]string, 0, len(args))
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		if arg == "--" {
+			rest = append(rest, args[index+1:]...)
+			break
+		}
+		key, value, hasValue := strings.Cut(arg, "=")
+		if !strings.HasPrefix(key, "-") {
+			rest = append(rest, arg)
+			continue
+		}
+		switch strings.TrimLeft(key, "-") {
+		case "host", "token", "config", "timeout":
+			if !hasValue {
+				index++
+				if index >= len(args) {
+					return clientFlagValues{}, nil, fmt.Errorf("%s needs an argument", key)
+				}
+				value = args[index]
+			}
+			switch strings.TrimLeft(key, "-") {
+			case "host":
+				values.host = value
+			case "token":
+				values.token = value
+			case "config":
+				values.config = value
+			case "timeout":
+				parsed, err := time.ParseDuration(value)
+				if err != nil {
+					return clientFlagValues{}, nil, fmt.Errorf("--timeout: %w", err)
+				}
+				values.timeout = parsed
+			}
+		case "json":
+			if !hasValue {
+				values.jsonOut = true
+				continue
+			}
+			parsed, err := strconv.ParseBool(value)
+			if err != nil {
+				return clientFlagValues{}, nil, fmt.Errorf("--json: %w", err)
+			}
+			values.jsonOut = parsed
+		default:
+			rest = append(rest, arg)
+		}
+	}
+	return values, rest, nil
+}
+
+// clientFlags loads global flags from any position and falls back to WT_DEPLOY_HOST, WT_TOKEN and the config file.
 func clientFlags(name string, args []string, requireHost bool) (clientOptions, []string, error) {
-	configPath := configArg(args)
-	fileCfg, err := loadFileConfig(configPath)
+	values, rest, err := extractClientFlags(args)
 	if err != nil {
 		return clientOptions{}, nil, err
 	}
-	flags := flag.NewFlagSet(name, flag.ContinueOnError)
-	host := flags.String("host", firstNonEmpty(os.Getenv("WT_DEPLOY_HOST"), fileCfg.Host), "supervisor URL")
-	token := flags.String("token", firstNonEmpty(os.Getenv("WT_TOKEN"), fileCfg.Token), "bearer token")
-	config := flags.String("config", configPath, "config file (default ~/.config/wt/config.json)")
-	jsonOut := flags.Bool("json", false, "print raw JSON")
-	timeout := flags.Duration("timeout", defaultClientTimeout, "HTTP timeout")
-	if err := flags.Parse(args); err != nil {
+	fileCfg, err := loadFileConfig(values.config)
+	if err != nil {
 		return clientOptions{}, nil, err
 	}
-	if *config != configPath {
-		fileCfg, err = loadFileConfig(*config)
-		if err != nil {
-			return clientOptions{}, nil, err
-		}
-		if *host == "" {
-			*host = fileCfg.Host
-		}
-		if *token == "" {
-			*token = fileCfg.Token
-		}
-	}
-	if requireHost && strings.TrimSpace(*host) == "" {
+	host := firstNonEmpty(values.host, os.Getenv("WT_DEPLOY_HOST"), fileCfg.Host)
+	token := firstNonEmpty(values.token, os.Getenv("WT_TOKEN"), fileCfg.Token)
+	if requireHost && strings.TrimSpace(host) == "" {
 		return clientOptions{}, nil, fmt.Errorf("set --host, WT_DEPLOY_HOST or host in the config file")
 	}
-	return clientOptions{host: *host, token: *token, jsonOut: *jsonOut, timeout: *timeout}, flags.Args(), nil
+	return clientOptions{host: host, token: token, jsonOut: values.jsonOut, timeout: values.timeout}, rest, nil
 }
 
 func supervisorURL(host, path string) string {
@@ -173,13 +218,6 @@ func printRawOrJSON(cfg clientOptions, body []byte) {
 	}
 	out, _ := json.Marshal(value)
 	fmt.Println(string(out))
-}
-
-func appNameArg(args []string, command string) (string, error) {
-	if len(args) == 0 {
-		return "", fmt.Errorf("usage: wt %s <app>", command)
-	}
-	return args[0], nil
 }
 
 func runApps(args []string) error {

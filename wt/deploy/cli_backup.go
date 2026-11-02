@@ -172,38 +172,34 @@ func runBackupDownload(cfg clientOptions, name, snapshot, out string) error {
 }
 
 func runBackup(args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: wt backup <list|create|restore|download|import> <app> ...")
-	}
-	action := args[0]
-	cfg, rest, err := clientFlags("backup "+action, args[1:], true)
+	cfg, rest, err := clientFlags("backup", args, true)
 	if err != nil {
 		return err
 	}
-	if len(rest) == 0 {
-		return fmt.Errorf("usage: wt backup %s <app> ...", action)
+	if len(rest) < 2 {
+		return fmt.Errorf("usage: wt backup <list|create|restore|download|import> <app> ...")
 	}
-	name := rest[0]
+	action, name := rest[0], rest[1]
 	switch action {
 	case "list":
 		return runBackupList(cfg, name)
 	case "create":
 		return runBackupCreate(cfg, name)
 	case "restore":
-		if len(rest) < 2 {
+		if len(rest) < 3 {
 			return fmt.Errorf("usage: wt backup restore <app> <snapshot>")
 		}
-		return runBackupRestore(cfg, name, rest[1])
+		return runBackupRestore(cfg, name, rest[2])
 	case "download":
-		if len(rest) < 2 {
+		if len(rest) < 3 {
 			return fmt.Errorf("usage: wt backup download <app> <snapshot> [--out FILE]")
 		}
-		return runBackupDownload(cfg, name, rest[1], backupOutPath(rest))
+		return runBackupDownload(cfg, name, rest[2], backupOutPath(rest[1:]))
 	case "import":
-		if len(rest) < 2 {
+		if len(rest) < 3 {
 			return fmt.Errorf("usage: wt backup import <app> <archive.tar.gz>")
 		}
-		return backupImport(cfg, name, rest[1])
+		return backupImport(cfg, name, rest[2])
 	default:
 		return fmt.Errorf("unknown backup action %q", action)
 	}
