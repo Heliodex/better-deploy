@@ -277,6 +277,11 @@ func (s *storageServer) logChanges(app string, changes []storageChange) {
 	if len(changes) == 0 {
 		return
 	}
+	if s.bus != nil {
+		for _, change := range changes {
+			s.publishStorageChange(app, change)
+		}
+	}
 	s.changeMu.Lock()
 	defer s.changeMu.Unlock()
 
@@ -319,6 +324,34 @@ func (s *storageServer) logChanges(app string, changes []storageChange) {
 	if err := file.Close(); err != nil {
 		log.Printf("storage %s: change log: %v", app, err)
 	}
+}
+
+type storageBusEvent struct {
+	RequestID    string   `json:"requestId,omitempty"`
+	RowsAffected int64    `json:"rowsAffected"`
+	Tables       []string `json:"tables,omitempty"`
+	Ops          []string `json:"ops,omitempty"`
+}
+
+// publishStorageChange sends a compact trigger on the reserved storage topic after a committed write.
+// It deliberately leaves the SQL and row values out of the bus; the browser should refetch through the app.
+func (s *storageServer) publishStorageChange(app string, change storageChange) {
+	event := storageBusEvent{RequestID: change.RequestID, RowsAffected: change.RowsAffected}
+	seen := map[string]struct{}{}
+	for _, row := range change.Rows {
+		key := row.Table + "\x00" + row.Op
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		event.Tables = append(event.Tables, row.Table)
+		event.Ops = append(event.Ops, row.Op)
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		return
+	}
+	_, _ = s.bus.publish(app, "storage", jsontext.Value(data))
 }
 
 // recentChanges returns the newest entries first. The log keeps one rotated file, so the read is bounded by the two files.

@@ -184,6 +184,10 @@ func (s *supervisor) handleAppFetch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "app does not allow calls from "+caller)
 		return
 	}
+	if rest == "/v1/publish" {
+		handleEventPublish(s.bus, w, r, target)
+		return
+	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxAppFetchBody)
 	body, err := io.ReadAll(r.Body)

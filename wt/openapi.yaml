@@ -702,6 +702,55 @@ paths:
                                 properties:
                                     enabled: { type: boolean }
 
+    /v1/publish:
+        post:
+            summary: Publish one host-bus event
+            description: >
+                Served by the storage loopback service (WT_STORAGE_URL) and
+                intercepted on the authenticated app-fetch path for another app.
+                The storage bearer token selects the app.
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            required: [topic]
+                            properties:
+                                topic: { type: string, maxLength: 128 }
+                                data: {}
+            responses:
+                "202":
+                    description: Event accepted
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/Event"
+                "400":
+                    description: Invalid topic or body
+    /v1/events:
+        get:
+            summary: Subscribe to an app's host-bus events
+            description: >
+                Served by the supervisor on the app host, outside the wasm
+                component. No bearer token is required.
+            parameters:
+                - name: topic
+                  in: query
+                  schema: { type: string, maxLength: 128 }
+                - name: since
+                  in: query
+                  schema: { type: integer, minimum: 0 }
+                - name: Last-Event-ID
+                  in: header
+                  schema: { type: string }
+            responses:
+                "200":
+                    description: Server-sent events; data is an Event, and a gap event reports the oldest retained id
+                    content:
+                        text/event-stream:
+                            schema: { type: string }
+
 components:
     securitySchemes:
         bearerAuth:
@@ -754,6 +803,13 @@ components:
                 user:
                     $ref: "#/components/schemas/IdentityUser"
                 csrfToken: { type: string }
+        Event:
+            type: object
+            properties:
+                id: { type: integer }
+                topic: { type: string }
+                time: { type: string, format: date-time }
+                data: {}
         BlobUploadResponse:
             type: object
             properties:

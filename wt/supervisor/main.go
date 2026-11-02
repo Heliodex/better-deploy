@@ -168,6 +168,7 @@ type supervisor struct {
 	deployments    *deploymentManager
 	blobs          *blobStore
 	identity       *identityStore
+	bus            *eventBus
 	secrets        *secretStore
 	jobs           *jobManager
 	metrics        *metrics
@@ -748,9 +749,11 @@ func startSupervisor(cfg config) *supervisor {
 		apps:        map[string]*app{},
 		hosts:       map[string]*app{},
 	}
+	s.bus = newEventBus()
 	s.jobs = newJobManager(filepath.Join(cfg.stateDir, ".jobs"), s)
 	s.metrics = newMetrics()
 	storage.metrics = s.metrics
+	storage.bus = s.bus
 	var fetch *appFetchServer
 	if listener, ok, listenErr := inheritedListener(fetchFDEnv); listenErr != nil {
 		log.Fatalf("app fetch listener: %v", listenErr)

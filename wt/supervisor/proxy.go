@@ -156,6 +156,10 @@ func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
 		s.serveMaintenance(w, r, a)
 		return
 	}
+	if appEventPath(r.URL.Path) {
+		s.handleAppEvents(w, r, a)
+		return
+	}
 	if identityMode {
 		if action, ok := identityAppAction(r.URL.Path); ok {
 			s.handleIdentityApp(w, r, a, action)

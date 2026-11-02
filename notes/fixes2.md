@@ -24,6 +24,7 @@ The short assessment: the spine is right and unusually well executed for a proto
 - [x] **Signed blob store.** Each app has a content-addressed blob store at `WT_STATE_DIR/.blobs/<app>`, signed with a per-app HMAC key in `WT_BLOB_SECRET`. Uploads hash the body and enforce a declared maximum; downloads support `Range`, `HEAD`, `ETag` and `If-None-Match`; deletes are signed. Blob bytes count toward `disk_mb` and the global budget, and the wasm component never handles the file body.
 - [x] **Platform end-user identity.** Apps opt in with `identity: "platform"`. The supervisor stores users and sessions under `WT_STATE_DIR/.identity`, hashes passwords with PBKDF2-SHA256, and serves login, logout, `GET /v1/me` and password change on the app host with a `wt_user` cookie and CSRF token. Admin routes create, list, update, reset and delete users. Proxied requests get signed `X-WT-User-*` headers and `app.UserFromRequest` verifies them; client-supplied identity headers and the session cookie never reach the app.
 - [x] **Readiness, dependencies and maintenance.** `GET /readyz` is separate from `/healthz`, `depends_on` gates an app host until its dependencies are ready (transitively, with cycle rejection and forward references), and `maintenance` serves a supervisor page with `503` and `Retry-After` without stopping the process.
+- [x] **Host event bus.** Apps publish to a per-app bounded bus through the storage loopback (`/v1/publish`), browsers subscribe with SSE on the app host (`/v1/events`), and storage writes emit compact `storage`-topic triggers. Cursors, `Last-Event-ID`, gap events and authenticated app-to-app publishes are supported; the stream is public to the app origin and topics are not authorization boundaries.
 
 ## Do not regress
 
@@ -112,10 +113,10 @@ These are the choices that make this worth continuing. Keep them unless a replac
 
 ## P2: missing APIs
 
-12. [ ] **Host event bus for realtime.** `wasmtime serve` does not give shared memory across concurrent requests, so an app cannot reliably fan out SSE from an in-process hub; every realtime page ends up polling SQLite per connection.
-   - [ ] Add `POST /v1/publish` and `GET /v1/events?topic=&since=` with SSE, a bounded ring buffer and a cursor.
-   - [ ] Reuse the panel's existing hub and the storage pre-update hooks.
-   - [ ] Use it for app-to-app notifications as well as browser fan-out.
+12. [x] **Host event bus for realtime.** `wasmtime serve` does not give shared memory across concurrent requests, so an app cannot reliably fan out SSE from an in-process hub; every realtime page ended up polling SQLite per connection.
+   - [x] Add `POST /v1/publish` on the storage loopback and `GET /v1/events?topic=&since=` on the app host with SSE, a bounded per-app ring of 256 events or 1 MiB, sequence cursors, `Last-Event-ID`, and a `gap` event when the cursor falls off the ring.
+   - [x] Reuse the storage write path: committed writes publish a compact `storage`-topic event with request id, row count and affected tables/ops, without SQL or row values, so a page can refetch instead of polling.
+   - [x] Use it for app-to-app notifications: `app.PublishTo` posts through the authenticated app-fetch path, `allow_callers` still applies, and the event lands on the target app's bus for its browser subscribers.
 
 13. [x] **Blob and file uploads.** A user upload used to stream through the component and consume a concurrency slot, while `/data` had no serving path.
    - [x] Add a content-addressed per-app blob store with signed upload, download and delete URLs under `/_wt/blobs`, using a per-app HMAC key and a same-origin SDK helper.

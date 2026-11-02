@@ -99,6 +99,7 @@ type storageServer struct {
 	querySem chan struct{}
 
 	metrics *metrics
+	bus     *eventBus
 }
 
 type storageRequest struct {
@@ -1089,6 +1090,10 @@ func (s *storageServer) handle(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="wt-storage"`)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if r.URL.Path == "/v1/publish" {
+		handleEventPublish(s.bus, w, r, app)
 		return
 	}
 	if s.tempOver.Load() {

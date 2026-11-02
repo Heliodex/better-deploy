@@ -155,6 +155,9 @@ func (s *supervisor) handleDelete(w http.ResponseWriter, r *http.Request, name s
 	}
 
 	s.unregister(a)
+	if s.bus != nil {
+		s.bus.remove(name)
+	}
 	s.drainAndStop(a, "delete")
 	if a.logs != nil {
 		a.logs.close()

@@ -1,0 +1,141 @@
+// Realtime event publishing over the storage loopback and SSE subscription on the app host.
+
+package main
+
+import (
+	"encoding/json/jsontext"
+	"encoding/json/v2"
+	"fmt"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+)
+
+const (
+	eventHostPrefix = "/_wt/events"
+	eventKeepAlive  = 20 * time.Second
+)
+
+type eventPublishRequest struct {
+	Topic string         `json:"topic"`
+	Data  jsontext.Value `json:"data"`
+}
+
+type eventPublishResponse struct {
+	ID    int64     `json:"id"`
+	Topic string    `json:"topic"`
+	Time  time.Time `json:"time"`
+}
+
+// handleEventPublish is shared by the storage loopback service and the authenticated app-fetch publish path.
+func handleEventPublish(bus *eventBus, w http.ResponseWriter, r *http.Request, app string) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if bus == nil {
+		writeError(w, http.StatusServiceUnavailable, "event bus is unavailable")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, eventMaxBody+1024)
+	var request eventPublishRequest
+	if err := json.UnmarshalRead(r.Body, &request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	event, err := bus.publish(app, request.Topic, request.Data)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, eventPublishResponse{ID: event.ID, Topic: event.Topic, Time: event.Time})
+}
+
+// handleAppEvents streams an app's bus over SSE on the app host. It is public to the app's own origin, like the static files.
+func (s *supervisor) handleAppEvents(w http.ResponseWriter, r *http.Request, a *app) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	if s.bus == nil {
+		writeError(w, http.StatusServiceUnavailable, "event bus is unavailable")
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming unsupported")
+		return
+	}
+	topic := strings.TrimSpace(r.URL.Query().Get("topic"))
+	if len(topic) > eventMaxTopic || strings.ContainsAny(topic, "\x00\r\n") {
+		writeError(w, http.StatusBadRequest, "invalid topic")
+		return
+	}
+	var since *int64
+	if value := r.URL.Query().Get("since"); value != "" {
+		parsed, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || parsed < 0 {
+			writeError(w, http.StatusBadRequest, "since must be a non-negative event id")
+			return
+		}
+		since = &parsed
+	} else if value := r.Header.Get("Last-Event-ID"); value != "" {
+		parsed, err := strconv.ParseInt(value, 10, 64)
+		if err == nil && parsed >= 0 {
+			since = &parsed
+		}
+	}
+
+	sub, replay, oldest, gap := s.bus.subscribe(a.name, topic, since)
+	defer s.bus.unsubscribe(a.name, sub)
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	_, _ = fmt.Fprint(w, "retry: 3000\n\n")
+	if gap {
+		_, _ = fmt.Fprintf(w, "event: gap\ndata: {\"oldest\":%d}\n\n", oldest)
+	}
+	for _, event := range replay {
+		if !writeBusEvent(w, event) {
+			return
+		}
+	}
+	flusher.Flush()
+
+	ticker := time.NewTicker(eventKeepAlive)
+	defer ticker.Stop()
+	for {
+		select {
+		case event, ok := <-sub.ch:
+			if !ok {
+				return
+			}
+			if !writeBusEvent(w, event) {
+				return
+			}
+			flusher.Flush()
+		case <-ticker.C:
+			if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+		case <-r.Context().Done():
+			return
+		}
+	}
+}
+
+func writeBusEvent(w http.ResponseWriter, event busEvent) bool {
+	data := event.json()
+	if data == nil {
+		return true
+	}
+	_, err := fmt.Fprintf(w, "id: %d\nevent: message\ndata: %s\n\n", event.ID, data)
+	return err == nil
+}
+
+// appEventPath reports whether a path belongs to the host event bus rather than the app's wasm component.
+func appEventPath(path string) bool {
+	return path == "/v1/events" || path == eventHostPrefix || path == eventHostPrefix+"/"
+}
