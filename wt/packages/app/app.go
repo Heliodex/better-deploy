@@ -32,9 +32,77 @@ func WriteJSON(w http.ResponseWriter, status int, value any) {
 	_, _ = w.Write(append(data, '\n'))
 }
 
-// WriteError writes {"error": message} with the given status.
+// ErrorResponse is the standard JSON error body. Error stays the human-readable message; Code is stable for clients and Field names a request field when one applies.
+type ErrorResponse struct {
+	Error string `json:"error"`
+	Code  string `json:"code"`
+	Field string `json:"field,omitempty"`
+}
+
+// ErrorCode maps an HTTP status to the stable code clients can branch on.
+func ErrorCode(status int) string {
+	switch status {
+	case http.StatusBadRequest:
+		return "invalid"
+	case http.StatusUnauthorized:
+		return "unauthorized"
+	case http.StatusForbidden:
+		return "forbidden"
+	case http.StatusNotFound:
+		return "not_found"
+	case http.StatusMethodNotAllowed:
+		return "method_not_allowed"
+	case http.StatusConflict:
+		return "conflict"
+	case http.StatusPreconditionFailed:
+		return "precondition_failed"
+	case http.StatusRequestEntityTooLarge:
+		return "too_large"
+	case http.StatusUnsupportedMediaType:
+		return "unsupported_media_type"
+	case http.StatusUnprocessableEntity:
+		return "invalid"
+	case http.StatusTooManyRequests:
+		return "rate_limited"
+	case http.StatusInternalServerError:
+		return "internal"
+	case http.StatusNotImplemented:
+		return "not_implemented"
+	case http.StatusBadGateway:
+		return "bad_gateway"
+	case http.StatusServiceUnavailable:
+		return "unavailable"
+	case http.StatusGatewayTimeout:
+		return "timeout"
+	}
+	switch {
+	case status >= 500:
+		return "internal"
+	case status >= 400:
+		return "invalid"
+	}
+	return "error"
+}
+
+// WriteError writes {"error": message, "code": statusCode} with the given status.
 func WriteError(w http.ResponseWriter, status int, message string) {
-	WriteJSON(w, status, map[string]string{"error": message})
+	WriteErrorCode(w, status, "", message)
+}
+
+// WriteErrorCode writes the standard error body with an explicit stable code.
+func WriteErrorCode(w http.ResponseWriter, status int, code, message string) {
+	if code == "" {
+		code = ErrorCode(status)
+	}
+	WriteJSON(w, status, ErrorResponse{Error: message, Code: code})
+}
+
+// WriteErrorField writes the standard error body and names the request field that failed.
+func WriteErrorField(w http.ResponseWriter, status int, code, field, message string) {
+	if code == "" {
+		code = ErrorCode(status)
+	}
+	WriteJSON(w, status, ErrorResponse{Error: message, Code: code, Field: field})
 }
 
 // HealthPath is the reserved readiness path the supervisor probes.

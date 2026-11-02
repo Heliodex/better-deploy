@@ -111,9 +111,41 @@ func TestWriteError(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", rec.Code)
 	}
-	var out map[string]string
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || out["error"] != "nope" {
+	var out ErrorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || out.Error != "nope" || out.Code != "invalid" {
 		t.Errorf("body = %q, %v", rec.Body.String(), err)
+	}
+}
+
+func TestErrorCode(t *testing.T) {
+	cases := map[int]string{
+		http.StatusBadRequest:          "invalid",
+		http.StatusUnauthorized:        "unauthorized",
+		http.StatusForbidden:           "forbidden",
+		http.StatusNotFound:            "not_found",
+		http.StatusConflict:            "conflict",
+		http.StatusUnprocessableEntity: "invalid",
+		http.StatusTooManyRequests:     "rate_limited",
+		http.StatusInternalServerError: "internal",
+		http.StatusServiceUnavailable:  "unavailable",
+		http.StatusTeapot:              "invalid",
+	}
+	for status, want := range cases {
+		if got := ErrorCode(status); got != want {
+			t.Errorf("ErrorCode(%d) = %q, want %q", status, got, want)
+		}
+	}
+}
+
+func TestWriteErrorField(t *testing.T) {
+	rec := httptest.NewRecorder()
+	WriteErrorField(rec, http.StatusConflict, "conflict", "name", "name is taken")
+	var out ErrorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Code != "conflict" || out.Field != "name" || out.Error != "name is taken" {
+		t.Errorf("body = %+v", out)
 	}
 }
 
