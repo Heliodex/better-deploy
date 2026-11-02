@@ -25,13 +25,8 @@ type buildCache struct {
 
 // buildStatus reports which phases ran, which were reused and the resulting component digest.
 type buildStatus struct {
-	ComponentBuilt  bool
-	ComponentReused bool
-	StaticBuilt     bool
-	StaticReused    bool
-	StaticSkipped   bool
-	BuildSkipped    bool
-	WasmDigest      string
+	ComponentBuilt, ComponentReused, StaticBuilt, StaticReused, StaticSkipped, BuildSkipped bool
+	WasmDigest                                                                              string
 }
 
 // writeBuildCache records a successful phase. Write errors are ignored because the cache only skips future work.
