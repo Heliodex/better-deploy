@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en-GB">
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<title>Blob Box</title>
+		<style>
+			:root {
+				color-scheme: light;
+				--ink: #1c2420;
+				--muted: #64706a;
+				--paper: #f3f0e8;
+				--card: #fffdf8;
+				--line: #ddd6c8;
+				--accent: #1f7a5a;
+				--bad: #b54343;
+			}
+
+			* { box-sizing: border-box; }
+
+			body {
+				margin: 0;
+				background: radial-gradient(circle at 80% 0, rgba(31, 122, 90, 0.1), transparent 28rem), var(--paper);
+				color: var(--ink);
+				font: 16px/1.5 ui-sans-serif, system-ui, sans-serif;
+			}
+
+			main { width: min(860px, calc(100% - 32px)); margin: 0 auto; padding: 54px 0 80px; }
+			h1 { margin: 0 0 8px; font-size: clamp(2rem, 5vw, 3.4rem); letter-spacing: -0.05em; }
+			h1 span { color: var(--accent); }
+			p { margin: 0; color: var(--muted); }
+			.card { margin-top: 28px; padding: 22px; border: 1px solid var(--line); border-radius: 18px; background: var(--card); box-shadow: 0 20px 50px rgba(40, 50, 40, 0.07); }
+			form { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+			input[type="file"] { flex: 1 1 280px; padding: 10px; border: 1px dashed var(--line); border-radius: 12px; background: #faf8f3; }
+			button { padding: 10px 16px; border: 0; border-radius: 999px; background: var(--accent); color: white; font-weight: 700; cursor: pointer; }
+			button.secondary { background: transparent; color: var(--bad); border: 1px solid #e4c2c2; }
+			button:disabled { opacity: 0.5; cursor: progress; }
+			ul { margin: 0; padding: 0; list-style: none; }
+			li { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 14px 0; border-top: 1px solid var(--line); }
+			li:first-child { border-top: 0; }
+			li a { flex: 1 1 260px; color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+			li small { color: var(--muted); font-family: ui-monospace, monospace; }
+			.error { margin-top: 16px; padding: 12px 14px; border-radius: 12px; background: #fbe7e7; color: var(--bad); }
+			.empty { padding: 20px 0; color: var(--muted); }
+			code { font-family: ui-monospace, monospace; font-size: 0.86em; }
+		</style>
+	</head>
+	<body>
+		<main>
+			<h1>Blob <span>Box</span></h1>
+			<p>A signed-URL upload board. Bytes go straight to the supervisor's blob store; metadata lives in SQLite.</p>
+
+			<section class="card">
+				<form id="upload-form">
+					<input id="file" type="file" required>
+					<button id="upload-button" type="submit">Upload</button>
+				</form>
+				<div id="status" hidden></div>
+			</section>
+
+			<section class="card">
+				<ul id="files"><li class="empty">Loading files…</li></ul>
+			</section>
+		</main>
+
+		<script>
+			const form = document.querySelector("#upload-form")
+			const fileInput = document.querySelector("#file")
+			const button = document.querySelector("#upload-button")
+			const status = document.querySelector("#status")
+			const list = document.querySelector("#files")
+
+			const showError = message => {
+				status.textContent = message
+				status.className = "error"
+				status.hidden = false
+			}
+
+			const clearError = () => {
+				status.hidden = true
+				status.textContent = ""
+			}
+
+			const json = async (path, init) => {
+				const response = await fetch(path, init)
+				const data = await response.json().catch(() => null)
+				if (!response.ok) throw new Error(data?.error || `Request failed (${response.status})`)
+				return data
+			}
+
+			const bytes = size => size < 1024 ? `${size} B` : size < 1048576 ? `${(size / 1024).toFixed(1)} kB` : `${(size / 1048576).toFixed(1)} MB`
+
+			const load = async () => {
+				try {
+					const data = await json("/api/files")
+					if (data.files.length === 0) {
+						list.innerHTML = '<li class="empty">No files yet.</li>'
+						return
+					}
+					list.replaceChildren(...data.files.map(file => {
+						const row = document.createElement("li")
+						const link = document.createElement("a")
+						link.href = file.downloadUrl
+						link.textContent = file.name
+						const meta = document.createElement("small")
+						meta.textContent = `${bytes(file.size)} · ${file.contentType}`
+						const remove = document.createElement("button")
+						remove.type = "button"
+						remove.className = "secondary"
+						remove.textContent = "Delete"
+						remove.onclick = async () => {
+							clearError()
+							try {
+								const response = await fetch(`/api/files/${file.id}`, { method: "DELETE" })
+								if (!response.ok) throw new Error(response.statusText)
+								await load()
+							} catch (error) {
+								showError(error.message)
+							}
+						}
+						row.append(link, meta, remove)
+						return row
+					}))
+				} catch (error) {
+					showError(error.message)
+				}
+			}
+
+			form.onsubmit = async event => {
+				event.preventDefault()
+				clearError()
+				const file = fileInput.files?.[0]
+				if (!file) return
+				button.disabled = true
+				try {
+					const contentType = file.type || "application/octet-stream"
+					const upload = await json("/api/uploads", {
+						method: "POST",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify({ name: file.name, contentType, size: file.size }),
+					})
+					const response = await fetch(upload.uploadUrl, {
+						method: "PUT",
+						headers: { "content-type": contentType },
+						body: file,
+					})
+					if (!response.ok) throw new Error(`Upload failed (${response.status})`)
+					const blob = await response.json()
+					await json("/api/files", {
+						method: "POST",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify({ name: file.name, digest: blob.digest, size: blob.size, contentType: blob.contentType }),
+					})
+					form.reset()
+					await load()
+				} catch (error) {
+					showError(error.message)
+				} finally {
+					button.disabled = false
+				}
+			}
+
+			void load()
+		</script>
+	</body>
+</html>

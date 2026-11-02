@@ -28,6 +28,7 @@ The first request for a precompiled Go component is tens of milliseconds on a la
   - `example/ticker` – logs a `ticker beat` line every 10 seconds from an `app.json` schedule and enqueues a durable `/jobs/beat` job with a payload, so the supervisor log tail and job queue have steady activity to show.
   - `example/guestbook` – SvelteKit static frontend with a Go JSON API; the frontend is served from the bundle's `static/` directory, not embedded in the component.
   - `example/pulse` – SvelteKit uptime dashboard over a Go API that probes URLs on a supervisor schedule, keeps latency history in SQLite and streams each cycle over the event bus.
+  - `example/blobbox` – signed-URL upload board backed by SQLite metadata and the supervisor blob store; demonstrates `app.DeleteBlob` and the blob admin/GC endpoints.
 - `supervisor/` – runs apps, proxies by `Host`, deploys bundles blue/green.
   - `supervisor/web` – SvelteKit admin panel, embedded into the supervisor binary (not tracked: `web/build`, `web/node_modules`, `web/.svelte-kit`).
 - `deploy/` – builds, precompiles and uploads an app.
@@ -70,6 +71,9 @@ wt-deploy jobs ticker show <id>
 wt-deploy jobs ticker enqueue --path /jobs/beat --body '{"slot":1}' --max-attempts 5
 wt-deploy jobs ticker cancel <id>
 wt-deploy jobs ticker retry <id>
+wt-deploy blobs blobbox list
+wt-deploy blobs blobbox delete <digest>
+wt-deploy blobs blobbox gc --older-than 720h --dry-run
 wt-deploy deploy --dir ./notes --app-host notes.example.com
 wt-deploy build --dir ./notes --out notes.tar.gz
 wt-deploy rollback notes 20261101T120000.000000000Z
@@ -660,7 +664,24 @@ GET  /_wt/blobs/<digest>?exp=&sig=       download, Range and HEAD supported
 DELETE /_wt/blobs/<digest>?exp=&sig=     remove the blob
 ```
 
-`exp` is a Unix timestamp no more than 24 hours out, and `sig` is HMAC-SHA256 over the method, app name, digest, expiry, max bytes and content type. Uploads hash the body while streaming it to a temporary file, check the declared `max`, and move it under the SHA-256 digest, so a client cannot choose the digest. A duplicate upload is a no-op (`200` instead of `201`). Downloads set an `ETag` and `Cache-Control: private`, and `http.ServeContent` supplies `Range`, `If-Range`, `If-None-Match` and partial responses. There is no automatic garbage collection because only the app knows which files its data still references; call the delete URL when a record is removed, or purge the app's state.
+`exp` is a Unix timestamp no more than 24 hours out, and `sig` is HMAC-SHA256 over the method, app name, digest, expiry, max bytes and content type. Uploads hash the body while streaming it to a temporary file, check the declared `max`, and move it under the SHA-256 digest, so a client cannot choose the digest. A duplicate upload is a no-op (`200` instead of `201`). Downloads set an `ETag` and `Cache-Control: private`, and `http.ServeContent` supplies `Range`, `If-Range`, `If-None-Match` and partial responses.
+
+`app.DeleteBlob(ctx, client, digest)` removes a blob through the authenticated storage loopback, so a normal app delete can remove both the SQLite row and the content. The admin API and CLI can recover or clean up after a client that uploaded but never recorded the digest:
+
+```text
+GET    /apps/<name>/blobs                         list digest, size, content type and age
+DELETE /apps/<name>/blobs/<digest>                remove one blob
+POST   /apps/<name>/blobs/gc                      {olderThan, keep, dryRun}
+```
+
+```sh
+wt-deploy blobs blobbox list
+wt-deploy blobs blobbox delete <digest>
+wt-deploy blobs blobbox gc --older-than 720h --dry-run
+wt-deploy blobs blobbox gc --older-than 720h --keep <digest>,<digest>
+```
+
+The GC cutoff is explicit; the supervisor cannot know which digests the app still references, so pass `keep` for every digest that must survive, or run the dry run first. `--keep` accepts repeated or comma-separated digests. `example/blobbox` stores metadata in a `files` table, signs upload/download URLs and calls `app.DeleteBlob` from its delete handler.
 
 ### Why not a WIT storage import?
 
