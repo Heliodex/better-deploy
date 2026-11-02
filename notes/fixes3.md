@@ -4,7 +4,7 @@ Architecture simplification review, 2026-11-01. This pass looks for duplicated m
 
 The short assessment: the code is clean at function level after the earlier splits, but the same concepts are still implemented two or three times. The biggest wins are removing the test-only direct launch path, giving isolation one lifecycle, and making the storage and configuration surfaces share one representation.
 
-The first two items below are now implemented; the remaining list is unchanged in priority order.
+The first four items below are now implemented; the remaining list is unchanged in priority order.
 
 ## Small changes in this pass
 
@@ -26,15 +26,17 @@ The first two items below are now implemented; the remaining list is unchanged i
    - This is security-relevant: a single `Close` makes it much harder to leak a cgroup, uid, namespace root or firewall rule on a partial launch.
    - Implemented as `isolationPlan` with `prepareIsolation`, `attachProcess`, `activate` and an idempotent `close`. `launch` stores the active plan on the app so `stop` and failed launches release the same resources through one path.
 
-3. [ ] **Unify the storage statement types and the SQL handler surface.** There are still two statement shapes (`storageStatement` and `storageTransactionStatement`) plus conversion for batches and migrations, and `storageServer.handle` wraps most routes in `handleSQL` closures for the same semaphore and error handling. One statement type with an optional `Query` flag, one decoder and one executor would cover query, exec, write, batch, transaction, session and migration.
+3. [x] **Unify the storage statement types and the SQL handler surface.** There are still two statement shapes (`storageStatement` and `storageTransactionStatement`) plus conversion for batches and migrations, and `storageServer.handle` wraps most routes in `handleSQL` closures for the same semaphore and error handling. One statement type with an optional `Query` flag, one decoder and one executor would cover query, exec, write, batch, transaction, session and migration.
    - Collapse `storageBatchRequest` and `storageTransactionRequest` into one request type; keep the wire names compatible.
    - Turn the route closures into methods that take the app string, so auth, body limits and query semaphore handling live in one place.
    - After this, add tests that send the same statement through every entry point and expect the same result shape and error codes.
+   - Implemented in `dce29e9`. One `storageStatement` with `Query` covers batches, transactions, sessions and migrations; batch and transaction share `storageStatementsRequest` and `storageStatementsResponse`; `handleSQL` takes the app and accepts handler methods directly. Batches reject `query` statements explicitly because they cannot return rows.
 
-4. [ ] **Table-drive configuration and remove the variadic tenant mode.** `configFromEnv`, `bindConfigFlags`, `applyConfigFlags`, `validateTenantConfig`, `validateIsolationConfig` and `validateDataQuotaConfig` together maintain 57 `WT_*` names and 34 flags, including duplicated MiB conversions and defaults. Separately, `normalizeAppConfig`, `readAppConfig` and `persistAppConfig` take `modes ...string` only to smuggle one tenant mode through, which hides the real parameter and invites call sites to pass the wrong thing.
+4. [x] **Table-drive configuration and remove the variadic tenant mode.** `configFromEnv`, `bindConfigFlags`, `applyConfigFlags`, `validateTenantConfig`, `validateIsolationConfig` and `validateDataQuotaConfig` together maintain 57 `WT_*` names and 34 flags, including duplicated MiB conversions and defaults. Separately, `normalizeAppConfig`, `readAppConfig` and `persistAppConfig` take `modes ...string` only to smuggle one tenant mode through, which hides the real parameter and invites call sites to pass the wrong thing.
    - Use one table of `{env, flag, default, parse, validate}` entries to populate the config and bind the flags, or move both to a versioned config file with a single loader and a small env alias layer.
    - Replace `modes ...string` with an explicit `tenantMode string` parameter or a field on the loader.
    - This is also the prerequisite for a real `wt config` that shows effective values and their source.
+   - Implemented in `23ed5a9`. `bindString`, `bindBool`, `bindInt` and `bindInt64` load the environment default and register the flag on one line each, so `configFromEnv` and the separate flag pass are gone. `normalizeAppConfig`, `readAppConfig` and `persistAppConfig` now take an explicit tenant mode.
 
 5. [ ] **Replace the manual app, storage, identity and admin dispatch with one route table.** The supervisor has 72 HTTP handlers and several independent prefix switches: `handleAppPrefixRoute`, `handleAppVerb`, `storageServer.handle`, the identity action switch and the admin routes. Method checks, audit wrapping, body limits and scope checks are repeated at each layer, and the hand-written `openapi.yaml` can drift from all of them.
    - Declare routes as `{pattern, method, scope, body limit, handler}` and let one dispatcher apply authentication, audit, `Allow` headers and 404s.
@@ -73,8 +75,8 @@ The first two items below are now implemented; the remaining list is unchanged i
 
 ## If I picked the next three
 
-1. Unify storage statements and handlers, because storage is the most-touched API and still has parallel representations.
-2. Table-drive configuration and remove the variadic tenant mode; it is the main source of operational drift.
-3. Replace the manual dispatch with a route table that also generates the OpenAPI document and panel client.
+1. Replace the manual dispatch with a route table that also generates the OpenAPI document and panel client.
+2. Unify operator tokens and platform identity under one principal and session layer.
+3. Collapse backup and deployment content storage into one content-addressed store with retention policies.
 
 Keep the invariants in `notes/fixes2.md` under "Do not regress"; none of the items above requires weakening the wasm artifact, blue/green deploys, the storage authorizer, sessions, scoped tokens or the tested isolation boundaries.
