@@ -1,6 +1,7 @@
 <script lang="ts">
 import type { DatabaseRows, DatabaseTableStat, StorageChange } from "./api"
 import { formatChangeParams, formatDatabaseValue, formatRowValue, formatSize, formatTime, rowOpClass } from "./format"
+import { routes } from "./routes.gen"
 
 interface Props {
 	changes: StorageChange[]
@@ -90,7 +91,7 @@ async function importFile(event: Event): Promise<void> {
 				<a
 					class="btn"
 					download={`${name}.db`}
-					href={`/apps/${encodeURIComponent(name)}/database/export`}
+					href={routes.appDatabasePath(name, "export")}
 				>
 					Export
 				</a>

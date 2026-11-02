@@ -3,6 +3,7 @@ import type { BackupInfo } from "./api"
 import BackupTree from "./BackupTree.svelte"
 import { backupKindLabel } from "./backup-tree"
 import { formatSize, formatTime } from "./format"
+import { routes } from "./routes.gen"
 
 interface Props {
 	actionMessage: string
@@ -210,7 +211,7 @@ async function importFile(event: Event): Promise<void> {
 					<a
 						class="btn"
 						download={`${selectedInfo.name}.tar.gz`}
-						href={`/apps/${encodeURIComponent(name)}/backups/${encodeURIComponent(selectedInfo.name)}/download`}
+						href={routes.appBackup(name, `${encodeURIComponent(selectedInfo.name)}/download`)}
 					>
 						Download
 					</a>

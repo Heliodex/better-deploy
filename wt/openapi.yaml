@@ -3,7 +3,7 @@ info:
     title: wt supervisor API
     version: "0.1.0"
     description: >
-        Hand-maintained OpenAPI document for the supervisor's admin and app APIs.
+        OpenAPI document for the supervisor's admin and app APIs. The path and method set is checked against the route tables; component schemas and descriptions are maintained here.
         Newer resources use camelCase. Legacy config, backup and job-enqueue request
         fields still use the snake_case spellings shown here.
 servers:
@@ -35,37 +35,6 @@ paths:
                         application/json:
                             schema:
                                 $ref: "#/components/schemas/AppInfo"
-        post:
-            summary: Deploy a bundle synchronously (compatibility alias)
-            description: >
-                Use POST /apps/{name}/deployments for a queued deployment resource.
-                This route stays synchronous for older CLI and panel clients.
-            parameters:
-                - name: If-None-Match
-                  in: header
-                  schema: { type: string }
-                - name: Idempotency-Key
-                  in: header
-                  schema: { type: string }
-            requestBody:
-                required: true
-                content:
-                    multipart/form-data:
-                        schema:
-                            type: object
-                            required: [artifact]
-                            properties:
-                                artifact:
-                                    type: string
-                                    format: binary
-            responses:
-                "200":
-                    description: Deployed app info
-                    headers:
-                        ETag:
-                            schema: { type: string }
-                "304":
-                    description: Bundle already matches If-None-Match
         delete:
             summary: Remove an app, optionally purging state
             parameters:
@@ -751,6 +720,415 @@ paths:
                         text/event-stream:
                             schema: { type: string }
 
+    /apps/{name}/secrets:
+        parameters:
+            - $ref: "#/components/parameters/AppName"
+        get:
+            summary: List secret names, never values
+            responses:
+                "200":
+                    description: OK
+                "400":
+                    description: Invalid request
+                "401":
+                    description: Unauthorized
+                "403":
+                    description: Forbidden
+                "404":
+                    description: Not found
+    /apps/{name}/secrets/{key}:
+        parameters:
+            - $ref: "#/components/parameters/AppName"
+            - name: key
+              in: path
+              required: true
+              schema: { type: string }
+        put:
+            summary: Set or rotate one secret
+            responses:
+                "200":
+                    description: OK
+                "400":
+                    description: Invalid request
+                "401":
+                    description: Unauthorized
+                "403":
+                    description: Forbidden
+                "404":
+                    description: Not found
+        delete:
+            summary: Delete one secret
+            responses:
+                "200":
+                    description: OK
+                "400":
+                    description: Invalid request
+                "401":
+                    description: Unauthorized
+                "403":
+                    description: Forbidden
+                "404":
+                    description: Not found
+    /apps/{name}/database:
+        parameters:
+            - $ref: "#/components/parameters/AppName"
+        get:
+            summary: Read the database overview
+            responses:
+                "200":
+                    description: OK
+                "400":
+                    description: Invalid request
+                "401":
+                    description: Unauthorized
+                "403":
+                    description: Forbidden
+                "404":
+                    description: Not found
+    /apps/{name}/logs/stream:
+        parameters:
+            - $ref: "#/components/parameters/AppName"
+        get:
+            summary: Stream app log lines over SSE
+            responses:
+                "200":
+                    description: OK
+                "400":
+                    description: Invalid request
+                "401":
+                    description: Unauthorized
+                "403":
+                    description: Forbidden
+                "404":
+                    description: Not found
+    /apps/{name}/resources:
+        parameters:
+            - $ref: "#/components/parameters/AppName"
+        get:
+            summary: Read app resource history
+            responses:
+                "200":
+                    description: OK
+                "400":
+                    description: Invalid request
+                "401":
+                    description: Unauthorized
+                "403":
+                    description: Forbidden
+                "404":
+                    description: Not found
+    /apps/{name}/stop:
+        parameters:
+            - $ref: "#/components/parameters/AppName"
+        post:
+            summary: Stop the app process
+            responses:
+                "200":
+                    description: OK
+                "400":
+                    description: Invalid request
+                "401":
+                    description: Unauthorized
+                "403":
+                    description: Forbidden
+                "404":
+                    description: Not found
+    /apps/{name}/start:
+        parameters:
+            - $ref: "#/components/parameters/AppName"
+        post:
+            summary: Start a stopped app
+            responses:
+                "200":
+                    description: OK
+                "400":
+                    description: Invalid request
+                "401":
+                    description: Unauthorized
+                "403":
+                    description: Forbidden
+                "404":
+                    description: Not found
+    /apps/{name}/restart:
+        parameters:
+            - $ref: "#/components/parameters/AppName"
+        post:
+            summary: Restart the app process
+            responses:
+                "200":
+                    description: OK
+                "400":
+                    description: Invalid request
+                "401":
+                    description: Unauthorized
+                "403":
+                    description: Forbidden
+                "404":
+                    description: Not found
+    /apps/{name}/rollback/{id}:
+        parameters:
+            - $ref: "#/components/parameters/AppName"
+            - name: id
+              in: path
+              required: true
+              schema: { type: string }
+        post:
+            summary: Roll back to a retained deployment
+            responses:
+                "200":
+                    description: OK
+                "400":
+                    description: Invalid request
+                "401":
+                    description: Unauthorized
+                "403":
+                    description: Forbidden
+                "404":
+                    description: Not found
+    /v1/sessions:
+        post:
+            summary: Create a pinned storage session
+            responses:
+                "200":
+                    description: OK
+                "400":
+                    description: Invalid request
+                "401":
+                    description: Unauthorized
+                "403":
+                    description: Forbidden
+                "404":
+                    description: Not found
+    /v1/sessions/{id}/query:
+        parameters:
+            - name: id
+              in: path
+              required: true
+              schema: { type: string }
+        post:
+            summary: Run a query on a storage session
+            responses:
+                "200":
+                    description: OK
+                "400":
+                    description: Invalid request
+                "401":
+                    description: Unauthorized
+                "403":
+                    description: Forbidden
+                "404":
+                    description: Not found
+    /v1/sessions/{id}/exec:
+        parameters:
+            - name: id
+              in: path
+              required: true
+              schema: { type: string }
+        post:
+            summary: Run a write on a storage session
+            responses:
+                "200":
+                    description: OK
+                "400":
+                    description: Invalid request
+                "401":
+                    description: Unauthorized
+                "403":
+                    description: Forbidden
+                "404":
+                    description: Not found
+    /v1/sessions/{id}/commit:
+        parameters:
+            - name: id
+              in: path
+              required: true
+              schema: { type: string }
+        post:
+            summary: Commit a storage session
+            responses:
+                "200":
+                    description: OK
+                "400":
+                    description: Invalid request
+                "401":
+                    description: Unauthorized
+                "403":
+                    description: Forbidden
+                "404":
+                    description: Not found
+    /v1/sessions/{id}/rollback:
+        parameters:
+            - name: id
+              in: path
+              required: true
+              schema: { type: string }
+        post:
+            summary: Roll back a storage session
+            responses:
+                "200":
+                    description: OK
+                "400":
+                    description: Invalid request
+                "401":
+                    description: Unauthorized
+                "403":
+                    description: Forbidden
+                "404":
+                    description: Not found
+    /v1/query:
+        post:
+            summary: Run a read-only query
+            responses:
+                "200":
+                    description: OK
+                "400":
+                    description: Invalid request
+                "401":
+                    description: Unauthorized
+                "403":
+                    description: Forbidden
+                "404":
+                    description: Not found
+    /v1/exec:
+        post:
+            summary: Run a write statement
+            responses:
+                "200":
+                    description: OK
+                "400":
+                    description: Invalid request
+                "401":
+                    description: Unauthorized
+                "403":
+                    description: Forbidden
+                "404":
+                    description: Not found
+    /v1/write:
+        post:
+            summary: Run a write and return rows
+            responses:
+                "200":
+                    description: OK
+                "400":
+                    description: Invalid request
+                "401":
+                    description: Unauthorized
+                "403":
+                    description: Forbidden
+                "404":
+                    description: Not found
+    /v1/batch:
+        post:
+            summary: Run a write batch
+            responses:
+                "200":
+                    description: OK
+                "400":
+                    description: Invalid request
+                "401":
+                    description: Unauthorized
+                "403":
+                    description: Forbidden
+                "404":
+                    description: Not found
+    /v1/transaction:
+        post:
+            summary: Run a transaction with optional queries
+            responses:
+                "200":
+                    description: OK
+                "400":
+                    description: Invalid request
+                "401":
+                    description: Unauthorized
+                "403":
+                    description: Forbidden
+                "404":
+                    description: Not found
+    /v1/schema:
+        get:
+            summary: Read the database schema
+            responses:
+                "200":
+                    description: OK
+                "400":
+                    description: Invalid request
+                "401":
+                    description: Unauthorized
+                "403":
+                    description: Forbidden
+                "404":
+                    description: Not found
+    /v1/migrate:
+        post:
+            summary: Apply a migration version
+            responses:
+                "200":
+                    description: OK
+                "400":
+                    description: Invalid request
+                "401":
+                    description: Unauthorized
+                "403":
+                    description: Forbidden
+                "404":
+                    description: Not found
+    /usage:
+        get:
+            summary: Read disk usage and the global budget
+            responses:
+                "200":
+                    description: OK
+                "400":
+                    description: Invalid request
+                "401":
+                    description: Unauthorized
+                "403":
+                    description: Forbidden
+                "404":
+                    description: Not found
+    /events:
+        get:
+            summary: Stream app snapshots over SSE
+            responses:
+                "200":
+                    description: OK
+                "400":
+                    description: Invalid request
+                "401":
+                    description: Unauthorized
+                "403":
+                    description: Forbidden
+                "404":
+                    description: Not found
+    /login:
+        post:
+            summary: Exchange a token for the panel cookie
+            responses:
+                "200":
+                    description: OK
+                "400":
+                    description: Invalid request
+                "401":
+                    description: Unauthorized
+                "403":
+                    description: Forbidden
+                "404":
+                    description: Not found
+    /logout:
+        post:
+            summary: Clear the panel cookie
+            responses:
+                "200":
+                    description: OK
+                "400":
+                    description: Invalid request
+                "401":
+                    description: Unauthorized
+                "403":
+                    description: Forbidden
+                "404":
+                    description: Not found
 components:
     securitySchemes:
         bearerAuth:
