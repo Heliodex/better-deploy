@@ -109,7 +109,8 @@ async function parseJSON<T>(response: Response, schema: GenericSchema<T>): Promi
 	const parsed = safeParse(schema, data)
 	if (!parsed.success) {
 		const preview = JSON.stringify(data)?.slice(0, 300) ?? "no body"
-		throw new Error(`The supervisor returned an unexpected response shape (${response.status}: ${preview}).`)
+		const contentType = response.headers.get("content-type") ?? "unknown content type"
+		throw new Error(`The supervisor returned an unexpected response shape (${response.status} ${contentType}: ${preview}).`)
 	}
 
 	return parsed.output
@@ -129,7 +130,13 @@ async function request<T>(path: string, options: RequestOptions, schema: Generic
 		headers,
 		method: options.method,
 	})
-	return parseJSON(response, schema)
+	try {
+		return await parseJSON(response, schema)
+	} catch (error) {
+		if (error instanceof Error && error.message.startsWith("The supervisor returned an unexpected response shape"))
+			throw new Error(`${error.message} [${path}]`)
+		throw error
+	}
 }
 
 export const fetchApps = (token: string): Promise<AppInfo[]> => request(routes.apps, { token }, appsResponseSchema)
