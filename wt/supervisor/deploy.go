@@ -214,7 +214,7 @@ func (s *supervisor) receiveBundle(w http.ResponseWriter, r *http.Request, name 
 	}
 	cfg.Name = name
 	if err := s.hostConflictError(cfg, name); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeError(w, http.StatusConflict, err.Error())
 		return "", appConfig{}, cleanup, false
 	}
 	if err := s.dependencyCycleError(name, cfg.DependsOn); err != nil {

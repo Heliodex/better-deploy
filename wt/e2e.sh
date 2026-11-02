@@ -167,12 +167,12 @@ if [ "${WT_E2E_EXAMPLES:-0}" = "1" ]; then
 	"$work/wt-deploy" new --dir "$work/scaffolded"
 	"$work/wt-deploy" bundle --dir "$work/scaffolded" --out "$work/scaffolded.tar.gz" --wasmtime "$wasmtime" --target "$target"
 	deploy "$work/scaffolded.tar.gz" scaffolded
-	curl -fsS -H "Host: scaffolded.localhost" "http://127.0.0.1:$port/" | grep -q "A tiny notes app"
+	curl -fsS -H "Host: scaffolded.localhost" -H "Accept: text/html" "http://127.0.0.1:$port/" | grep -q "A tiny notes app"
 
 	echo "e2e: bundling and deploying the guestbook"
 	"$work/wt-deploy" bundle --dir "$root/wt/example/guestbook" --out "$work/guestbook.tar.gz" --wasmtime "$wasmtime" --target "$target"
 	deploy "$work/guestbook.tar.gz" guestbook
-	curl -fsS -H "Host: guestbook.localhost" "http://127.0.0.1:$port/" | grep -q "Guestbook"
+	curl -fsS -H "Host: guestbook.localhost" -H "Accept: text/html" "http://127.0.0.1:$port/" | grep -q "Wasm Wall"
 fi
 
 echo "e2e: ok"
