@@ -4,7 +4,7 @@ Architecture simplification review, 2026-11-01. This pass looks for duplicated m
 
 The short assessment: the code is clean at function level after the earlier splits, but the same concepts are still implemented two or three times. The biggest wins are removing the test-only direct launch path, giving isolation one lifecycle, and making the storage and configuration surfaces share one representation.
 
-The first eight items below are now implemented, with the remaining follow-ups from items 6 to 8 listed separately.
+The first eleven items below are now implemented. Item 11 leaves the client-facing sync deploy alias and static-only header in place, and a few follow-ups from earlier items remain; those are listed under "If I picked the next three".
 
 ## Small changes in this pass
 
@@ -62,25 +62,28 @@ The first eight items below are now implemented, with the remaining follow-ups f
    - This would make the metrics and `/usage` response a projection of the same data instead of separate measurements.
    - Implemented in `9b478dd` for the byte budgets: `overByteBudget`, `budgetWatch` and one `walkUsage` measurement now cover the global disk budget, storage temp budget, tree sizes and app data. The `setquota` backend, artifact cache cap and session cap still have their own admission paths.
 
-9. [ ] **Share the bounded ring and SSE writer across events, logs and changes.** The host event bus, the app log tail and the storage change log each keep a bounded ring and cursor logic, and the SSE handlers repeat frame writing and gap handling. The cursor semantics are already close enough that three copies are a maintenance cost without a benefit.
+9. [x] **Share the bounded ring and SSE writer across events, logs and changes.** The host event bus, the app log tail and the storage change log each keep a bounded ring and cursor logic, and the SSE handlers repeat frame writing and gap handling. The cursor semantics are already close enough that three copies are a maintenance cost without a benefit.
    - Extract a generic `ring[T]` with `Since(cursor)` and one SSE response helper that emits `Last-Event-ID`, gap frames and heartbeats.
    - Keep the storage change log's on-disk format, but read it through the same cursor interface.
    - This makes a future `wt:log` WIT import or a second subscriber cheaper.
+   - Implemented in `f4ef31e`: `boundedRing` holds the event bus window, and one `sseStream` writes the event, log and deployment streams with shared headers, frames, pings and flushes.
 
-10. [ ] **Consolidate the runner protocol types and op dispatch.** `runner.go` and `runner_client.go` define the request and event shapes and the op strings separately, and handover passes listeners through environment variables and inherited file descriptors. It works and is tested, but a protocol change means editing both sides and the handover setup.
+10. [x] **Consolidate the runner protocol types and op dispatch.** `runner.go` and `runner_client.go` define the request and event shapes and the op strings separately, and handover passes listeners through environment variables and inherited file descriptors. It works and is tested, but a protocol change means editing both sides and the handover setup.
     - Put the request and event types plus op constants in one file shared by client and server, and route both through one state machine.
     - Keep the Unix socket and liveness pipe; only remove the duplicated schema and ad-hoc dispatch.
     - This is lower priority than the items above because the current protocol is small and the handover tests cover it.
+    - Implemented in `f7e3166`: `runner_protocol.go` owns the request, event and app info types, the client interface and every op constant; client and server use the constants instead of duplicated strings.
 
-11. [ ] **Retire compatibility layers behind an explicit version cutover.** The code carries the legacy metadata-only `X-WT-App-Signature`, artifact records without CPU or epoch, the `X-WT-Static-Only` deploy path, `POST /apps/<name>` beside the queued `/deployments` resource, and legacy `user_version` migration bookkeeping. Each branch has tests and documentation, and each one makes the current path harder to read.
+11. [x] **Retire compatibility layers behind an explicit version cutover.** The code carries the legacy metadata-only `X-WT-App-Signature`, artifact records without CPU or epoch, the `X-WT-Static-Only` deploy path, `POST /apps/<name>` beside the queued `/deployments` resource, and legacy `user_version` migration bookkeeping. Each branch has tests and documentation, and each one makes the current path harder to read.
     - Declare the oldest supported app and supervisor version, then delete the branches and their tests in one release.
     - Keep the data migrations, but drop the dual write and dual read paths.
     - Do this last, after the structural changes, so there is only one code path left to document.
+    - Implemented without a version gate as requested: removed the v1 `X-WT-App-Signature` from the supervisor and the SDK, required strict artifact metadata (target, CPU, epoch, wasm digest and runtime), removed the legacy `user_version` no-op migration path, removed the `/v1/login`, `/v1/logout` and `/v1/me` identity aliases, and made full deploys require `main.wasm`. The `POST /apps/<name>` sync deploy alias and the `X-WT-Static-Only` header remain because the CLI and panel still call them; dropping those needs the client move to the queued deployment resource.
 
 ## If I picked the next three
 
-1. Share the bounded ring and SSE writer across events, logs and changes.
-2. Consolidate the runner protocol types and op dispatch.
-3. Retire compatibility layers behind an explicit version cutover.
+1. Move the CLI and panel to the queued deployment resource and drop `POST /apps/<name>`; then remove the `X-WT-Static-Only` header by deriving static-only from the digest and If-Match path.
+2. Generate the OpenAPI document and panel client from the route table, which is the second half of item 5.
+3. Move backup snapshots onto `contentStore`, which is the remaining half of item 7.
 
 Keep the invariants in `notes/fixes2.md` under "Do not regress"; none of the items above requires weakening the wasm artifact, blue/green deploys, the storage authorizer, sessions, scoped tokens or the tested isolation boundaries.
