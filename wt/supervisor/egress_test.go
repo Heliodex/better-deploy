@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -29,12 +30,7 @@ func (f *fakeRunner) joined() []string {
 }
 
 func containsCommand(commands []string, want string) bool {
-	for _, command := range commands {
-		if command == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(commands, want)
 }
 
 func TestEgressRuleLifecycle(t *testing.T) {

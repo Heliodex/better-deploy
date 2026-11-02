@@ -308,7 +308,7 @@ type appInfo struct {
 	OverQuota      bool      `json:"overQuota,omitempty"`
 	Maintenance    bool      `json:"maintenance,omitempty"`
 	SampledAt      time.Time `json:"sampledAt"`
-	LastHealthy    time.Time `json:"lastHealthy,omitempty"`
+	LastHealthy    time.Time `json:"lastHealthy"`
 	LastError      string    `json:"lastError,omitempty"`
 	CurrentDigest  string    `json:"currentDigest,omitempty"`
 	Ready          bool      `json:"ready"`

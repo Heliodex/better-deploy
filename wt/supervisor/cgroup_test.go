@@ -52,7 +52,7 @@ func TestCgroupManagerWritesLimitsAndCleansUp(t *testing.T) {
 		}
 	}
 	subtree := readTestFile(t, filepath.Join(root, "cgroup.subtree_control"))
-	for _, controller := range strings.Fields(requiredControllers) {
+	for controller := range strings.FieldsSeq(requiredControllers) {
 		if !strings.Contains(subtree, "+"+controller) {
 			t.Errorf("subtree_control = %q, missing +%s", subtree, controller)
 		}
@@ -132,7 +132,7 @@ func TestCgroupManagerEnablesParentControllers(t *testing.T) {
 		t.Fatalf("create should succeed after enabling the parent: %v", err)
 	}
 	parentSubtree := readTestFile(t, filepath.Join(parent, "cgroup.subtree_control"))
-	for _, controller := range strings.Fields(requiredControllers) {
+	for controller := range strings.FieldsSeq(requiredControllers) {
 		if !strings.Contains(parentSubtree, "+"+controller) {
 			t.Errorf("parent subtree_control = %q, missing +%s", parentSubtree, controller)
 		}

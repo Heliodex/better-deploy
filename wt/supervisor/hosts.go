@@ -12,7 +12,7 @@ func validDNSName(host string) bool {
 	if host == "" || len(host) > 253 {
 		return false
 	}
-	for _, label := range strings.Split(host, ".") {
+	for label := range strings.SplitSeq(host, ".") {
 		if len(label) == 0 || len(label) > 63 {
 			return false
 		}

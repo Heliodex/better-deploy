@@ -252,7 +252,7 @@ func (s *supervisor) handleDeploymentRoute(w http.ResponseWriter, r *http.Reques
 	}
 }
 
-func (s *supervisor) handleDeploymentCancel(w http.ResponseWriter, r *http.Request, name, id string) {
+func (s *supervisor) handleDeploymentCancel(w http.ResponseWriter, _ *http.Request, name, id string) {
 	info, err := s.deployments.info(name, id)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -275,7 +275,7 @@ func (s *supervisor) handleDeploymentCancel(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusAccepted, info)
 }
 
-func (s *supervisor) handleDeploymentLogs(w http.ResponseWriter, r *http.Request, name, id string) {
+func (s *supervisor) handleDeploymentLogs(w http.ResponseWriter, _ *http.Request, name, id string) {
 	data, err := s.deployments.readLog(name, id)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -311,7 +311,7 @@ func (s *supervisor) handleDeploymentLogStream(w http.ResponseWriter, r *http.Re
 	for {
 		data, err := s.deployments.readLog(name, id)
 		if err == nil && int64(len(data)) > offset {
-			for _, line := range strings.Split(string(data[offset:]), "\n") {
+			for line := range strings.SplitSeq(string(data[offset:]), "\n") {
 				if line == "" {
 					continue
 				}

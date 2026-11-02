@@ -6,6 +6,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -161,9 +162,7 @@ func (s *secretStore) values(app string) map[string]string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make(map[string]string, len(s.current[app]))
-	for key, value := range s.current[app] {
-		out[key] = value
-	}
+	maps.Copy(out, s.current[app])
 	return out
 }
 
@@ -184,9 +183,7 @@ func (s *secretStore) set(app, key, value string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	values := make(map[string]string, len(s.current[app])+1)
-	for existing, current := range s.current[app] {
-		values[existing] = current
-	}
+	maps.Copy(values, s.current[app])
 	values[key] = value
 	if err := s.writeLocked(app, values); err != nil {
 		return err

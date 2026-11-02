@@ -417,10 +417,7 @@ func storageDSN(path string, readOnly bool, quotaBytes int64, tempDir string) st
 		query.Add("_pragma", fmt.Sprintf("wal_autocheckpoint(%d)", walAutoCheckpoint(quotaBytes)))
 	}
 	if quotaBytes > 0 {
-		pages := quotaBytes / storagePageSize
-		if pages < 1 {
-			pages = 1
-		}
+		pages := max(quotaBytes/storagePageSize, 1)
 		query.Add("_pragma", fmt.Sprintf("max_page_count(%d)", pages))
 	}
 	if readOnly {
@@ -632,7 +629,7 @@ func checkBackupDatabase(path string) error {
 // configureStorageConn applies the per-connection safety limits that the DSN cannot express.
 // ATTACH is disabled at the SQLite level, which also blocks VACUUM INTO and therefore arbitrary file writes from SQL.
 // The pragmas themselves, including temp_store, cache_size, mmap_size and synchronous, are set in storageDSN for every physical connection.
-func configureStorageConn(ctx context.Context, conn *sql.Conn) error {
+func configureStorageConn(_ context.Context, conn *sql.Conn) error {
 	for _, limit := range []struct {
 		id, value int
 	}{

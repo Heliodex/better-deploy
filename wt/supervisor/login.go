@@ -102,10 +102,7 @@ func (s *supervisor) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now()
 	if allowed, wait := limiter.allow(key, now); !allowed {
-		seconds := int(wait.Seconds())
-		if seconds < 1 {
-			seconds = 1
-		}
+		seconds := max(int(wait.Seconds()), 1)
 		w.Header().Set("Retry-After", strconv.Itoa(seconds))
 		s.appendAudit(authIdentity{Name: "anonymous"}, r, "login.failed", "", http.StatusTooManyRequests, "too many attempts")
 		writeError(w, http.StatusTooManyRequests, "too many login attempts; try again later")

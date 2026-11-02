@@ -80,7 +80,7 @@ func firstError(values ...error) error {
 
 func addVary(header http.Header, value string) {
 	for _, existing := range header.Values("Vary") {
-		for _, token := range strings.Split(existing, ",") {
+		for token := range strings.SplitSeq(existing, ",") {
 			if strings.EqualFold(strings.TrimSpace(token), value) {
 				return
 			}

@@ -81,7 +81,7 @@ func configETag(cfg appConfig) string {
 }
 
 func etagMatches(header, etag string) bool {
-	for _, candidate := range strings.Split(header, ",") {
+	for candidate := range strings.SplitSeq(header, ",") {
 		candidate = strings.TrimSpace(candidate)
 		if candidate == "*" || candidate == etag || strings.Trim(candidate, `"`) == strings.Trim(etag, `"`) {
 			return true

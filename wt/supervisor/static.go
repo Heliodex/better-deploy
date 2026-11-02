@@ -38,7 +38,7 @@ func staticFile(dir, requestPath string) (string, bool) {
 
 // acceptsEncoding reports whether an Accept-Encoding value permits one coding, including q=0 rejection.
 func acceptsEncoding(header, encoding string) bool {
-	for _, item := range strings.Split(header, ",") {
+	for item := range strings.SplitSeq(header, ",") {
 		fields := strings.Split(strings.TrimSpace(item), ";")
 		name := strings.ToLower(strings.TrimSpace(fields[0]))
 		if name != encoding && name != "*" {

@@ -89,8 +89,7 @@ func storageErrorDetails(err error) (int, storageErrorResponse) {
 		return http.StatusGatewayTimeout, storageErrorResponse{Error: "storage query timed out", Code: "timeout"}
 	}
 
-	var sqliteErr *sqlite.Error
-	if errors.As(err, &sqliteErr) {
+	if sqliteErr, ok := errors.AsType[*sqlite.Error](err); ok {
 		code := sqliteErr.Code()
 		if code == sqlite3.SQLITE_ERROR && strings.Contains(strings.ToLower(sqliteErr.Error()), "not authorized to use function") {
 			// SQLite refuses a disabled function such as load_extension before the authorizer runs, and reports SQLITE_ERROR.

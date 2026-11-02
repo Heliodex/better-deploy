@@ -100,7 +100,7 @@ type authToken struct {
 	Role      string    `json:"role"`
 	Apps      []string  `json:"apps,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
-	ExpiresAt time.Time `json:"expiresAt,omitempty"`
+	ExpiresAt time.Time `json:"expiresAt"`
 }
 
 type authTokenFile struct {

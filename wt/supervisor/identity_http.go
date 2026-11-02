@@ -121,7 +121,7 @@ func (s *supervisor) handleIdentityApp(w http.ResponseWriter, r *http.Request, a
 	}
 }
 
-func (s *supervisor) handleIdentityLogin(w http.ResponseWriter, r *http.Request, a *app) {
+func (s *supervisor) handleIdentityLogin(w http.ResponseWriter, r *http.Request, _ *app) {
 	limiter := s.identityLoginGuard()
 	key := s.forwardedInfo(r).ClientIP
 	if key == "" {
@@ -129,10 +129,7 @@ func (s *supervisor) handleIdentityLogin(w http.ResponseWriter, r *http.Request,
 	}
 	now := time.Now()
 	if allowed, wait := limiter.allow(key, now); !allowed {
-		seconds := int(wait.Seconds())
-		if seconds < 1 {
-			seconds = 1
-		}
+		seconds := max(int(wait.Seconds()), 1)
 		w.Header().Set("Retry-After", strconv.Itoa(seconds))
 		writeError(w, http.StatusTooManyRequests, "too many login attempts; try again later")
 		return

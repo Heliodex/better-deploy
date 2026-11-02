@@ -20,7 +20,7 @@ const artifactName = "artifact.json"
 type artifactInfo struct {
 	Wasmtime   string    `json:"wasmtime,omitempty"`
 	Target     string    `json:"target,omitempty"`
-	CompiledAt time.Time `json:"compiled_at,omitempty"`
+	CompiledAt time.Time `json:"compiled_at"`
 	// Epoch marks a cwasm compiled with epoch interruption, which the host must enable and per-request timeouts require.
 	Epoch      bool   `json:"epoch_interruption,omitempty"`
 	WasmSHA256 string `json:"wasm_sha256,omitempty"`

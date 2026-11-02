@@ -45,9 +45,9 @@ var errDeploymentNotFound = errors.New("deployment not found")
 type deploymentInfo struct {
 	ID          string            `json:"id"`
 	DeployedAt  time.Time         `json:"deployedAt"`
-	QueuedAt    time.Time         `json:"queuedAt,omitempty"`
-	StartedAt   time.Time         `json:"startedAt,omitempty"`
-	FinishedAt  time.Time         `json:"finishedAt,omitempty"`
+	QueuedAt    time.Time         `json:"queuedAt"`
+	StartedAt   time.Time         `json:"startedAt"`
+	FinishedAt  time.Time         `json:"finishedAt"`
 	Mode        string            `json:"mode,omitempty"`
 	Digest      string            `json:"digest"`
 	Size        int64             `json:"size"`

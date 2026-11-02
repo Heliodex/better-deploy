@@ -50,12 +50,12 @@ type appJob struct {
 	RunAt          time.Time         `json:"runAt"`
 	CreatedAt      time.Time         `json:"createdAt"`
 	UpdatedAt      time.Time         `json:"updatedAt"`
-	StartedAt      time.Time         `json:"startedAt,omitempty"`
-	FinishedAt     time.Time         `json:"finishedAt,omitempty"`
+	StartedAt      time.Time         `json:"startedAt"`
+	FinishedAt     time.Time         `json:"finishedAt"`
 	Attempts       int               `json:"attempts"`
 	MaxAttempts    int               `json:"maxAttempts"`
 	IdempotencyKey string            `json:"idempotencyKey,omitempty"`
-	LeaseUntil     time.Time         `json:"leaseUntil,omitempty"`
+	LeaseUntil     time.Time         `json:"leaseUntil"`
 	LastError      string            `json:"lastError,omitempty"`
 	StatusCode     int               `json:"statusCode,omitempty"`
 }
@@ -588,7 +588,7 @@ func (s *jobStore) runJob(job appJob) (int, error) {
 	return response.StatusCode, nil
 }
 
-func (s *jobStore) finished(id string) {
+func (s *jobStore) finished(_ string) {
 	s.mu.Lock()
 	if s.running > 0 {
 		s.running--
@@ -641,10 +641,7 @@ func jobBackoff(attempt int) time.Duration {
 		attempt = 1
 	}
 	backoff := time.Duration(1<<min(attempt-1, 8)) * time.Second
-	if backoff > 5*time.Minute {
-		backoff = 5 * time.Minute
-	}
-	return backoff
+	return min(backoff, 5*time.Minute)
 }
 
 // handleAppJobs serves the queue resource for one app.

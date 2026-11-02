@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"slices"
 	"strings"
 )
 
@@ -99,7 +100,7 @@ func firstForwardedProto(value string) string {
 func (s *supervisor) forwardedClientIP(values []string, remote string) string {
 	var addresses []string
 	for _, value := range values {
-		for _, entry := range strings.Split(value, ",") {
+		for entry := range strings.SplitSeq(value, ",") {
 			entry = strings.TrimSpace(entry)
 			if entry == "" {
 				continue
@@ -117,9 +118,9 @@ func (s *supervisor) forwardedClientIP(values []string, remote string) string {
 	if len(addresses) == 0 {
 		return remote
 	}
-	for index := len(addresses) - 1; index >= 0; index-- {
-		if !s.isTrustedProxy(addresses[index]) {
-			return addresses[index]
+	for _, address := range slices.Backward(addresses) {
+		if !s.isTrustedProxy(address) {
+			return address
 		}
 	}
 	return addresses[0]

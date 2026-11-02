@@ -440,9 +440,7 @@ func (m *backupManager) runDue(ctx context.Context, now time.Time) {
 	jobs := make(chan string)
 	var wg sync.WaitGroup
 	for range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for name := range jobs {
 				if ctx.Err() != nil {
 					return
@@ -451,7 +449,7 @@ func (m *backupManager) runDue(ctx context.Context, now time.Time) {
 					log.Printf("backup %s: %v", name, err)
 				}
 			}
-		}()
+		})
 	}
 	for _, name := range names {
 		select {

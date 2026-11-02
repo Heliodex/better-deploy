@@ -354,7 +354,7 @@ func (s *supervisor) recordDeploymentFailure(name, digest string, cause error) {
 	s.resetHistoryUsage(name)
 }
 
-func (s *supervisor) handleDeployments(w http.ResponseWriter, r *http.Request, name string) {
+func (s *supervisor) handleDeployments(w http.ResponseWriter, _ *http.Request, name string) {
 	if s.lookup(name) == nil {
 		if s.deployments == nil || !existsPath(s.deployments.appDir(name)) {
 			writeError(w, http.StatusNotFound, "app not found")
@@ -395,7 +395,7 @@ func (s *supervisor) handleDeployments(w http.ResponseWriter, r *http.Request, n
 }
 
 // handleDeploymentInfo serves one retained history entry.
-func (s *supervisor) handleDeploymentInfo(w http.ResponseWriter, r *http.Request, name, id string) {
+func (s *supervisor) handleDeploymentInfo(w http.ResponseWriter, _ *http.Request, name, id string) {
 	if s.deployments == nil {
 		writeError(w, http.StatusServiceUnavailable, "deployment history unavailable")
 		return

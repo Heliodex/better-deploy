@@ -183,7 +183,7 @@ func (r *runnerServer) handleConnection(conn net.Conn) {
 	_ = conn.Close()
 }
 
-func (r *runnerServer) handleRequest(conn net.Conn, request runnerRequest) {
+func (r *runnerServer) handleRequest(_ net.Conn, request runnerRequest) {
 	switch request.Op {
 	case "start":
 		if request.Start == nil {
@@ -382,8 +382,7 @@ func (r *runnerServer) waitApp(app *runnerProcess) {
 	code := 0
 	message := ""
 	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
 				code = 128 + int(status.Signal())
 			} else {

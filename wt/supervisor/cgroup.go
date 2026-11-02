@@ -47,7 +47,7 @@ func enableControllersAt(dir string, required []string) error {
 		return fmt.Errorf("read cgroup controllers under %s (cgroup v2 required): %w", dir, err)
 	}
 	available := map[string]bool{}
-	for _, name := range strings.Fields(string(controllers)) {
+	for name := range strings.FieldsSeq(string(controllers)) {
 		available[strings.TrimPrefix(name, "+")] = true
 	}
 	var missing []string
@@ -68,7 +68,7 @@ func enableControllersAt(dir string, required []string) error {
 	// cgroup.subtree_control reads back bare names ("cpu memory") but only accepts "+name"/"-name" writes.
 	enabled := map[string]bool{}
 	tokens := make([]string, 0, len(required))
-	for _, token := range strings.Fields(string(existing)) {
+	for token := range strings.FieldsSeq(string(existing)) {
 		name := strings.TrimPrefix(token, "+")
 		enabled[name] = true
 		tokens = append(tokens, "+"+name)
@@ -104,8 +104,7 @@ func (m *cgroupManager) enableControllers() error {
 	if err == nil {
 		return nil
 	}
-	var missing *missingControllersError
-	if !errors.As(err, &missing) {
+	if _, ok := errors.AsType[*missingControllersError](err); !ok {
 		return err
 	}
 
@@ -127,10 +126,7 @@ func (m *cgroupManager) enableControllers() error {
 
 // cpuMax renders cpu.max for a millicore quota over a 100 ms period (1000 millicores means one core).
 func cpuMax(millicores int) string {
-	quota := int64(millicores) * cgroupCPUPeriod / 1000
-	if quota < 1000 {
-		quota = 1000
-	}
+	quota := max(int64(millicores)*cgroupCPUPeriod/1000, 1000)
 	return fmt.Sprintf("%d %d", quota, cgroupCPUPeriod)
 }
 

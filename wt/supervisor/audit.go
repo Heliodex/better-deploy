@@ -124,10 +124,7 @@ func (a *auditStore) tail(limit int) ([]auditEntry, error) {
 		return nil, err
 	}
 	lines := bytes.Split(bytes.TrimSpace(data), []byte{'\n'})
-	start := len(lines) - limit
-	if start < 0 {
-		start = 0
-	}
+	start := max(len(lines)-limit, 0)
 	out := make([]auditEntry, 0, len(lines)-start)
 	for _, line := range lines[start:] {
 		if len(line) == 0 {

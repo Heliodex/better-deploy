@@ -13,6 +13,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 )
@@ -122,12 +123,7 @@ func parseAppFetchPath(path string) (target, rest string, ok bool) {
 
 // allowsAppCaller reports whether the target's allow_callers list names the caller.
 func allowsAppCaller(allowed []string, caller string) bool {
-	for _, name := range allowed {
-		if name == caller {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(allowed, caller)
 }
 
 // appCallSignature binds the caller identity to one method, path and timestamp.
@@ -192,8 +188,7 @@ func (s *supervisor) handleAppFetch(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxAppFetchBody)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			writeError(w, http.StatusRequestEntityTooLarge, "app fetch body is too large")
 			return
 		}
