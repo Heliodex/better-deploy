@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -213,6 +214,68 @@ func (b *blobStore) remove(app, digest string) error {
 	}
 	_ = os.Remove(filepath.Join(b.appDir(app), digest+".json"))
 	return nil
+}
+
+// list returns every blob for an app, including ones whose metadata sidecar is missing.
+func (b *blobStore) list(app string) ([]blobInfo, error) {
+	if b == nil {
+		return nil, errBlobStoreEmpty
+	}
+	entries, err := os.ReadDir(b.appDir(app))
+	if os.IsNotExist(err) {
+		return []blobInfo{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	digests := map[string]struct{}{}
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.HasSuffix(name, ".json") {
+			name = strings.TrimSuffix(name, ".json")
+		}
+		if validBlobDigest(name) {
+			digests[name] = struct{}{}
+		}
+	}
+	out := make([]blobInfo, 0, len(digests))
+	for digest := range digests {
+		file, info, err := b.open(app, digest)
+		if err != nil {
+			continue
+		}
+		_ = file.Close()
+		out = append(out, info)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].Digest < out[j].Digest
+		}
+		return out[i].CreatedAt.Before(out[j].CreatedAt)
+	})
+	return out, nil
+}
+
+// gc removes blobs older than cutoff that are not in keep. The caller is responsible for protecting referenced digests.
+func (b *blobStore) gc(app string, cutoff time.Time, keep map[string]struct{}) ([]string, error) {
+	infos, err := b.list(app)
+	if err != nil {
+		return nil, err
+	}
+	deleted := make([]string, 0)
+	for _, info := range infos {
+		if _, kept := keep[info.Digest]; kept || !info.CreatedAt.Before(cutoff) {
+			continue
+		}
+		if err := b.remove(app, info.Digest); err != nil {
+			if errors.Is(err, errBlobNotFound) {
+				continue
+			}
+			return deleted, err
+		}
+		deleted = append(deleted, info.Digest)
+	}
+	return deleted, nil
 }
 
 type blobUploadResponse struct {

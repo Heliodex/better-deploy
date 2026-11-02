@@ -32,6 +32,9 @@ func (s *storageServer) buildStorageRoutes() *routeTable {
 	rt.add(http.MethodPost, "/v1/publish", withStorageApp(func(w http.ResponseWriter, r *http.Request, app string) {
 		handleEventPublish(s.bus, w, r, app)
 	}))
+	rt.add(http.MethodDelete, "/v1/blobs/{id}", withStorageID(func(w http.ResponseWriter, r *http.Request, app, digest string) {
+		s.storageBlobDelete(w, r, app, digest)
+	}))
 	rt.add(http.MethodGet, "/v1/jobs", withStorageApp(s.storageJobs))
 	rt.add(http.MethodPost, "/v1/jobs", withStorageApp(s.storageJobs))
 	rt.add(http.MethodGet, "/v1/jobs/{id}", withStorageID(func(w http.ResponseWriter, r *http.Request, app, id string) {

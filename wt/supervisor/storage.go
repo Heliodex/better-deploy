@@ -95,6 +95,7 @@ type storageServer struct {
 	metrics *metrics
 	bus     *eventBus
 	jobs    *jobManager
+	blobs   *blobStore
 
 	routesCache routeCache
 }

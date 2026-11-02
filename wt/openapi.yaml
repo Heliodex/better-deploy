@@ -303,6 +303,76 @@ paths:
       responses:
         "200":
           description: Requeued job
+  "/apps/{name}/blobs":
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+    get:
+      summary: List an app's stored blobs
+      responses:
+        "200":
+          description: Blobs, oldest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  blobs:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Blob"
+  "/apps/{name}/blobs/{digest}":
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+      - name: digest
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      summary: Delete one blob by digest
+      responses:
+        "204":
+          description: Blob removed
+        "404":
+          description: Blob not found
+  "/apps/{name}/blobs/gc":
+    parameters:
+      - $ref: "#/components/parameters/AppName"
+    post:
+      summary: Remove old blobs, or preview the removal with dryRun
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - olderThan
+              properties:
+                olderThan:
+                  type: string
+                keep:
+                  type: array
+                  items:
+                    type: string
+                dryRun:
+                  type: boolean
+      responses:
+        "200":
+          description: Deleted or would-delete digests
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted:
+                    type: array
+                    items:
+                      type: string
+                  dryRun:
+                    type: boolean
+                  olderThan:
+                    type: string
   "/apps/{name}/logs":
     parameters:
       - $ref: "#/components/parameters/AppName"
@@ -1073,6 +1143,17 @@ paths:
           description: Job not found
         "409":
           description: Job is not retryable
+  /v1/blobs/{id}:
+    delete:
+      summary: Delete one of the app's blobs
+      description: "Served by the storage loopback service (WT_STORAGE_URL). The storage bearer token selects the app.\n"
+      responses:
+        "204":
+          description: Blob removed
+        "401":
+          description: Unauthorized
+        "404":
+          description: Blob not found
   /v1/sessions:
     post:
       summary: Create a pinned storage session
@@ -1583,6 +1664,17 @@ components:
           maximum: 20
           default: 3
         idempotencyKey:
+          type: string
+    Blob:
+      type: object
+      properties:
+        digest:
+          type: string
+        size:
+          type: integer
+        contentType:
+          type: string
+        createdAt:
           type: string
     Job:
       type: object

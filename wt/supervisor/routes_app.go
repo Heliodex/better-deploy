@@ -138,6 +138,21 @@ func (s *supervisor) handleRollbackRoute(w http.ResponseWriter, r *http.Request,
 	s.handleRollback(w, r, params["name"], params["id"])
 }
 
+// handleAppBlobsRoute adapts the blob list handler.
+func (s *supervisor) handleAppBlobsRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
+	s.handleAppBlobs(w, r, params["name"])
+}
+
+// handleAppBlobRoute adapts the blob delete handler.
+func (s *supervisor) handleAppBlobRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
+	s.handleAppBlob(w, r, params["name"], params["digest"])
+}
+
+// handleAppBlobGCRoute adapts the blob garbage collection handler.
+func (s *supervisor) handleAppBlobGCRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
+	s.handleAppBlobGC(w, r, params["name"])
+}
+
 // buildAppRoutes declares every app subresource once, with the method and scope label it needs.
 func (s *supervisor) buildAppRoutes() *routeTable {
 	rt := newRouteTable()
@@ -153,6 +168,9 @@ func (s *supervisor) buildAppRoutes() *routeTable {
 	rt.addApp(http.MethodGet, "/apps/{name}/deployments", constantAction("deployments"), s.handleDeploymentsRoute)
 	rt.addApp(http.MethodPost, "/apps/{name}/deployments", constantAction("deployments"), s.handleDeploymentsRoute)
 	rt.addApp("", "/apps/{name}/deployments/{rest...}", actionWithPrefix("deployments"), s.handleDeploymentItemRoute)
+	rt.addApp(http.MethodGet, "/apps/{name}/blobs", constantAction("blobs"), s.handleAppBlobsRoute)
+	rt.addApp(http.MethodDelete, "/apps/{name}/blobs/{digest}", constantAction("blobs"), s.handleAppBlobRoute)
+	rt.addApp(http.MethodPost, "/apps/{name}/blobs/gc", constantAction("blobs/gc"), s.handleAppBlobGCRoute)
 	rt.addApp("", "/apps/{name}/jobs/{rest...}", actionWithPrefix("jobs"), s.handleJobsRoute)
 	rt.addApp("", "/apps/{name}/backups/{rest...}", actionWithPrefix("backups"), s.handleBackupsRoute)
 	rt.addApp(http.MethodGet, "/apps/{name}/database", constantAction("database"), s.handleDatabaseRoute)

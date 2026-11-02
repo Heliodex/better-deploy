@@ -115,6 +115,111 @@ func TestBlobUploadDownloadAndDelete(t *testing.T) {
 	}
 }
 
+func TestBlobAdminLifecycle(t *testing.T) {
+	s, a := testBlobSupervisor(t)
+	expires := time.Now().Add(time.Hour)
+	body := []byte("admin blob")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, signedBlobURL(t, s, a, "upload", "", 1024, "text/plain", expires), bytes.NewReader(body))
+	s.handleBlobs(rec, req, a)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("upload = %d: %s", rec.Code, rec.Body.String())
+	}
+	var uploaded blobUploadResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &uploaded); err != nil {
+		t.Fatal(err)
+	}
+	digest := uploaded.Digest
+
+	rec = httptest.NewRecorder()
+	s.handleAppBlobs(rec, httptest.NewRequest(http.MethodGet, "/apps/demo/blobs", nil), "demo")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list = %d: %s", rec.Code, rec.Body.String())
+	}
+	var listed struct {
+		Blobs []blobInfo `json:"blobs"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Blobs) != 1 || listed.Blobs[0].Digest != digest {
+		t.Errorf("listed = %+v", listed.Blobs)
+	}
+
+	// Age the sidecar so the GC cutoff can select it.
+	metaPath := filepath.Join(s.blobs.appDir("demo"), digest+".json")
+	var info blobInfo
+	data, err := os.ReadFile(metaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &info); err != nil {
+		t.Fatal(err)
+	}
+	info.CreatedAt = time.Now().Add(-48 * time.Hour)
+	data, _ = json.Marshal(info)
+	if err := os.WriteFile(metaPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	rec = httptest.NewRecorder()
+	bodyGC := strings.NewReader(`{"olderThan":"24h","dryRun":true}`)
+	s.handleAppBlobGC(rec, httptest.NewRequest(http.MethodPost, "/apps/demo/blobs/gc", bodyGC), "demo")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("dry run = %d: %s", rec.Code, rec.Body.String())
+	}
+	var preview blobGCResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &preview); err != nil {
+		t.Fatal(err)
+	}
+	if len(preview.Deleted) != 1 || preview.Deleted[0] != digest || !preview.DryRun {
+		t.Errorf("preview = %+v", preview)
+	}
+	if _, err := os.Stat(filepath.Join(s.blobs.appDir("demo"), digest)); err != nil {
+		t.Fatal("dry run removed the blob")
+	}
+
+	rec = httptest.NewRecorder()
+	bodyGC = strings.NewReader(`{"olderThan":"24h"}`)
+	s.handleAppBlobGC(rec, httptest.NewRequest(http.MethodPost, "/apps/demo/blobs/gc", bodyGC), "demo")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("gc = %d: %s", rec.Code, rec.Body.String())
+	}
+	var collected blobGCResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &collected); err != nil {
+		t.Fatal(err)
+	}
+	if len(collected.Deleted) != 1 || collected.Deleted[0] != digest || collected.DryRun {
+		t.Errorf("gc = %+v", collected)
+	}
+	if _, err := os.Stat(filepath.Join(s.blobs.appDir("demo"), digest)); !os.IsNotExist(err) {
+		t.Errorf("blob still exists after gc: %v", err)
+	}
+}
+
+func TestBlobAdminDelete(t *testing.T) {
+	s, a := testBlobSupervisor(t)
+	expires := time.Now().Add(time.Hour)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, signedBlobURL(t, s, a, "upload", "", 1024, "text/plain", expires), strings.NewReader("delete me"))
+	s.handleBlobs(rec, req, a)
+	if rec.Code != http.StatusCreated {
+		t.Fatal(rec.Body.String())
+	}
+	var uploaded blobUploadResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &uploaded); err != nil {
+		t.Fatal(err)
+	}
+	rec = httptest.NewRecorder()
+	s.handleAppBlob(rec, httptest.NewRequest(http.MethodDelete, "/apps/demo/blobs/"+uploaded.Digest, nil), "demo", uploaded.Digest)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("delete = %d: %s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(s.blobs.appDir("demo"), uploaded.Digest)); !os.IsNotExist(err) {
+		t.Errorf("blob still exists: %v", err)
+	}
+}
+
 func TestBlobRejectsBadSignatureAndOversize(t *testing.T) {
 	s, a := testBlobSupervisor(t)
 	expires := time.Now().Add(time.Hour)
