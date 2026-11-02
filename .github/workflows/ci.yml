@@ -104,11 +104,18 @@ jobs:
               working-directory: wt/example/guestbook/web
               run: bun install --frozen-lockfile
 
+            - name: Check namespace test support
+              run: |
+                  if unshare -Ur -m sh -c 'mount --make-rprivate /' 2>/dev/null; then
+                      echo "WT_NS_TEST=1" >> "$GITHUB_ENV"
+                  else
+                      echo "namespace integration test skipped: unprivileged mount namespaces are unavailable"
+                  fi
+
             - name: Test supervisor
               working-directory: wt/supervisor
               env:
                   WT_HANDOVER_TEST: "1"
-                  WT_NS_TEST: "1"
                   WT_SECCOMP_TEST: "1"
               run: go test -race -count=1 -covermode=atomic -coverprofile=coverage.out ./...
 
