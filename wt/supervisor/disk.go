@@ -47,20 +47,19 @@ func walkSize(root string, total *int64) error {
 	})
 }
 
-// appDataUsage measures /data, the app's SQLite database files and its blob store, counting every non-root directory entry
-// so empty files and directories still count against the inode quota.
-func (s *supervisor) appDataUsage(name string) (bytes, entries int64, err error) {
-	dataDir := filepath.Join(s.cfg.stateDir, name)
-	if err := filepath.WalkDir(dataDir, func(path string, entry os.DirEntry, walkErr error) error {
+// walkUsage adds the regular-file bytes and every non-root entry under root to the totals.
+func walkUsage(root string, bytes, entries *int64) error {
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			if os.IsNotExist(walkErr) {
 				return nil
 			}
 			return walkErr
 		}
-		if path != dataDir {
-			entries++
+		if path == root {
+			return nil
 		}
+		*entries++
 		if entry.IsDir() {
 			return nil
 		}
@@ -69,13 +68,19 @@ func (s *supervisor) appDataUsage(name string) (bytes, entries int64, err error)
 			return err
 		}
 		if info.Mode().IsRegular() {
-			bytes += info.Size()
+			*bytes += info.Size()
 		}
 		return nil
-	}); err != nil {
+	})
+}
+
+// appDataUsage measures /data, the app's SQLite database files and its blob store, counting every non-root directory entry
+// so empty files and directories still count against the inode quota.
+func (s *supervisor) appDataUsage(name string) (bytes, entries int64, err error) {
+	dataDir := filepath.Join(s.cfg.stateDir, name)
+	if err := walkUsage(dataDir, &bytes, &entries); err != nil {
 		return bytes, entries, err
 	}
-
 	storageDir := filepath.Join(s.cfg.stateDir, ".storage", name)
 	storageEntries, err := os.ReadDir(storageDir)
 	if err != nil && !os.IsNotExist(err) {
@@ -95,29 +100,7 @@ func (s *supervisor) appDataUsage(name string) (bytes, entries int64, err error)
 	}
 
 	blobDir := filepath.Join(s.cfg.stateDir, blobDirName, name)
-	if err := filepath.WalkDir(blobDir, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			if os.IsNotExist(walkErr) {
-				return nil
-			}
-			return walkErr
-		}
-		if path == blobDir {
-			return nil
-		}
-		entries++
-		if entry.IsDir() {
-			return nil
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		if info.Mode().IsRegular() {
-			bytes += info.Size()
-		}
-		return nil
-	}); err != nil {
+	if err := walkUsage(blobDir, &bytes, &entries); err != nil {
 		return bytes, entries, err
 	}
 	return bytes, entries, nil
