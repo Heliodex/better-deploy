@@ -212,10 +212,20 @@ func TestAppArgsNetwork(t *testing.T) {
 	a.cfg.requestTimeout = 30 * time.Second
 	a.wasmEpoch = true
 	args, _ := mustAppArgs(t, s, a, "main.cwasm")
-	for _, want := range []string{"epoch-interruption=y", "timeout=30s"} {
+	for _, want := range []string{"epoch-interruption=y", "timeout=30000ms"} {
 		if !strings.Contains(args, want) {
 			t.Errorf("timeout args = %q, missing %q", args, want)
 		}
+	}
+	a.cfg.requestTimeout = 2 * time.Hour
+	args, _ = mustAppArgs(t, s, a, "main.cwasm")
+	if !strings.Contains(args, "timeout=7200000ms") {
+		t.Errorf("hour timeout args = %q, want milliseconds", args)
+	}
+	a.cfg.requestTimeout = 0
+	args, _ = mustAppArgs(t, s, a, "main.cwasm")
+	if !strings.Contains(args, "timeout=86400000ms") {
+		t.Errorf("default epoch timeout args = %q", args)
 	}
 	a.wasmEpoch = false
 	args, _ = mustAppArgs(t, s, a, "main.cwasm")

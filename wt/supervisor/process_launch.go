@@ -10,9 +10,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
+
+// epochIdleTimeout stands in for "no request timeout". Epoch interruption always needs a deadline, and wasmtime applies the deadline immediately when none is set.
+const epochIdleTimeout = 24 * time.Hour
 
 // launchSession carries the resolved inputs shared by the runner and direct launch paths.
 type launchSession struct {
@@ -49,9 +53,12 @@ func appServeArgs(target string, cfg appConfig, epoch bool) []string {
 	}
 	if epoch {
 		args = append(args, "-W", "epoch-interruption=y")
-		if cfg.requestTimeout > 0 {
-			args = append(args, "-W", "timeout="+cfg.requestTimeout.String())
+		timeout := cfg.requestTimeout
+		if timeout <= 0 {
+			timeout = epochIdleTimeout
 		}
+		// wasmtime parses whole seconds or milliseconds, not Go's "1h0m0s" form.
+		args = append(args, "-W", "timeout="+strconv.FormatInt(timeout.Milliseconds(), 10)+"ms")
 	}
 	return args
 }
