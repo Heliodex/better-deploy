@@ -101,12 +101,12 @@ func TestNewMatchesTemplate(t *testing.T) {
 
 // TestTemplateHandlerUsesServeHTTP guards the wasihttp.Handle call against the template passing an http.Handler where a handler function is required.
 func TestTemplateHandlerUsesServeHTTP(t *testing.T) {
-	data, err := templateFS.ReadFile("testdata/template/main.go")
+	data, err := templateFS.ReadFile("testdata/template/wasm.go")
 	if err != nil {
 		t.Fatal(err)
 	}
 	src := strings.ReplaceAll(string(data), newContractToken, "example.test/contract")
-	file, err := parser.ParseFile(token.NewFileSet(), "main.go", src, parser.AllErrors)
+	file, err := parser.ParseFile(token.NewFileSet(), "wasm.go", src, parser.AllErrors)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,6 +154,8 @@ func TestRunNew(t *testing.T) {
 		"biome.json",
 		".oxlintrc.json",
 		"main.go",
+		"main_test.go",
+		"wasm.go",
 		".gitignore",
 		"contract/generate.go",
 		"web/package.json",

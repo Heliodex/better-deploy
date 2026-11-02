@@ -25,6 +25,8 @@ const (
 //go:embed all:testdata/template/biome.json
 //go:embed all:testdata/template/.oxlintrc.json
 //go:embed all:testdata/template/main.go
+//go:embed all:testdata/template/main_test.go
+//go:embed all:testdata/template/wasm.go
 //go:embed all:testdata/template/.gitignore
 //go:embed all:testdata/template/contract
 //go:embed all:testdata/template/web/package.json

@@ -406,6 +406,8 @@ curl -X PATCH -H "Authorization: Bearer $WT_TOKEN" \
 
 `wt new` scaffolds a notes app with the guestbook stack: a static SvelteKit frontend with Valibot request and response validation, a Go JSON API, the Valibot to JSON Schema to `go-jsonschema` contract pipeline for both directions of the wire, and per-app SQLite storage. Inside `wt/example` it keeps using the shared monorepo module. Anywhere else it writes a standalone module with a vendored `sdk/` tree (`app`, `storage`, `wasihttp`, `httpmeta`, WIT and `generate.sh`), `go.mod`/`go.sum`, and `app.json` `build_component` and `build_static` commands that use `./sdk`. Pass `--module` to choose the Go module path and `--sdk /path/to/wt/packages` to copy a local SDK instead of the embedded one. The embedded copy is checked against `wt/packages` by `TestEmbeddedSDKMatchesPackages`.
 
+The scaffold keeps handlers on an `app` struct with a `newApp(store)` constructor and a `handler()` method; `wasm.go` holds only the `//go:build wasip1` storage, migration and `wasihttp.Handle` wiring. `main_test.go` constructs the app against `storage.NewTestServer` and covers a stored row, validation and a storage failure without wasmtime. Run `go generate ./contract/ && go test ./...` in the app directory; the test server is host-only and excluded from the wasm build.
+
 `wt dev` builds the app and serves its API at `http://<name>.localhost:8080/`, while the admin panel moves to a separate listener at `http://127.0.0.1:8081/admin/` (override with `--admin-port`). This keeps `/admin` and `/apps` off the app host. Pass `--workspace DIR` to serve every immediate child directory with an `app.json` together; workspace apps use `<name>.localhost` and share one supervisor and state directory, so app-to-app fetch and storage work across them. `--app-host` is only valid for the single-app form. The SQLite database persists in `/tmp/wt-dev/<name>` between runs.
 
 For a SvelteKit app with a `web/package.json`, `wt dev` also starts `vite dev` on a free port and prints its URL, normally `http://127.0.0.1:<vite-port>/`. The browser gets Vite HMR and component state is preserved. Vite proxies `dev.proxy` (default `/api`) to the supervisor with the app's `Host`, so frontend fetches hit the running wasm component. It also proxies `dev.supervisor_proxy`, which defaults to `/v1/events`, `/_wt/events`, `/_wt/blobs` and `/_wt/identity`, so live updates, signed blob URLs and platform identity work in dev without an app-specific proxy entry; set `supervisor_proxy: []` to disable those routes. A generated `web/.wt-dev.vite.config.ts` keeps the app's own Vite config and adds both sets of proxies, the loopback host and the chosen port; it is ignored by git and removed on exit.
@@ -632,6 +634,8 @@ err = store.WithTx(ctx, func(tx *storage.Tx) error {
     return err
 })
 ```
+
+`storage.NewTestServer()` starts an isolated in-memory SQLite service that speaks the same HTTP wire format for query, exec, write, batch, transaction, migrate and sessions. `server.NewClient(server.Client())` returns a normal `*storage.Client`, so handler tests use the same code as production. The file is `//go:build !wasip1`, so it and its `modernc.org/sqlite` dependency are excluded from the wasm component; the scaffold's `main_test.go` is the reference example.
 
 The notes example uses a real `notes` table. The one-time migration from the old JSON value has already run on the demo deployment, and the old `/v1/kv` endpoints have been removed.
 
