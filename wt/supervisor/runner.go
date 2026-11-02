@@ -172,6 +172,9 @@ func (r *runnerServer) handleConnection(conn net.Conn) {
 		}
 		r.handleRequest(conn, request)
 	}
+	if err := scanner.Err(); err != nil {
+		log.Printf("runner: read request: %v", err)
+	}
 	r.mu.Lock()
 	if r.conn == conn {
 		r.conn = nil

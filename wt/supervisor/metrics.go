@@ -263,7 +263,7 @@ func (m *metrics) render(s *supervisor) string {
 }
 
 func writeOutcomes(builder *strings.Builder, name, help string, values map[outcomeKey]uint64) {
-	builder.WriteString("# HELP " + name + " " + help + "\n# TYPE " + name + " counter\n")
+	fmt.Fprintf(builder, "# HELP %s %s\n# TYPE %s counter\n", name, help, name)
 	keys := make([]outcomeKey, 0, len(values))
 	for key := range values {
 		keys = append(keys, key)

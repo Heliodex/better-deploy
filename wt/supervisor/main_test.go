@@ -576,8 +576,7 @@ func BenchmarkManyAppsSnapshot(b *testing.B) {
 		name := fmt.Sprintf("app-%03d", index)
 		s.apps[name] = &app{name: name, cfg: appConfig{Host: name + ".localhost"}, cmd: &exec.Cmd{}, ready: true}
 	}
-	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		_ = s.snapshot()
 	}
 }

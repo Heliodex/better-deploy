@@ -231,8 +231,7 @@ func BenchmarkProxyLatency(b *testing.B) {
 	proxy := s.apps["demo"].proxy
 	req := httptest.NewRequest(http.MethodGet, "http://demo.localhost/", nil)
 	b.ReportAllocs()
-	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		rec := httptest.NewRecorder()
 		proxy.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {

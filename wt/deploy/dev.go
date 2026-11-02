@@ -334,7 +334,7 @@ func writeViteDevConfig(dev *viteDev, supervisorPort int) error {
 	content.WriteString("    server: {\n")
 	content.WriteString("      ...config.server,\n")
 	content.WriteString("      host: \"127.0.0.1\",\n")
-	content.WriteString("      port: " + strconv.Itoa(dev.port) + ",\n")
+	fmt.Fprintf(&content, "      port: %d,\n", dev.port)
 	content.WriteString("      strictPort: true,\n")
 	content.WriteString("      proxy: {\n")
 	content.WriteString("        ...config.server?.proxy,\n")

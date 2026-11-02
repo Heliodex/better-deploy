@@ -249,7 +249,7 @@ func TestDeploymentHistoryPrunesUnreferencedBlobs(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := range deploymentKeep + 2 {
-		if err := os.WriteFile(filepath.Join(source, "main.cwasm"), []byte(fmt.Sprintf("cwasm %d", i)), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(source, "main.cwasm"), fmt.Appendf(nil, "cwasm %d", i), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := manager.record("demo", source); err != nil {
@@ -275,7 +275,7 @@ func TestDeploymentHistoryByteBudget(t *testing.T) {
 	manager := newDeploymentManager(t.TempDir())
 	source := writeDeploymentSource(t, "demo.localhost")
 	for i := range 3 {
-		if err := os.WriteFile(filepath.Join(source, "main.cwasm"), []byte(fmt.Sprintf("cwasm %d", i)), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(source, "main.cwasm"), fmt.Appendf(nil, "cwasm %d", i), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := manager.record("demo", source); err != nil {
