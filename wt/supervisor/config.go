@@ -316,10 +316,8 @@ func (s *supervisor) handleAppConfigPatch(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, maxConfigRequestBytes)
 	var patch appConfigPatch
-	if err := json.UnmarshalRead(r.Body, &patch); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !readJSONBody(w, r, maxConfigRequestBytes, &patch) {
 		return
 	}
 

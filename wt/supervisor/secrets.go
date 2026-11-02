@@ -362,12 +362,10 @@ func (s *supervisor) handleAppSecrets(w http.ResponseWriter, r *http.Request, na
 			writeError(w, http.StatusServiceUnavailable, "secret store unavailable")
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, maxSecretBodyBytes)
 		var body struct {
 			Value *string `json:"value"`
 		}
-		if err := json.UnmarshalRead(r.Body, &body); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		if !readJSONBody(w, r, maxSecretBodyBytes, &body) {
 			return
 		}
 		if body.Value == nil {

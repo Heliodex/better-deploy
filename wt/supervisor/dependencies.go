@@ -3,7 +3,6 @@
 package main
 
 import (
-	"encoding/json/v2"
 	"fmt"
 	"html"
 	"net/http"
@@ -101,10 +100,8 @@ func (s *supervisor) handleAppMaintenance(w http.ResponseWriter, r *http.Request
 		a.mu.Unlock()
 		writeJSON(w, http.StatusOK, maintenanceResponse{Enabled: enabled})
 	case http.MethodPost:
-		r.Body = http.MaxBytesReader(w, r.Body, maxConfigRequestBytes)
 		var request maintenanceRequest
-		if err := json.UnmarshalRead(r.Body, &request); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		if !readJSONBody(w, r, maxConfigRequestBytes, &request) {
 			return
 		}
 		a.mu.Lock()

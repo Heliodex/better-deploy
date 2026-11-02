@@ -184,10 +184,8 @@ func (s *supervisor) handleBackupSettings(w http.ResponseWriter, r *http.Request
 	if !requireMethod(w, r, http.MethodPut) {
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxBackupRequestBytes)
 	var settings backupSettings
-	if err := json.UnmarshalRead(r.Body, &settings); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !readJSONBody(w, r, maxBackupRequestBytes, &settings) {
 		return
 	}
 	if err := settings.validate(); err != nil {

@@ -510,10 +510,8 @@ func (s *supervisor) handleAuthTokens(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		writeJSON(w, http.StatusOK, authTokensResponse{Tokens: s.auth.list()})
 	case http.MethodPost:
-		r.Body = http.MaxBytesReader(w, r.Body, maxConfigRequestBytes)
 		var req authTokenCreateRequest
-		if err := json.UnmarshalRead(r.Body, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		if !readJSONBody(w, r, maxConfigRequestBytes, &req) {
 			return
 		}
 		expiresAt, err := parseTokenExpiry(req.ExpiresIn)

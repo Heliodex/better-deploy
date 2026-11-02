@@ -665,10 +665,8 @@ func handleJobsCollection(w http.ResponseWriter, r *http.Request, store *jobStor
 		}
 		writeJSON(w, http.StatusOK, jobsResponse{Jobs: store.list(status, 100)})
 	case http.MethodPost:
-		r.Body = http.MaxBytesReader(w, r.Body, jobMaxBodyBytes+maxConfigRequestBytes)
 		var req jobEnqueueRequest
-		if err := json.UnmarshalRead(r.Body, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		if !readJSONBody(w, r, jobMaxBodyBytes+maxConfigRequestBytes, &req) {
 			return
 		}
 		job, created, err := store.enqueue(req)

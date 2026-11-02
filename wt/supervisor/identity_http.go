@@ -185,16 +185,6 @@ func (s *supervisor) handleIdentityMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, identityMeResponse{User: user, CSRFToken: session.CSRF})
 }
 
-// readIdentityJSON decodes a small identity request body.
-func readIdentityJSON(w http.ResponseWriter, r *http.Request, target any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
-	if err := json.UnmarshalRead(r.Body, target); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
-		return false
-	}
-	return true
-}
-
 func (s *supervisor) handleIdentityPassword(w http.ResponseWriter, r *http.Request) {
 	session, user, _, ok := s.identityRequest(r)
 	if !ok {
@@ -206,7 +196,7 @@ func (s *supervisor) handleIdentityPassword(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	var request identityPasswordRequest
-	if !readIdentityJSON(w, r, &request) {
+	if !readJSONBody(w, r, 16<<10, &request) {
 		return
 	}
 	if _, err := s.identity.authenticate(user.Email, request.CurrentPassword); err != nil {
@@ -260,7 +250,7 @@ func (s *supervisor) handleIdentityUsers(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusOK, identityUsersResponse{Users: s.identity.listUsers()})
 	case http.MethodPost:
 		var request identityCreateUserRequest
-		if !readIdentityJSON(w, r, &request) {
+		if !readJSONBody(w, r, 16<<10, &request) {
 			return
 		}
 		user, err := s.identity.createUser(request.Email, request.Name, request.Password, request.Groups)
@@ -281,7 +271,7 @@ func (s *supervisor) handleIdentityUserPassword(w http.ResponseWriter, r *http.R
 		return
 	}
 	var request identityResetPasswordRequest
-	if !readIdentityJSON(w, r, &request) {
+	if !readJSONBody(w, r, 16<<10, &request) {
 		return
 	}
 	if err := s.identity.setPassword(id, request.Password); err != nil {
@@ -304,7 +294,7 @@ func (s *supervisor) handleIdentityUserGet(w http.ResponseWriter, id string) {
 // handleIdentityUserUpdate applies a name, group or disabled change.
 func (s *supervisor) handleIdentityUserUpdate(w http.ResponseWriter, r *http.Request, id string) {
 	var request identityUpdateUserRequest
-	if !readIdentityJSON(w, r, &request) {
+	if !readJSONBody(w, r, 16<<10, &request) {
 		return
 	}
 	current, ok := s.identity.user(id)

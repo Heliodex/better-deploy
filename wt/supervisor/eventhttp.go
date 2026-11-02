@@ -4,7 +4,6 @@ package main
 
 import (
 	"encoding/json/jsontext"
-	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -37,10 +36,8 @@ func handleEventPublish(bus *eventBus, w http.ResponseWriter, r *http.Request, a
 		writeError(w, http.StatusServiceUnavailable, "event bus is unavailable")
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, eventMaxBody+1024)
 	var request eventPublishRequest
-	if err := json.UnmarshalRead(r.Body, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !readJSONBody(w, r, eventMaxBody+1024, &request) {
 		return
 	}
 	event, err := bus.publish(app, request.Topic, request.Data)
