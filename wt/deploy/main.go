@@ -510,12 +510,31 @@ func writeTarPath(tw *tar.Writer, name, path string) error {
 }
 
 // bundle packs app.json, the component files and static output into a gzipped tarball for upload.
+// manifestJSON preserves app.json fields the deploy tool does not model, while applying name and host overrides.
+func manifestJSON(dir string, m manifest) ([]byte, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "app.json"))
+	if err != nil {
+		return json.Marshal(m, jsontext.WithIndent("  "))
+	}
+	var values map[string]any
+	if err := json.Unmarshal(data, &values); err != nil {
+		return nil, err
+	}
+	if m.Name != "" {
+		values["name"] = m.Name
+	}
+	if m.Host != "" {
+		values["host"] = m.Host
+	}
+	return json.Marshal(values, jsontext.WithIndent("  "))
+}
+
 func bundle(dir string, m manifest, includeComponent bool) ([]byte, error) {
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
 
-	appJSON, err := json.Marshal(m, jsontext.WithIndent("  "))
+	appJSON, err := manifestJSON(dir, m)
 	if err != nil {
 		return nil, err
 	}

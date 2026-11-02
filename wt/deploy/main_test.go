@@ -76,6 +76,46 @@ func TestBundle(t *testing.T) {
 	}
 }
 
+func TestBundlePreservesUnknownManifestFields(t *testing.T) {
+	dir := t.TempDir()
+	appJSON := `{"name":"demo","host":"old.localhost","identity":"platform","allow_callers":["peer"],"job_concurrency":2,"future_field":{"keep":true}}`
+	if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(appJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	data, err := bundle(dir, manifest{Name: "demo", Host: "new.localhost"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gz, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			t.Fatal("bundle has no app.json")
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if header.Name != "app.json" {
+			continue
+		}
+		body, err := io.ReadAll(tr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{`"identity": "platform"`, `"job_concurrency": 2`, `"future_field"`, `"host": "new.localhost"`} {
+			if !strings.Contains(string(body), want) {
+				t.Errorf("app.json is missing %s:\n%s", want, body)
+			}
+		}
+		return
+	}
+}
+
 func TestBundleOmitsMissingCwasm(t *testing.T) {
 	dir := t.TempDir()
 	for name, body := range map[string]string{"app.json": `{"name":"hello"}`, "main.wasm": "wasm"} {
