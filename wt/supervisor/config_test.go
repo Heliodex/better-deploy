@@ -17,7 +17,7 @@ func TestAppConfigGetAndPatch(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(original), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := readAppConfig(dir, "demo", "localhost")
+	cfg, err := readAppConfig(dir, "demo", "localhost", tenantTrusted)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestAppConfigGetAndPatch(t *testing.T) {
 		t.Errorf("hosts map was not updated: %v", s.hosts)
 	}
 
-	saved, err := readAppConfig(dir, "demo", "localhost")
+	saved, err := readAppConfig(dir, "demo", "localhost", tenantTrusted)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,11 +87,11 @@ func TestAppConfigGetAndPatch(t *testing.T) {
 func TestAppConfigPatchesHealthSettings(t *testing.T) {
 	dir := t.TempDir()
 	cfg := appConfig{Name: "demo", Host: "demo.localhost", Health: "/healthz", Env: map[string]string{}}
-	cfg, err := normalizeAppConfig(cfg, "demo", "localhost")
+	cfg, err := normalizeAppConfig(cfg, "demo", "localhost", tenantTrusted)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := persistAppConfig(dir, cfg); err != nil {
+	if err := persistAppConfig(dir, cfg, tenantTrusted); err != nil {
 		t.Fatal(err)
 	}
 	s := testSupervisor()
@@ -125,7 +125,7 @@ func TestAppConfigPatchesHealthSettings(t *testing.T) {
 func TestAppConfigRejectsTakenHost(t *testing.T) {
 	dir := t.TempDir()
 	cfg := appConfig{Name: "demo", Host: "demo.localhost", Health: "/", Env: map[string]string{}}
-	if err := persistAppConfig(dir, cfg); err != nil {
+	if err := persistAppConfig(dir, cfg, tenantTrusted); err != nil {
 		t.Fatal(err)
 	}
 	s := testSupervisor()
@@ -147,11 +147,11 @@ func TestAppConfigRejectsTakenHost(t *testing.T) {
 
 func TestAppConfigPatchesCallersAndEgress(t *testing.T) {
 	dir := t.TempDir()
-	cfg, err := normalizeAppConfig(appConfig{Name: "demo", Host: "demo.localhost", Health: "/", Env: map[string]string{}}, "demo", "localhost")
+	cfg, err := normalizeAppConfig(appConfig{Name: "demo", Host: "demo.localhost", Health: "/", Env: map[string]string{}}, "demo", "localhost", tenantTrusted)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := persistAppConfig(dir, cfg); err != nil {
+	if err := persistAppConfig(dir, cfg, tenantTrusted); err != nil {
 		t.Fatal(err)
 	}
 	s := testSupervisor()
@@ -206,11 +206,11 @@ func TestAppConfigPatchesCallersAndEgress(t *testing.T) {
 
 func TestAppConfigConditionalRequests(t *testing.T) {
 	dir := t.TempDir()
-	cfg, err := normalizeAppConfig(appConfig{Name: "demo", Host: "demo.localhost", Health: "/", Env: map[string]string{}}, "demo", "localhost")
+	cfg, err := normalizeAppConfig(appConfig{Name: "demo", Host: "demo.localhost", Health: "/", Env: map[string]string{}}, "demo", "localhost", tenantTrusted)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := persistAppConfig(dir, cfg); err != nil {
+	if err := persistAppConfig(dir, cfg, tenantTrusted); err != nil {
 		t.Fatal(err)
 	}
 	s := testSupervisor()

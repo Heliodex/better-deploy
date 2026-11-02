@@ -43,7 +43,7 @@ func TestReadAppConfigValidatesSchedule(t *testing.T) {
 	}
 
 	good := `{"schedule":[{"path":"/tick","every":"10s"}]}`
-	if _, err := readAppConfig(writeConfig(t, good), "demo", "localhost"); err != nil {
+	if _, err := readAppConfig(writeConfig(t, good), "demo", "localhost", tenantTrusted); err != nil {
 		t.Errorf("valid schedule rejected: %v", err)
 	}
 
@@ -53,7 +53,7 @@ func TestReadAppConfigValidatesSchedule(t *testing.T) {
 		"bad interval":   `{"schedule":[{"path":"/tick","every":"often"}]}`,
 		"interval floor": `{"schedule":[{"path":"/tick","every":"100ms"}]}`,
 	} {
-		if _, err := readAppConfig(writeConfig(t, body), "demo", "localhost"); err == nil {
+		if _, err := readAppConfig(writeConfig(t, body), "demo", "localhost", tenantTrusted); err == nil {
 			t.Errorf("%s: expected an error", name)
 		}
 	}

@@ -321,11 +321,11 @@ func TestStorageMigrationTimeoutConfig(t *testing.T) {
 	}
 
 	t.Setenv("WT_STORAGE_MIGRATION_TIMEOUT", "20m")
-	if got := configFromEnv().storageMigrationTimeout; got != 20*time.Minute {
+	if got := envStorageMigrationTimeout(); got != 20*time.Minute {
 		t.Errorf("config timeout = %s, want 20m", got)
 	}
 	t.Setenv("WT_STORAGE_MIGRATION_TIMEOUT", "invalid")
-	if got := configFromEnv().storageMigrationTimeout; got != defaultStorageMigrationTimeout {
+	if got := envStorageMigrationTimeout(); got != defaultStorageMigrationTimeout {
 		t.Errorf("invalid config timeout = %s, want default", got)
 	}
 }

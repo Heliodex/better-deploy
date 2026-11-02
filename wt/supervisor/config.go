@@ -205,12 +205,12 @@ func appConfigPermission(untrusted bool) os.FileMode {
 
 // persistAppConfig writes app.json with the tenant-appropriate permission. The optional mode keeps
 // existing trusted callers working while untrusted PATCHes write the file 0600 from the start.
-func persistAppConfig(dir string, cfg appConfig, modes ...string) error {
+func persistAppConfig(dir string, cfg appConfig, mode string) error {
 	data, err := json.Marshal(cfg)
 	if err != nil {
 		return err
 	}
-	perm := appConfigPermission(tenantModeArg(modes) == tenantUntrusted)
+	perm := appConfigPermission(mode == tenantUntrusted)
 	if err := writeFileAtomicMode(filepath.Join(dir, "app.json"), append(data, '\n'), perm); err != nil {
 		return fmt.Errorf("write app.json: %w", err)
 	}

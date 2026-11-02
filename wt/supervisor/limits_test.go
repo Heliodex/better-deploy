@@ -94,7 +94,7 @@ func TestProxyRequestTimeout(t *testing.T) {
 }
 
 func TestNormalizeRequestLimits(t *testing.T) {
-	cfg, err := normalizeAppConfig(appConfig{RequestTimeout: "30s", MaxConcurrent: 4}, "demo", "localhost")
+	cfg, err := normalizeAppConfig(appConfig{RequestTimeout: "30s", MaxConcurrent: 4}, "demo", "localhost", tenantTrusted)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,14 +109,14 @@ func TestNormalizeRequestLimits(t *testing.T) {
 		{MaxConcurrent: -1},
 		{Network: "open"},
 	} {
-		if _, err := normalizeAppConfig(bad, "demo", "localhost"); err == nil {
+		if _, err := normalizeAppConfig(bad, "demo", "localhost", tenantTrusted); err == nil {
 			t.Errorf("config %+v should be rejected", bad)
 		}
 	}
 }
 
 func TestNormalizeHealthSettings(t *testing.T) {
-	cfg, err := normalizeAppConfig(appConfig{}, "demo", "localhost")
+	cfg, err := normalizeAppConfig(appConfig{}, "demo", "localhost", tenantTrusted)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,8 @@ func TestNormalizeHealthSettings(t *testing.T) {
 		HealthInterval:     "5s",
 		HealthFailures:     3,
 		RestartOnUnhealthy: true,
-	}, "demo", "localhost")
+	}, "demo", "localhost", tenantTrusted)
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +152,7 @@ func TestNormalizeHealthSettings(t *testing.T) {
 		{HealthFailures: -1},
 		{HealthFailures: 101},
 	} {
-		if _, err := normalizeAppConfig(bad, "demo", "localhost"); err == nil {
+		if _, err := normalizeAppConfig(bad, "demo", "localhost", tenantTrusted); err == nil {
 			t.Errorf("config %+v should be rejected", bad)
 		}
 	}

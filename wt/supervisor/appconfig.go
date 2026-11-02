@@ -136,48 +136,6 @@ func envStorageMigrationTimeout() time.Duration {
 	return timeout
 }
 
-func configFromEnv() config {
-	untrusted := strings.EqualFold(strings.TrimSpace(env("WT_TENANT_MODE", tenantTrusted)), tenantUntrusted)
-	return config{
-		appsDir:             env("WT_APPS_DIR", "./apps"),
-		stateDir:            env("WT_STATE_DIR", "./state"),
-		cacheDir:            env("WT_CACHE_DIR", ""),
-		cacheMaxBytes:       envInt64("WT_CACHE_MAX_BYTES", defaultCacheMaxBytes),
-		listen:              env("WT_LISTEN", "127.0.0.1:8080"),
-		storageListen:       env("WT_STORAGE_LISTEN", "127.0.0.1:0"),
-		domain:              env("WT_APPS_DOMAIN", "localhost"),
-		wasmtime:            env("WT_WASMTIME", "wasmtime"),
-		wasmtimeCompiler:    env("WT_WASMTIME_COMPILER", env("WT_WASMTIME", "wasmtime")),
-		wasmtimeTarget:      env("WT_WASMTIME_TARGET", "x86_64-unknown-linux-musl"),
-		token:               os.Getenv("WT_TOKEN"),
-		tlsCert:             os.Getenv("WT_TLS_CERT"),
-		tlsKey:              os.Getenv("WT_TLS_KEY"),
-		tenantMode:          env("WT_TENANT_MODE", tenantTrusted),
-		adminListen:         os.Getenv("WT_ADMIN_LISTEN"),
-		authFile:            os.Getenv("WT_AUTH_FILE"),
-		trustedProxiesValue: os.Getenv("WT_TRUSTED_PROXIES"),
-		appFetchListen:      env("WT_APP_FETCH_LISTEN", "127.0.0.1:0"),
-		cgroupRoot:          env("WT_CGROUP_ROOT", "/sys/fs/cgroup/wt"),
-		iptables:            env("WT_IPTABLES", "iptables"),
-		ip6tables:           env("WT_IP6TABLES", "ip6tables"),
-		dataQuotaMode:       env("WT_DATA_QUOTA_MODE", dataQuotaMonitor),
-		setquota:            env("WT_SETQUOTA", "setquota"),
-		findmnt:             env("WT_FINDMNT", "findmnt"),
-		dataQuotaFS:         os.Getenv("WT_DATA_QUOTA_FS"),
-		appUIDBase:          int(envInt64("WT_APP_UID_BASE", 20000)),
-		ipv6Egress:          envBool("WT_IPV6_EGRESS", true),
-		appNamespaces:       envBool("WT_APP_NAMESPACES", untrusted),
-		appSeccomp:          envBool("WT_APP_SECCOMP", untrusted),
-		accessLog:           envBool("WT_ACCESS_LOG", true),
-		accessLogEvery:      int(envInt64("WT_ACCESS_LOG_EVERY", 1)),
-		diskBudgetBytes:     envInt64("WT_DISK_BUDGET_MB", 0) << 20,
-
-		storageMigrationTimeout: envStorageMigrationTimeout(),
-		storageTmpDir:           os.Getenv("WT_STORAGE_TMP_DIR"),
-		storageTempBudgetBytes:  envInt64("WT_STORAGE_TEMP_BUDGET_MB", defaultStorageTempBudgetMB) << 20,
-	}
-}
-
 // sameRuntimeConfig compares the settings that require a new process, ignoring build and display metadata.
 func sameRuntimeConfig(a, b appConfig) bool {
 	if a.Host != b.Host || a.Health != b.Health {
@@ -396,14 +354,6 @@ func parseScheduleInterval(entry scheduleConfig) (time.Duration, error) {
 	return every, nil
 }
 
-// tenantModeArg returns the optional tenant mode passed to normalization helpers, defaulting to trusted.
-func tenantModeArg(modes []string) string {
-	if len(modes) > 0 && modes[0] != "" {
-		return modes[0]
-	}
-	return tenantTrusted
-}
-
 // normalizeAppAddress fills in and validates the app name, host and host aliases.
 func normalizeAppAddress(cfg appConfig, name, domain string) (appConfig, error) {
 	if strings.TrimSpace(cfg.Name) == "" {
@@ -593,8 +543,7 @@ func applyAppDefaults(cfg *appConfig, mode string) error {
 }
 
 // normalizeAppConfig fills in defaults and validates an app's runtime config. The optional mode applies untrusted defaults.
-func normalizeAppConfig(cfg appConfig, name, domain string, modes ...string) (appConfig, error) {
-	mode := tenantModeArg(modes)
+func normalizeAppConfig(cfg appConfig, name, domain, mode string) (appConfig, error) {
 	cfg, err := normalizeAppAddress(cfg, name, domain)
 	if err != nil {
 		return cfg, err
@@ -612,7 +561,7 @@ func normalizeAppConfig(cfg appConfig, name, domain string, modes ...string) (ap
 	return cfg, nil
 }
 
-func readAppConfig(dir, name, domain string, modes ...string) (appConfig, error) {
+func readAppConfig(dir, name, domain, mode string) (appConfig, error) {
 	cfg := appConfig{Name: name, Env: map[string]string{}}
 
 	data, err := os.ReadFile(filepath.Join(dir, "app.json"))
@@ -625,5 +574,5 @@ func readAppConfig(dir, name, domain string, modes ...string) (appConfig, error)
 	default:
 		return cfg, fmt.Errorf("read app.json: %w", err)
 	}
-	return normalizeAppConfig(cfg, name, domain, modes...)
+	return normalizeAppConfig(cfg, name, domain, mode)
 }

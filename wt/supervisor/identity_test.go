@@ -250,10 +250,10 @@ func TestIdentityProxyRouting(t *testing.T) {
 }
 
 func TestIdentityConfigValidation(t *testing.T) {
-	if _, err := normalizeAppConfig(appConfig{Name: "demo", Identity: identityModePlatform}, "demo", "localhost"); err != nil {
+	if _, err := normalizeAppConfig(appConfig{Name: "demo", Identity: identityModePlatform}, "demo", "localhost", tenantTrusted); err != nil {
 		t.Errorf("platform identity rejected: %v", err)
 	}
-	if _, err := normalizeAppConfig(appConfig{Name: "demo", Identity: "oauth"}, "demo", "localhost"); err == nil {
+	if _, err := normalizeAppConfig(appConfig{Name: "demo", Identity: "oauth"}, "demo", "localhost", tenantTrusted); err == nil {
 		t.Error("unknown identity mode accepted")
 	}
 }
