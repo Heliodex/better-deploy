@@ -1,13 +1,17 @@
 package app
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -107,4 +111,34 @@ func BlobDeleteURL(digest string, expires time.Time) (string, error) {
 	}
 	signature := blobSignature(secret, "delete", digest, expires.Unix(), 0, "")
 	return blobBase() + "/" + digest + "?exp=" + strconv.FormatInt(expires.Unix(), 10) + "&sig=" + signature, nil
+}
+
+// DeleteBlob removes one of the app's stored blobs through the storage loopback service. A missing blob is treated as already deleted.
+func DeleteBlob(ctx context.Context, client *http.Client, digest string) error {
+	if len(digest) != sha256.Size*2 {
+		return fmt.Errorf("blob digest must be 64 hex characters")
+	}
+	if _, err := hex.DecodeString(digest); err != nil {
+		return fmt.Errorf("blob digest must be 64 hex characters")
+	}
+	base := strings.TrimSuffix(os.Getenv(storageURLEnv), "/")
+	token := os.Getenv(storageTokenEnv)
+	if base == "" || token == "" {
+		return fmt.Errorf("%s and %s are not set", storageURLEnv, storageTokenEnv)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, base+"/v1/blobs/"+digest, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if resp.StatusCode == http.StatusNoContent || resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	return fmt.Errorf("delete blob returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
 }

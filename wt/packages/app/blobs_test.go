@@ -1,6 +1,8 @@
 package app
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strconv"
 	"strings"
@@ -18,6 +20,41 @@ func TestBlobSignatureVector(t *testing.T) {
 	}
 	if got := blobSignature(testBlobSecret, "upload", "", 1700000000, 1024, "text/plain"); got != "34961813da763a9ce6d1b3e40dbd60e59a6db5ec2f094b63a99f61ab6a1e0153" {
 		t.Errorf("upload signature = %s", got)
+	}
+}
+
+func TestDeleteBlob(t *testing.T) {
+	var gotPath, gotAuth string
+	status := http.StatusNoContent
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(status)
+	}))
+	defer server.Close()
+	t.Setenv(storageURLEnv, server.URL)
+	t.Setenv(storageTokenEnv, "secret")
+	digest := strings.Repeat("a", 64)
+
+	if err := DeleteBlob(t.Context(), server.Client(), digest); err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != "/v1/blobs/"+digest || gotAuth != "Bearer secret" {
+		t.Errorf("path=%q auth=%q", gotPath, gotAuth)
+	}
+	status = http.StatusNotFound
+	if err := DeleteBlob(t.Context(), server.Client(), digest); err != nil {
+		t.Errorf("missing blob should be idempotent: %v", err)
+	}
+	status = http.StatusInternalServerError
+	if err := DeleteBlob(t.Context(), server.Client(), digest); err == nil {
+		t.Error("server error was ignored")
+	}
+}
+
+func TestDeleteBlobRejectsInvalidDigest(t *testing.T) {
+	if err := DeleteBlob(t.Context(), http.DefaultClient, "nope"); err == nil {
+		t.Error("invalid digest was accepted")
 	}
 }
 
