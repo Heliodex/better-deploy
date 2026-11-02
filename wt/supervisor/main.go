@@ -206,7 +206,6 @@ func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
 }
 
-// requireMethod writes 405 with an Allow header unless the request uses method.
 // readJSONBody decodes a size-limited JSON body and reports a 400 on malformed input.
 func readJSONBody(w http.ResponseWriter, r *http.Request, limit int64, target any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, limit)
@@ -217,6 +216,7 @@ func readJSONBody(w http.ResponseWriter, r *http.Request, limit int64, target an
 	return true
 }
 
+// requireMethod writes 405 with an Allow header unless the request uses method.
 func requireMethod(w http.ResponseWriter, r *http.Request, method string) bool {
 	if r.Method == method {
 		return true
