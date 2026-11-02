@@ -37,6 +37,7 @@ func spawnTestApp(t *testing.T, s *supervisor, name string) *app {
 func newLifecycleSupervisor(t *testing.T) *supervisor {
 	t.Helper()
 	s := testSupervisor()
+	s.runner, _, _ = startTestRunner(t)
 	s.cfg.wasmtime = os.Args[0]
 	s.cfg.appsDir = t.TempDir()
 	s.cfg.stateDir = t.TempDir()

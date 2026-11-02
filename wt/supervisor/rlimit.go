@@ -3,8 +3,6 @@
 package main
 
 import (
-	"fmt"
-
 	"golang.org/x/sys/unix"
 )
 
@@ -30,15 +28,4 @@ func rlimitPlan(cfg appConfig) []rlimitSpec {
 		})
 	}
 	return append(plan, rlimitSpec{Resource: unix.RLIMIT_CORE, Name: "RLIMIT_CORE", Value: 0})
-}
-
-// applyProcessLimits sets the hard and soft limits on a running child. The caller decides whether a failure is fatal.
-func applyProcessLimits(pid int, cfg appConfig) error {
-	for _, spec := range rlimitPlan(cfg) {
-		limit := &unix.Rlimit{Cur: spec.Value, Max: spec.Value}
-		if err := unix.Prlimit(pid, spec.Resource, limit, nil); err != nil {
-			return fmt.Errorf("set %s=%d on pid %d: %w", spec.Name, spec.Value, pid, err)
-		}
-	}
-	return nil
 }

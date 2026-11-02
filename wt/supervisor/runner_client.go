@@ -10,6 +10,15 @@ import (
 	"time"
 )
 
+// runnerConn is the supervisor side of the app runner.
+type runnerConn interface {
+	Start(runnerStartRequest) (*runnerStream, runnerEvent, error)
+	Go(name string) error
+	Stop(name string) error
+	Stream(name string) *runnerStream
+	Close()
+}
+
 type runnerStream struct {
 	name    string
 	events  chan runnerEvent
@@ -98,9 +107,10 @@ func (c *runnerClient) dispatch(event runnerEvent) {
 		c.snapshot = append([]runnerAppInfo(nil), event.Snapshot...)
 		c.runnerPID = event.RunnerPID
 		for _, info := range event.Snapshot {
-			if c.streams[info.Name] == nil {
-				c.streams[info.Name] = &runnerStream{
-					name:    info.Name,
+			id := runnerKey(info.ID, info.Name)
+			if c.streams[id] == nil {
+				c.streams[id] = &runnerStream{
+					name:    id,
 					events:  make(chan runnerEvent, runnerOutputBuffer),
 					started: make(chan runnerEvent, 1),
 				}
@@ -110,7 +120,7 @@ func (c *runnerClient) dispatch(event runnerEvent) {
 		c.snapshotOnce.Do(func() { close(c.snapshotCh) })
 	case "started", "error":
 		c.mu.Lock()
-		stream := c.streams[event.App]
+		stream := c.streams[runnerKey(event.ID, event.App)]
 		c.mu.Unlock()
 		if stream == nil {
 			return
@@ -121,7 +131,7 @@ func (c *runnerClient) dispatch(event runnerEvent) {
 		}
 	case "exited":
 		c.mu.Lock()
-		stream := c.streams[event.App]
+		stream := c.streams[runnerKey(event.ID, event.App)]
 		c.mu.Unlock()
 		if stream != nil {
 			select {
@@ -131,7 +141,7 @@ func (c *runnerClient) dispatch(event runnerEvent) {
 		}
 	default:
 		c.mu.Lock()
-		stream := c.streams[event.App]
+		stream := c.streams[runnerKey(event.ID, event.App)]
 		c.mu.Unlock()
 		if stream == nil {
 			return
@@ -206,40 +216,40 @@ func (c *runnerClient) RunnerPID() int {
 	return c.runnerPID
 }
 
-func (c *runnerClient) newStream(name string) *runnerStream {
+func (c *runnerClient) newStream(id string) *runnerStream {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	stream := c.streams[name]
+	stream := c.streams[id]
 	if stream == nil {
 		stream = &runnerStream{
-			name:    name,
+			name:    id,
 			events:  make(chan runnerEvent, runnerOutputBuffer),
 			started: make(chan runnerEvent, 1),
 		}
-		c.streams[name] = stream
+		c.streams[id] = stream
 	}
 	return stream
 }
 
 // startStream replaces any previous stream for the app, so a restart cannot consume an old generation's buffered output or exit event.
-func (c *runnerClient) startStream(name string) *runnerStream {
+func (c *runnerClient) startStream(id string) *runnerStream {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	stream := &runnerStream{
-		name:    name,
+		name:    id,
 		events:  make(chan runnerEvent, runnerOutputBuffer),
 		started: make(chan runnerEvent, 1),
 	}
-	c.streams[name] = stream
+	c.streams[id] = stream
 	return stream
 }
 
-func (c *runnerClient) Stream(name string) *runnerStream {
-	return c.newStream(name)
+func (c *runnerClient) Stream(id string) *runnerStream {
+	return c.newStream(id)
 }
 
 func (c *runnerClient) Start(request runnerStartRequest) (*runnerStream, runnerEvent, error) {
-	stream := c.startStream(request.Name)
+	stream := c.startStream(runnerKey(request.ID, request.Name))
 	if err := c.send(runnerRequest{Op: "start", Start: &request}); err != nil {
 		return nil, runnerEvent{}, err
 	}
@@ -250,19 +260,19 @@ func (c *runnerClient) Start(request runnerStartRequest) (*runnerStream, runnerE
 		}
 		return stream, event, nil
 	case <-time.After(runnerRequestTimeout):
-		_ = c.send(runnerRequest{Op: "stop", App: request.Name})
+		_ = c.send(runnerRequest{Op: "stop", ID: stream.name})
 		return nil, runnerEvent{}, errors.New("timed out waiting for the runner to start the app")
 	case <-c.done:
 		return nil, runnerEvent{}, c.Err()
 	}
 }
 
-func (c *runnerClient) Go(name string) error {
-	return c.send(runnerRequest{Op: "go", App: name})
+func (c *runnerClient) Go(id string) error {
+	return c.send(runnerRequest{Op: "go", ID: id})
 }
 
-func (c *runnerClient) Stop(name string) error {
-	return c.send(runnerRequest{Op: "stop", App: name})
+func (c *runnerClient) Stop(id string) error {
+	return c.send(runnerRequest{Op: "stop", ID: id})
 }
 
 func (c *runnerClient) Shutdown() error {

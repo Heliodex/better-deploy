@@ -9,12 +9,10 @@ package main
 import (
 	"debug/elf"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"syscall"
 )
@@ -260,22 +258,6 @@ func resetNamespaceRoots(stateDir string, untrusted bool) error {
 		return fmt.Errorf("create namespace roots: %w", err)
 	}
 	return os.Chmod(base, mode)
-}
-
-// watchNamespaceChild reads the host pid that the helper writes to the pid pipe.
-// Resource sampling and app info use the wasmtime pid, not the helper.
-func watchNamespaceChild(a *app, cmd *exec.Cmd, reader *os.File) {
-	defer reader.Close()
-	data, _ := io.ReadAll(io.LimitReader(reader, 64))
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil || pid <= 0 {
-		return
-	}
-	a.mu.Lock()
-	if a.cmd == cmd && !a.exited {
-		a.workPID = pid
-	}
-	a.mu.Unlock()
 }
 
 // prepareNamespaces builds the namespace plan for one launch attempt.

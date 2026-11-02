@@ -409,6 +409,7 @@ func TestHandleRestartRestartsSchedule(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := testSupervisor()
+	s.runner, _, _ = startTestRunner(t)
 	s.cfg.wasmtime = os.Args[0]
 	s.cfg.stateDir = t.TempDir()
 	a, err := s.spawn("demo", dir, appConfig{

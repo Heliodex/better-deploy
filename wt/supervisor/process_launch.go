@@ -11,18 +11,18 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"syscall"
 	"time"
 )
 
 // launchSession carries the resolved inputs shared by the runner and direct launch paths.
 type launchSession struct {
+	id         string
 	cfg        appConfig
 	source     string
 	args, env  []string
 	iso        *launchIsolation
 	ns         *nsLaunch
-	planEnv    string
+	plan       []byte
 	deadline   time.Time
 	namespaced bool
 }
@@ -175,10 +175,8 @@ func (s *supervisor) launch(a *app, source string) error {
 	if err != nil {
 		return err
 	}
-	if s.runner != nil {
-		return s.launchRunner(a, session)
-	}
-	return s.launchDirect(a, session)
+	session.id = a.name + "-" + newRequestID()
+	return s.launchRunner(a, session)
 }
 
 // prepareLaunchSession resolves the environment, isolation and namespace inputs before any process starts.
@@ -213,14 +211,14 @@ func (s *supervisor) prepareLaunchSession(a *app, source string, cfg appConfig, 
 		a.recordError(err)
 		return nil, err
 	}
-	planData, err := json.Marshal(ns.plan)
+	plan, err := json.Marshal(ns.plan)
 	if err != nil {
 		s.releaseIsolation(a, iso)
 		return nil, fmt.Errorf("encode namespace plan: %w", err)
 	}
 	iso.nsRoot = ns.plan.Root
 	session.ns = ns
-	session.planEnv = nsPlanEnv + "=" + string(planData)
+	session.plan = plan
 	return session, nil
 }
 
@@ -241,6 +239,7 @@ func (s *supervisor) launchRunner(a *app, l *launchSession) error {
 	finder, recent, out := s.launchOutput(a)
 	configData, _ := json.Marshal(l.cfg)
 	request := runnerStartRequest{
+		ID:         l.id,
 		Name:       a.name,
 		Dir:        a.dir,
 		Path:       s.cfg.wasmtime,
@@ -254,12 +253,7 @@ func (s *supervisor) launchRunner(a *app, l *launchSession) error {
 		request.StorageToken = s.storage.tokenFor(a.name)
 	}
 	if l.namespaced {
-		planData, err := json.Marshal(l.ns.plan)
-		if err != nil {
-			s.releaseIsolation(a, l.iso)
-			return fmt.Errorf("encode namespace plan: %w", err)
-		}
-		request.Plan = planData
+		request.Plan = l.plan
 		request.HostID = l.ns.hostID
 		request.HostGID = l.ns.hostGID
 		request.AllowSetgroups = l.ns.plan.ClearGroups
@@ -304,7 +298,7 @@ func (s *supervisor) launchRunner(a *app, l *launchSession) error {
 		}
 	}
 	if l.namespaced {
-		if err := s.runner.Go(a.name); err != nil {
+		if err := s.runner.Go(l.id); err != nil {
 			return fail(fmt.Errorf("release app start: %w", err))
 		}
 	}
@@ -312,122 +306,6 @@ func (s *supervisor) launchRunner(a *app, l *launchSession) error {
 		return fail(err)
 	}
 	return nil
-}
-
-// launchDirect starts an app as a child process and then waits for readiness.
-func (s *supervisor) launchDirect(a *app, l *launchSession) error {
-	finder, recent, out := s.launchOutput(a)
-	cmd, goWriter, err := s.startDirectProcess(a, l, out)
-	if err != nil {
-		return err
-	}
-
-	done := make(chan struct{})
-	a.mu.Lock()
-	a.cmd = cmd
-	a.done = done
-	a.exited = false
-	a.workPID = 0
-	a.started = time.Now().UTC()
-	if a.timer != nil {
-		a.timer.Stop()
-		a.timer = nil
-	}
-	a.mu.Unlock()
-
-	nsRoot := ""
-	if l.ns != nil {
-		nsRoot = l.ns.plan.Root
-	}
-	go s.watchDirectExit(a, cmd, done, nsRoot)
-
-	// A failed launch after the process started must leave no process, cgroup or firewall rule behind.
-	fail := func(err error) error {
-		if goWriter != nil {
-			_ = goWriter.Close()
-			goWriter = nil
-		}
-		a.recordError(err)
-		s.kill(a)
-		s.releaseIsolation(a, l.iso)
-		return err
-	}
-	if s.cfg.untrusted() && !l.namespaced {
-		if err := applyProcessLimits(cmd.Process.Pid, l.cfg); err != nil {
-			return fail(fmt.Errorf("apply rlimits: %w", err))
-		}
-	}
-	if l.iso.cgroup != "" && s.cgroups != nil {
-		if err := s.cgroups.addPID(a.name, cmd.Process.Pid); err != nil {
-			return fail(err)
-		}
-	}
-	// The helper waits for this byte before it starts wasmtime, so the runtime inherits the cgroup at fork time.
-	if goWriter != nil {
-		if _, err := goWriter.Write([]byte{1}); err != nil {
-			return fail(fmt.Errorf("release app start: %w", err))
-		}
-		_ = goWriter.Close()
-		goWriter = nil
-	}
-	if err := s.awaitAppReady(a, l, done, finder, recent); err != nil {
-		return fail(err)
-	}
-	return nil
-}
-
-// startDirectProcess builds and starts the wasmtime command, using the namespace helper when isolation is on.
-func (s *supervisor) startDirectProcess(a *app, l *launchSession, out io.Writer) (cmd *exec.Cmd, goWriter *os.File, err error) {
-	var pidReader *os.File
-	if l.namespaced {
-		cmd = exec.Command("/proc/self/exe", append([]string{nsInitArg}, l.args...)...)
-		cmd.Env = append(stripEnv(mergeEnv(minimalEnv(), l.env), nsPlanEnv), l.planEnv)
-		cmd.SysProcAttr = namespaceSysProcAttr(l.ns.hostID, l.ns.hostGID, l.ns.plan.ClearGroups)
-		var pidWriter, goReader *os.File
-		pidReader, pidWriter, err = os.Pipe()
-		if err != nil {
-			s.releaseIsolation(a, l.iso)
-			return nil, nil, fmt.Errorf("pid pipe: %w", err)
-		}
-		goReader, goWriter, err = os.Pipe()
-		if err != nil {
-			_ = pidReader.Close()
-			_ = pidWriter.Close()
-			s.releaseIsolation(a, l.iso)
-			return nil, nil, fmt.Errorf("start pipe: %w", err)
-		}
-		cmd.ExtraFiles = []*os.File{pidWriter, goReader}
-	} else {
-		cmd = exec.Command(s.cfg.wasmtime, l.args...)
-		cmd.Env = mergeEnv(minimalEnv(), l.env)
-		cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGTERM}
-		if credential := appCredential(l.iso); credential != nil {
-			cmd.SysProcAttr.Credential = credential
-		}
-	}
-	cmd.Stdout = out
-	cmd.Stderr = out
-	if err := cmd.Start(); err != nil {
-		if pidReader != nil {
-			_ = pidReader.Close()
-		}
-		if goWriter != nil {
-			_ = goWriter.Close()
-		}
-		for _, file := range cmd.ExtraFiles {
-			_ = file.Close()
-		}
-		s.releaseIsolation(a, l.iso)
-		return nil, nil, fmt.Errorf("start app: %w", err)
-	}
-	if len(cmd.ExtraFiles) > 0 {
-		for _, file := range cmd.ExtraFiles {
-			_ = file.Close()
-		}
-		cmd.ExtraFiles = nil
-		go watchNamespaceChild(a, cmd, pidReader)
-	}
-	return cmd, goWriter, nil
 }
 
 // awaitAppReady waits for the port, applies egress rules, runs migrations and activates the app.

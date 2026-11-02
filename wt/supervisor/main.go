@@ -173,7 +173,7 @@ type supervisor struct {
 	cgroups        *cgroupManager
 	egress         *egressManager
 	quota          *dataQuota
-	runner         *runnerClient
+	runner         runnerConn
 	runnerLiveness *os.File
 	runnerSnapshot []runnerAppInfo
 

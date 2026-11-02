@@ -35,6 +35,7 @@ const (
 )
 
 type runnerStartRequest struct {
+	ID             string   `json:"id,omitempty"`
 	Name           string   `json:"name"`
 	Dir            string   `json:"dir"`
 	Path           string   `json:"path"`
@@ -51,6 +52,7 @@ type runnerStartRequest struct {
 }
 
 type runnerAppInfo struct {
+	ID           string    `json:"id,omitempty"`
 	Name         string    `json:"name"`
 	Dir          string    `json:"dir"`
 	PID          int       `json:"pid"`
@@ -65,6 +67,7 @@ type runnerAppInfo struct {
 
 type runnerEvent struct {
 	Op        string          `json:"op"`
+	ID        string          `json:"id,omitempty"`
 	App       string          `json:"app,omitempty"`
 	PID       int             `json:"pid,omitempty"`
 	WorkPID   int             `json:"workPid,omitempty"`
@@ -78,6 +81,7 @@ type runnerEvent struct {
 
 type runnerRequest struct {
 	Op     string              `json:"op"`
+	ID     string              `json:"id,omitempty"`
 	App    string              `json:"app,omitempty"`
 	Start  *runnerStartRequest `json:"start,omitempty"`
 	Signal int                 `json:"signal,omitempty"`
@@ -102,6 +106,14 @@ type runnerServer struct {
 	conn    net.Conn
 	apps    map[string]*runnerProcess
 	closing bool
+}
+
+// runnerKey is the runner's process key: the launch ID, or the app name for older requests.
+func runnerKey(id, name string) string {
+	if id != "" {
+		return id
+	}
+	return name
 }
 
 // runnerMain is the entry point for the --wt-runner process.
@@ -184,26 +196,27 @@ func (r *runnerServer) handleConnection(conn net.Conn) {
 }
 
 func (r *runnerServer) handleRequest(_ net.Conn, request runnerRequest) {
+	id := runnerKey(request.ID, request.App)
 	switch request.Op {
 	case "start":
 		if request.Start == nil {
-			r.send(runnerEvent{Op: "error", App: request.App, Error: "missing start request"})
+			r.send(runnerEvent{Op: "error", ID: id, App: request.App, Error: "missing start request"})
 			return
 		}
 		r.start(*request.Start)
 	case "go":
-		r.release(request.App)
+		r.release(id)
 	case "stop":
-		r.stop(request.App)
+		r.stop(id)
 	case "signal":
-		r.signal(request.App, syscall.Signal(request.Signal))
+		r.signal(id, syscall.Signal(request.Signal))
 	case "snapshot":
 		r.send(runnerEvent{Op: "snapshot", Snapshot: r.snapshotApps(), RunnerPID: os.Getpid()})
 	case "shutdown":
 		r.shutdown()
 		os.Exit(0)
 	default:
-		r.send(runnerEvent{Op: "error", App: request.App, Error: "unknown request " + request.Op})
+		r.send(runnerEvent{Op: "error", ID: id, App: request.App, Error: "unknown request " + request.Op})
 	}
 }
 
@@ -283,6 +296,7 @@ func newRunnerCommand(request runnerStartRequest, output *os.File) (*exec.Cmd, *
 func (r *runnerServer) registerProcess(request runnerStartRequest, cmd *exec.Cmd, goWriter, pidReader *os.File) *runnerProcess {
 	app := &runnerProcess{
 		info: runnerAppInfo{
+			ID:           runnerKey(request.ID, request.Name),
 			Name:         request.Name,
 			Dir:          request.Dir,
 			PID:          cmd.Process.Pid,
@@ -301,19 +315,23 @@ func (r *runnerServer) registerProcess(request runnerStartRequest, cmd *exec.Cmd
 		app.info.WorkPID = cmd.Process.Pid
 	}
 	r.mu.Lock()
-	r.apps[request.Name] = app
+	r.apps[app.info.ID] = app
 	r.mu.Unlock()
 	return app
 }
 
 func (r *runnerServer) start(request runnerStartRequest) {
+	id := runnerKey(request.ID, request.Name)
+	sendError := func(message string) {
+		r.send(runnerEvent{Op: "error", ID: id, App: request.Name, Error: message})
+	}
 	if request.Name == "" || request.Path == "" {
-		r.send(runnerEvent{Op: "error", App: request.Name, Error: "name and path are required"})
+		sendError("name and path are required")
 		return
 	}
 	outputRead, outputWrite, err := os.Pipe()
 	if err != nil {
-		r.send(runnerEvent{Op: "error", App: request.Name, Error: "output pipe: " + err.Error()})
+		sendError("output pipe: " + err.Error())
 		return
 	}
 
@@ -321,7 +339,7 @@ func (r *runnerServer) start(request runnerStartRequest) {
 	if err != nil {
 		_ = outputRead.Close()
 		_ = outputWrite.Close()
-		r.send(runnerEvent{Op: "error", App: request.Name, Error: err.Error()})
+		sendError(err.Error())
 		return
 	}
 	if err := cmd.Start(); err != nil {
@@ -336,7 +354,7 @@ func (r *runnerServer) start(request runnerStartRequest) {
 		for _, file := range cmd.ExtraFiles {
 			_ = file.Close()
 		}
-		r.send(runnerEvent{Op: "error", App: request.Name, Error: "start app: " + err.Error()})
+		sendError("start app: " + err.Error())
 		return
 	}
 	_ = outputWrite.Close()
@@ -346,7 +364,7 @@ func (r *runnerServer) start(request runnerStartRequest) {
 	cmd.ExtraFiles = nil
 
 	app := r.registerProcess(request, cmd, goWriter, pidReader)
-	r.send(runnerEvent{Op: "started", App: request.Name, PID: cmd.Process.Pid, WorkPID: app.info.WorkPID})
+	r.send(runnerEvent{Op: "started", ID: app.info.ID, App: request.Name, PID: cmd.Process.Pid, WorkPID: app.info.WorkPID})
 	go r.readOutput(app, outputRead)
 	go r.waitApp(app)
 	if pidReader != nil {
@@ -362,9 +380,9 @@ func (r *runnerServer) readOutput(app *runnerProcess, output *os.File) {
 		n, err := output.Read(buffer)
 		if n > 0 {
 			data := append([]byte(nil), buffer[:n]...)
-			r.send(runnerEvent{Op: "output", App: app.info.Name, Data: data})
+			r.send(runnerEvent{Op: "output", ID: app.info.ID, App: app.info.Name, Data: data})
 			if port := app.observePort(data); port != 0 {
-				r.send(runnerEvent{Op: "port", App: app.info.Name, Port: port})
+				r.send(runnerEvent{Op: "port", ID: app.info.ID, App: app.info.Name, Port: port})
 			}
 		}
 		if err != nil {
@@ -383,7 +401,7 @@ func (r *runnerServer) readWorkPID(app *runnerProcess, reader *os.File) {
 	app.mu.Lock()
 	app.info.WorkPID = pid
 	app.mu.Unlock()
-	r.send(runnerEvent{Op: "work", App: app.info.Name, WorkPID: pid})
+	r.send(runnerEvent{Op: "work", ID: app.info.ID, App: app.info.Name, WorkPID: pid})
 }
 
 func (r *runnerServer) waitApp(app *runnerProcess) {
@@ -402,6 +420,7 @@ func (r *runnerServer) waitApp(app *runnerProcess) {
 		message = err.Error()
 	}
 	app.mu.Lock()
+	id := app.info.ID
 	name := app.info.Name
 	goWriter := app.goWriter
 	app.goWriter = nil
@@ -415,14 +434,14 @@ func (r *runnerServer) waitApp(app *runnerProcess) {
 		_ = pidReader.Close()
 	}
 	r.mu.Lock()
-	delete(r.apps, name)
+	delete(r.apps, id)
 	r.mu.Unlock()
-	r.send(runnerEvent{Op: "exited", App: name, Code: code, Error: message})
+	r.send(runnerEvent{Op: "exited", ID: id, App: name, Code: code, Error: message})
 }
 
-func (r *runnerServer) release(name string) {
+func (r *runnerServer) release(id string) {
 	r.mu.Lock()
-	app := r.apps[name]
+	app := r.apps[id]
 	r.mu.Unlock()
 	if app == nil {
 		return
@@ -437,13 +456,13 @@ func (r *runnerServer) release(name string) {
 	}
 }
 
-func (r *runnerServer) stop(name string) {
-	r.signal(name, syscall.SIGTERM)
+func (r *runnerServer) stop(id string) {
+	r.signal(id, syscall.SIGTERM)
 }
 
-func (r *runnerServer) signal(name string, signal syscall.Signal) {
+func (r *runnerServer) signal(id string, signal syscall.Signal) {
 	r.mu.Lock()
-	app := r.apps[name]
+	app := r.apps[id]
 	r.mu.Unlock()
 	if app == nil || signal == 0 {
 		return
@@ -466,7 +485,9 @@ func (r *runnerServer) shutdown() {
 		apps = append(apps, app)
 	}
 	r.mu.Unlock()
-	_ = r.listener.Close()
+	if r.listener != nil {
+		_ = r.listener.Close()
+	}
 	for _, app := range apps {
 		app.mu.Lock()
 		pid := app.info.PID

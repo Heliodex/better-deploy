@@ -7,7 +7,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"syscall"
 )
 
 type launchIsolation struct {
@@ -183,13 +182,4 @@ func (s *supervisor) applyEgress(a *app) error {
 	egress := append([]egressRule(nil), a.cfg.Egress...)
 	a.mu.Unlock()
 	return s.egress.add(a.name, uid, port, egress...)
-}
-
-// appCredential builds the SysProcAttr credential for an untrusted app. A nil result keeps the supervisor's own identity.
-func appCredential(iso *launchIsolation) *syscall.Credential {
-	if iso == nil || iso.uid == 0 {
-		return nil
-	}
-	// Explicitly empty supplementary groups so the app cannot inherit root's group memberships.
-	return &syscall.Credential{Uid: uint32(iso.uid), Gid: uint32(iso.gid), Groups: []uint32{}}
 }

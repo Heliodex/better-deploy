@@ -310,15 +310,6 @@ func (s *supervisor) finishExit(a *app, cmd *exec.Cmd, done chan struct{}, exitE
 	s.scheduleRestart(a, delay)
 }
 
-// watchDirectExit waits for a directly launched process, cleans up its namespace root and applies the shared exit bookkeeping.
-func (s *supervisor) watchDirectExit(a *app, cmd *exec.Cmd, done chan struct{}, nsRoot string) {
-	exitErr := cmd.Wait()
-	if nsRoot != "" {
-		_ = os.RemoveAll(nsRoot)
-	}
-	s.finishExit(a, cmd, done, exitErr, "app %s: wasmtime exited: %v")
-}
-
 // finishRunnerExit runs the same bookkeeping as a directly waited process, but the exit comes from the runner after it reaps the app.
 func (s *supervisor) finishRunnerExit(a *app, cmd *exec.Cmd, done chan struct{}, nsRoot string, exitErr error) {
 	if nsRoot != "" {
@@ -402,7 +393,7 @@ func (s *supervisor) adoptApp(name, dir string, cfg appConfig, info runnerAppInf
 	a.exited = false
 	s.loadResourceHistory(a)
 
-	stream := s.runner.Stream(name)
+	stream := s.runner.Stream(runnerKey(info.ID, name))
 	logging := log.New(os.Stderr, "["+name+"] ", 0).Writer()
 	go s.consumeRunnerStream(a, cmd, a.done, stream, io.MultiWriter(a.logs, logging), "")
 	a.proxy = s.newProxy(a)
@@ -454,7 +445,7 @@ func (s *supervisor) loadApps() error {
 			delete(snapshot, name)
 			if err != nil {
 				log.Printf("app %s: adopt: %v (skipped)", name, err)
-				_ = s.runner.Stop(name)
+				_ = s.runner.Stop(runnerKey(info.ID, name))
 				continue
 			}
 			s.register(a)
@@ -468,9 +459,9 @@ func (s *supervisor) loadApps() error {
 		s.register(a)
 	}
 
-	for name := range snapshot {
+	for name, info := range snapshot {
 		log.Printf("app %s: running without an app directory; stopping it", name)
-		_ = s.runner.Stop(name)
+		_ = s.runner.Stop(runnerKey(info.ID, name))
 	}
 	for _, a := range s.allApps() {
 		a.mu.Lock()
