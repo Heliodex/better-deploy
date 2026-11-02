@@ -20,12 +20,15 @@ func writeExampleLayout(t *testing.T, root string) {
 	if err := os.MkdirAll(filepath.Join(root, "example"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(filepath.Join(root, "example", "go.mod"), []byte("module example.test\n\ngo 1.27.1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.MkdirAll(filepath.Join(root, "packages"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(filepath.Join(root, "packages", "go.mod"), []byte("module wt.packages\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -34,15 +37,19 @@ func writeExampleLayout(t *testing.T, root string) {
 // TestNewMatchesTemplate fails if a template file is missing from the embed list in new.go, or if node_modules or bun.lock leak into the embedded set.
 func TestNewMatchesTemplate(t *testing.T) {
 	embedded := map[string]bool{}
+
 	err := fs.WalkDir(templateFS, "testdata/template", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
+
 		if entry.IsDir() {
 			return nil
 		}
+
 		rel := strings.TrimPrefix(path, "testdata/template/")
 		embedded[rel] = true
+
 		return nil
 	})
 	if err != nil {
@@ -50,24 +57,29 @@ func TestNewMatchesTemplate(t *testing.T) {
 	}
 
 	onDisk := map[string]bool{}
+
 	err = filepath.WalkDir("testdata/template", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
+
 		rel, err := filepath.Rel(filepath.Join("testdata", "template"), path)
 		if err != nil {
 			return err
 		}
+
 		rel = filepath.ToSlash(rel)
 		if rel == "." {
 			return nil
 		}
+
 		if rel == "web" || strings.HasPrefix(rel, "web/") {
 			name := strings.TrimPrefix(rel, "web/")
 			if name == "node_modules" || strings.HasPrefix(name, "node_modules/") || name == "bun.lock" {
 				if entry.IsDir() {
 					return filepath.SkipDir
 				}
+
 				return nil
 			}
 			// Generated output that bun install and svelte-kit sync leave behind.
@@ -75,13 +87,17 @@ func TestNewMatchesTemplate(t *testing.T) {
 				if entry.IsDir() {
 					return filepath.SkipDir
 				}
+
 				return nil
 			}
 		}
+
 		if entry.IsDir() {
 			return nil
 		}
+
 		onDisk[rel] = true
+
 		return nil
 	})
 	if err != nil {
@@ -93,6 +109,7 @@ func TestNewMatchesTemplate(t *testing.T) {
 			t.Errorf("template file %s is not embedded; add it to the go:embed list in new.go", rel)
 		}
 	}
+
 	for rel := range embedded {
 		if !onDisk[rel] {
 			t.Errorf("embedded file %s is missing on disk", rel)
@@ -106,37 +123,47 @@ func TestTemplateHandlerUsesServeHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	src := strings.ReplaceAll(string(data), newContractToken, "example.test/contract")
+
 	file, err := parser.ParseFile(token.NewFileSet(), "wasm.go", src, parser.AllErrors)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	found := false
+
 	ast.Inspect(file, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
 		if !ok {
 			return true
 		}
+
 		sel, ok := call.Fun.(*ast.SelectorExpr)
 		if !ok || sel.Sel.Name != "Handle" {
 			return true
 		}
+
 		pkg, ok := sel.X.(*ast.Ident)
 		if !ok || pkg.Name != "wasihttp" {
 			return true
 		}
+
 		found = true
+
 		if len(call.Args) != 1 {
 			t.Errorf("wasihttp.Handle has %d arguments, want 1", len(call.Args))
 			return true
 		}
+
 		arg, ok := call.Args[0].(*ast.SelectorExpr)
 		if !ok || arg.Sel.Name != "ServeHTTP" {
 			t.Errorf("wasihttp.Handle argument must be a .ServeHTTP method value")
 		}
+
 		return true
 	})
+
 	if !found {
 		t.Error("template has no wasihttp.Handle call")
 	}
@@ -150,6 +177,7 @@ func TestRunNew(t *testing.T) {
 	if err := runNew([]string{"--dir", dir}); err != nil {
 		t.Fatal(err)
 	}
+
 	for _, name := range []string{
 		"app.json",
 		"biome.json",
@@ -175,6 +203,7 @@ func TestRunNew(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	var manifest struct {
 		Name           string `json:"name"`
 		Host           string `json:"host"`
@@ -184,9 +213,11 @@ func TestRunNew(t *testing.T) {
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		t.Fatal(err)
 	}
+
 	if manifest.Name != "myapp" || manifest.Host != "myapp.localhost" {
 		t.Errorf("manifest = %+v", manifest)
 	}
+
 	if manifest.BuildComponent == "" || manifest.BuildStatic == "" {
 		t.Errorf("manifest is missing split build commands: %+v", manifest)
 	}
@@ -195,9 +226,11 @@ func TestRunNew(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !strings.Contains(string(main), `"example.test/myapp/contract"`) {
 		t.Errorf("main.go does not import the app contract:\n%s", main)
 	}
+
 	if _, err := parser.ParseFile(token.NewFileSet(), "main.go", main, parser.AllErrors); err != nil {
 		t.Errorf("main.go does not parse: %v", err)
 	}
@@ -206,6 +239,7 @@ func TestRunNew(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !strings.Contains(string(generate), "//go:generate") {
 		t.Errorf("contract/generate.go has no go:generate directives:\n%s", generate)
 	}
@@ -214,9 +248,11 @@ func TestRunNew(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if strings.Contains(string(script), "createNote") {
 		t.Errorf("contract script references a specific schema; keep it generic:\n%s", script)
 	}
+
 	for _, want := range []string{"requestSchemas", "responseSchemas", "$ref"} {
 		if !strings.Contains(string(script), want) {
 			t.Errorf("contract script is missing %q:\n%s", want, script)
@@ -227,11 +263,13 @@ func TestRunNew(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	for _, want := range []string{"requestSchemas", "responseSchemas", `title("NotesResponse")`, `title("ErrorResponse")`} {
 		if !strings.Contains(string(contractSource), want) {
 			t.Errorf("contract.ts is missing %q:\n%s", want, contractSource)
 		}
 	}
+
 	if !strings.Contains(string(main), "contract.NotesResponse") {
 		t.Errorf("main.go does not return the generated response type:\n%s", main)
 	}
@@ -239,36 +277,45 @@ func TestRunNew(t *testing.T) {
 	if err := runNew([]string{"--dir", dir}); err == nil {
 		t.Error("expected error scaffolding into a non-empty directory")
 	}
+
 	if err := runNew([]string{"--dir", filepath.Join(root, "example", "Bad_Name")}); err == nil {
 		t.Error("expected error for an invalid app name")
 	}
+
 	outside := filepath.Join(t.TempDir(), "elsewhere")
 	if err := runNew([]string{"--dir", outside}); err != nil {
 		t.Fatalf("standalone scaffold: %v", err)
 	}
+
 	for _, name := range []string{"go.mod", "go.sum", "sdk/go.mod", "sdk/go.sum", "sdk/app/app.go", "sdk/generate.sh", "sdk/wit/world.wit"} {
 		if _, err := os.Stat(filepath.Join(outside, name)); err != nil {
 			t.Errorf("standalone missing %s: %v", name, err)
 		}
 	}
+
 	standaloneMain, err := os.ReadFile(filepath.Join(outside, "main.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !strings.Contains(string(standaloneMain), `"elsewhere/contract"`) {
 		t.Errorf("standalone main.go does not use its own module contract:\n%s", standaloneMain)
 	}
+
 	standaloneApp, err := os.ReadFile(filepath.Join(outside, "app.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !strings.Contains(string(standaloneApp), "sh ./sdk/generate.sh") || !strings.Contains(string(standaloneApp), "./sdk/wit") {
 		t.Errorf("standalone app.json does not use the vendored SDK:\n%s", standaloneApp)
 	}
+
 	module, err := os.ReadFile(filepath.Join(outside, "go.mod"))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !strings.Contains(string(module), "replace wt.packages => ./sdk") || !strings.Contains(string(module), "tool (") {
 		t.Errorf("standalone go.mod is incomplete:\n%s", module)
 	}
@@ -278,43 +325,53 @@ func TestEmbeddedSDKMatchesPackages(t *testing.T) {
 	roots := []string{"app", "storage", "wasihttp", "httpmeta", "wit"}
 	for _, root := range roots {
 		source := filepath.Join("..", "packages", root)
+
 		err := filepath.WalkDir(source, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
+
 			if entry.IsDir() || strings.HasSuffix(path, "_test.go") {
 				return nil
 			}
+
 			rel, err := filepath.Rel(filepath.Join("..", "packages"), path)
 			if err != nil {
 				return err
 			}
+
 			want, err := os.ReadFile(path)
 			if err != nil {
 				return err
 			}
+
 			got, err := os.ReadFile(filepath.Join("testdata", "sdk", rel))
 			if err != nil {
 				return fmt.Errorf("%s is missing from testdata/sdk: %w", rel, err)
 			}
+
 			if !bytes.Equal(got, want) {
 				return fmt.Errorf("testdata/sdk/%s is stale; copy %s from packages", rel, rel)
 			}
+
 			return nil
 		})
 		if err != nil {
 			t.Error(err)
 		}
 	}
+
 	for _, name := range []string{"generate.sh"} {
 		want, err := os.ReadFile(filepath.Join("..", "packages", name))
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		got, err := os.ReadFile(filepath.Join("testdata", "sdk", name))
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if !bytes.Equal(got, want) {
 			t.Errorf("testdata/sdk/%s is stale", name)
 		}

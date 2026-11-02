@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -17,9 +18,11 @@ func backupJSON(cfg clientOptions, method, path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	if err := checkAPI(status, body); err != nil {
 		return nil, err
 	}
+
 	return body, nil
 }
 
@@ -34,6 +37,7 @@ func backupOutPath(rest []string) string {
 			out = value
 		}
 	}
+
 	return out
 }
 
@@ -41,6 +45,7 @@ func backupOutPath(rest []string) string {
 func backupImport(cfg clientOptions, name, archive string) error {
 	reader, writer := io.Pipe()
 	multipartWriter := multipart.NewWriter(writer)
+
 	go func() {
 		file, err := os.Open(archive)
 		if err != nil {
@@ -48,35 +53,45 @@ func backupImport(cfg clientOptions, name, archive string) error {
 			return
 		}
 		defer file.Close()
+
 		part, err := multipartWriter.CreateFormFile("snapshot", filepath.Base(archive))
 		if err != nil {
 			_ = writer.CloseWithError(err)
 			return
 		}
+
 		if _, err := io.Copy(part, file); err != nil {
 			_ = writer.CloseWithError(err)
 			return
 		}
+
 		_ = writer.CloseWithError(multipartWriter.Close())
 	}()
+
 	req, err := http.NewRequest(http.MethodPost, supervisorURL(cfg.host, "/apps/"+name+"/backups/import"), reader)
 	if err != nil {
 		return err
 	}
+
 	req.Header.Set("Content-Type", multipartWriter.FormDataContentType())
+
 	if cfg.token != "" {
 		req.Header.Set("Authorization", "Bearer "+cfg.token)
 	}
+
 	resp, err := (&http.Client{Timeout: 0}).Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
+
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err := checkAPI(resp.StatusCode, body); err != nil {
 		return err
 	}
+
 	printRawOrJSON(cfg, body)
+
 	return nil
 }
 
@@ -86,27 +101,34 @@ func backupDownload(cfg clientOptions, name, snapshot, out string) error {
 	if err != nil {
 		return err
 	}
+
 	if cfg.token != "" {
 		req.Header.Set("Authorization", "Bearer "+cfg.token)
 	}
+
 	resp, err := (&http.Client{Timeout: 0}).Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
+
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		return fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
+
 	file, err := os.Create(out)
 	if err != nil {
 		return err
 	}
+
 	_, copyErr := io.Copy(file, resp.Body)
 	closeErr := file.Close()
+
 	if copyErr != nil {
 		return copyErr
 	}
+
 	return closeErr
 }
 
@@ -116,10 +138,12 @@ func runBackupList(cfg clientOptions, name string) error {
 	if err != nil {
 		return err
 	}
+
 	if cfg.jsonOut {
 		printRawOrJSON(cfg, body)
 		return nil
 	}
+
 	var result struct {
 		Current string `json:"current"`
 		Backups []struct {
@@ -132,13 +156,16 @@ func runBackupList(cfg clientOptions, name string) error {
 	if err := json.Unmarshal(body, &result); err != nil {
 		return err
 	}
+
 	for _, backup := range result.Backups {
 		marker := " "
 		if backup.Name == result.Current {
 			marker = "*"
 		}
+
 		fmt.Printf("%s %-42s %-10s %d\n", marker, backup.Name, backup.Kind, backup.Size)
 	}
+
 	return nil
 }
 
@@ -148,7 +175,9 @@ func runBackupCreate(cfg clientOptions, name string) error {
 	if err != nil {
 		return err
 	}
+
 	printRawOrJSON(cfg, body)
+
 	return nil
 }
 
@@ -158,7 +187,9 @@ func runBackupRestore(cfg clientOptions, name, snapshot string) error {
 	if err != nil {
 		return err
 	}
+
 	printRawOrJSON(cfg, body)
+
 	return nil
 }
 
@@ -167,7 +198,9 @@ func runBackupDownload(cfg clientOptions, name, snapshot, out string) error {
 	if err := backupDownload(cfg, name, snapshot, out); err != nil {
 		return err
 	}
+
 	fmt.Println("wrote", out)
+
 	return nil
 }
 
@@ -176,9 +209,11 @@ func runBackup(args []string) error {
 	if err != nil {
 		return err
 	}
+
 	if len(rest) < 2 {
-		return fmt.Errorf("usage: wt backup <list|create|restore|download|import> <app>")
+		return errors.New("usage: wt backup <list|create|restore|download|import> <app>")
 	}
+
 	action, name := rest[0], rest[1]
 	switch action {
 	case "list":
@@ -187,18 +222,21 @@ func runBackup(args []string) error {
 		return runBackupCreate(cfg, name)
 	case "restore":
 		if len(rest) < 3 {
-			return fmt.Errorf("usage: wt backup restore <app> <snapshot>")
+			return errors.New("usage: wt backup restore <app> <snapshot>")
 		}
+
 		return runBackupRestore(cfg, name, rest[2])
 	case "download":
 		if len(rest) < 3 {
-			return fmt.Errorf("usage: wt backup download <app> <snapshot> [--out FILE]")
+			return errors.New("usage: wt backup download <app> <snapshot> [--out FILE]")
 		}
+
 		return runBackupDownload(cfg, name, rest[2], backupOutPath(rest[1:]))
 	case "import":
 		if len(rest) < 3 {
-			return fmt.Errorf("usage: wt backup import <app> <archive.tar.gz>")
+			return errors.New("usage: wt backup import <app> <archive.tar.gz>")
 		}
+
 		return backupImport(cfg, name, rest[2])
 	default:
 		return fmt.Errorf("unknown backup action %q", action)

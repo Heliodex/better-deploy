@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,7 @@ type configSetOptions struct {
 
 func parseConfigSetOptions(rest []string) (configSetOptions, error) {
 	var opts configSetOptions
+
 	for index := 1; index < len(rest); index++ {
 		switch {
 		case rest[index] == "--data" && index+1 < len(rest):
@@ -36,6 +38,7 @@ func parseConfigSetOptions(rest []string) (configSetOptions, error) {
 			return opts, fmt.Errorf("unexpected argument %q", rest[index])
 		}
 	}
+
 	return opts, nil
 }
 
@@ -44,10 +47,12 @@ func configSetData(opts configSetOptions) (string, error) {
 	if opts.data != "" || opts.file == "" {
 		return opts.data, nil
 	}
+
 	raw, err := os.ReadFile(opts.file)
 	if err != nil {
 		return "", err
 	}
+
 	return string(raw), nil
 }
 
@@ -57,23 +62,30 @@ func patchConfig(cfg clientOptions, name, data, ifMatch string) error {
 	if err != nil {
 		return err
 	}
+
 	req.Header.Set("Content-Type", "application/json")
+
 	if cfg.token != "" {
 		req.Header.Set("Authorization", "Bearer "+cfg.token)
 	}
+
 	if ifMatch != "" {
 		req.Header.Set("If-Match", ifMatch)
 	}
+
 	resp, err := (&http.Client{Timeout: cfg.timeout}).Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
+
 	body, _ := io.ReadAll(resp.Body)
 	if err := checkAPI(resp.StatusCode, body); err != nil {
 		return err
 	}
+
 	printRawOrJSON(cfg, body)
+
 	return nil
 }
 
@@ -83,17 +95,22 @@ func runConfigShow(cfg clientOptions, name string) error {
 	if err != nil {
 		return err
 	}
+
 	if err := checkAPI(status, body); err != nil {
 		return err
 	}
+
 	if cfg.jsonOut {
 		printRawOrJSON(cfg, body)
 		return nil
 	}
+
 	if etag := header.Get("ETag"); etag != "" {
 		fmt.Fprintln(os.Stderr, "ETag:", etag)
 	}
+
 	printRawOrJSON(cfg, body)
+
 	return nil
 }
 
@@ -103,13 +120,16 @@ func runConfigSet(cfg clientOptions, name string, rest []string) error {
 	if err != nil {
 		return err
 	}
+
 	data, err := configSetData(opts)
 	if err != nil {
 		return err
 	}
+
 	if data == "" {
-		return fmt.Errorf("provide --data JSON or --file patch.json")
+		return errors.New("provide --data JSON or --file patch.json")
 	}
+
 	return patchConfig(cfg, name, data, opts.ifMatch)
 }
 
@@ -118,9 +138,11 @@ func runConfig(args []string) error {
 	if err != nil {
 		return err
 	}
+
 	if len(rest) < 2 {
-		return fmt.Errorf("usage: wt config <show|set> <app>")
+		return errors.New("usage: wt config <show|set> <app>")
 	}
+
 	action, name := rest[0], rest[1]
 	switch action {
 	case "show":

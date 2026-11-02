@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -36,10 +37,12 @@ func configArg(args []string) string {
 		if arg == "--config" && index+1 < len(args) {
 			return args[index+1]
 		}
+
 		if value, ok := strings.CutPrefix(arg, "--config="); ok {
 			return value
 		}
 	}
+
 	return ""
 }
 
@@ -48,13 +51,16 @@ func defaultConfigPath() string {
 	if value := strings.TrimSpace(os.Getenv("WT_CONFIG")); value != "" {
 		return value
 	}
+
 	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
 		return filepath.Join(dir, "wt", "config.json")
 	}
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
+
 	return filepath.Join(home, ".config", "wt", "config.json")
 }
 
@@ -63,20 +69,25 @@ func loadFileConfig(explicit string) (fileConfig, error) {
 	if path == "" {
 		path = defaultConfigPath()
 	}
+
 	if path == "" {
 		return fileConfig{}, nil
 	}
+
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return fileConfig{}, nil
 	}
+
 	if err != nil {
 		return fileConfig{}, fmt.Errorf("config %s: %w", path, err)
 	}
+
 	var cfg fileConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return fileConfig{}, fmt.Errorf("config %s: %w", path, err)
 	}
+
 	return cfg, nil
 }
 
@@ -86,6 +97,7 @@ func firstNonEmpty(values ...string) string {
 			return value
 		}
 	}
+
 	return ""
 }
 
@@ -99,6 +111,7 @@ type clientFlagValues struct {
 // extractClientFlags removes --host, --token, --config, --json and --timeout wherever they appear, leaving command flags and positionals in order.
 func extractClientFlags(args []string) (clientFlagValues, []string, error) {
 	values := clientFlagValues{timeout: defaultClientTimeout}
+
 	rest := make([]string, 0, len(args))
 	for index := 0; index < len(args); index++ {
 		arg := args[index]
@@ -106,11 +119,13 @@ func extractClientFlags(args []string) (clientFlagValues, []string, error) {
 			rest = append(rest, args[index+1:]...)
 			break
 		}
+
 		key, value, hasValue := strings.Cut(arg, "=")
 		if !strings.HasPrefix(key, "-") {
 			rest = append(rest, arg)
 			continue
 		}
+
 		switch strings.TrimLeft(key, "-") {
 		case "host", "token", "config", "timeout":
 			if !hasValue {
@@ -118,8 +133,10 @@ func extractClientFlags(args []string) (clientFlagValues, []string, error) {
 				if index >= len(args) {
 					return clientFlagValues{}, nil, fmt.Errorf("%s needs an argument", key)
 				}
+
 				value = args[index]
 			}
+
 			switch strings.TrimLeft(key, "-") {
 			case "host":
 				values.host = value
@@ -132,6 +149,7 @@ func extractClientFlags(args []string) (clientFlagValues, []string, error) {
 				if err != nil {
 					return clientFlagValues{}, nil, fmt.Errorf("--timeout: %w", err)
 				}
+
 				values.timeout = parsed
 			}
 		case "json":
@@ -139,15 +157,18 @@ func extractClientFlags(args []string) (clientFlagValues, []string, error) {
 				values.jsonOut = true
 				continue
 			}
+
 			parsed, err := strconv.ParseBool(value)
 			if err != nil {
 				return clientFlagValues{}, nil, fmt.Errorf("--json: %w", err)
 			}
+
 			values.jsonOut = parsed
 		default:
 			rest = append(rest, arg)
 		}
 	}
+
 	return values, rest, nil
 }
 
@@ -157,15 +178,19 @@ func clientFlags(args []string, requireHost bool) (clientOptions, []string, erro
 	if err != nil {
 		return clientOptions{}, nil, err
 	}
+
 	fileCfg, err := loadFileConfig(values.config)
 	if err != nil {
 		return clientOptions{}, nil, err
 	}
+
 	host := firstNonEmpty(values.host, os.Getenv("WT_DEPLOY_HOST"), fileCfg.Host)
 	token := firstNonEmpty(values.token, os.Getenv("WT_TOKEN"), fileCfg.Token)
+
 	if requireHost && strings.TrimSpace(host) == "" {
-		return clientOptions{}, nil, fmt.Errorf("set --host, WT_DEPLOY_HOST or host in the config file")
+		return clientOptions{}, nil, errors.New("set --host, WT_DEPLOY_HOST or host in the config file")
 	}
+
 	return clientOptions{host: host, token: token, jsonOut: values.jsonOut, timeout: values.timeout}, rest, nil
 }
 
@@ -179,22 +204,28 @@ func apiDo(cfg clientOptions, method, path string, body io.Reader, contentType s
 	if err != nil {
 		return 0, nil, nil, err
 	}
+
 	if cfg.token != "" {
 		req.Header.Set("Authorization", "Bearer "+cfg.token)
 	}
+
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
+
 	client := &http.Client{Timeout: cfg.timeout}
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return 0, nil, nil, err
 	}
 	defer resp.Body.Close()
+
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
 		return resp.StatusCode, resp.Header, nil, err
 	}
+
 	return resp.StatusCode, resp.Header, data, nil
 }
 
@@ -203,6 +234,7 @@ func checkAPI(status int, body []byte) error {
 	if status >= 200 && status < 300 {
 		return nil
 	}
+
 	return fmt.Errorf("status %d: %s", status, strings.TrimSpace(string(body)))
 }
 
@@ -211,11 +243,13 @@ func printRawOrJSON(cfg clientOptions, body []byte) {
 		fmt.Println(strings.TrimSpace(string(body)))
 		return
 	}
+
 	var value any
 	if err := json.Unmarshal(body, &value); err != nil {
 		fmt.Println(strings.TrimSpace(string(body)))
 		return
 	}
+
 	out, _ := json.Marshal(value)
 	fmt.Println(string(out))
 }
@@ -225,26 +259,32 @@ func runApps(args []string) error {
 	if err != nil {
 		return err
 	}
+
 	if len(rest) > 0 {
 		return fmt.Errorf("unexpected argument %q", rest[0])
 	}
+
 	if !cfg.jsonOut {
 		capClient := clientOptions{host: cfg.host, token: cfg.token, timeout: 5 * time.Second}
 		if caps, err := fetchCapabilities(capClient); err == nil {
 			fmt.Fprintln(os.Stderr, caps.summary())
 		}
 	}
+
 	status, _, body, err := apiDo(cfg, http.MethodGet, "/apps", nil, "")
 	if err != nil {
 		return err
 	}
+
 	if err := checkAPI(status, body); err != nil {
 		return err
 	}
+
 	if cfg.jsonOut {
 		printRawOrJSON(cfg, body)
 		return nil
 	}
+
 	var apps []struct {
 		Name          string  `json:"name"`
 		Host          string  `json:"host"`
@@ -258,18 +298,23 @@ func runApps(args []string) error {
 	if err := json.Unmarshal(body, &apps); err != nil {
 		return err
 	}
+
 	if len(apps) == 0 {
 		fmt.Println("no apps")
 		return nil
 	}
+
 	fmt.Printf("%-24s %-32s %-10s %-6s %-7s %s\n", "NAME", "HOST", "STATUS", "READY", "PID", "DIGEST")
+
 	for _, app := range apps {
 		digest := app.CurrentDigest
 		if len(digest) > 12 {
 			digest = digest[:12]
 		}
+
 		fmt.Printf("%-24s %-32s %-10s %-6v %-7d %s\n", app.Name, app.Host, app.Status, app.Ready, app.PID, digest)
 	}
+
 	return nil
 }
 
@@ -284,6 +329,7 @@ func derefLog(entry *logLine) []logLine {
 	if entry == nil {
 		return nil
 	}
+
 	return []logLine{*entry}
 }
 
@@ -293,22 +339,27 @@ func followLogs(cfg clientOptions, path string) error {
 	if err != nil {
 		return err
 	}
+
 	req.Header.Set("Authorization", "Bearer "+cfg.token)
+
 	resp, err := (&http.Client{Timeout: 0}).Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
+
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		return fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
+
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data: ") {
 			continue
 		}
+
 		var message struct {
 			Type string    `json:"type"`
 			Logs []logLine `json:"logs"`
@@ -317,14 +368,17 @@ func followLogs(cfg clientOptions, path string) error {
 		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &message); err != nil {
 			continue
 		}
+
 		for _, entry := range append(message.Logs, derefLog(message.Log)...) {
 			if cfg.jsonOut {
 				fmt.Printf("{\"time\":%q,\"level\":%q,\"source\":%q,\"message\":%q}\n", entry.Time, entry.Level, entry.Source, entry.Message)
 				continue
 			}
+
 			fmt.Printf("%s %-6s %-10s %s\n", entry.Time, entry.Level, entry.Source, entry.Message)
 		}
 	}
+
 	return scanner.Err()
 }
 
@@ -334,22 +388,27 @@ func printLogs(cfg clientOptions, path string) error {
 	if err != nil {
 		return err
 	}
+
 	if err := checkAPI(status, body); err != nil {
 		return err
 	}
+
 	if cfg.jsonOut {
 		printRawOrJSON(cfg, body)
 		return nil
 	}
+
 	var result struct {
 		Logs []logLine `json:"logs"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
 		return err
 	}
+
 	for _, entry := range result.Logs {
 		fmt.Printf("%s %-6s %-10s %s\n", entry.Time, entry.Level, entry.Source, entry.Message)
 	}
+
 	return nil
 }
 
@@ -364,7 +423,9 @@ type logOptions struct {
 func parseLogOptions(cfg *clientOptions, rest []string) (string, logOptions, error) {
 	name := rest[0]
 	opts := logOptions{tail: 200}
+
 	var err error
+
 	for index := 1; index < len(rest); index++ {
 		arg := rest[index]
 		switch {
@@ -374,14 +435,15 @@ func parseLogOptions(cfg *clientOptions, rest []string) (string, logOptions, err
 			cfg.jsonOut = true
 		case arg == "--tail" && index+1 < len(rest):
 			index++
+
 			opts.tail, err = strconv.Atoi(rest[index])
 			if err != nil {
-				return "", opts, fmt.Errorf("tail must be an integer")
+				return "", opts, errors.New("tail must be an integer")
 			}
 		case strings.HasPrefix(arg, "--tail="):
 			opts.tail, err = strconv.Atoi(strings.TrimPrefix(arg, "--tail="))
 			if err != nil {
-				return "", opts, fmt.Errorf("tail must be an integer")
+				return "", opts, errors.New("tail must be an integer")
 			}
 		case arg == "--level" && index+1 < len(rest):
 			index++
@@ -402,6 +464,7 @@ func parseLogOptions(cfg *clientOptions, rest []string) (string, logOptions, err
 			return "", opts, fmt.Errorf("unexpected argument %q", arg)
 		}
 	}
+
 	return name, opts, nil
 }
 
@@ -411,25 +474,32 @@ func logPath(name string, opts logOptions) string {
 	if opts.level != "" {
 		values["level"] = opts.level
 	}
+
 	if opts.source != "" {
 		values["source"] = opts.source
 	}
+
 	if opts.query != "" {
 		values["q"] = opts.query
 	}
+
 	path := "/apps/" + name + "/logs"
 	if opts.follow {
 		path += "/stream"
 	}
+
 	var query strings.Builder
+
 	separator := byte('?')
 	for key, value := range values {
 		query.WriteByte(separator)
 		query.WriteString(key)
 		query.WriteByte('=')
 		query.WriteString(value)
+
 		separator = '&'
 	}
+
 	return path + query.String()
 }
 
@@ -438,17 +508,21 @@ func runLogs(args []string) error {
 	if err != nil {
 		return err
 	}
+
 	if len(rest) == 0 {
-		return fmt.Errorf("usage: wt logs <app> [--tail N] [--level LEVEL] [--source app|supervisor] [--q TEXT] [--follow] [--json]")
+		return errors.New("usage: wt logs <app> [--tail N] [--level LEVEL] [--source app|supervisor] [--q TEXT] [--follow] [--json]")
 	}
+
 	name, opts, err := parseLogOptions(&cfg, rest)
 	if err != nil {
 		return err
 	}
+
 	path := logPath(name, opts)
 	if opts.follow {
 		return followLogs(cfg, path)
 	}
+
 	return printLogs(cfg, path)
 }
 
@@ -457,33 +531,44 @@ func runRollback(args []string) error {
 	if err != nil {
 		return err
 	}
+
 	if len(rest) < 2 {
-		return fmt.Errorf("usage: wt rollback <app> <deployment-id> [--backup SNAPSHOT]")
+		return errors.New("usage: wt rollback <app> <deployment-id> [--backup SNAPSHOT]")
 	}
+
 	backup := ""
+
 	for index := 2; index < len(rest); index++ {
 		if rest[index] == "--backup" && index+1 < len(rest) {
 			index++
 			backup = rest[index]
+
 			continue
 		}
+
 		if value, ok := strings.CutPrefix(rest[index], "--backup="); ok {
 			backup = value
 			continue
 		}
+
 		return fmt.Errorf("unexpected argument %q", rest[index])
 	}
+
 	path := "/apps/" + rest[0] + "/rollback/" + rest[1]
 	if backup != "" {
 		path += "?backup=" + backup
 	}
+
 	status, _, body, err := apiDo(cfg, http.MethodPost, path, nil, "")
 	if err != nil {
 		return err
 	}
+
 	if err := checkAPI(status, body); err != nil {
 		return err
 	}
+
 	printRawOrJSON(cfg, body)
+
 	return nil
 }

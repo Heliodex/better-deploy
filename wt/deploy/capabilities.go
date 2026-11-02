@@ -35,13 +35,16 @@ func (c supervisorCapabilities) displayVersion() string {
 	if name == "" {
 		name = "unknown"
 	}
+
 	commit := strings.TrimSpace(c.Commit)
 	if len(commit) > 12 {
 		commit = commit[:12]
 	}
+
 	if commit == "" {
 		return name
 	}
+
 	return name + "+" + commit
 }
 
@@ -51,9 +54,11 @@ func (c supervisorCapabilities) summary() string {
 	if runtime == "" {
 		runtime = "wasmtime unknown"
 	}
+
 	if target := strings.TrimSpace(c.WasmtimeTarget); target != "" {
 		runtime += " (" + target + ")"
 	}
+
 	return "supervisor: " + c.displayVersion() + "; " + runtime
 }
 
@@ -63,13 +68,16 @@ func fetchCapabilities(client clientOptions) (supervisorCapabilities, error) {
 	if err != nil {
 		return supervisorCapabilities{}, fmt.Errorf("query supervisor capabilities: %w", err)
 	}
+
 	if err := checkAPI(status, body); err != nil {
 		return supervisorCapabilities{}, fmt.Errorf("query supervisor capabilities: %w", err)
 	}
+
 	var caps supervisorCapabilities
 	if err := json.Unmarshal(body, &caps); err != nil {
 		return supervisorCapabilities{}, fmt.Errorf("decode supervisor capabilities: %w", err)
 	}
+
 	return caps, nil
 }
 
@@ -79,29 +87,36 @@ func preflightDeploy(cfg *deployConfig) (deployPreflight, error) {
 	if err != nil {
 		return deployPreflight{}, fmt.Errorf("preflight %s: %w", cfg.host, err)
 	}
+
 	pre := deployPreflight{Checked: true, Capabilities: caps}
 	if caps.WasmtimeTarget != "" && !cfg.targetConfigured {
 		cfg.target = caps.WasmtimeTarget
 		pre.TargetFromServer = true
 	}
+
 	localVersion, err := wasmtimeVersion(cfg.wasmtime)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: local wasmtime unavailable: %v\n", err)
 		return pre, nil
 	}
+
 	targetMatch := caps.WasmtimeTarget == "" || strings.TrimSpace(cfg.target) == strings.TrimSpace(caps.WasmtimeTarget)
 	versionMatch := caps.Wasmtime == "" || strings.TrimSpace(localVersion) == strings.TrimSpace(caps.Wasmtime)
 	pre.RuntimeKnown = caps.Wasmtime != "" && caps.WasmtimeTarget != ""
+
 	pre.RuntimeMatch = pre.RuntimeKnown && targetMatch && versionMatch
 	if !targetMatch {
 		fmt.Fprintf(os.Stderr, "warning: target %q differs from supervisor target %q; the supervisor will recompile from main.wasm\n", cfg.target, caps.WasmtimeTarget)
 	}
+
 	if !versionMatch {
 		fmt.Fprintf(os.Stderr, "warning: local wasmtime %q differs from supervisor %q; the supervisor will recompile from main.wasm\n", localVersion, caps.Wasmtime)
 	}
+
 	if !pre.RuntimeMatch && !caps.Compiler {
 		fmt.Fprintln(os.Stderr, "warning: supervisor has no compiler and the uploaded cwasm will not match")
 	}
+
 	return pre, nil
 }
 
@@ -110,17 +125,21 @@ func printRuntimePlan(pre deployPreflight, hasCwasm bool) {
 	if !pre.Checked {
 		return
 	}
+
 	if !hasCwasm {
 		fmt.Fprintln(os.Stderr, "casm: none uploaded; supervisor will compile main.wasm")
 		return
 	}
+
 	if pre.RuntimeMatch {
 		fmt.Fprintln(os.Stderr, "casm: matches supervisor runtime and target")
 		return
 	}
+
 	if pre.Capabilities.Compiler {
 		fmt.Fprintln(os.Stderr, "casm: supervisor will recompile main.wasm")
 		return
 	}
+
 	fmt.Fprintln(os.Stderr, "casm: mismatch and supervisor has no compiler; deploy may fail")
 }

@@ -27,10 +27,12 @@ func freeLocalPort() (int, error) {
 		return 0, err
 	}
 	defer listener.Close()
+
 	address, ok := listener.Addr().(*net.TCPAddr)
 	if !ok {
 		return 0, fmt.Errorf("unexpected listener address %s", listener.Addr())
 	}
+
 	return address.Port, nil
 }
 
@@ -40,19 +42,24 @@ func resolveViteDev(appDir string, m manifest, host string) (*viteDev, bool, err
 	if dev == nil {
 		dev = &appDevConfig{}
 	}
+
 	web := dev.Web
 	if web == "" {
 		web = "web"
 	}
+
 	webDir := filepath.Join(appDir, web)
+
 	info, err := os.Stat(filepath.Join(webDir, "package.json"))
 	if err != nil || !info.Mode().IsRegular() {
 		return nil, false, nil
 	}
+
 	command := dev.Command
 	if strings.TrimSpace(command) == "" {
 		command = "bun run dev"
 	}
+
 	port := dev.Port
 	if port == 0 {
 		port, err = freeLocalPort()
@@ -60,15 +67,19 @@ func resolveViteDev(appDir string, m manifest, host string) (*viteDev, bool, err
 			return nil, false, fmt.Errorf("find vite port: %w", err)
 		}
 	}
+
 	proxy := append([]string(nil), dev.Proxy...)
 	if len(proxy) == 0 {
 		proxy = []string{"/api"}
 	}
+
 	supervisorProxy := dev.SupervisorProxy
 	if supervisorProxy == nil {
 		supervisorProxy = defaultSupervisorProxy
 	}
+
 	proxy = mergeProxyPrefixes(proxy, supervisorProxy)
+
 	return &viteDev{
 		appDir:  appDir,
 		webDir:  webDir,
@@ -84,40 +95,50 @@ func resolveViteDev(appDir string, m manifest, host string) (*viteDev, bool, err
 // mergeProxyPrefixes appends groups without duplicating a prefix, preserving the app prefixes first.
 func mergeProxyPrefixes(groups ...[]string) []string {
 	seen := map[string]struct{}{}
+
 	var out []string
+
 	for _, group := range groups {
 		for _, prefix := range group {
 			if _, ok := seen[prefix]; ok {
 				continue
 			}
+
 			seen[prefix] = struct{}{}
 			out = append(out, prefix)
 		}
 	}
+
 	return out
 }
 
 // writeViteDevConfig writes a config that keeps the app's own Vite config and adds the app and supervisor proxies.
 func writeViteDevConfig(dev *viteDev, supervisorPort int) error {
 	baseImport := ""
+
 	for _, name := range []string{"vite.config.ts", "vite.config.mts", "vite.config.js", "vite.config.mjs"} {
 		if info, err := os.Stat(filepath.Join(dev.webDir, name)); err == nil && info.Mode().IsRegular() {
 			baseImport = "./" + name
 			break
 		}
 	}
+
 	var content strings.Builder
 	if baseImport != "" {
 		fmt.Fprintf(&content, "import base from %q\n\n", baseImport)
 	} else {
 		content.WriteString("const base: any = {}\n\n")
 	}
+
 	target := "http://127.0.0.1:" + strconv.Itoa(supervisorPort)
+
 	content.WriteString("const proxy = {\n")
+
 	for _, prefix := range dev.proxy {
 		fmt.Fprintf(&content, "  %s: {\n    target: %s,\n    changeOrigin: false,\n    headers: { Host: %s },\n  },\n",
 			strconv.Quote(prefix), strconv.Quote(target), strconv.Quote(dev.host))
 	}
+
 	content.WriteString("}\n\n")
 	content.WriteString("export default async (env: any) => {\n")
 	content.WriteString("  const config = (typeof base === \"function\" ? await base(env) : base) ?? {}\n")
@@ -140,6 +161,7 @@ func writeViteDevConfig(dev *viteDev, supervisorPort int) error {
 	if err := os.WriteFile(dev.configPath, []byte(content.String()), 0o644); err != nil {
 		return fmt.Errorf("write vite dev config: %w", err)
 	}
+
 	return nil
 }
 
@@ -155,15 +177,19 @@ func startVite(dev *viteDev) (*exec.Cmd, error) {
 	} else {
 		command += " -- --config " + shellQuote(dev.configPath)
 	}
+
 	cmd := exec.Command("sh", "-c", command)
 	cmd.Dir = dev.webDir
+
 	cmd.Env = append(os.Environ(), "WT_DEV=1")
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
+
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start vite: %w", err)
 	}
+
 	return cmd, nil
 }
 
@@ -172,6 +198,7 @@ func signalViteGroup(cmd *exec.Cmd, signal syscall.Signal) {
 	if cmd == nil || cmd.Process == nil {
 		return
 	}
+
 	_ = syscall.Kill(-cmd.Process.Pid, signal)
 }
 
@@ -181,13 +208,17 @@ func ensureWebDeps(webDir string) error {
 	if err == nil && info.IsDir() {
 		return nil
 	}
+
 	fmt.Fprintln(os.Stderr, "dev: installing web dependencies in", webDir)
+
 	cmd := exec.Command("bun", "install")
 	cmd.Dir = webDir
 	cmd.Stdout = os.Stderr
+
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("bun install: %w", err)
 	}
+
 	return nil
 }

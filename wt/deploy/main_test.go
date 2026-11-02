@@ -32,6 +32,7 @@ func TestBundle(t *testing.T) {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
 		}
+
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -41,6 +42,7 @@ func TestBundle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	gz, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
 		t.Fatal(err)
@@ -48,30 +50,38 @@ func TestBundle(t *testing.T) {
 	defer gz.Close()
 
 	entries := map[string]string{}
+
 	tr := tar.NewReader(gz)
 	for {
 		header, err := tr.Next()
 		if errors.Is(err, io.EOF) {
 			break
 		}
+
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		body, err := io.ReadAll(tr)
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		entries[header.Name] = string(body)
 	}
+
 	if len(entries) != 5 {
 		t.Errorf("entries = %v, want app.json, main.cwasm, main.wasm, artifact.json and static/index.html", entries)
 	}
+
 	if entries["static/index.html"] != "<html>hello</html>" {
 		t.Errorf("static/index.html = %q", entries["static/index.html"])
 	}
+
 	if !strings.Contains(entries["app.json"], `"name": "hello"`) || entries["main.cwasm"] != "cwasm" || entries["main.wasm"] != "wasm" {
 		t.Errorf("entries = %v", entries)
 	}
+
 	if !strings.Contains(entries["artifact.json"], "wasmtime-cli 50.0.0") {
 		t.Errorf("artifact.json = %q", entries["artifact.json"])
 	}
@@ -79,40 +89,49 @@ func TestBundle(t *testing.T) {
 
 func TestBundlePreservesUnknownManifestFields(t *testing.T) {
 	dir := t.TempDir()
+
 	appJSON := `{"name":"demo","host":"old.localhost","identity":"platform","allow_callers":["peer"],"job_concurrency":2,"future_field":{"keep":true}}`
 	if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(appJSON), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
 	data, err := bundle(dir, manifest{Name: "demo", Host: "new.localhost"}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	gz, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer gz.Close()
+
 	tr := tar.NewReader(gz)
 	for {
 		header, err := tr.Next()
 		if errors.Is(err, io.EOF) {
 			t.Fatal("bundle has no app.json")
 		}
+
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if header.Name != "app.json" {
 			continue
 		}
+
 		body, err := io.ReadAll(tr)
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		for _, want := range []string{`"identity": "platform"`, `"job_concurrency": 2`, `"future_field"`, `"host": "new.localhost"`} {
 			if !strings.Contains(string(body), want) {
 				t.Errorf("app.json is missing %s:\n%s", want, body)
 			}
 		}
+
 		return
 	}
 }
@@ -124,30 +143,38 @@ func TestBundleOmitsMissingCwasm(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+
 	data, err := bundle(dir, manifest{Name: "hello"}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	gz, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer gz.Close()
+
 	names := map[string]bool{}
+
 	tr := tar.NewReader(gz)
 	for {
 		header, err := tr.Next()
 		if errors.Is(err, io.EOF) {
 			break
 		}
+
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		names[header.Name] = true
 	}
+
 	if !names["main.wasm"] {
 		t.Error("bundle is missing main.wasm")
 	}
+
 	if names["main.cwasm"] {
 		t.Error("bundle included an absent main.cwasm")
 	}
@@ -158,9 +185,11 @@ func TestBundleRequiresWasm(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(`{"name":"hello"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(filepath.Join(dir, "main.cwasm"), []byte("cwasm"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
 	if _, err := bundle(dir, manifest{Name: "hello"}, true); err == nil || !strings.Contains(err.Error(), "main.wasm") {
 		t.Errorf("bundle error = %v, want a missing main.wasm error", err)
 	}
@@ -171,17 +200,21 @@ func TestWriteArtifactRecordsWasm(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "main.wasm"), []byte("wasm"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
 	cfg := &deployConfig{dir: dir, wasmtime: filepath.Join(dir, "missing-wasmtime"), target: "x86_64-test"}
 	if err := writeArtifact(cfg, true); err != nil {
 		t.Fatal(err)
 	}
+
 	info, err := readArtifactFile(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if info.WasmSHA256 != digestOf("wasm") || info.WasmBytes != int64(len("wasm")) {
 		t.Errorf("artifact = %+v, want the wasm digest and size", info)
 	}
+
 	if info.Wasmtime != "" || info.Target != "x86_64-test" || !info.Epoch {
 		t.Errorf("artifact = %+v, want the target and epoch without a runtime version", info)
 	}
@@ -192,17 +225,21 @@ func TestRunCompileSkipCompileWithoutCwasm(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "main.wasm"), []byte("wasm"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
 	cfg := &deployConfig{dir: dir, wasmtime: filepath.Join(dir, "missing-wasmtime"), target: "x86_64-test", skipCompile: true}
 	if err := runCompile(cfg); err != nil {
 		t.Fatal(err)
 	}
+
 	if _, err := os.Stat(filepath.Join(dir, "main.cwasm")); !os.IsNotExist(err) {
 		t.Errorf("--skip-compile created main.cwasm: %v", err)
 	}
+
 	info, err := readArtifactFile(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if info.WasmSHA256 != digestOf("wasm") || info.WasmBytes != int64(len("wasm")) {
 		t.Errorf("artifact = %+v, want metadata even without a cwasm", info)
 	}
@@ -213,27 +250,34 @@ func TestRunCompileSkipCompileMovesStaleCwasm(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "main.wasm"), []byte("new"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(filepath.Join(dir, "main.cwasm"), []byte("old"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
 	artifactJSON := `{"wasm_sha256":"` + digestOf("old") + `"}`
 	if err := os.WriteFile(filepath.Join(dir, artifactName), []byte(artifactJSON), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
 	cfg := &deployConfig{dir: dir, wasmtime: filepath.Join(dir, "missing-wasmtime"), target: "x86_64-test", skipCompile: true}
 	if err := runCompile(cfg); err != nil {
 		t.Fatal(err)
 	}
+
 	if _, err := os.Stat(filepath.Join(dir, "main.cwasm")); !os.IsNotExist(err) {
 		t.Errorf("stale main.cwasm was kept: %v", err)
 	}
+
 	if _, err := os.Stat(filepath.Join(dir, "main.cwasm.stale")); err != nil {
 		t.Errorf("stale main.cwasm was not moved aside: %v", err)
 	}
+
 	info, err := readArtifactFile(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if info.WasmSHA256 != digestOf("new") {
 		t.Errorf("artifact digest = %q, want %q", info.WasmSHA256, digestOf("new"))
 	}
@@ -249,28 +293,35 @@ func TestRunCompileSkipCompileMovesUnverifiedCwasm(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(dir, "main.wasm"), []byte("wasm"), 0o644); err != nil {
 				t.Fatal(err)
 			}
+
 			if err := os.WriteFile(filepath.Join(dir, "main.cwasm"), []byte("unverified"), 0o644); err != nil {
 				t.Fatal(err)
 			}
+
 			if artifactJSON != "" {
 				if err := os.WriteFile(filepath.Join(dir, artifactName), []byte(artifactJSON), 0o644); err != nil {
 					t.Fatal(err)
 				}
 			}
+
 			cfg := &deployConfig{dir: dir, wasmtime: filepath.Join(dir, "missing-wasmtime"), target: "x86_64-test", skipCompile: true}
 			if err := runCompile(cfg); err != nil {
 				t.Fatal(err)
 			}
+
 			if _, err := os.Stat(filepath.Join(dir, "main.cwasm")); !os.IsNotExist(err) {
 				t.Errorf("unverified main.cwasm was kept: %v", err)
 			}
+
 			if _, err := os.Stat(filepath.Join(dir, "main.cwasm.stale")); err != nil {
 				t.Errorf("unverified main.cwasm was not moved aside: %v", err)
 			}
+
 			info, err := readArtifactFile(dir)
 			if err != nil {
 				t.Fatal(err)
 			}
+
 			if info.WasmSHA256 != digestOf("wasm") {
 				t.Errorf("artifact digest = %q, want %q", info.WasmSHA256, digestOf("wasm"))
 			}
@@ -283,21 +334,26 @@ func TestRunCompileKeepsOldCwasmOnFailure(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "main.wasm"), []byte("wasm"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(filepath.Join(dir, "main.cwasm"), []byte("old"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
 	compiler := filepath.Join(t.TempDir(), "wasmtime")
 	if err := os.WriteFile(compiler, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+
 	cfg := &deployConfig{dir: dir, wasmtime: compiler, target: "x86_64-test"}
 	if err := runCompile(cfg); err == nil {
 		t.Fatal("expected a compile error")
 	}
+
 	cwasm, err := os.ReadFile(filepath.Join(dir, "main.cwasm"))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if string(cwasm) != "old" {
 		t.Errorf("main.cwasm = %q, want the previous artifact", cwasm)
 	}
@@ -316,40 +372,50 @@ func TestRunBundle(t *testing.T) {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
 		}
+
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
+
 	out := filepath.Join(t.TempDir(), "hello.tar.gz")
 	if err := runBundle([]string{"--dir", dir, "--out", out, "--skip-build", "--skip-compile"}); err != nil {
 		t.Fatal(err)
 	}
+
 	data, err := os.ReadFile(out)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	gz, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer gz.Close()
+
 	names := map[string]bool{}
+
 	tr := tar.NewReader(gz)
 	for {
 		header, err := tr.Next()
 		if errors.Is(err, io.EOF) {
 			break
 		}
+
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		names[header.Name] = true
 	}
+
 	for _, name := range []string{"app.json", "main.cwasm", "main.wasm", "artifact.json", "static/app.js"} {
 		if !names[name] {
 			t.Errorf("bundle entries = %v, missing %s", names, name)
 		}
 	}
+
 	if len(names) != 5 {
 		t.Errorf("bundle entries = %v, want 5", names)
 	}
@@ -373,15 +439,19 @@ func TestResolveDevConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if cfg.dir != "guestbook" || cfg.port != 9000 {
 		t.Errorf("config = %+v, want dir guestbook port 9000", cfg)
 	}
+
 	if cfg.appHost != "" {
 		t.Errorf("appHost = %q, want an app-specific default", cfg.appHost)
 	}
+
 	if cfg.adminPort != 9001 {
 		t.Errorf("adminPort = %d, want 9001", cfg.adminPort)
 	}
+
 	if !cfg.watch {
 		t.Error("watch should default to true")
 	}
@@ -390,29 +460,35 @@ func TestResolveDevConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if cfg.dir != "." || cfg.port != 8080 {
 		t.Errorf("defaults = %+v, want dir . port 8080", cfg)
 	}
 
 	t.Setenv("WT_DEV_PORT", "9001")
+
 	cfg, err = resolveDevConfig([]string{})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if cfg.port != 9001 {
 		t.Errorf("port = %d, want 9001 from WT_DEV_PORT", cfg.port)
 	}
 
 	t.Setenv("WT_DEV_PORT", "bogus")
+
 	if _, err := resolveDevConfig([]string{}); err == nil {
 		t.Error("expected error for invalid WT_DEV_PORT")
 	}
 
 	t.Setenv("WT_DEV_PORT", "")
+
 	cfg, err = resolveDevConfig([]string{"--watch=false"})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if cfg.watch {
 		t.Error("--watch=false did not disable watching")
 	}
@@ -423,6 +499,7 @@ func TestFindSupervisor(t *testing.T) {
 	if err := os.WriteFile(bin, []byte("x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+
 	cfg := &devConfig{supervisor: bin}
 	if got, err := findSupervisor(cfg, t.TempDir()); err != nil || got != bin {
 		t.Errorf("findSupervisor = %q, %v; want %q, nil", got, err, bin)
@@ -437,12 +514,15 @@ func TestFindSupervisor(t *testing.T) {
 func TestDevEnv(t *testing.T) {
 	t.Setenv("WT_TOKEN", "prod-token")
 	t.Setenv("WT_TLS_CERT", "/tmp/cert")
+
 	env := devEnv("/apps", "/state", "127.0.0.1:8080", "127.0.0.1:8081", "/bin/wasmtime", "triple")
 	got := map[string]string{}
+
 	for _, entry := range env {
 		key, value, _ := strings.Cut(entry, "=")
 		got[key] = value
 	}
+
 	for key, want := range map[string]string{
 		"WT_APPS_DIR":        "/apps",
 		"WT_STATE_DIR":       "/state",
@@ -457,11 +537,13 @@ func TestDevEnv(t *testing.T) {
 			t.Errorf("%s = %q, want %q", key, got[key], want)
 		}
 	}
+
 	for _, key := range []string{"WT_TLS_CERT", "WT_TLS_KEY"} {
 		if got[key] != "" {
 			t.Errorf("%s = %q, want empty", key, got[key])
 		}
 	}
+
 	if got["WT_TOKEN"] == "prod-token" {
 		t.Error("parent WT_TOKEN leaked into dev env")
 	}
@@ -471,12 +553,14 @@ func TestReadManifestValidatesSchedule(t *testing.T) {
 	dir := t.TempDir()
 	write := func(body string) {
 		t.Helper()
+
 		if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	write(`{"name":"demo","schedule":[{"path":"/tick","every":"10s"}]}`)
+
 	if _, err := readManifest(dir); err != nil {
 		t.Errorf("valid schedule rejected: %v", err)
 	}
@@ -489,6 +573,7 @@ func TestReadManifestValidatesSchedule(t *testing.T) {
 		"too slow":      `{"name":"demo","schedule":[{"path":"/tick","every":"48h"}]}`,
 	} {
 		write(body)
+
 		if _, err := readManifest(dir); err == nil {
 			t.Errorf("%s: expected an error", name)
 		}
@@ -502,19 +587,23 @@ func TestWorkspaceAppDirs(t *testing.T) {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
+
 		if name != "not-an-app" {
 			if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(`{"name":"`+name+`"}`), 0o644); err != nil {
 				t.Fatal(err)
 			}
 		}
 	}
+
 	dirs, err := workspaceAppDirs(root)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(dirs) != 2 || filepath.Base(dirs[0]) != "alpha" || filepath.Base(dirs[1]) != "beta" {
 		t.Errorf("dirs = %v", dirs)
 	}
+
 	if _, err := workspaceAppDirs(filepath.Join(root, "not-an-app")); err == nil {
 		t.Error("empty workspace was accepted")
 	}

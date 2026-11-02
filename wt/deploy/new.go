@@ -2,6 +2,7 @@ package main
 
 import (
 	"embed"
+	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -52,13 +53,16 @@ func resolveNewConfig(args []string) (*newConfig, error) {
 	flags := flag.NewFlagSet("new", flag.ContinueOnError)
 	dir := flags.String("dir", ".", "directory to scaffold the app in")
 	module := flags.String("module", "", "Go module path for a standalone app (default: app name)")
+
 	sdk := flags.String("sdk", "", "copy the Go SDK from this packages directory instead of the embedded SDK")
 	if err := flags.Parse(args); err != nil {
 		return nil, err
 	}
+
 	if flags.NArg() > 0 {
 		return nil, fmt.Errorf("unexpected argument %q", flags.Arg(0))
 	}
+
 	return &newConfig{dir: *dir, module: *module, sdk: *sdk}, nil
 }
 
@@ -76,27 +80,35 @@ type scaffoldMode struct {
 func exampleModule(dir string) (string, error) {
 	parent := filepath.Dir(dir)
 	if filepath.Base(parent) != "example" {
-		return "", fmt.Errorf("not under wt/example")
+		return "", errors.New("not under wt/example")
 	}
+
 	data, err := os.ReadFile(filepath.Join(parent, "go.mod"))
 	if err != nil {
 		return "", fmt.Errorf("read example go.mod: %w", err)
 	}
+
 	module := ""
+
 	for line := range strings.SplitSeq(string(data), "\n") {
 		name, ok := strings.CutPrefix(line, "module ")
 		if !ok {
 			continue
 		}
+
 		module = strings.TrimSpace(name)
+
 		break
 	}
+
 	if module == "" {
-		return "", fmt.Errorf("example go.mod has no module line")
+		return "", errors.New("example go.mod has no module line")
 	}
+
 	if _, err := os.Stat(filepath.Join(filepath.Dir(parent), "packages", "go.mod")); err != nil {
-		return "", fmt.Errorf("no wt/packages next to wt/example")
+		return "", errors.New("no wt/packages next to wt/example")
 	}
+
 	return module, nil
 }
 
@@ -113,13 +125,16 @@ func scaffoldFor(cfg *newConfig, abs, name string) (scaffoldMode, error) {
 			}, nil
 		}
 	}
+
 	module := strings.TrimSpace(cfg.module)
 	if module == "" {
 		module = name
 	}
+
 	if strings.ContainsAny(module, " \t\r\n") {
 		return scaffoldMode{}, fmt.Errorf("module %q contains whitespace", module)
 	}
+
 	return scaffoldMode{
 		monorepo:      false,
 		module:        module,
@@ -138,32 +153,42 @@ func copyEmbeddedDir(root, dst string) (int, error) {
 		if err != nil {
 			return err
 		}
+
 		rel, ok := strings.CutPrefix(path, root)
 		if !ok {
 			return nil
 		}
+
 		rel = strings.TrimPrefix(rel, "/")
+
 		target := filepath.Join(dst, filepath.FromSlash(rel))
 		if entry.IsDir() {
 			return os.MkdirAll(target, 0o755)
 		}
+
 		data, err := sdkFS.ReadFile(path)
 		if err != nil {
 			return err
 		}
+
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return err
 		}
+
 		mode := os.FileMode(0o644)
 		if strings.HasSuffix(rel, ".sh") {
 			mode = 0o755
 		}
+
 		if err := os.WriteFile(target, data, mode); err != nil {
 			return err
 		}
+
 		count++
+
 		return nil
 	})
+
 	return count, err
 }
 
@@ -174,40 +199,52 @@ func copyLocalDir(src, dst string) (int, error) {
 		if err != nil {
 			return err
 		}
+
 		rel, err := filepath.Rel(src, path)
 		if err != nil {
 			return err
 		}
+
 		if rel == "." {
 			return nil
 		}
+
 		if entry.IsDir() && (entry.Name() == "binding" || entry.Name() == "tmp") {
 			return filepath.SkipDir
 		}
+
 		if strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
+
 		target := filepath.Join(dst, rel)
 		if entry.IsDir() {
 			return os.MkdirAll(target, 0o755)
 		}
+
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
+
 		mode := os.FileMode(0o644)
 		if info, err := entry.Info(); err == nil && info.Mode()&0o111 != 0 {
 			mode = 0o755
 		}
+
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return err
 		}
+
 		if err := os.WriteFile(target, data, mode); err != nil {
 			return err
 		}
+
 		count++
+
 		return nil
 	})
+
 	return count, err
 }
 
@@ -217,29 +254,35 @@ func writeStandaloneGoMod(abs, module string) error {
 	if err != nil {
 		return err
 	}
+
 	text := strings.ReplaceAll(string(data), newModuleToken, module)
 	if err := os.WriteFile(filepath.Join(abs, "go.mod"), []byte(text), 0o644); err != nil {
 		return err
 	}
+
 	sum, err := standaloneFS.ReadFile("testdata/standalone/go.sum")
 	if err == nil {
 		if err := os.WriteFile(filepath.Join(abs, "go.sum"), sum, 0o644); err != nil {
 			return err
 		}
 	}
+
 	sdkMod, err := standaloneFS.ReadFile("testdata/standalone/sdk.go.mod")
 	if err != nil {
 		return err
 	}
+
 	if err := os.WriteFile(filepath.Join(abs, "sdk", "go.mod"), sdkMod, 0o644); err != nil {
 		return err
 	}
+
 	sdkSum, err := standaloneFS.ReadFile("testdata/standalone/sdk.go.sum")
 	if err == nil {
 		if err := os.WriteFile(filepath.Join(abs, "sdk", "go.sum"), sdkSum, 0o644); err != nil {
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -251,11 +294,13 @@ func prepareNewDir(display, abs string) error {
 		if len(entries) > 0 {
 			return fmt.Errorf("directory %s is not empty", display)
 		}
+
 		return nil
 	case os.IsNotExist(err):
 		if err := os.MkdirAll(abs, 0o755); err != nil {
 			return fmt.Errorf("create %s: %w", display, err)
 		}
+
 		return nil
 	default:
 		return err
@@ -269,29 +314,38 @@ func writeTemplateFiles(abs, name string, mode scaffoldMode) (int, error) {
 		if err != nil {
 			return err
 		}
+
 		rel, ok := strings.CutPrefix(path, "testdata/template")
 		if !ok {
 			return fmt.Errorf("unexpected template path %q", path)
 		}
+
 		rel = strings.TrimPrefix(rel, "/")
+
 		dst := filepath.Join(abs, filepath.FromSlash(rel))
 		if entry.IsDir() {
 			return os.MkdirAll(dst, 0o755)
 		}
+
 		data, err := templateFS.ReadFile(path)
 		if err != nil {
 			return err
 		}
+
 		out := strings.ReplaceAll(string(data), newNameToken, name)
 		out = strings.ReplaceAll(out, newContractToken, mode.contract)
 		out = strings.ReplaceAll(out, newSDKGenToken, mode.sdkGenerate)
+
 		out = strings.ReplaceAll(out, newSDKWITToken, mode.sdkWIT)
 		if err := os.WriteFile(dst, []byte(out), 0o644); err != nil {
 			return err
 		}
+
 		count++
+
 		return nil
 	})
+
 	return count, err
 }
 
@@ -301,10 +355,12 @@ func validateLocalSDK(dir string) error {
 	if err != nil || info.IsDir() {
 		return fmt.Errorf("--sdk %s is not a packages directory with go.mod", dir)
 	}
+
 	module, err := os.ReadFile(filepath.Join(dir, "go.mod"))
 	if err != nil || !strings.Contains(string(module), "module wt.packages") {
 		return fmt.Errorf("--sdk %s does not contain module wt.packages", dir)
 	}
+
 	return nil
 }
 
@@ -314,34 +370,43 @@ func appendStandaloneIgnore(abs string) error {
 	if strings.Contains(string(ignore), "sdk/binding/") {
 		return nil
 	}
+
 	appendIgnore := "sdk/binding/\nsdk/tmp/\n"
 	if err := os.WriteFile(filepath.Join(abs, ".gitignore"), append(ignore, []byte(appendIgnore)...), 0o644); err != nil {
 		return err
 	}
+
 	return nil
 }
 
 // installStandaloneSDK copies the SDK tree and rewrites the generated module file.
 func installStandaloneSDK(cfg *newConfig, abs, module string) (int, error) {
-	var sdkCount int
-	var err error
+	var (
+		sdkCount int
+		err      error
+	)
 	if cfg.sdk != "" {
 		if err := validateLocalSDK(cfg.sdk); err != nil {
 			return 0, err
 		}
+
 		sdkCount, err = copyLocalDir(cfg.sdk, filepath.Join(abs, "sdk"))
 	} else {
 		sdkCount, err = copyEmbeddedDir("testdata/sdk", filepath.Join(abs, "sdk"))
 	}
+
 	if err != nil {
 		return 0, err
 	}
+
 	if err := writeStandaloneGoMod(abs, module); err != nil {
 		return 0, err
 	}
+
 	if err := appendStandaloneIgnore(abs); err != nil {
 		return 0, err
 	}
+
 	return sdkCount, nil
 }
 
@@ -351,6 +416,7 @@ func printNewSummary(dir, name string, mode scaffoldMode, count int) {
 	fmt.Printf("new: created %s (%d files, %s)\n", dir, count, layout)
 	fmt.Printf("next:\n  wt-deploy dev --dir %s\n", dir)
 	fmt.Printf("  wt-deploy deploy --dir %s --host <supervisor> --app-host %s.<domain>\n", dir, name)
+
 	if mode.standalone {
 		fmt.Printf("  module: %s\n", mode.module)
 	}
@@ -361,32 +427,41 @@ func runNew(args []string) error {
 	if err != nil {
 		return err
 	}
+
 	abs, err := filepath.Abs(cfg.dir)
 	if err != nil {
 		return err
 	}
+
 	name := filepath.Base(abs)
 	if !validName(name) {
 		return fmt.Errorf("invalid app name %q: use lowercase letters, digits and hyphens", name)
 	}
+
 	mode, err := scaffoldFor(cfg, abs, name)
 	if err != nil {
 		return err
 	}
+
 	if err := prepareNewDir(cfg.dir, abs); err != nil {
 		return err
 	}
+
 	count, err := writeTemplateFiles(abs, name, mode)
 	if err != nil {
 		return err
 	}
+
 	if mode.standalone {
 		sdkCount, err := installStandaloneSDK(cfg, abs, mode.module)
 		if err != nil {
 			return err
 		}
+
 		count += sdkCount
 	}
+
 	printNewSummary(cfg.dir, name, mode, count)
+
 	return nil
 }

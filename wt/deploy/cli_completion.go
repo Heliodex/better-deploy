@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -8,9 +9,11 @@ import (
 // runCompletion prints a completion script for the selected shell.
 func runCompletion(args []string) error {
 	if len(args) != 1 {
-		return fmt.Errorf("usage: wt completion <bash|zsh|fish>")
+		return errors.New("usage: wt completion <bash|zsh|fish>")
 	}
+
 	commands := []string{"apps", "logs", "jobs", "blobs", "deploy", "bundle", "dev", "new", "rollback", "backup", "config", "open", "completion", "help"}
+
 	switch args[0] {
 	case "bash":
 		fmt.Printf("_wt() {\n  local cur\n  cur=\"${COMP_WORDS[COMP_CWORD]}\"\n  COMPREPLY=( $(compgen -W %q -- \"$cur\") )\n}\ncomplete -F _wt wt-deploy\n", strings.Join(commands, " "))
@@ -23,5 +26,6 @@ func runCompletion(args []string) error {
 	default:
 		return fmt.Errorf("unknown shell %q", args[0])
 	}
+
 	return nil
 }

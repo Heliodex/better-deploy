@@ -4,10 +4,6 @@ set -euo pipefail
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 config="$root/../.golangci.yml"
-if [[ ${1-} == "--all" ]]; then
-    config="$root/../.golangci-all.yml"
-    shift
-fi
 
 if ! command -v golangci-lint >/dev/null 2>&1; then
     echo "golangci-lint is not installed" >&2

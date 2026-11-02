@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -102,19 +103,23 @@ type uploadProgress struct {
 
 func (u *uploadProgress) Read(p []byte) (int, error) {
 	count, err := u.reader.Read(p)
+
 	u.done += int64(count)
 	if u.total <= 0 {
 		return count, err
 	}
+
 	if u.next == 0 {
 		u.next = u.total / 4
 		u.last = time.Now()
 	}
+
 	if u.done >= u.next || err == io.EOF {
 		percent := u.done * 100 / u.total
 		fmt.Fprintf(os.Stderr, "upload: %d%% (%d/%d bytes)\n", percent, u.done, u.total)
 		u.next = u.done + u.total/4
 	}
+
 	return count, err
 }
 
@@ -127,6 +132,7 @@ func validName(name string) bool {
 	if len(name) == 0 || len(name) > 63 {
 		return false
 	}
+
 	for i, r := range name {
 		switch {
 		case r >= 'a' && r <= 'z':
@@ -136,52 +142,64 @@ func validName(name string) bool {
 			return false
 		}
 	}
+
 	return true
 }
 
 // readManifest loads and validates app.json, defaulting the name to the directory name.
 func readManifest(dir string) (manifest, error) {
 	var m manifest
+
 	data, err := os.ReadFile(filepath.Join(dir, "app.json"))
 	if err != nil {
 		return m, fmt.Errorf("read app.json: %w", err)
 	}
+
 	if err := json.Unmarshal(data, &m); err != nil {
 		return m, fmt.Errorf("app.json: %w", err)
 	}
+
 	if m.Name == "" {
 		m.Name = filepath.Base(filepath.Clean(dir))
 	}
+
 	if !validName(m.Name) {
 		return m, fmt.Errorf("invalid app name %q", m.Name)
 	}
+
 	if m.MemoryMB < 0 || m.DiskMB < 0 {
-		return m, fmt.Errorf("memory_mb and disk_mb must be 0 or more")
+		return m, errors.New("memory_mb and disk_mb must be 0 or more")
 	}
+
 	for i, value := range m.ComponentInputs {
 		if !validInputPath(value) {
 			return m, fmt.Errorf("component_inputs[%d]: %q must be a relative file or directory", i, value)
 		}
 	}
+
 	for i, value := range m.StaticInputs {
 		if !validInputPath(value) {
 			return m, fmt.Errorf("static_inputs[%d]: %q must be a relative file or directory", i, value)
 		}
 	}
+
 	for i, entry := range m.Schedule {
 		if !strings.HasPrefix(entry.Path, "/") {
 			return m, fmt.Errorf("schedule[%d]: path must start with /", i)
 		}
+
 		every, err := time.ParseDuration(entry.Every)
 		if err != nil || every < minScheduleInterval || every > maxScheduleInterval {
 			return m, fmt.Errorf("schedule[%d]: every %q must be a duration between %s and %s", i, entry.Every, minScheduleInterval, maxScheduleInterval)
 		}
 	}
+
 	if m.Dev != nil {
 		if err := normalizeDevConfig(m.Dev); err != nil {
 			return m, err
 		}
 	}
+
 	return m, nil
 }
 
@@ -190,10 +208,13 @@ func validAppRelative(value string) bool {
 	if value == "" {
 		return true
 	}
+
 	if filepath.IsAbs(value) {
 		return false
 	}
+
 	clean := filepath.Clean(value)
+
 	return clean != ".." && !strings.HasPrefix(clean, ".."+string(filepath.Separator))
 }
 
@@ -203,7 +224,9 @@ func validInputPath(value string) bool {
 	if value == "" || filepath.IsAbs(value) || strings.HasPrefix(value, "~") {
 		return false
 	}
+
 	clean := filepath.Clean(value)
+
 	return clean != "." && clean != ".." && clean != string(filepath.Separator)
 }
 
@@ -215,26 +238,33 @@ func normalizeDevConfig(dev *appDevConfig) error {
 	if !validAppRelative(dev.Web) {
 		return fmt.Errorf("dev.web %q must stay inside the app directory", dev.Web)
 	}
+
 	for _, path := range dev.Watch {
 		if !validAppRelative(path) {
 			return fmt.Errorf("dev.watch %q must stay inside the app directory", path)
 		}
 	}
+
 	if len(dev.Proxy) == 0 {
 		dev.Proxy = []string{"/api"}
 	}
+
 	if dev.SupervisorProxy == nil {
 		dev.SupervisorProxy = append([]string(nil), defaultSupervisorProxy...)
 	}
+
 	if err := validateDevPrefixes("dev.proxy", dev.Proxy); err != nil {
 		return err
 	}
+
 	if err := validateDevPrefixes("dev.supervisor_proxy", dev.SupervisorProxy); err != nil {
 		return err
 	}
+
 	if dev.Port < 0 || dev.Port > 65535 {
-		return fmt.Errorf("dev.port must be between 1 and 65535, or 0 for a free port")
+		return errors.New("dev.port must be between 1 and 65535, or 0 for a free port")
 	}
+
 	return nil
 }
 
@@ -245,16 +275,19 @@ func validateDevPrefixes(name string, prefixes []string) error {
 			return fmt.Errorf("%s %q must be an absolute path prefix such as /api", name, prefix)
 		}
 	}
+
 	return nil
 }
 
 // resolveConfig builds the deploy config from the config file, environment and deploy flags.
 func resolveConfig(args []string) (*deployConfig, error) {
 	configPath := configArg(args)
+
 	fileCfg, err := loadFileConfig(configPath)
 	if err != nil {
 		return nil, err
 	}
+
 	flags := flag.NewFlagSet("deploy", flag.ContinueOnError)
 	dir := flags.String("dir", ".", "app directory containing app.json")
 	app := flags.String("app", "", "app name (default: app.json name or directory name)")
@@ -262,46 +295,57 @@ func resolveConfig(args []string) (*deployConfig, error) {
 	token := flags.String("token", firstNonEmpty(env("WT_TOKEN"), fileCfg.Token), "deploy bearer token")
 	wasmtime := flags.String("wasmtime", firstNonEmpty(env("WT_WASMTIME"), fileCfg.Wasmtime, "wasmtime"), "wasmtime binary")
 	targetDefault := firstNonEmpty(env("WT_WASMTIME_TARGET"), fileCfg.Target)
+
 	targetConfigured := targetDefault != ""
 	if targetDefault == "" {
 		targetDefault = "x86_64-unknown-linux-musl"
 	}
+
 	target := flags.String("target", targetDefault, "wasmtime compile target (default: supervisor target or x86_64-unknown-linux-musl)")
 	appHost := flags.String("app-host", fileCfg.AppHost, "override the app host in the uploaded app.json")
 	config := flags.String("config", configPath, "config file (default ~/.config/wt/config.json)")
 	jsonOut := flags.Bool("json", false, "print only the raw API response")
 	forceBuild := flags.Bool("force-build", false, "rebuild the component and static phases even when their inputs are unchanged")
 	skipBuild := flags.Bool("skip-build", false, "skip running app.json's build commands")
+
 	skipCompile := flags.Bool("skip-compile", false, "do not compile; include main.cwasm only if it already exists")
 	if err := flags.Parse(args); err != nil {
 		return nil, err
 	}
+
 	if *target != targetDefault {
 		targetConfigured = true
 	}
+
 	flags.Visit(func(f *flag.Flag) {
 		if f.Name == "target" {
 			targetConfigured = true
 		}
 	})
+
 	if flags.NArg() > 0 {
 		return nil, fmt.Errorf("unexpected argument %q", flags.Arg(0))
 	}
+
 	if *config != configPath {
 		fileCfg, err = loadFileConfig(*config)
 		if err != nil {
 			return nil, err
 		}
+
 		if *host == "" {
 			*host = fileCfg.Host
 		}
+
 		if *token == "" {
 			*token = fileCfg.Token
 		}
 	}
+
 	if *host == "" {
-		return nil, fmt.Errorf("set --host, WT_DEPLOY_HOST or host in the config file")
+		return nil, errors.New("set --host, WT_DEPLOY_HOST or host in the config file")
 	}
+
 	return &deployConfig{
 		dir:              *dir,
 		app:              *app,
@@ -323,16 +367,20 @@ func runBuildPhase(cfg *deployConfig, phase, command string) error {
 	if cfg.skipBuild {
 		return nil
 	}
+
 	if strings.TrimSpace(command) == "" {
 		return fmt.Errorf("app.json has no %s build command; set one or pass --skip-build", phase)
 	}
+
 	cmd := exec.Command("sh", "-c", command)
 	cmd.Dir = cfg.dir
 	cmd.Stdout = os.Stderr
+
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%s build: %w", phase, err)
 	}
+
 	return nil
 }
 
@@ -341,6 +389,7 @@ func wasmtimeVersion(bin string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("wasmtime --version: %w", err)
 	}
+
 	return strings.TrimSpace(string(out)), nil
 }
 
@@ -350,25 +399,31 @@ func fileDigest(path string) (string, error) {
 		return "", err
 	}
 	defer file.Close()
+
 	hash := sha256.New()
 	if _, err := io.Copy(hash, file); err != nil {
 		return "", err
 	}
+
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 // writeArtifact records the wasm digest, size and compiler details so the supervisor can key its cache and detect a stale cwasm.
 func writeArtifact(cfg *deployConfig, epoch bool) error {
 	wasm := filepath.Join(cfg.dir, "main.wasm")
+
 	info, err := os.Stat(wasm)
 	if err != nil {
 		return fmt.Errorf("read main.wasm: %w", err)
 	}
+
 	digest, err := fileDigest(wasm)
 	if err != nil {
 		return fmt.Errorf("digest main.wasm: %w", err)
 	}
+
 	record := artifact{Target: cfg.target, CPU: "baseline", CompiledAt: time.Now().UTC(), Epoch: epoch, WasmSHA256: digest, WasmBytes: info.Size()}
+
 	version, err := wasmtimeVersion(cfg.wasmtime)
 	if err != nil {
 		// Without a version the supervisor can still key and rebuild the artifact from main.wasm.
@@ -376,22 +431,27 @@ func writeArtifact(cfg *deployConfig, epoch bool) error {
 	} else {
 		record.Wasmtime = version
 	}
+
 	data, err := json.Marshal(record)
 	if err != nil {
 		return err
 	}
+
 	return os.WriteFile(filepath.Join(cfg.dir, artifactName), append(data, '\n'), 0o644)
 }
 
 func readArtifactFile(dir string) (artifact, error) {
 	var info artifact
+
 	data, err := os.ReadFile(filepath.Join(dir, artifactName))
 	if err != nil {
 		return info, err
 	}
+
 	if err := json.Unmarshal(data, &info); err != nil {
 		return info, err
 	}
+
 	return info, nil
 }
 
@@ -402,27 +462,33 @@ func runCompile(cfg *deployConfig) error {
 	if _, err := os.Stat(wasm); err != nil {
 		return fmt.Errorf("read main.wasm: %w (did the build run?)", err)
 	}
+
 	cwasm := filepath.Join(cfg.dir, "main.cwasm")
 	if cfg.skipCompile {
 		digest, err := fileDigest(wasm)
 		if err != nil {
 			return fmt.Errorf("digest main.wasm: %w", err)
 		}
+
 		artifact, artifactErr := readArtifactFile(cfg.dir)
 		verified := artifactErr == nil && artifact.WasmSHA256 == digest
+
 		epoch := verified && artifact.Epoch
 		if !verified {
 			stale := cwasm + ".stale"
 			if err := os.Rename(cwasm, stale); err != nil && !os.IsNotExist(err) {
 				return fmt.Errorf("move unverified main.cwasm aside: %w", err)
 			}
+
 			if _, err := os.Stat(stale); err == nil {
 				fmt.Fprintf(os.Stderr, "warning: main.cwasm was not verified against main.wasm; moved it to %s\n", filepath.Base(stale))
 			}
 		}
+
 		if _, err := os.Stat(cwasm); err != nil {
 			fmt.Fprintln(os.Stderr, "warning: --skip-compile and no verified main.cwasm; the supervisor will compile main.wasm if it has a compiler")
 		}
+
 		return writeArtifact(cfg, epoch)
 	}
 
@@ -430,25 +496,31 @@ func runCompile(cfg *deployConfig) error {
 	if err != nil {
 		return err
 	}
+
 	name := temp.Name()
 	if err := temp.Close(); err != nil {
 		_ = os.Remove(name)
 		return err
 	}
+
 	if err := os.Remove(name); err != nil {
 		return err
 	}
+
 	cmd := exec.Command(cfg.wasmtime, "compile", "--target", cfg.target, "-W", "component-model-async=y", "-W", "epoch-interruption=y", wasm, "-o", name)
 	cmd.Stdout = os.Stderr
+
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		_ = os.Remove(name)
 		return fmt.Errorf("wasmtime compile: %w", err)
 	}
+
 	if err := os.Rename(name, cwasm); err != nil {
 		_ = os.Remove(name)
 		return err
 	}
+
 	return writeArtifact(cfg, true)
 }
 
@@ -456,9 +528,11 @@ func writeTarFile(tw *tar.Writer, name string, data []byte) error {
 	if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(data))}); err != nil {
 		return fmt.Errorf("write %s: %w", name, err)
 	}
+
 	if _, err := tw.Write(data); err != nil {
 		return fmt.Errorf("write %s: %w", name, err)
 	}
+
 	return nil
 }
 
@@ -469,19 +543,24 @@ func writeTarPath(tw *tar.Writer, name, path string) error {
 		return err
 	}
 	defer file.Close()
+
 	info, err := file.Stat()
 	if err != nil {
 		return err
 	}
+
 	header, err := tar.FileInfoHeader(info, "")
 	if err != nil {
 		return err
 	}
+
 	header.Name = name
 	if err := tw.WriteHeader(header); err != nil {
 		return err
 	}
+
 	_, err = io.CopyN(tw, file, info.Size())
+
 	return err
 }
 
@@ -492,21 +571,26 @@ func manifestJSON(dir string, m manifest) ([]byte, error) {
 	if err != nil {
 		return json.Marshal(m, jsontext.WithIndent("  "))
 	}
+
 	var values map[string]any
 	if err := json.Unmarshal(data, &values); err != nil {
 		return nil, err
 	}
+
 	if m.Name != "" {
 		values["name"] = m.Name
 	}
+
 	if m.Host != "" {
 		values["host"] = m.Host
 	}
+
 	return json.Marshal(values, jsontext.WithIndent("  "))
 }
 
 func bundle(dir string, m manifest, includeComponent bool) ([]byte, error) {
 	var buf bytes.Buffer
+
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
 
@@ -514,14 +598,17 @@ func bundle(dir string, m manifest, includeComponent bool) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	if err := writeTarFile(tw, "app.json", append(appJSON, '\n')); err != nil {
 		return nil, err
 	}
+
 	if includeComponent {
 		wasm, err := os.ReadFile(filepath.Join(dir, "main.wasm"))
 		if err != nil {
 			return nil, fmt.Errorf("read main.wasm: %w (did the build run?)", err)
 		}
+
 		if err := writeTarFile(tw, "main.wasm", wasm); err != nil {
 			return nil, err
 		}
@@ -531,9 +618,11 @@ func bundle(dir string, m manifest, includeComponent bool) ([]byte, error) {
 			if os.IsNotExist(err) {
 				continue
 			}
+
 			if err != nil {
 				return nil, fmt.Errorf("read %s: %w", name, err)
 			}
+
 			if err := writeTarFile(tw, name, extra); err != nil {
 				return nil, err
 			}
@@ -546,28 +635,35 @@ func bundle(dir string, m manifest, includeComponent bool) ([]byte, error) {
 			if err != nil {
 				return err
 			}
+
 			if entry.IsDir() {
 				return nil
 			}
+
 			if !entry.Type().IsRegular() {
 				return nil
 			}
+
 			rel, err := filepath.Rel(dir, path)
 			if err != nil {
 				return err
 			}
+
 			return writeTarPath(tw, filepath.ToSlash(rel), path)
 		})
 		if err != nil {
 			return nil, fmt.Errorf("add static files: %w", err)
 		}
 	}
+
 	if err := tw.Close(); err != nil {
 		return nil, err
 	}
+
 	if err := gz.Close(); err != nil {
 		return nil, err
 	}
+
 	return buf.Bytes(), nil
 }
 
@@ -576,65 +672,83 @@ func baseURL(host string) string {
 	if strings.HasPrefix(host, "http://") || strings.HasPrefix(host, "https://") {
 		return strings.TrimSuffix(host, "/")
 	}
+
 	return "https://" + host
 }
 
 // upload posts the bundle as a multipart deployment and waits for a queued deployment to finish.
 func upload(cfg *deployConfig, m manifest, bundle []byte) error {
 	var body bytes.Buffer
+
 	form := multipart.NewWriter(&body)
+
 	part, err := form.CreateFormFile("artifact", "app.tar.gz")
 	if err != nil {
 		return err
 	}
+
 	if _, err := part.Write(bundle); err != nil {
 		return err
 	}
+
 	if err := form.Close(); err != nil {
 		return err
 	}
 
 	url := baseURL(cfg.host) + "/apps/" + m.Name + "/deployments"
+
 	req, err := http.NewRequest(http.MethodPost, url, &body)
 	if err != nil {
 		return err
 	}
+
 	if cfg.token != "" {
 		req.Header.Set("Authorization", "Bearer "+cfg.token)
 	}
+
 	req.Header.Set("Content-Type", form.FormDataContentType())
+
 	size := int64(body.Len())
 	req.ContentLength = size
 	progress := &uploadProgress{reader: bytes.NewReader(body.Bytes()), total: size}
 	req.Body = io.NopCloser(progress)
 
 	client := &http.Client{Timeout: 2 * time.Minute}
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("post bundle: %w", err)
 	}
 	defer resp.Body.Close()
+
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return fmt.Errorf("read response: %w", err)
 	}
+
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("deploy failed with status %s: %s", resp.Status, strings.TrimSpace(string(respBody)))
 	}
+
 	if resp.StatusCode != http.StatusAccepted {
 		return printDeployResult(cfg, m.Name, respBody)
 	}
+
 	location := resp.Header.Get("Location")
+
 	var queued deploymentState
 	if err := json.Unmarshal(respBody, &queued); err != nil {
 		return fmt.Errorf("read deployment: %w", err)
 	}
+
 	if location == "" {
 		location = "/apps/" + m.Name + "/deployments/" + queued.ID
 	}
+
 	if queued.ID == "" {
 		queued.ID = filepath.Base(location)
 	}
+
 	return waitDeploy(cfg, m.Name, location)
 }
 
@@ -655,13 +769,16 @@ func waitDeploy(cfg *deployConfig, name, location string) error {
 		if err != nil {
 			return err
 		}
+
 		if status != http.StatusOK {
 			return fmt.Errorf("deployment status %d: %s", status, strings.TrimSpace(string(body)))
 		}
+
 		var state deploymentState
 		if err := json.Unmarshal(body, &state); err != nil {
 			return fmt.Errorf("read deployment status: %w", err)
 		}
+
 		switch state.Status {
 		case "queued", "running":
 			time.Sleep(250 * time.Millisecond)
@@ -671,6 +788,7 @@ func waitDeploy(cfg *deployConfig, name, location string) error {
 			if state.Error != "" {
 				return fmt.Errorf("deploy %s: %s", state.Status, state.Error)
 			}
+
 			return fmt.Errorf("deploy %s", state.Status)
 		}
 	}
@@ -680,19 +798,24 @@ func waitDeploy(cfg *deployConfig, name, location string) error {
 func printDeployResult(cfg *deployConfig, name string, body []byte) error {
 	if body == nil {
 		client := clientOptions{host: cfg.host, token: cfg.token, jsonOut: cfg.jsonOut, timeout: 30 * time.Second}
+
 		status, _, data, err := apiDo(client, http.MethodGet, "/apps/"+name, nil, "")
 		if err != nil {
 			return err
 		}
+
 		if status != http.StatusOK {
 			return fmt.Errorf("app info status %d: %s", status, strings.TrimSpace(string(data)))
 		}
+
 		body = data
 	}
+
 	if cfg.jsonOut {
 		fmt.Println(strings.TrimSpace(string(body)))
 		return nil
 	}
+
 	var info struct {
 		Name          string `json:"name"`
 		Host          string `json:"host"`
@@ -704,30 +827,40 @@ func printDeployResult(cfg *deployConfig, name string, body []byte) error {
 		fmt.Println(strings.TrimSpace(string(body)))
 		return nil
 	}
+
 	if info.Name == "" {
 		info.Name = name
 	}
+
 	fmt.Printf("deployed %s\n", info.Name)
+
 	if info.Host != "" {
 		fmt.Printf("  url: %s\n", appURLForHost(cfg.host, info.Host))
 	}
+
 	if info.CurrentDigest != "" {
 		digest := info.CurrentDigest
 		if len(digest) > 12 {
 			digest = digest[:12]
 		}
+
 		fmt.Printf("  digest: %s\n", digest)
 	}
+
 	if info.Status != "" {
 		fmt.Printf("  status: %s", info.Status)
+
 		if info.Ready {
 			fmt.Print(" (ready)")
 		}
+
 		fmt.Println()
 	}
+
 	if !cfg.start.IsZero() {
 		fmt.Printf("  time: %s\n", time.Since(cfg.start).Round(time.Millisecond))
 	}
+
 	return nil
 }
 
@@ -737,23 +870,29 @@ func buildBundle(cfg *deployConfig) (manifest, []byte, buildStatus, error) {
 	if err != nil {
 		return m, nil, buildStatus{}, err
 	}
+
 	if cfg.app != "" {
 		if !validName(cfg.app) {
 			return m, nil, buildStatus{}, fmt.Errorf("invalid app name %q", cfg.app)
 		}
+
 		m.Name = cfg.app
 	}
+
 	if cfg.appHost != "" {
 		m.Host = cfg.appHost
 	}
+
 	status, err := prepareBuilds(cfg, m)
 	if err != nil {
 		return m, nil, status, err
 	}
+
 	data, err := bundle(cfg.dir, m, true)
 	if err != nil {
 		return m, nil, status, err
 	}
+
 	return m, data, status, nil
 }
 
@@ -763,58 +902,73 @@ func deploy(args []string) error {
 	if err != nil {
 		return err
 	}
+
 	cfg.start = time.Now()
+
 	m, err := readManifest(cfg.dir)
 	if err != nil {
 		return err
 	}
+
 	if cfg.app != "" {
 		if !validName(cfg.app) {
 			return fmt.Errorf("invalid app name %q", cfg.app)
 		}
+
 		m.Name = cfg.app
 	}
+
 	if cfg.appHost != "" {
 		m.Host = cfg.appHost
 	}
+
 	preflight, err := preflightDeploy(cfg)
 	if err != nil {
 		return err
 	}
+
 	if preflight.TargetFromServer {
 		fmt.Fprintf(os.Stderr, "target: %s (from supervisor)\n", cfg.target)
 	}
+
 	status, err := prepareBuilds(cfg, m)
 	if err != nil {
 		return err
 	}
+
 	printBuildStatus(status)
 
 	keepComponent := false
 	if !cfg.forceBuild && status.WasmDigest != "" {
 		keepComponent = keepRunningComponent(false, status, serverDigest(cfg, m.Name))
 	}
+
 	if keepComponent {
 		fmt.Fprintln(os.Stderr, "component: already running; uploading static only")
 	} else if status.WasmDigest != "" {
 		fmt.Fprintln(os.Stderr, "component: uploading")
+
 		_, cwasmErr := os.Stat(filepath.Join(cfg.dir, "main.cwasm"))
 		printRuntimePlan(preflight, cwasmErr == nil)
 	}
+
 	data, err := bundle(cfg.dir, m, !keepComponent)
 	if err != nil {
 		return err
 	}
+
 	return upload(cfg, m, data)
 }
 
 // resolveBundleConfig parses the flags for building a bundle without a supervisor.
 func resolveBundleConfig(args []string) (*deployConfig, error) {
 	configPath := configArg(args)
+
 	fileCfg, err := loadFileConfig(configPath)
 	if err != nil {
 		return nil, err
 	}
+
 	flags := flag.NewFlagSet("bundle", flag.ContinueOnError)
 	dir := flags.String("dir", ".", "app directory containing app.json")
 	wasmtime := flags.String("wasmtime", firstNonEmpty(env("WT_WASMTIME"), fileCfg.Wasmtime, "wasmtime"), "wasmtime binary")
@@ -822,13 +976,16 @@ func resolveBundleConfig(args []string) (*deployConfig, error) {
 	out := flags.String("out", "", "output file (default <name>.tar.gz)")
 	skipBuild := flags.Bool("skip-build", false, "skip running app.json's build commands")
 	skipCompile := flags.Bool("skip-compile", false, "do not compile; include main.cwasm only if it already exists")
+
 	forceBuild := flags.Bool("force-build", false, "rebuild the component and static phases even when their inputs are unchanged")
 	if err := flags.Parse(args); err != nil {
 		return nil, err
 	}
+
 	if flags.NArg() > 0 {
 		return nil, fmt.Errorf("unexpected argument %q", flags.Arg(0))
 	}
+
 	return &deployConfig{
 		dir:         *dir,
 		wasmtime:    *wasmtime,
@@ -846,28 +1003,36 @@ func runBundle(args []string) error {
 	if err != nil {
 		return err
 	}
+
 	m, data, status, err := buildBundle(cfg)
 	if err != nil {
 		return err
 	}
+
 	printBuildStatus(status)
+
 	out := cfg.out
 	if out == "" {
 		out = m.Name + ".tar.gz"
 	}
+
 	if err := os.WriteFile(out, data, 0o644); err != nil {
 		return fmt.Errorf("write bundle: %w", err)
 	}
+
 	fmt.Println("wrote", out)
+
 	return nil
 }
 
 func main() {
 	command := "deploy"
+
 	args := os.Args[1:]
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		command, args = args[0], args[1:]
 	}
+
 	for _, arg := range args {
 		if arg == "-h" || arg == "--help" {
 			command = "help"
@@ -876,6 +1041,7 @@ func main() {
 	}
 
 	var err error
+
 	switch command {
 	case "deploy":
 		err = deploy(args)
@@ -921,6 +1087,7 @@ func main() {
 	default:
 		err = fmt.Errorf("unknown command %q", command)
 	}
+
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "wt-deploy:", err)
 		os.Exit(1)

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -35,22 +36,27 @@ func writeBuildCache(dir string, cache buildCache) {
 	if err != nil {
 		return
 	}
+
 	_ = os.WriteFile(filepath.Join(dir, buildCacheName), append(data, '\n'), 0o644)
 }
 
 // readBuildCache loads the last phase cache. A missing or malformed file reads as an empty cache, which forces a rebuild.
 func readBuildCache(dir string) (buildCache, error) {
 	var cache buildCache
+
 	data, err := os.ReadFile(filepath.Join(dir, buildCacheName))
 	if os.IsNotExist(err) {
 		return cache, nil
 	}
+
 	if err != nil {
 		return cache, err
 	}
+
 	if err := json.Unmarshal(data, &cache); err != nil {
 		return buildCache{}, nil
 	}
+
 	return cache, nil
 }
 
@@ -60,6 +66,7 @@ func commonSkipDir(entry os.DirEntry) bool {
 	case ".git", "node_modules", "dist", "target", ".svelte-kit":
 		return true
 	}
+
 	return false
 }
 
@@ -69,23 +76,28 @@ func appComponentSkip(root string) func(string, os.DirEntry) bool {
 		if commonSkipDir(entry) {
 			return true
 		}
+
 		if entry.Name() == "testdata" {
 			return true
 		}
+
 		if filepath.Dir(path) == root {
 			switch entry.Name() {
 			case "web", "static":
 				return true
 			}
 		}
+
 		rel, err := filepath.Rel(root, path)
 		if err != nil {
 			return false
 		}
+
 		switch filepath.ToSlash(rel) {
 		case "sdk/binding", "sdk/tmp":
 			return true
 		}
+
 		return false
 	}
 }
@@ -96,20 +108,25 @@ func moduleSkipDir(root string) func(string, os.DirEntry) bool {
 		if commonSkipDir(entry) {
 			return true
 		}
+
 		if entry.Name() == "testdata" {
 			return true
 		}
+
 		if filepath.Dir(path) != root {
 			return false
 		}
+
 		base := filepath.Base(root)
 		if base != "packages" && base != "sdk" {
 			return false
 		}
+
 		switch entry.Name() {
 		case "binding", "tmp":
 			return true
 		}
+
 		return false
 	}
 }
@@ -120,12 +137,14 @@ func staticSkipDir(root string) func(string, os.DirEntry) bool {
 		if commonSkipDir(entry) {
 			return true
 		}
+
 		if filepath.Dir(path) == root {
 			switch entry.Name() {
 			case "build", ".vite":
 				return true
 			}
 		}
+
 		return false
 	}
 }
@@ -133,25 +152,33 @@ func staticSkipDir(root string) func(string, os.DirEntry) bool {
 // walkFiles collects regular files under root, applying directory and file filters.
 func walkFiles(root string, skipDir func(string, os.DirEntry) bool, include func(string, os.DirEntry) bool) ([]string, error) {
 	var files []string
+
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			if os.IsNotExist(err) {
 				return nil
 			}
+
 			return err
 		}
+
 		if entry.IsDir() {
 			if path != root && skipDir != nil && skipDir(path, entry) {
 				return filepath.SkipDir
 			}
+
 			return nil
 		}
+
 		if include != nil && !include(path, entry) {
 			return nil
 		}
+
 		files = append(files, path)
+
 		return nil
 	})
+
 	return files, err
 }
 
@@ -161,14 +188,17 @@ func isComponentSource(path string, entry os.DirEntry) bool {
 	if strings.HasSuffix(name, "_test.go") || strings.HasSuffix(name, ".gen.go") {
 		return false
 	}
+
 	switch name {
 	case "go.mod", "go.sum", "go.work", "go.work.sum":
 		return true
 	}
+
 	switch filepath.Ext(name) {
 	case ".go", ".wit":
 		return true
 	}
+
 	return false
 }
 
@@ -178,14 +208,17 @@ func isModuleSource(path string, entry os.DirEntry) bool {
 	if strings.HasSuffix(name, "_test.go") || strings.HasSuffix(name, ".gen.go") {
 		return false
 	}
+
 	switch name {
 	case "go.mod", "go.sum", "go.work", "go.work.sum":
 		return true
 	}
+
 	switch filepath.Ext(name) {
 	case ".go", ".s", ".wit", ".sh":
 		return true
 	}
+
 	return false
 }
 
@@ -195,18 +228,22 @@ func goModuleRoot(dir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	for {
 		info, err := os.Stat(filepath.Join(abs, "go.mod"))
 		if err == nil && !info.IsDir() {
 			return abs, nil
 		}
+
 		if err != nil && !os.IsNotExist(err) {
 			return "", err
 		}
+
 		parent := filepath.Dir(abs)
 		if parent == abs {
 			return "", nil
 		}
+
 		abs = parent
 	}
 }
@@ -217,27 +254,35 @@ func localReplaceDirs(dir string) ([]string, error) {
 	if err != nil || root == "" {
 		return nil, err
 	}
+
 	data, err := os.ReadFile(filepath.Join(root, "go.mod"))
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
+
 	if err != nil {
 		return nil, err
 	}
+
 	var paths []string
+
 	inBlock := false
+
 	for raw := range strings.SplitSeq(string(data), "\n") {
 		line := strings.TrimSpace(raw)
 		if index := strings.Index(line, "//"); index >= 0 {
 			line = strings.TrimSpace(line[:index])
 		}
+
 		if line == "" {
 			continue
 		}
+
 		if line == "replace (" {
 			inBlock = true
 			continue
 		}
+
 		if inBlock {
 			if line == ")" {
 				inBlock = false
@@ -246,42 +291,53 @@ func localReplaceDirs(dir string) ([]string, error) {
 		} else if !strings.HasPrefix(line, "replace ") {
 			continue
 		}
+
 		line = strings.TrimPrefix(line, "replace ")
+
 		_, right, ok := strings.Cut(line, "=>")
 		if !ok {
 			continue
 		}
+
 		fields := strings.Fields(right)
 		if len(fields) == 0 {
 			continue
 		}
+
 		value := fields[0]
 		if strings.HasPrefix(value, ".") || filepath.IsAbs(value) {
 			if !filepath.IsAbs(value) {
 				value = filepath.Join(root, value)
 			}
+
 			paths = append(paths, value)
 		}
 	}
+
 	return paths, nil
 }
 
 // dedupePaths sorts paths and removes duplicates so a walk and an explicit input can overlap.
 func dedupePaths(paths []string) []string {
 	seen := map[string]struct{}{}
+
 	out := make([]string, 0, len(paths))
 	for _, path := range paths {
 		abs, err := filepath.Abs(path)
 		if err != nil {
 			abs = filepath.Clean(path)
 		}
+
 		if _, ok := seen[abs]; ok {
 			continue
 		}
+
 		seen[abs] = struct{}{}
 		out = append(out, abs)
 	}
+
 	sort.Strings(out)
+
 	return out
 }
 
@@ -291,45 +347,56 @@ func collectComponentInputFiles(dir string, m manifest) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	for _, value := range m.ComponentInputs {
 		value = strings.TrimSpace(value)
 		if value == "" {
 			continue
 		}
+
 		path := value
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(dir, path)
 		}
+
 		info, err := os.Stat(path)
 		if os.IsNotExist(err) {
 			continue
 		}
+
 		if err != nil {
 			return nil, err
 		}
+
 		if !info.IsDir() {
 			files = append(files, path)
 			continue
 		}
+
 		more, err := walkFiles(path, moduleSkipDir(path), nil)
 		if err != nil {
 			return nil, err
 		}
+
 		files = append(files, more...)
 	}
+
 	replaces, err := localReplaceDirs(dir)
 	if err != nil {
 		return nil, err
 	}
+
 	root, err := goModuleRoot(dir)
 	if err != nil {
 		return nil, err
 	}
+
 	if root != "" {
 		appAbs, err := filepath.Abs(dir)
 		if err != nil {
 			return nil, err
 		}
+
 		if root != appAbs {
 			for _, name := range []string{"go.mod", "go.sum", "go.work", "go.work.sum"} {
 				path := filepath.Join(root, name)
@@ -339,28 +406,35 @@ func collectComponentInputFiles(dir string, m manifest) ([]string, error) {
 			}
 		}
 	}
+
 	for _, value := range replaces {
 		path := value
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(dir, path)
 		}
+
 		info, err := os.Stat(path)
 		if os.IsNotExist(err) {
 			continue
 		}
+
 		if err != nil {
 			return nil, err
 		}
+
 		if !info.IsDir() {
 			files = append(files, path)
 			continue
 		}
+
 		more, err := walkFiles(path, moduleSkipDir(path), isModuleSource)
 		if err != nil {
 			return nil, err
 		}
+
 		files = append(files, more...)
 	}
+
 	return dedupePaths(files), nil
 }
 
@@ -369,12 +443,14 @@ func webDirName(m manifest) string {
 	if m.Dev != nil && strings.TrimSpace(m.Dev.Web) != "" {
 		return strings.TrimSpace(m.Dev.Web)
 	}
+
 	return "web"
 }
 
 // collectStaticInputFiles walks the frontend source and explicit static_inputs, excluding build output and dependencies.
 func collectStaticInputFiles(dir string, m manifest) ([]string, error) {
 	var files []string
+
 	web := filepath.Join(dir, webDirName(m))
 	if info, err := os.Stat(web); err == nil && info.IsDir() {
 		more, err := walkFiles(web, staticSkipDir(web), func(path string, entry os.DirEntry) bool {
@@ -383,34 +459,43 @@ func collectStaticInputFiles(dir string, m manifest) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
+
 		files = append(files, more...)
 	}
+
 	for _, value := range m.StaticInputs {
 		value = strings.TrimSpace(value)
 		if value == "" {
 			continue
 		}
+
 		path := value
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(dir, path)
 		}
+
 		info, err := os.Stat(path)
 		if os.IsNotExist(err) {
 			continue
 		}
+
 		if err != nil {
 			return nil, err
 		}
+
 		if !info.IsDir() {
 			files = append(files, path)
 			continue
 		}
+
 		more, err := walkFiles(path, staticSkipDir(path), nil)
 		if err != nil {
 			return nil, err
 		}
+
 		files = append(files, more...)
 	}
+
 	return dedupePaths(files), nil
 }
 
@@ -418,23 +503,28 @@ func collectStaticInputFiles(dir string, m manifest) ([]string, error) {
 func inputHash(dir, command, seed string, files []string) (string, error) {
 	hash := sha256.New()
 	_, _ = io.WriteString(hash, "command\x00"+command+"\x00seed\x00"+seed+"\x00")
+
 	base, err := filepath.Abs(dir)
 	if err != nil {
 		return "", err
 	}
+
 	for _, path := range files {
 		rel, err := filepath.Rel(base, path)
 		if err != nil {
 			return "", err
 		}
+
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return "", err
 		}
+
 		_, _ = io.WriteString(hash, filepath.ToSlash(rel)+"\x00")
 		_, _ = hash.Write(data)
 		_, _ = hash.Write([]byte{0})
 	}
+
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
@@ -444,7 +534,9 @@ func componentInputHash(dir string, m manifest, command string) (string, error) 
 	if err != nil {
 		return "", err
 	}
+
 	seed := "component\x00" + strings.Join(m.ComponentInputs, "\x00")
+
 	return inputHash(dir, command, seed, files)
 }
 
@@ -454,37 +546,47 @@ func staticInputHash(dir string, m manifest, command string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	seed := "static\x00" + webDirName(m) + "\x00" + strings.Join(m.StaticInputs, "\x00")
+
 	return inputHash(dir, command, seed, files)
 }
 
 // checkStaticSvelteKit rejects server-only SvelteKit files: the production artifact is adapter-static output.
 func checkStaticSvelteKit(dir string, m manifest) error {
 	web := webDirName(m)
+
 	src := filepath.Join(dir, web, "src")
 	if info, err := os.Stat(src); err != nil || !info.IsDir() {
 		return nil
 	}
+
 	var found []string
+
 	err := filepath.WalkDir(src, func(path string, entry os.DirEntry, err error) error {
 		if err != nil || entry.IsDir() {
 			return nil
 		}
+
 		name := entry.Name()
 		rel, _ := filepath.Rel(dir, path)
 		serverFile := strings.HasSuffix(name, ".server.ts") || strings.HasSuffix(name, ".server.js") || strings.HasSuffix(name, ".server.mjs") || strings.HasPrefix(name, "+server.")
+
 		serverDir := strings.Contains(filepath.ToSlash(rel), "/lib/server/")
 		if serverFile || serverDir {
 			found = append(found, filepath.ToSlash(rel))
 		}
+
 		return nil
 	})
 	if err != nil {
 		return fmt.Errorf("check SvelteKit routes: %w", err)
 	}
+
 	if len(found) > 0 {
 		return fmt.Errorf("SvelteKit apps are static-only; remove server-only files or move the logic into the Go component: %s", strings.Join(found, ", "))
 	}
+
 	return nil
 }
 
@@ -494,32 +596,38 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 	if err := checkStaticSvelteKit(cfg.dir, m); err != nil {
 		return status, err
 	}
+
 	componentCmd := strings.TrimSpace(cfg.buildComponentCommand)
 	if componentCmd == "" {
 		componentCmd = strings.TrimSpace(m.BuildComponent)
 	}
+
 	staticCmd := strings.TrimSpace(m.BuildStatic)
 	if cfg.skipStatic {
 		staticCmd = ""
 		status.StaticSkipped = true
 	}
+
 	if cfg.skipBuild {
 		status.BuildSkipped = true
 		if digest, err := fileDigest(filepath.Join(cfg.dir, "main.wasm")); err == nil {
 			status.WasmDigest = digest
 		}
+
 		return status, nil
 	}
 
 	wasmPath := filepath.Join(cfg.dir, "main.wasm")
 	wasmInfo, wasmErr := os.Stat(wasmPath)
 	wasmExists := wasmErr == nil && wasmInfo.Mode().IsRegular()
+
 	hasComponentBuild := componentCmd != ""
 	if !hasComponentBuild && !wasmExists {
-		return status, fmt.Errorf("app.json has no build_component and main.wasm is missing")
+		return status, errors.New("app.json has no build_component and main.wasm is missing")
 	}
+
 	if !hasComponentBuild && cfg.forceBuild {
-		return status, fmt.Errorf("cannot force-build without a component build command")
+		return status, errors.New("cannot force-build without a component build command")
 	}
 
 	staticDir := filepath.Join(cfg.dir, "static")
@@ -528,14 +636,18 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 	staticRelevant := staticCmd != ""
 
 	cache, _ := readBuildCache(cfg.dir)
-	var componentHash, staticHash string
-	var err error
+
+	var (
+		componentHash, staticHash string
+		err                       error
+	)
 	if hasComponentBuild {
 		componentHash, err = componentInputHash(cfg.dir, m, componentCmd)
 		if err != nil {
 			return status, err
 		}
 	}
+
 	if staticRelevant {
 		staticHash, err = staticInputHash(cfg.dir, m, staticCmd)
 		if err != nil {
@@ -547,6 +659,7 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 	if hasComponentBuild {
 		componentStale = cfg.forceBuild || cache.ComponentHash != componentHash || !wasmExists
 	}
+
 	staticStale := false
 	if staticRelevant {
 		staticStale = cfg.forceBuild || cache.StaticHash != staticHash || !staticExists
@@ -557,19 +670,23 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 		if err := runBuildPhase(cfg, "component", componentCmd); err != nil {
 			return status, err
 		}
+
 		status.ComponentBuilt = true
 		if err := runCompile(cfg); err != nil {
 			return status, err
 		}
+
 		if digest, err := fileDigest(wasmPath); err == nil {
 			status.WasmDigest = digest
 			cache.WasmDigest = digest
 		}
+
 		if hash, err := componentInputHash(cfg.dir, m, componentCmd); err == nil {
 			cache.ComponentHash = hash
 		} else {
 			cache.ComponentHash = componentHash
 		}
+
 		writeBuildCache(cfg.dir, cache)
 	case hasComponentBuild, wasmExists:
 		status.ComponentReused = true
@@ -580,13 +697,17 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 		if err := runBuildPhase(cfg, "static", staticCmd); err != nil {
 			return status, err
 		}
+
 		status.StaticBuilt = true
+
 		if hash, err := staticInputHash(cfg.dir, m, staticCmd); err == nil {
 			cache.StaticHash = hash
 		} else {
 			cache.StaticHash = staticHash
 		}
+
 		writeBuildCache(cfg.dir, cache)
+
 		if info, err := os.Stat(staticDir); err != nil || !info.IsDir() {
 			fmt.Fprintf(os.Stderr, "warning: static build finished but %s is missing\n", staticDir)
 		}
@@ -599,6 +720,7 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 			status.WasmDigest = digest
 		}
 	}
+
 	return status, nil
 }
 
@@ -608,12 +730,14 @@ func printBuildStatus(status buildStatus) {
 		fmt.Fprintln(os.Stderr, "build: skipped")
 		return
 	}
+
 	switch {
 	case status.ComponentBuilt:
 		fmt.Fprintln(os.Stderr, "component: built")
 	case status.ComponentReused:
 		fmt.Fprintln(os.Stderr, "component: reused")
 	}
+
 	switch {
 	case status.StaticBuilt:
 		fmt.Fprintln(os.Stderr, "static: built")
@@ -637,24 +761,29 @@ func serverDigest(cfg *deployConfig, name string) string {
 	if err != nil {
 		return ""
 	}
+
 	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
 	if err != nil {
 		return ""
 	}
 	defer resp.Body.Close()
+
 	if resp.StatusCode != http.StatusOK {
 		return ""
 	}
+
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return ""
 	}
+
 	var info struct {
 		CurrentDigest string `json:"currentDigest"`
 	}
 	if err := json.Unmarshal(data, &info); err != nil {
 		return ""
 	}
+
 	return info.CurrentDigest
 }
 
@@ -664,8 +793,10 @@ func httpRequest(cfg *deployConfig, method, path string, body io.Reader) (*http.
 	if err != nil {
 		return nil, err
 	}
+
 	if cfg.token != "" {
 		req.Header.Set("Authorization", "Bearer "+cfg.token)
 	}
+
 	return req, nil
 }

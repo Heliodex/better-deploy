@@ -115,7 +115,7 @@ func toWasiHeaders(headers http.Header) (*wasi.Fields, error) {
 	fields := wasi.MakeFields()
 
 	for key, vals := range headers {
-		fieldVals := [][]uint8{}
+		fieldVals := make([][]uint8, 0, len(vals))
 		for _, val := range vals {
 			fieldVals = append(fieldVals, []uint8(val))
 		}

@@ -1,32 +1,31 @@
 version: "2"
 
-run:
-    timeout: 5m
-    tests: true
-
+# The default profile is strict: every current linter is enabled.
+# Deprecated aliases are disabled in favour of their replacements:
+#   exhaustruct -> exhaustruct_v5, gomodguard -> gomodguard_v2, wsl -> wsl_v5
 linters:
-    default: standard
-    enable:
-        - bodyclose
-        - copyloopvar
-        - durationcheck
-        - errname
-        - errorlint
-        - forcetypeassert
-        - gocheckcompilerdirectives
-        - gocritic
-        - makezero
-        - mirror
-        - nolintlint
-        - prealloc
-        - reassign
-        - rowserrcheck
-        - sqlclosecheck
-        - thelper
-        - unconvert
-        - unparam
-        - usestdlibvars
-        - wastedassign
+    default: all
+    disable:
+        # Deprecated aliases.
+        - exhaustruct
+        - gomodguard
+        - wsl
+        # Opposing or architecture-specific rules.
+        - dupword
+        - err113
+        - exhaustruct_v5
+        - forbidigo
+        - funcorder
+        - gochecknoglobals
+        - gochecknoinits
+        - nlreturn
+        - noinlineerr
+        - nilerr
+        - nonamedreturns
+        - paralleltest
+        - tagliatelle
+        - testpackage
+        - varnamelen
     exclusions:
         generated: lax
         presets:
@@ -42,17 +41,55 @@ linters:
                   - unparam
               path: _test\.go
     settings:
-        gocritic:
-            enabled-tags:
-                - diagnostic
-                - performance
-            disabled-checks:
-                - badCall
-                - evalOrder
-                - hugeParam
-                - mapKey
-                - rangeValCopy
-                - sprintfQuotedString
+        cyclop:
+            max-complexity: 30
+        funlen:
+            lines: 150
+            statements: 100
+        gocognit:
+            min-complexity: 30
+        depguard:
+            rules:
+                main:
+                    allow:
+                        - $gostd
+                        - better-deploy
+                        - go.bytecodealliance.org
+                        - golang.org/x/sys/unix
+                        - modernc.org/sqlite
+                        - modernc.org/sqlite/lib
+                        - wt.packages
+        goconst:
+            min-occurrences: 10
+        gosec:
+            excludes:
+                - G104
+                - G107
+                - G122
+                - G204
+                - G702
+                - G703
+                - G704
+                - G706
+        lll:
+            line-length: 200
+        mnd:
+            ignored-numbers:
+                - "0"
+                - "1"
+                - "2"
+                - "3"
+                - "4"
+                - "5"
+                - "6"
+                - "7"
+                - "8"
+                - "9"
+                - "10"
+                - "100"
+                - "1000"
+        nestif:
+            min-complexity: 10
         nolintlint:
             require-explanation: true
             require-specific: true
