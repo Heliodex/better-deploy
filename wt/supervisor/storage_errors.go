@@ -95,7 +95,9 @@ func storageErrorDetails(err error) (int, storageErrorResponse) {
 			// SQLite refuses a disabled function such as load_extension before the authorizer runs, and reports SQLITE_ERROR.
 			return http.StatusForbidden, storageErrorResponse{Error: errorMessage(err), Code: "denied", SQLiteCode: code}
 		}
+
 		status, name, constraint := storageSQLiteError(code)
+
 		return status, storageErrorResponse{
 			Error:      errorMessage(err),
 			Code:       name,
@@ -103,6 +105,7 @@ func storageErrorDetails(err error) (int, storageErrorResponse) {
 			Constraint: constraint,
 		}
 	}
+
 	return http.StatusInternalServerError, storageErrorResponse{Error: errorMessage(err), Code: "internal"}
 }
 

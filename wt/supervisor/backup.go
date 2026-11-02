@@ -71,9 +71,11 @@ func (b backupSettings) interval() (time.Duration, error) {
 	if err != nil {
 		return 0, fmt.Errorf("every %q: use a duration such as 6h or 24h", b.Every)
 	}
+
 	if every < minBackupEvery || every > maxBackupEvery {
 		return 0, fmt.Errorf("every %q must be between %s and %s", b.Every, minBackupEvery, maxBackupEvery)
 	}
+
 	return every, nil
 }
 
@@ -81,9 +83,11 @@ func (b backupSettings) validate() error {
 	if _, err := b.interval(); err != nil {
 		return err
 	}
+
 	if b.Keep < minBackupKeep || b.Keep > maxBackupKeep {
 		return fmt.Errorf("keep must be between %d and %d", minBackupKeep, maxBackupKeep)
 	}
+
 	return nil
 }
 
@@ -148,14 +152,17 @@ func newBackupManager(dir string, storage *storageServer, dataDir string) *backu
 func (m *backupManager) appLock(app string) *sync.Mutex {
 	m.locksMu.Lock()
 	defer m.locksMu.Unlock()
+
 	if m.locks == nil {
 		m.locks = map[string]*sync.Mutex{}
 	}
+
 	lock := m.locks[app]
 	if lock == nil {
 		lock = &sync.Mutex{}
 		m.locks[app] = lock
 	}
+
 	return lock
 }
 
@@ -196,6 +203,7 @@ func (m *backupManager) adoptBackupFile(app, source, dst string) error {
 	if err != nil {
 		return err
 	}
+
 	return m.content(app).link(digest, dst)
 }
 
@@ -205,27 +213,34 @@ func (m *backupManager) gcBlobs(app string) error {
 	if os.IsNotExist(err) {
 		return nil
 	}
+
 	if err != nil {
 		return err
 	}
+
 	referenced := map[string]struct{}{}
+
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || (!strings.HasSuffix(name, backupFileSuffix) && !strings.HasSuffix(name, backupDataSuffix)) {
 			continue
 		}
+
 		digest, err := fileDigest(filepath.Join(m.appDir(app), name))
 		if err != nil {
 			continue
 		}
+
 		referenced[digest] = struct{}{}
 	}
+
 	return m.content(app).prune(referenced)
 }
 
 // settings reads an app's policy, falling back to the defaults when it has never been configured.
 func (m *backupManager) settings(app string) (backupSettings, error) {
 	settings := defaultBackupSettings()
+
 	data, err := os.ReadFile(m.configPath(app))
 	switch {
 	case os.IsNotExist(err):
@@ -233,12 +248,15 @@ func (m *backupManager) settings(app string) (backupSettings, error) {
 	case err != nil:
 		return settings, err
 	}
+
 	if err := json.Unmarshal(data, &settings); err != nil {
 		return settings, fmt.Errorf("backup config: %w", err)
 	}
+
 	if err := settings.validate(); err != nil {
 		return settings, fmt.Errorf("backup config: %w", err)
 	}
+
 	return settings, nil
 }
 
@@ -253,14 +271,17 @@ func writeFileAtomicMode(path string, data []byte, perm os.FileMode) error {
 	if err := os.WriteFile(temp, data, perm); err != nil {
 		return err
 	}
+
 	if err := os.Chmod(temp, perm); err != nil {
 		_ = os.Remove(temp)
 		return err
 	}
+
 	if err := os.Rename(temp, path); err != nil {
 		_ = os.Remove(temp)
 		return err
 	}
+
 	return nil
 }
 
@@ -268,6 +289,7 @@ func writeFileAtomicMode(path string, data []byte, perm os.FileMode) error {
 func backupTime(name string) (time.Time, bool) {
 	stamp := strings.TrimSuffix(strings.TrimPrefix(name, backupFilePrefix), backupFileSuffix)
 	created, err := time.Parse(backupTimeLayout, stamp)
+
 	return created, err == nil
 }
 
@@ -277,14 +299,17 @@ func (m *backupManager) filesLocked(app string) ([]backupInfo, error) {
 	if os.IsNotExist(err) {
 		return []backupInfo{}, nil
 	}
+
 	if err != nil {
 		return nil, err
 	}
+
 	infos := make([]backupInfo, 0, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
+
 		name := entry.Name()
 		switch {
 		case strings.HasPrefix(name, backupFilePrefix) && strings.HasSuffix(name, backupFileSuffix):
@@ -292,15 +317,18 @@ func (m *backupManager) filesLocked(app string) ([]backupInfo, error) {
 			if !ok {
 				continue
 			}
+
 			info, err := entry.Info()
 			if err != nil {
 				return nil, err
 			}
+
 			backup := backupInfo{Name: name, Size: info.Size(), CreatedAt: created}
 			if data, err := os.Stat(m.dataPath(app, name)); err == nil && data.Mode().IsRegular() {
 				backup.DataSize = data.Size()
 				backup.HasData = true
 			}
+
 			infos = append(infos, backup)
 		case strings.HasPrefix(name, backupFilePrefix) && strings.HasSuffix(name, backupDataSuffix):
 			// A data-only snapshot has no database file; the archive itself is the snapshot.
@@ -308,18 +336,23 @@ func (m *backupManager) filesLocked(app string) ([]backupInfo, error) {
 			if exists(m.appDir(app), name) {
 				continue
 			}
+
 			created, ok := backupTime(name)
 			if !ok {
 				continue
 			}
+
 			info, err := entry.Info()
 			if err != nil {
 				return nil, err
 			}
+
 			infos = append(infos, backupInfo{Name: name, DataSize: info.Size(), HasData: true, CreatedAt: created})
 		}
 	}
+
 	sort.Slice(infos, func(i, j int) bool { return infos[i].CreatedAt.After(infos[j].CreatedAt) })
+
 	return infos, nil
 }
 
@@ -329,20 +362,24 @@ func (m *backupManager) stateLocked(app string) (backupState, error) {
 	if err != nil {
 		return backupState{}, err
 	}
+
 	tree, changed, err := m.loadTreeLocked(app, files)
 	if err != nil {
 		return backupState{}, err
 	}
+
 	if changed {
 		if err := m.saveTreeLocked(app, tree); err != nil {
 			return backupState{}, err
 		}
 	}
+
 	for i := range files {
 		node := tree.Nodes[files[i].Name]
 		files[i].Parent = node.Parent
 		files[i].Kind = node.Kind
 	}
+
 	return backupState{Files: files, Tree: tree}, nil
 }
 
@@ -352,6 +389,7 @@ func (m *backupManager) listLocked(app string) ([]backupInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return state.Files, nil
 }
 
@@ -359,6 +397,7 @@ func (m *backupManager) listLocked(app string) ([]backupInfo, error) {
 func (m *backupManager) list(app string) ([]backupInfo, error) {
 	m.lock(app)
 	defer m.unlock(app)
+
 	return m.listLocked(app)
 }
 
@@ -366,14 +405,17 @@ func (m *backupManager) list(app string) ([]backupInfo, error) {
 func (m *backupManager) overview(app string) (backupsResponse, error) {
 	m.lock(app)
 	defer m.unlock(app)
+
 	settings, err := m.settings(app)
 	if err != nil {
 		return backupsResponse{}, err
 	}
+
 	state, err := m.stateLocked(app)
 	if err != nil {
 		return backupsResponse{}, err
 	}
+
 	return backupsResponse{
 		Settings: settings,
 		Backups:  state.Files,
@@ -391,13 +433,16 @@ func (m *backupManager) saveSettingsLocked(app string, settings backupSettings) 
 	if err := os.MkdirAll(m.appDir(app), 0o755); err != nil {
 		return fmt.Errorf("backup dir: %w", err)
 	}
+
 	data, err := json.Marshal(settings)
 	if err != nil {
 		return err
 	}
+
 	if err := writeFileAtomic(m.configPath(app), append(data, '\n')); err != nil {
 		return fmt.Errorf("write backup config: %w", err)
 	}
+
 	return m.pruneLocked(app, settings.Keep)
 }
 
@@ -406,8 +451,10 @@ func (m *backupManager) saveSettings(app string, settings backupSettings) error 
 	if err := settings.validate(); err != nil {
 		return err
 	}
+
 	m.lock(app)
 	defer m.unlock(app)
+
 	return m.saveSettingsLocked(app, settings)
 }
 
@@ -415,6 +462,7 @@ func (m *backupManager) saveSettings(app string, settings backupSettings) error 
 func (m *backupManager) create(ctx context.Context, app string) (backupInfo, error) {
 	m.lock(app)
 	defer m.unlock(app)
+
 	return m.createLocked(ctx, app, backupKindManual)
 }
 
@@ -422,32 +470,40 @@ func (m *backupManager) create(ctx context.Context, app string) (backupInfo, err
 func (m *backupManager) backupIfDue(ctx context.Context, app string, now time.Time) error {
 	m.lock(app)
 	defer m.unlock(app)
+
 	settings, err := m.settings(app)
 	if err != nil {
 		return err
 	}
+
 	if !settings.Enabled {
 		return nil
 	}
+
 	every, err := settings.interval()
 	if err != nil {
 		return err
 	}
+
 	state, err := m.stateLocked(app)
 	if err != nil {
 		return err
 	}
+
 	last := state.Tree.Checked
 	if len(state.Files) > 0 && state.Files[0].CreatedAt.After(last) {
 		last = state.Files[0].CreatedAt
 	}
+
 	if !last.IsZero() && now.Sub(last) < every {
 		return nil
 	}
+
 	_, err = m.createLocked(ctx, app, backupKindAutomatic)
 	if errors.Is(err, errBackupUnchanged) {
 		return nil
 	}
+
 	return err
 }
 
@@ -458,26 +514,33 @@ func (m *backupManager) dueApps() []string {
 		if !os.IsNotExist(err) {
 			log.Printf("backup: scan apps: %v", err)
 		}
+
 		return nil
 	}
+
 	names := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") || !validName(entry.Name()) {
 			continue
 		}
+
 		names = append(names, entry.Name())
 	}
+
 	return names
 }
 
 // runDue snapshots every app whose policy is enabled and whose newest snapshot is older than its interval. An app without a database still gets a data-only snapshot of /data. A small worker pool bounds concurrent archives without letting one app's large /data delay every other app.
 func (m *backupManager) runDue(ctx context.Context, now time.Time) {
 	names := m.dueApps()
+
 	workers := min(backupWorkers, len(names))
 	if workers == 0 {
 		return
 	}
+
 	jobs := make(chan string)
+
 	var wg sync.WaitGroup
 	for range workers {
 		wg.Go(func() {
@@ -485,21 +548,25 @@ func (m *backupManager) runDue(ctx context.Context, now time.Time) {
 				if ctx.Err() != nil {
 					return
 				}
+
 				if err := m.backupIfDue(ctx, name, now); err != nil {
 					log.Printf("backup %s: %v", name, err)
 				}
 			}
 		})
 	}
+
 	for _, name := range names {
 		select {
 		case jobs <- name:
 		case <-ctx.Done():
 			close(jobs)
 			wg.Wait()
+
 			return
 		}
 	}
+
 	close(jobs)
 	wg.Wait()
 }
@@ -513,6 +580,7 @@ func backupCheckDelay(draw func(int64) int64) time.Duration {
 // loop runs the periodic snapshots until the context is cancelled.
 func (m *backupManager) loop(ctx context.Context) {
 	m.runDue(ctx, time.Now())
+
 	for {
 		timer := time.NewTimer(backupCheckDelay(rand.Int64N))
 		select {

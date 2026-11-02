@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -55,7 +56,9 @@ func (s *appStats) appendHistory(now time.Time, cpu float64, memory int64) {
 	if !s.lastAppend.IsZero() && now.Sub(s.lastAppend) < resourceSampleInterval/2 {
 		return
 	}
+
 	s.lastAppend = now
+
 	s.history = append(s.history, resourceSample{At: now.UTC(), CPUPercent: cpu, MemoryBytes: memory})
 	if len(s.history) > resourceHistoryPoints {
 		s.history = s.history[len(s.history)-resourceHistoryPoints:]
@@ -66,9 +69,11 @@ func (s *appStats) appendHistory(now time.Time, cpu float64, memory int64) {
 func (a *app) recordHistory() {
 	a.stats.mu.Lock()
 	defer a.stats.mu.Unlock()
+
 	if a.stats.sampledAt.IsZero() || time.Since(a.stats.sampledAt) > 2*resourceSampleInterval {
 		return
 	}
+
 	a.stats.appendHistory(a.stats.sampledAt, a.stats.cpuPercent, a.stats.memoryBytes)
 }
 
@@ -76,6 +81,7 @@ func (a *app) recordHistory() {
 func (a *app) resourceStats() (float64, int64, time.Time) {
 	a.stats.mu.Lock()
 	defer a.stats.mu.Unlock()
+
 	return a.stats.cpuPercent, a.stats.memoryBytes, a.stats.sampledAt
 }
 
@@ -83,8 +89,10 @@ func (a *app) resourceStats() (float64, int64, time.Time) {
 func (a *app) resourceHistory() []resourceSample {
 	a.stats.mu.Lock()
 	defer a.stats.mu.Unlock()
+
 	out := make([]resourceSample, len(a.stats.history))
 	copy(out, a.stats.history)
+
 	return out
 }
 
@@ -114,26 +122,32 @@ func (s *supervisor) persistResources() {
 	if s.cfg.stateDir == "" {
 		return
 	}
+
 	if err := os.MkdirAll(s.resourcesDir(), 0o755); err != nil {
 		log.Printf("resources: persist: %v", err)
 		return
 	}
+
 	for _, a := range s.allApps() {
 		data, err := json.Marshal(resourceHistoryResponse{Samples: a.resourceHistory()})
 		if err != nil {
 			continue
 		}
+
 		tmp, err := os.CreateTemp(s.resourcesDir(), "."+a.name+".*.json")
 		if err != nil {
 			continue
 		}
+
 		tmpName := tmp.Name()
 		_, writeErr := tmp.Write(append(data, '\n'))
+
 		closeErr := tmp.Close()
 		if writeErr != nil || closeErr != nil {
 			_ = os.Remove(tmpName)
 			continue
 		}
+
 		if err := os.Rename(tmpName, s.resourceHistoryPath(a.name)); err != nil {
 			_ = os.Remove(tmpName)
 		}
@@ -146,25 +160,33 @@ func (s *supervisor) loadResourceHistory(a *app) {
 	if err != nil {
 		return
 	}
+
 	var out resourceHistoryResponse
 	if err := json.Unmarshal(data, &out); err != nil {
 		return
 	}
+
 	cutoff := time.Now().Add(-resourceHistoryWindow)
+
 	kept := make([]resourceSample, 0, len(out.Samples))
 	for _, sample := range out.Samples {
 		if sample.At.IsZero() || sample.At.Before(cutoff) {
 			continue
 		}
+
 		kept = append(kept, sample)
 	}
+
 	sort.Slice(kept, func(i, j int) bool { return kept[i].At.Before(kept[j].At) })
+
 	if len(kept) > resourceHistoryPoints {
 		kept = kept[len(kept)-resourceHistoryPoints:]
 	}
+
 	if len(kept) == 0 {
 		return
 	}
+
 	a.stats.mu.Lock()
 	a.stats.history = kept
 	a.stats.lastAppend = kept[len(kept)-1].At
@@ -176,6 +198,7 @@ func cpuPercent(previous, current uint64, elapsed time.Duration) float64 {
 	if elapsed <= 0 || current < previous {
 		return 0
 	}
+
 	return float64(current-previous) / clockTicks / elapsed.Seconds() * 100
 }
 
@@ -183,21 +206,25 @@ func cpuPercent(previous, current uint64, elapsed time.Duration) float64 {
 func parseProcStat(data []byte) (uint64, error) {
 	close := bytes.LastIndexByte(data, ')')
 	if close < 0 || close+2 >= len(data) {
-		return 0, fmt.Errorf("malformed /proc stat")
+		return 0, errors.New("malformed /proc stat")
 	}
+
 	fields := strings.Fields(string(data[close+1:]))
 	// fields[0] is the process state (field 3), so utime and stime are fields 14 and 15.
 	if len(fields) < 13 {
-		return 0, fmt.Errorf("short /proc stat")
+		return 0, errors.New("short /proc stat")
 	}
+
 	utime, err := strconv.ParseUint(fields[11], 10, 64)
 	if err != nil {
 		return 0, err
 	}
+
 	stime, err := strconv.ParseUint(fields[12], 10, 64)
 	if err != nil {
 		return 0, err
 	}
+
 	return utime + stime, nil
 }
 
@@ -205,12 +232,14 @@ func parseProcStat(data []byte) (uint64, error) {
 func parseProcStatm(data []byte) (int64, error) {
 	fields := strings.Fields(string(data))
 	if len(fields) < 2 {
-		return 0, fmt.Errorf("short /proc statm")
+		return 0, errors.New("short /proc statm")
 	}
+
 	pages, err := strconv.ParseInt(fields[1], 10, 64)
 	if err != nil {
 		return 0, err
 	}
+
 	return pages * int64(os.Getpagesize()), nil
 }
 
@@ -220,18 +249,22 @@ func readProcessStats(pid int) (uint64, int64, error) {
 	if err != nil {
 		return 0, 0, err
 	}
+
 	ticks, err := parseProcStat(stat)
 	if err != nil {
 		return 0, 0, err
 	}
+
 	statm, err := os.ReadFile(fmt.Sprintf("/proc/%d/statm", pid))
 	if err != nil {
 		return 0, 0, err
 	}
+
 	memory, err := parseProcStatm(statm)
 	if err != nil {
 		return 0, 0, err
 	}
+
 	return ticks, memory, nil
 }
 
@@ -239,6 +272,7 @@ func readProcessStats(pid int) (uint64, int64, error) {
 func (a *app) sampleResources(now time.Time) {
 	a.mu.Lock()
 	pid := 0
+
 	started := a.started
 	if a.cmd != nil && a.cmd.Process != nil && !a.exited {
 		pid = a.cmd.Process.Pid
@@ -251,6 +285,7 @@ func (a *app) sampleResources(now time.Time) {
 	stats := &a.stats
 	stats.mu.Lock()
 	defer stats.mu.Unlock()
+
 	if pid == 0 {
 		stats.pid = 0
 		stats.lastTicks = 0
@@ -258,8 +293,10 @@ func (a *app) sampleResources(now time.Time) {
 		stats.sampledAt = now.UTC()
 		stats.cpuPercent = 0
 		stats.memoryBytes = 0
+
 		return
 	}
+
 	if stats.pid == pid && !stats.lastSample.IsZero() && now.Sub(stats.lastSample) < resourceSampleInterval/2 {
 		return
 	}
@@ -268,12 +305,14 @@ func (a *app) sampleResources(now time.Time) {
 	if err != nil {
 		return
 	}
+
 	if stats.pid == pid && !stats.lastSample.IsZero() {
 		stats.cpuPercent = cpuPercent(stats.lastTicks, ticks, now.Sub(stats.lastSample))
 	} else if !started.IsZero() {
 		// A fresh process has no previous sample, so report its average since launch.
 		stats.cpuPercent = cpuPercent(0, ticks, now.Sub(started))
 	}
+
 	stats.pid = pid
 	stats.lastTicks = ticks
 	stats.lastSample = now
@@ -290,6 +329,7 @@ func (s *supervisor) handleResources(w http.ResponseWriter, _ *http.Request, a *
 // sampleAll refreshes resource usage for every app.
 func (s *supervisor) sampleAll() {
 	apps := s.allApps()
+
 	now := time.Now()
 	for _, a := range apps {
 		a.sampleResources(now)
@@ -301,19 +341,26 @@ func (s *supervisor) monitorResources(every time.Duration) {
 	s.sampleAll()
 	s.recordAll()
 	s.persistResources()
+
 	lastPersist := time.Now()
+
 	ticker := time.NewTicker(every)
 	defer ticker.Stop()
+
 	for range ticker.C {
 		if s.stopping.Load() {
 			return
 		}
+
 		s.sampleAll()
 		s.recordAll()
+
 		if time.Since(lastPersist) >= resourcePersistInterval {
 			s.persistResources()
+
 			lastPersist = time.Now()
 		}
+
 		if s.events != nil && s.events.hasSubscribers() {
 			s.broadcast()
 		}

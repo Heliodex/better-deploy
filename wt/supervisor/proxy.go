@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -35,8 +36,9 @@ const (
 func newRequestID() string {
 	var value [16]byte
 	if _, err := rand.Read(value[:]); err != nil {
-		return fmt.Sprintf("%d", time.Now().UnixNano())
+		return strconv.FormatInt(time.Now().UnixNano(), 10)
 	}
+
 	return hex.EncodeToString(value[:])
 }
 
@@ -65,6 +67,7 @@ func (s *supervisor) newProxy(a *app) *httputil.ReverseProxy {
 			if remote := remoteIP(r.In.RemoteAddr); info.Trusted && remote != "" && remote != info.ClientIP {
 				chain += ", " + remote
 			}
+
 			r.Out.Header.Set("X-Forwarded-For", chain)
 			r.Out.Header.Set("X-Real-IP", info.ClientIP)
 			r.Out.Header.Set("X-Forwarded-Host", info.Authority)
@@ -78,6 +81,7 @@ func (s *supervisor) newProxy(a *app) *httputil.ReverseProxy {
 			r.Out.Header.Set(spinClientAddrHeader, info.ClientIP)
 			r.Out.Header.Set(spinPathInfoHeader, r.In.URL.RequestURI())
 			r.Out.Header.Set(spinBasePathHeader, "")
+
 			if requestID := r.In.Header.Get(requestIDHeader); requestID != "" {
 				r.Out.Header.Set(requestIDHeader, requestID)
 			}
@@ -87,6 +91,7 @@ func (s *supervisor) newProxy(a *app) *httputil.ReverseProxy {
 			http.Error(w, "app unavailable", http.StatusBadGateway)
 		},
 	}
+
 	return proxy
 }
 
@@ -104,9 +109,11 @@ func formatProxyDuration(d time.Duration) string {
 	if d < time.Millisecond {
 		return fmt.Sprintf("%dµs", d.Microseconds())
 	}
+
 	if d < time.Second {
 		return fmt.Sprintf("%.1fms", float64(d.Microseconds())/1000)
 	}
+
 	return fmt.Sprintf("%.2fs", d.Seconds())
 }
 
@@ -116,6 +123,7 @@ func formatAccessLog(method string, status int, duration time.Duration, uri, req
 	if requestID != "" {
 		line += " request=" + requestID
 	}
+
 	return line
 }
 
@@ -125,6 +133,7 @@ func requestHost(r *http.Request) string {
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		return h
 	}
+
 	return host
 }
 
@@ -132,45 +141,55 @@ func requestHost(r *http.Request) string {
 func (s *supervisor) appForHost(host string) *app {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
 	if a := s.hosts[host]; a != nil {
 		return a
 	}
+
 	labels := strings.Split(host, ".")
 	if len(labels) < 2 {
 		return nil
 	}
+
 	return s.hosts["*."+strings.Join(labels[1:], ".")]
 }
 
 // handleProxy resolves the app host and dispatches maintenance, events, identity and blob traffic before proxying.
 func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
 	host := s.effectiveHost(r)
+
 	a := s.appForHost(host)
 	if a == nil {
 		http.Error(w, "no app for this host", http.StatusNotFound)
 		return
 	}
+
 	a.mu.Lock()
 	identityMode := a.cfg.Identity == identityModePlatform
 	maintenance := a.cfg.Maintenance
 	a.mu.Unlock()
+
 	if maintenance {
 		s.serveMaintenance(w, r, a)
 		return
 	}
+
 	if appEventPath(r.URL.Path) {
 		s.handleAppEvents(w, r, a)
 		return
 	}
+
 	if identityMode && s.serveIdentityApp(w, r) {
 		return
 	}
+
 	s.identityProxyHeaders(r, a.name, identityMode)
 	// Blob traffic belongs to the supervisor, not the wasm component, so large bodies never take an app slot.
 	if r.URL.Path == blobPrefix || strings.HasPrefix(r.URL.Path, blobPrefix+"/") {
 		s.handleBlobs(w, r, a)
 		return
 	}
+
 	s.serveApp(w, r, a)
 }
 
@@ -179,6 +198,7 @@ func (s *supervisor) logAccess(a *app, r *http.Request, started time.Time, reque
 	if a.logs == nil || !s.shouldLogAccess(a, status) {
 		return
 	}
+
 	a.logs.logSupervisor(formatAccessLog(r.Method, status, time.Since(started), r.URL.RequestURI(), requestID))
 }
 
@@ -189,7 +209,9 @@ func (s *supervisor) startAccess(w http.ResponseWriter, r *http.Request) string 
 		requestID = newRequestID()
 		r.Header.Set(requestIDHeader, requestID)
 	}
+
 	w.Header().Set(requestIDHeader, requestID)
+
 	return requestID
 }
 
@@ -199,10 +221,12 @@ func (s *supervisor) requireDependencies(w http.ResponseWriter, a *app) bool {
 	if ready {
 		return true
 	}
+
 	w.Header().Set("Retry-After", "1")
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusServiceUnavailable)
 	_, _ = fmt.Fprintf(w, "waiting for dependencies: %s\n", strings.Join(waiting, ", "))
+
 	return false
 }
 
@@ -220,11 +244,14 @@ func (s *supervisor) proxyRequest(w http.ResponseWriter, r *http.Request, a *app
 	timeout := a.cfg.requestTimeout
 	proxy := a.proxy
 	a.mu.Unlock()
+
 	if proxy == nil {
 		w.Header().Set("Retry-After", "1")
 		http.Error(w, "app is not ready", http.StatusServiceUnavailable)
+
 		return false
 	}
+
 	if slots != nil {
 		select {
 		case slots <- struct{}{}:
@@ -234,12 +261,16 @@ func (s *supervisor) proxyRequest(w http.ResponseWriter, r *http.Request, a *app
 			return false
 		}
 	}
+
 	if timeout > 0 {
 		ctx, cancel := context.WithTimeout(r.Context(), timeout)
 		defer cancel()
+
 		r = r.WithContext(ctx)
 	}
+
 	proxy.ServeHTTP(w, r)
+
 	return true
 }
 
@@ -248,20 +279,26 @@ func (s *supervisor) serveApp(w http.ResponseWriter, r *http.Request, a *app) {
 	if !s.requireDependencies(w, a) {
 		return
 	}
+
 	requestID := s.startAccess(w, r)
+
 	started := time.Now()
 	if !a.beginRequest() {
 		s.writeUnavailable(w, r, a, started, requestID, "app is restarting")
 		return
 	}
+
 	defer a.requests.Done()
+
 	wrapped := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+
 	if s.metrics != nil {
 		s.metrics.beginRequest(a.name)
 		defer func() {
 			s.metrics.endRequest(a.name, r.Method, wrapped.status, time.Since(started))
 		}()
 	}
+
 	static, ready := a.servingState()
 
 	// Static files come from the bundle and do not consume the app's concurrency slots, but a stopped app does not serve them.
@@ -269,10 +306,12 @@ func (s *supervisor) serveApp(w http.ResponseWriter, r *http.Request, a *app) {
 		s.logAccess(a, r, started, requestID, wrapped.status)
 		return
 	}
+
 	if !ready {
 		s.writeUnavailable(w, r, a, started, requestID, "app not ready")
 		return
 	}
+
 	if s.proxyRequest(wrapped, r, a) {
 		s.logAccess(a, r, started, requestID, wrapped.status)
 	}
@@ -283,13 +322,16 @@ func (s *supervisor) shouldLogAccess(a *app, status int) bool {
 	if status >= http.StatusInternalServerError {
 		return true
 	}
+
 	if !s.cfg.accessLog && s.cfg.accessLogEvery != 0 {
 		return false
 	}
+
 	every := s.cfg.accessLogEvery
 	if every <= 1 {
 		return true
 	}
+
 	return a.accessLines.Add(1)%uint64(every) == 0
 }
 
@@ -316,6 +358,7 @@ func (s *supervisor) publicHandler() http.Handler {
 			s.handleProxy(w, r)
 			return
 		}
+
 		s.publicRoutes().ServeHTTP(w, r)
 	})
 }
@@ -327,6 +370,7 @@ func (s *supervisor) handler() http.Handler {
 			s.handleProxy(w, r)
 			return
 		}
+
 		s.serveAdminOrProxy(w, r)
 	})
 }
@@ -334,5 +378,6 @@ func (s *supervisor) handler() http.Handler {
 // statusWriter captures the status code a proxied response is written with. Unwrap hands the underlying writer's optional interfaces (Flusher, Hijacker) through.
 type statusWriter struct {
 	http.ResponseWriter
+
 	status int
 }

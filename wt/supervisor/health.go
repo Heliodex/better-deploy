@@ -42,10 +42,12 @@ func probeHealth(port int, path string) error {
 		return err
 	}
 	defer resp.Body.Close()
+
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return fmt.Errorf("%s: %s", resp.Status, trimMessage(body))
 	}
+
 	return nil
 }
 
@@ -55,6 +57,7 @@ func trimMessage(body []byte) string {
 	if len(text) > 200 {
 		text = text[:200]
 	}
+
 	return text
 }
 
@@ -63,18 +66,25 @@ func (s *supervisor) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 		return
 	}
+
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
+
 	if !s.ready.Load() || s.stopping.Load() {
 		w.WriteHeader(http.StatusServiceUnavailable)
+
 		if r.Method != http.MethodHead {
 			_, _ = io.WriteString(w, "not ready\n")
 		}
+
 		return
 	}
+
 	w.WriteHeader(http.StatusOK)
+
 	if r.Method != http.MethodHead {
 		_, _ = io.WriteString(w, "ok\n")
 	}
@@ -91,7 +101,9 @@ func (s *supervisor) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 func (a *app) servingState() (static, ready bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
 	running := a.cmd != nil && !a.exited && !a.retired
+
 	return running, running && a.ready
 }
 
@@ -99,13 +111,17 @@ func (a *app) servingState() (static, ready bool) {
 func (a *app) healthDue(now time.Time) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
 	if a.cmd == nil || a.exited || a.starting || a.retired {
 		return false
 	}
+
 	if !a.nextHealth.IsZero() && now.Before(a.nextHealth) {
 		return false
 	}
+
 	a.nextHealth = now.Add(a.cfg.probeInterval())
+
 	return true
 }
 
@@ -113,9 +129,11 @@ func (a *app) healthDue(now time.Time) bool {
 func (a *app) recordHealth(err error, now time.Time) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
 	if a.retired || a.cmd == nil || a.exited {
 		return false
 	}
+
 	if err == nil {
 		changed := !a.healthOK || !a.ready || a.lastError != ""
 		a.healthOK = true
@@ -123,17 +141,21 @@ func (a *app) recordHealth(err error, now time.Time) bool {
 		a.healthFailures = 0
 		a.lastHealthy = now.UTC()
 		a.lastError = ""
+
 		return changed
 	}
 
 	a.healthFailures++
 	a.lastError = err.Error()
+
 	wasReady := a.healthOK && a.ready
 	if wasReady && a.healthFailures >= a.cfg.failureLimit() {
 		a.healthOK = false
 		a.ready = false
+
 		return true
 	}
+
 	return a.healthFailures == 1
 }
 
@@ -141,21 +163,25 @@ func (a *app) recordHealth(err error, now time.Time) bool {
 // The normal process watcher then applies the usual restart backoff.
 func (s *supervisor) restartUnhealthy(a *app) {
 	a.mu.Lock()
+
 	should := a.cfg.RestartOnUnhealthy && !a.ready && !a.retired && !a.starting && a.cmd != nil && !a.exited
 	if !should || a.unhealthyRestart {
 		a.mu.Unlock()
 		return
 	}
+
 	a.unhealthyRestart = true
 	a.mu.Unlock()
 
 	log.Printf("app %s: restarting after failed health checks", a.name)
+
 	go func() {
 		defer func() {
 			a.mu.Lock()
 			a.unhealthyRestart = false
 			a.mu.Unlock()
 		}()
+
 		s.kill(a)
 	}()
 }
@@ -166,16 +192,20 @@ func (s *supervisor) checkHealth(a *app) {
 	running := a.cmd != nil && !a.exited && !a.starting && !a.retired
 	port, health := a.port, a.cfg.Health
 	a.mu.Unlock()
+
 	if !running {
 		return
 	}
+
 	err := probeHealth(port, health)
 	if a.recordHealth(err, time.Now()) {
 		if err != nil {
 			log.Printf("app %s: health check failed: %v", a.name, err)
 		}
+
 		s.broadcast()
 	}
+
 	if err != nil {
 		s.restartUnhealthy(a)
 	}
@@ -184,17 +214,22 @@ func (s *supervisor) checkHealth(a *app) {
 // checkAllHealth probes apps whose configured interval is due and publishes any status change.
 func (s *supervisor) checkAllHealth() {
 	now := time.Now()
+
 	var wg sync.WaitGroup
+
 	for _, a := range s.allApps() {
 		if !a.healthDue(now) {
 			continue
 		}
+
 		wg.Add(1)
 		go func(a *app) {
 			defer wg.Done()
+
 			s.checkHealth(a)
 		}(a)
 	}
+
 	wg.Wait()
 }
 
@@ -202,10 +237,12 @@ func (s *supervisor) checkAllHealth() {
 func (s *supervisor) monitorHealth() {
 	ticker := time.NewTicker(healthMonitorInterval)
 	defer ticker.Stop()
+
 	for range ticker.C {
 		if s.stopping.Load() {
 			return
 		}
+
 		s.checkAllHealth()
 	}
 }
@@ -221,6 +258,7 @@ func (a *app) statusLocked() string {
 		if a.ready {
 			return "running"
 		}
+
 		return "unhealthy"
 	default:
 		return "stopped"

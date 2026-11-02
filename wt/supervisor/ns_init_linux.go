@@ -30,19 +30,24 @@ func nsFatal(err error) {
 
 func readNSPlan() (nsPlan, error) {
 	var plan nsPlan
+
 	raw := os.Getenv(nsPlanEnv)
 	if raw == "" {
 		return plan, fmt.Errorf("%s is not set", nsPlanEnv)
 	}
+
 	if err := json.Unmarshal([]byte(raw), &plan); err != nil {
 		return plan, fmt.Errorf("parse namespace plan: %w", err)
 	}
+
 	if plan.Root == "" || plan.AppDir == "" || plan.DataDir == "" || plan.Wasmtime == "" || !strings.HasPrefix(plan.BinPath, "/") {
-		return plan, fmt.Errorf("namespace plan is incomplete")
+		return plan, errors.New("namespace plan is incomplete")
 	}
+
 	if plan.TmpfsMB < 1 || plan.TmpfsMB > 1024 {
 		return plan, fmt.Errorf("invalid tmpfs size %d", plan.TmpfsMB)
 	}
+
 	return plan, nil
 }
 
@@ -55,13 +60,16 @@ func bindDir(src, dst string, readOnly bool) error {
 	if err := os.MkdirAll(dst, 0o755); err != nil {
 		return err
 	}
+
 	if err := unix.Mount(src, dst, "", unix.MS_BIND|unix.MS_REC, ""); err != nil {
 		return err
 	}
+
 	flags := uintptr(unix.MS_BIND | unix.MS_REMOUNT | unix.MS_NOSUID | unix.MS_NODEV)
 	if readOnly {
 		flags |= unix.MS_RDONLY
 	}
+
 	return unix.Mount("", dst, "", flags, "")
 }
 
@@ -69,17 +77,22 @@ func bindFile(src, dst string, readOnly bool) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
+
 	file, err := os.OpenFile(dst, os.O_CREATE|os.O_RDONLY, 0o644)
 	if err != nil {
 		return err
 	}
+
 	_ = file.Close()
+
 	if err := unix.Mount(src, dst, "", unix.MS_BIND, ""); err != nil {
 		return err
 	}
+
 	if readOnly {
 		return unix.Mount("", dst, "", unix.MS_BIND|unix.MS_REMOUNT|unix.MS_RDONLY|unix.MS_NOSUID|unix.MS_NODEV, "")
 	}
+
 	return nil
 }
 
@@ -88,9 +101,11 @@ func bindPath(src, dst string, readOnly bool) error {
 	if err != nil {
 		return err
 	}
+
 	if info.IsDir() {
 		return bindDir(src, dst, readOnly)
 	}
+
 	return bindFile(src, dst, readOnly)
 }
 
@@ -100,10 +115,12 @@ func setupNamespace(plan *nsPlan) error {
 	if err := unix.Mount("", "/", "", unix.MS_REC|unix.MS_PRIVATE, ""); err != nil {
 		return fmt.Errorf("make mounts private: %w", err)
 	}
+
 	rootFlags := uintptr(unix.MS_NOSUID | unix.MS_NODEV)
 	if err := unix.Mount("tmpfs", plan.Root, "tmpfs", rootFlags, fmt.Sprintf("size=%dm,mode=0755", plan.TmpfsMB)); err != nil {
 		return fmt.Errorf("mount root tmpfs: %w", err)
 	}
+
 	for _, dir := range []string{"app", "bin", "data", "etc", "proc", "tmp"} {
 		if err := os.MkdirAll(insideRoot(plan.Root, "/"+dir), 0o755); err != nil {
 			return fmt.Errorf("create /%s: %w", dir, err)
@@ -113,25 +130,31 @@ func setupNamespace(plan *nsPlan) error {
 	if err := bindPath(plan.AppDir, insideRoot(plan.Root, "/app"), true); err != nil {
 		return fmt.Errorf("mount /app: %w", err)
 	}
+
 	if err := bindPath(plan.DataDir, insideRoot(plan.Root, "/data"), false); err != nil {
 		return fmt.Errorf("mount /data: %w", err)
 	}
+
 	if err := bindFile(plan.Wasmtime, insideRoot(plan.Root, plan.BinPath), true); err != nil {
 		return fmt.Errorf("mount %s: %w", plan.BinPath, err)
 	}
+
 	for _, dir := range plan.LibDirs {
 		if err := bindPath(dir, insideRoot(plan.Root, dir), true); err != nil {
 			return fmt.Errorf("mount %s: %w", dir, err)
 		}
 	}
+
 	for _, file := range plan.Files {
 		if err := bindPath(file, insideRoot(plan.Root, file), true); err != nil {
 			return fmt.Errorf("mount %s: %w", file, err)
 		}
 	}
+
 	if err := unix.Mount("proc", insideRoot(plan.Root, "/proc"), "proc", unix.MS_NOSUID|unix.MS_NODEV|unix.MS_NOEXEC, ""); err != nil {
 		return fmt.Errorf("mount /proc: %w", err)
 	}
+
 	tmpFlags := uintptr(unix.MS_NOSUID | unix.MS_NODEV | unix.MS_NOEXEC)
 	if err := unix.Mount("tmpfs", insideRoot(plan.Root, "/tmp"), "tmpfs", tmpFlags, fmt.Sprintf("size=%dm,mode=1777", defaultTmpfsDir)); err != nil {
 		return fmt.Errorf("mount /tmp: %w", err)
@@ -141,21 +164,27 @@ func setupNamespace(plan *nsPlan) error {
 	if err := os.MkdirAll(oldRoot, 0o755); err != nil {
 		return fmt.Errorf("create old root: %w", err)
 	}
+
 	if err := unix.PivotRoot(plan.Root, oldRoot); err != nil {
 		return fmt.Errorf("pivot root: %w", err)
 	}
+
 	if err := unix.Chdir("/"); err != nil {
 		return fmt.Errorf("chdir after pivot: %w", err)
 	}
+
 	if err := unix.Unmount("/.oldroot", unix.MNT_DETACH); err != nil {
 		return fmt.Errorf("detach old root: %w", err)
 	}
+
 	if err := unix.Rmdir("/.oldroot"); err != nil {
 		return fmt.Errorf("remove old root: %w", err)
 	}
+
 	if err := unix.Sethostname([]byte(plan.Hostname)); err != nil {
 		return fmt.Errorf("set hostname: %w", err)
 	}
+
 	return nil
 }
 
@@ -166,12 +195,15 @@ func dropBoundingCaps() error {
 			return fmt.Errorf("drop capability %d: %w", cap, err)
 		}
 	}
+
 	return nil
 }
 
 func clearCaps() error {
 	header := unix.CapUserHeader{Version: unix.LINUX_CAPABILITY_VERSION_3}
+
 	var empty [2]unix.CapUserData
+
 	_, _, errno := syscall.AllThreadsSyscall6(syscall.SYS_CAPSET, uintptr(unsafe.Pointer(&header)), uintptr(unsafe.Pointer(&empty[0])), 0, 0, 0, 0)
 	if errno == 0 {
 		return nil
@@ -189,6 +221,7 @@ func clearCaps() error {
 			return nil
 		}
 	}
+
 	return fmt.Errorf("clear capabilities: %w", errno)
 }
 
@@ -201,6 +234,7 @@ func applyPlanRlimits(plan *nsPlan) error {
 			return fmt.Errorf("set %s=%d: %w", spec.Name, spec.Value, err)
 		}
 	}
+
 	return nil
 }
 
@@ -210,36 +244,45 @@ func switchToApp(plan *nsPlan) error {
 	if err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); err != nil {
 		return fmt.Errorf("set no_new_privs: %w", err)
 	}
+
 	if err := dropBoundingCaps(); err != nil {
 		return err
 	}
+
 	if plan.ClearGroups {
 		if err := syscall.Setgroups(nil); err != nil {
 			return fmt.Errorf("clear supplementary groups: %w", err)
 		}
 	}
+
 	if err := syscall.Setresgid(0, 0, 0); err != nil {
 		return fmt.Errorf("set gid: %w", err)
 	}
+
 	if err := syscall.Setresuid(0, 0, 0); err != nil {
 		return fmt.Errorf("set uid: %w", err)
 	}
+
 	if err := clearCaps(); err != nil {
 		return err
 	}
+
 	return applyPlanRlimits(plan)
 }
 
 // childEnv passes the app environment to wasmtime without the internal plan.
 func childEnv() []string {
 	env := os.Environ()
+
 	out := env[:0]
 	for _, pair := range env {
 		if strings.HasPrefix(pair, nsPlanEnv+"=") {
 			continue
 		}
+
 		out = append(out, pair)
 	}
+
 	return out
 }
 
@@ -251,11 +294,13 @@ func runApp(plan *nsPlan, args []string) int {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "wt ns-init: start %s: %v\n", plan.BinPath, err)
 		return 125
 	}
+
 	if file := os.NewFile(nsPIDFile, "wt-pid"); file != nil {
 		_, _ = fmt.Fprintf(file, "%d\n", cmd.Process.Pid)
 		_ = file.Close()
@@ -263,7 +308,9 @@ func runApp(plan *nsPlan, args []string) int {
 
 	signals := make(chan os.Signal, 8)
 	signal.Notify(signals, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGHUP)
+
 	done := make(chan struct{})
+
 	go func() {
 		for {
 			select {
@@ -278,17 +325,22 @@ func runApp(plan *nsPlan, args []string) int {
 	}()
 
 	err := cmd.Wait()
+
 	close(done)
 	signal.Stop(signals)
+
 	if err == nil {
 		return 0
 	}
+
 	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 		if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
 			return 128 + int(status.Signal())
 		}
+
 		return exitErr.ExitCode()
 	}
+
 	return 125
 }
 
@@ -297,13 +349,15 @@ func runApp(plan *nsPlan, args []string) int {
 func waitForStart() error {
 	file := os.NewFile(nsGoFile, "wt-go")
 	if file == nil {
-		return fmt.Errorf("start pipe is missing")
+		return errors.New("start pipe is missing")
 	}
 	defer file.Close()
+
 	var buf [1]byte
 	if _, err := io.ReadFull(file, buf[:]); err != nil {
 		return fmt.Errorf("wait for supervisor: %w", err)
 	}
+
 	return nil
 }
 
@@ -311,23 +365,29 @@ func nsInitMain(args []string) {
 	// Seccomp filters and the credential switch are per-thread.
 	// Locking this goroutine keeps the child on the thread that installed the filter and dropped the capabilities, so wasmtime inherits both.
 	runtime.LockOSThread()
+
 	plan, err := readNSPlan()
 	if err != nil {
 		nsFatal(err)
 	}
+
 	if err := setupNamespace(&plan); err != nil {
 		nsFatal(err)
 	}
+
 	if err := switchToApp(&plan); err != nil {
 		nsFatal(err)
 	}
+
 	if plan.Seccomp {
 		if err := installSeccomp(); err != nil {
 			nsFatal(err)
 		}
 	}
+
 	if err := waitForStart(); err != nil {
 		nsFatal(err)
 	}
+
 	os.Exit(runApp(&plan, args))
 }

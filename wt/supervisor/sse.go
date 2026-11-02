@@ -17,11 +17,13 @@ func newSSEStream(w http.ResponseWriter, cacheControl string) (*sseStream, bool)
 	if !ok {
 		return nil, false
 	}
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", cacheControl)
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
+
 	return &sseStream{w: w, flusher: flusher}, true
 }
 
@@ -30,7 +32,9 @@ func (s *sseStream) write(format string, args ...any) bool {
 	if _, err := fmt.Fprintf(s.w, format, args...); err != nil {
 		return false
 	}
+
 	s.flusher.Flush()
+
 	return true
 }
 

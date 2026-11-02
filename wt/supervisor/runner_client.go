@@ -40,13 +40,16 @@ func newRunnerClient(conn net.Conn) *runnerClient {
 		done:       make(chan struct{}),
 	}
 	go c.readLoop()
+
 	return c
 }
 
 // dialRunner retries the runner socket until it accepts and sends its snapshot.
 func dialRunner(path string, timeout time.Duration) (*runnerClient, []runnerAppInfo, int, error) {
 	deadline := time.Now().Add(timeout)
+
 	var lastErr error
+
 	for {
 		conn, err := net.DialTimeout("unix", path, 200*time.Millisecond)
 		if err == nil {
@@ -59,17 +62,21 @@ func dialRunner(path string, timeout time.Duration) (*runnerClient, []runnerAppI
 				client.Close()
 			case <-time.After(2 * time.Second):
 				lastErr = errors.New("timed out waiting for the runner snapshot")
+
 				client.Close()
 			}
 		} else {
 			lastErr = err
 		}
+
 		if time.Now().After(deadline) {
 			if lastErr == nil {
 				lastErr = errors.New("runner did not accept a connection")
 			}
+
 			return nil, nil, 0, lastErr
 		}
+
 		time.Sleep(50 * time.Millisecond)
 	}
 }
@@ -78,18 +85,22 @@ func dialRunner(path string, timeout time.Duration) (*runnerClient, []runnerAppI
 func (c *runnerClient) readLoop() {
 	scanner := bufio.NewScanner(c.conn)
 	scanner.Buffer(make([]byte, 64<<10), runnerScanBytes)
+
 	for scanner.Scan() {
 		var event runnerEvent
 		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
 			c.fail(fmt.Errorf("runner event: %w", err))
 			return
 		}
+
 		c.dispatch(event)
 	}
+
 	err := scanner.Err()
 	if err == nil {
 		err = errors.New("runner connection closed")
 	}
+
 	c.fail(err)
 }
 
@@ -98,7 +109,9 @@ func (c *runnerClient) dispatch(event runnerEvent) {
 	switch event.Op {
 	case runnerOpSnapshot:
 		c.mu.Lock()
+
 		c.snapshot = append([]runnerAppInfo(nil), event.Snapshot...)
+
 		c.runnerPID = event.RunnerPID
 		for _, info := range event.Snapshot {
 			id := info.ID
@@ -116,9 +129,11 @@ func (c *runnerClient) dispatch(event runnerEvent) {
 		c.mu.Lock()
 		stream := c.streams[event.ID]
 		c.mu.Unlock()
+
 		if stream == nil {
 			return
 		}
+
 		select {
 		case stream.started <- event:
 		default:
@@ -127,6 +142,7 @@ func (c *runnerClient) dispatch(event runnerEvent) {
 		c.mu.Lock()
 		stream := c.streams[event.ID]
 		c.mu.Unlock()
+
 		if stream != nil {
 			select {
 			case stream.events <- event:
@@ -137,9 +153,11 @@ func (c *runnerClient) dispatch(event runnerEvent) {
 		c.mu.Lock()
 		stream := c.streams[event.ID]
 		c.mu.Unlock()
+
 		if stream == nil {
 			return
 		}
+
 		select {
 		case stream.events <- event:
 		default:
@@ -157,12 +175,15 @@ func (c *runnerClient) fail(err error) {
 		close(c.done)
 		_ = c.conn.Close()
 		c.mu.Lock()
+
 		streams := make([]*runnerStream, 0, len(c.streams))
 		for _, stream := range c.streams {
 			streams = append(streams, stream)
 		}
+
 		c.streams = map[string]*runnerStream{}
 		c.mu.Unlock()
+
 		for _, stream := range streams {
 			select {
 			case stream.events <- runnerEvent{Op: runnerOpExited, App: stream.name, Error: err.Error()}:
@@ -175,6 +196,7 @@ func (c *runnerClient) fail(err error) {
 func (c *runnerClient) Err() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
 	return c.closeErr
 }
 
@@ -188,27 +210,34 @@ func (c *runnerClient) send(request runnerRequest) error {
 	if err != nil {
 		return err
 	}
+
 	data = append(data, '\n')
+
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
+
 	select {
 	case <-c.done:
 		return errors.New("runner connection closed")
 	default:
 	}
+
 	_, err = c.conn.Write(data)
+
 	return err
 }
 
 func (c *runnerClient) Snapshot() []runnerAppInfo {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
 	return append([]runnerAppInfo(nil), c.snapshot...)
 }
 
 func (c *runnerClient) RunnerPID() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
 	return c.runnerPID
 }
 
@@ -216,6 +245,7 @@ func (c *runnerClient) RunnerPID() int {
 func (c *runnerClient) newStream(id string) *runnerStream {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
 	stream := c.streams[id]
 	if stream == nil {
 		stream = &runnerStream{
@@ -225,6 +255,7 @@ func (c *runnerClient) newStream(id string) *runnerStream {
 		}
 		c.streams[id] = stream
 	}
+
 	return stream
 }
 
@@ -232,12 +263,14 @@ func (c *runnerClient) newStream(id string) *runnerStream {
 func (c *runnerClient) startStream(id string) *runnerStream {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
 	stream := &runnerStream{
 		name:    id,
 		events:  make(chan runnerEvent, runnerOutputBuffer),
 		started: make(chan runnerEvent, 1),
 	}
 	c.streams[id] = stream
+
 	return stream
 }
 
@@ -251,11 +284,13 @@ func (c *runnerClient) Start(request runnerStartRequest) (*runnerStream, runnerE
 	if err := c.send(runnerRequest{Op: runnerOpStart, Start: &request}); err != nil {
 		return nil, runnerEvent{}, err
 	}
+
 	select {
 	case event := <-stream.started:
 		if event.Op == "error" || event.Error != "" {
 			return nil, event, errors.New(event.Error)
 		}
+
 		return stream, event, nil
 	case <-time.After(runnerRequestTimeout):
 		_ = c.send(runnerRequest{Op: runnerOpStop, ID: stream.name})
@@ -279,5 +314,6 @@ func (c *runnerClient) Stop(id string) error {
 func (c *runnerClient) Shutdown() error {
 	err := c.send(runnerRequest{Op: runnerOpShutdown})
 	c.Close()
+
 	return err
 }

@@ -18,22 +18,28 @@ func compressJSONResponse(res *http.Response, acceptEncoding string) error {
 	if res == nil || res.Body == nil || res.Request == nil || res.Request.Method == http.MethodHead {
 		return nil
 	}
+
 	if res.StatusCode < http.StatusOK || res.StatusCode == http.StatusNoContent || res.StatusCode == http.StatusNotModified {
 		return nil
 	}
+
 	if res.Header.Get("Content-Encoding") != "" || !acceptsEncoding(acceptEncoding, "gzip") {
 		return nil
 	}
+
 	if strings.Contains(strings.ToLower(res.Header.Get("Cache-Control")), "no-transform") {
 		return nil
 	}
+
 	mediaType, _, err := mime.ParseMediaType(res.Header.Get("Content-Type"))
 	if err != nil {
 		return nil
 	}
+
 	if mediaType != "application/json" && !strings.HasSuffix(mediaType, "+json") {
 		return nil
 	}
+
 	if res.ContentLength >= 0 && res.ContentLength <= 256 {
 		return nil
 	}
@@ -46,17 +52,20 @@ func compressJSONResponse(res *http.Response, acceptEncoding string) error {
 	res.Header.Del("Content-Length")
 	res.ContentLength = -1
 	addVary(res.Header, "Accept-Encoding")
+
 	go func() {
 		_, copyErr := io.Copy(gz, original)
 		closeErr := gz.Close()
 		_ = original.Close()
 		_ = writer.CloseWithError(firstError(copyErr, closeErr))
 	}()
+
 	return nil
 }
 
 type compressedBody struct {
 	*io.PipeReader
+
 	original io.ReadCloser
 	once     sync.Once
 }
@@ -66,6 +75,7 @@ func (b *compressedBody) Close() error {
 		_ = b.PipeReader.Close()
 		_ = b.original.Close()
 	})
+
 	return nil
 }
 
@@ -75,6 +85,7 @@ func firstError(values ...error) error {
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -86,5 +97,6 @@ func addVary(header http.Header, value string) {
 			}
 		}
 	}
+
 	header.Add("Vary", value)
 }

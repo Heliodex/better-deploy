@@ -4,6 +4,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"strconv"
@@ -50,6 +51,7 @@ func newEgressManager(bin, bin6 string, storageIP string, storagePort int, runne
 		manager.run4 = commandRunner(bin)
 		manager.run6 = commandRunner(bin6)
 	}
+
 	return manager
 }
 
@@ -57,10 +59,12 @@ func newEgressManager(bin, bin6 string, storageIP string, storagePort int, runne
 func commandRunner(bin string) egressRun {
 	return func(args ...string) error {
 		cmd := exec.Command(bin, args...)
+
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("%s %s: %w: %s", bin, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 		}
+
 		return nil
 	}
 }
@@ -70,18 +74,22 @@ func ensureChain(run egressRun, chain string, ready *bool) error {
 	if *ready {
 		return nil
 	}
+
 	if err := run("-w", "-N", chain); err != nil {
 		// The chain normally exists already; flush it so old per-app rules do not survive a restart.
 		if flushErr := run("-w", "-F", chain); flushErr != nil {
 			return fmt.Errorf("create egress chain %s: %w", chain, err)
 		}
 	}
+
 	if err := run("-w", "-C", "OUTPUT", "-j", chain); err != nil {
 		if err := run("-w", "-A", "OUTPUT", "-j", chain); err != nil {
 			return fmt.Errorf("hook egress chain %s into OUTPUT: %w", chain, err)
 		}
 	}
+
 	*ready = true
+
 	return nil
 }
 
@@ -89,6 +97,7 @@ func ensureChain(run egressRun, chain string, ready *bool) error {
 func (m *egressManager) setInternal(ip string, port int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	m.internalIP, m.internalPort = ip, port
 }
 
@@ -100,9 +109,11 @@ func (m *egressManager) rulesFor(uid, appPort int, extra ...egressRule) [][]stri
 	if m.internalIP != "" && m.internalPort > 0 {
 		rules = append(rules, []string{"-m", "owner", "--uid-owner", strconv.Itoa(uid), "-d", m.internalIP, "-p", "tcp", "--dport", strconv.Itoa(m.internalPort), "-j", "ACCEPT"})
 	}
+
 	for _, rule := range extra {
 		rules = append(rules, []string{"-m", "owner", "--uid-owner", strconv.Itoa(uid), "-d", rule.CIDR, "-p", "tcp", "--dport", strconv.Itoa(rule.Port), "-j", "ACCEPT"})
 	}
+
 	return append(rules,
 		[]string{"-m", "owner", "--uid-owner", strconv.Itoa(uid), "-d", "127.0.0.1", "-p", "tcp", "--sport", strconv.Itoa(appPort), "-j", "ACCEPT"},
 		[]string{"-m", "owner", "--uid-owner", strconv.Itoa(uid), "-j", "REJECT"},
@@ -119,12 +130,14 @@ func (m *egressManager) rules6For(uid int) [][]string {
 // deleteRules deletes rules in order, returning the first failure after trying the rest.
 func deleteRules(run egressRun, chain string, rules [][]string) error {
 	var firstErr error
+
 	for _, rule := range rules {
 		args := append([]string{"-w", "-D", chain}, rule...)
 		if err := run(args...); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
+
 	return firstErr
 }
 
@@ -137,42 +150,51 @@ func appendRules(run egressRun, chain string, rules [][]string) ([][]string, err
 			_ = deleteRules(run, chain, appended)
 			return nil, err
 		}
+
 		appended = append(appended, rule)
 	}
+
 	return appended, nil
 }
 
 // add installs the app's rules. Any previous rules for the app are removed first, because a restart gets a new port.
 func (m *egressManager) add(app string, uid, appPort int, extra ...egressRule) error {
 	if uid <= 0 {
-		return fmt.Errorf("egress rules need a non-zero app uid")
+		return errors.New("egress rules need a non-zero app uid")
 	}
+
 	if appPort <= 0 {
-		return fmt.Errorf("egress rules need the app's listening port")
+		return errors.New("egress rules need the app's listening port")
 	}
+
 	if m.storageIP == "" || m.storagePort <= 0 {
-		return fmt.Errorf("egress rules need the storage address")
+		return errors.New("egress rules need the storage address")
 	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	if err := ensureChain(m.run4, egressChain, &m.chainReady); err != nil {
 		return err
 	}
+
 	if m.ipv6 {
 		if err := ensureChain(m.run6, egressChain6, &m.chain6); err != nil {
 			return err
 		}
 	}
+
 	if previous, ok := m.rules[app]; ok {
 		if err := deleteRules(m.run4, egressChain, previous.v4); err != nil {
 			return fmt.Errorf("remove previous IPv4 egress rules for %s: %w", app, err)
 		}
+
 		if len(previous.v6) > 0 {
 			if err := deleteRules(m.run6, egressChain6, previous.v6); err != nil {
 				return fmt.Errorf("remove previous IPv6 egress rules for %s: %w", app, err)
 			}
 		}
+
 		delete(m.rules, app)
 	}
 
@@ -180,16 +202,21 @@ func (m *egressManager) add(app string, uid, appPort int, extra ...egressRule) e
 	if err != nil {
 		return fmt.Errorf("add IPv4 egress rule for %s: %w", app, err)
 	}
+
 	installed := egressAppRules{v4: appended4}
+
 	if m.ipv6 {
 		appended6, err := appendRules(m.run6, egressChain6, m.rules6For(uid))
 		if err != nil {
 			_ = deleteRules(m.run4, egressChain, appended4)
 			return fmt.Errorf("add IPv6 egress rule for %s: %w", app, err)
 		}
+
 		installed.v6 = appended6
 	}
+
 	m.rules[app] = installed
+
 	return nil
 }
 
@@ -197,19 +224,24 @@ func (m *egressManager) add(app string, uid, appPort int, extra ...egressRule) e
 func (m *egressManager) remove(app string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	rules, ok := m.rules[app]
 	if !ok {
 		return nil
 	}
+
 	delete(m.rules, app)
 	err4 := deleteRules(m.run4, egressChain, rules.v4)
+
 	var err6 error
 	if len(rules.v6) > 0 {
 		err6 = deleteRules(m.run6, egressChain6, rules.v6)
 	}
+
 	if err4 != nil {
 		return err4
 	}
+
 	return err6
 }
 
@@ -217,8 +249,11 @@ func (m *egressManager) remove(app string) error {
 func (m *egressManager) shutdown() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	m.rules = map[string]egressAppRules{}
+
 	var firstErr error
+
 	for _, chain := range []struct {
 		name  string
 		run   egressRun
@@ -230,6 +265,7 @@ func (m *egressManager) shutdown() error {
 		if !*chain.ready {
 			continue
 		}
+
 		for _, args := range [][]string{
 			{"-w", "-D", "OUTPUT", "-j", chain.name},
 			{"-w", "-F", chain.name},
@@ -239,7 +275,9 @@ func (m *egressManager) shutdown() error {
 				firstErr = err
 			}
 		}
+
 		*chain.ready = false
 	}
+
 	return firstErr
 }

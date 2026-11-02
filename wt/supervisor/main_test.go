@@ -25,28 +25,35 @@ func TestMain(m *testing.M) {
 		runnerMain()
 		return
 	}
+
 	if len(os.Args) > 1 && os.Args[1] == nsInitArg {
 		nsInitMain(os.Args[2:])
 		return
 	}
+
 	if len(os.Args) > 1 && os.Args[1] == "--version" {
 		fmt.Println("wasmtime 99.0.0")
 		return
 	}
+
 	if os.Getenv("WT_TEST_SUPERVISOR") == "1" {
 		main()
 		return
 	}
+
 	for i, arg := range os.Args {
 		if arg != "--addr" || i+1 >= len(os.Args) {
 			continue
 		}
+
 		listener, err := net.Listen("tcp", os.Args[i+1])
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+
 		fmt.Fprintf(os.Stderr, "Serving HTTP on http://%s/\n", listener.Addr())
+
 		err = http.Serve(listener, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusNoContent)
 		}))
@@ -54,8 +61,10 @@ func TestMain(m *testing.M) {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+
 		return
 	}
+
 	os.Exit(m.Run())
 }
 
@@ -66,25 +75,32 @@ func writeTarGz(t *testing.T, entries map[string]string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	gz := gzip.NewWriter(file)
+
 	tw := tar.NewWriter(gz)
 	for name, body := range entries {
 		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(body))}); err != nil {
 			t.Fatal(err)
 		}
+
 		if _, err := tw.Write([]byte(body)); err != nil {
 			t.Fatal(err)
 		}
 	}
+
 	if err := tw.Close(); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := gz.Close(); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
+
 	return file.Name()
 }
 
@@ -94,6 +110,7 @@ func TestValidName(t *testing.T) {
 			t.Errorf("%q should be valid", name)
 		}
 	}
+
 	for _, name := range []string{"", "-app", "app-", "App", "app_name", "app.name", "../app"} {
 		if validName(name) {
 			t.Errorf("%q should be invalid", name)
@@ -103,10 +120,12 @@ func TestValidName(t *testing.T) {
 
 func TestExtractTarGz(t *testing.T) {
 	archive := writeTarGz(t, map[string]string{"app.json": "{}", "main.wasm": "wasm"})
+
 	dst := t.TempDir()
 	if err := extractTarGz(archive, dst); err != nil {
 		t.Fatal(err)
 	}
+
 	for _, name := range []string{"app.json", "main.wasm"} {
 		if _, err := os.Stat(filepath.Join(dst, name)); err != nil {
 			t.Errorf("%s: %v", name, err)
@@ -126,16 +145,20 @@ func TestLogRingKeepsTail(t *testing.T) {
 	if _, err := r.Write([]byte("first\n")); err != nil {
 		t.Fatal(err)
 	}
+
 	if got := r.String(); got != "first" {
 		t.Errorf("String() = %q, want %q", got, "first")
 	}
+
 	big := make([]byte, maxLaunchLogBytes+100)
 	for i := range big {
 		big[i] = 'x'
 	}
+
 	if _, err := r.Write(big); err != nil {
 		t.Fatal(err)
 	}
+
 	if got := len(r.String()); got != maxLaunchLogBytes {
 		t.Errorf("len(String()) = %d, want %d", got, maxLaunchLogBytes)
 	}
@@ -146,14 +169,17 @@ func TestWithLaunchLog(t *testing.T) {
 	if err := withLaunchLog("main.cwasm", newLogRing(), base); !errors.Is(err, base) {
 		t.Errorf("empty ring should return the error unchanged, got %v", err)
 	}
+
 	recent := newLogRing()
 	if _, err := recent.Write([]byte("boom\n")); err != nil {
 		t.Fatal(err)
 	}
+
 	err := withLaunchLog("/tmp/x/main.cwasm", recent, base)
 	if !errors.Is(err, base) {
 		t.Errorf("should wrap the base error, got %v", err)
 	}
+
 	for _, want := range []string{"main.cwasm output", "boom"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q should contain %q", err, want)
@@ -165,7 +191,9 @@ func TestProxyRewrite(t *testing.T) {
 	type request struct {
 		host, forwardedHost, forwardedProto, forwardedFor, target string
 	}
+
 	got := make(chan request, 1)
+
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got <- request{
 			host:           r.Host,
@@ -174,6 +202,7 @@ func TestProxyRewrite(t *testing.T) {
 			forwardedFor:   r.Header.Get("X-Forwarded-For"),
 			target:         r.URL.RequestURI(),
 		}
+
 		_, _ = w.Write([]byte("ok"))
 	}))
 	defer backend.Close()
@@ -182,6 +211,7 @@ func TestProxyRewrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	port, err := strconv.Atoi(target.Port())
 	if err != nil {
 		t.Fatal(err)
@@ -192,8 +222,10 @@ func TestProxyRewrite(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "http://app.example/hello?x=1", nil)
 	req.Host = "app.example"
 	req.Header.Set("X-Forwarded-Proto", "https")
+
 	rec := httptest.NewRecorder()
 	proxy.ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %q", rec.Code, rec.Body.String())
 	}
@@ -203,15 +235,19 @@ func TestProxyRewrite(t *testing.T) {
 		if request.host != "app.example" {
 			t.Errorf("host = %q", request.host)
 		}
+
 		if request.forwardedHost != "app.example" {
 			t.Errorf("X-Forwarded-Host = %q", request.forwardedHost)
 		}
+
 		if request.forwardedProto != "https" {
 			t.Errorf("X-Forwarded-Proto = %q", request.forwardedProto)
 		}
+
 		if request.forwardedFor != "192.0.2.1" {
 			t.Errorf("X-Forwarded-For = %q", request.forwardedFor)
 		}
+
 		if request.target != "/hello?x=1" {
 			t.Errorf("target = %q", request.target)
 		}
@@ -226,6 +262,7 @@ func TestHandleProxyLogsRequest(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
+
 		_, _ = w.Write([]byte("ok"))
 	}))
 	defer backend.Close()
@@ -234,16 +271,19 @@ func TestHandleProxyLogsRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	port, err := strconv.Atoi(target.Port())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	s := testSupervisor()
+
 	logs, err := newAppLog(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	a := &app{name: "test", cfg: appConfig{Host: "app.example"}, logs: logs, cmd: &exec.Cmd{}, ready: true}
 	a.proxy = s.newProxy(&app{name: "test", port: port})
 	s.apps["test"] = a
@@ -260,12 +300,15 @@ func TestHandleProxyLogsRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(entries) != 2 {
 		t.Fatalf("logged %d requests, want 2: %+v", len(entries), entries)
 	}
+
 	if entries[0].Level != "info" || entries[0].Source != "supervisor" || !strings.HasPrefix(entries[0].Message, "GET 200 ") || !strings.Contains(entries[0].Message, " /hello?x=1") || !strings.Contains(entries[0].Message, "request=") {
 		t.Errorf("first entry = %+v, want a structured supervisor access line for GET 200 /hello?x=1 with a request id", entries[0])
 	}
+
 	if entries[1].Level != "info" || entries[1].Source != "supervisor" || !strings.HasPrefix(entries[1].Message, "GET 404 ") || !strings.Contains(entries[1].Message, " /missing") || !strings.Contains(entries[1].Message, "request=") {
 		t.Errorf("second entry = %+v, want a structured supervisor access line for GET 404 /missing with a request id", entries[1])
 	}
@@ -307,11 +350,13 @@ func TestFormatAccessLog(t *testing.T) {
 
 func TestWaitReadyRequiresSuccessStatus(t *testing.T) {
 	var calls atomic.Int64
+
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		if calls.Add(1) == 1 {
 			http.Error(w, "still migrating", http.StatusInternalServerError)
 			return
 		}
+
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer backend.Close()
@@ -320,16 +365,19 @@ func TestWaitReadyRequiresSuccessStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	port, err := strconv.Atoi(parsed.Port())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	s := &supervisor{}
+
 	a := &app{port: port, cfg: appConfig{Health: "/"}}
 	if err := s.waitReady(a, make(chan struct{})); err != nil {
 		t.Fatal(err)
 	}
+
 	if got := calls.Load(); got < 2 {
 		t.Errorf("waitReady accepted the 500 after %d call(s)", got)
 	}
@@ -345,6 +393,7 @@ func TestWaitReadyHonorsStartupTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	port, err := strconv.Atoi(parsed.Port())
 	if err != nil {
 		t.Fatal(err)
@@ -353,10 +402,12 @@ func TestWaitReadyHonorsStartupTimeout(t *testing.T) {
 	s := &supervisor{}
 	a := &app{port: port, cfg: appConfig{Health: "/", startupTimeout: 150 * time.Millisecond}}
 	started := time.Now()
+
 	err = s.waitReady(a, make(chan struct{}))
 	if err == nil || !strings.Contains(err.Error(), "150ms") {
 		t.Fatalf("waitReady error = %v, want the configured 150ms timeout", err)
 	}
+
 	if elapsed := time.Since(started); elapsed > 2*time.Second {
 		t.Errorf("waitReady waited %s for a 150ms timeout", elapsed)
 	}
@@ -367,8 +418,10 @@ func TestShutdownServerWaitsForInflightHandler(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	started := make(chan struct{})
 	release := make(chan struct{})
+
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		close(started)
 		<-release
@@ -377,17 +430,21 @@ func TestShutdownServerWaitsForInflightHandler(t *testing.T) {
 	go func() { _ = server.Serve(listener) }()
 
 	response := make(chan error, 1)
+
 	go func() {
 		resp, err := http.Get("http://" + listener.Addr().String())
 		if err == nil {
 			_ = resp.Body.Close()
 		}
+
 		response <- err
 	}()
+
 	<-started
 
 	shutdown := make(chan error, 1)
 	go func() { shutdown <- shutdownServer(server, 2*time.Second) }()
+
 	select {
 	case err := <-shutdown:
 		t.Fatalf("shutdown returned before the handler finished: %v", err)
@@ -395,9 +452,11 @@ func TestShutdownServerWaitsForInflightHandler(t *testing.T) {
 	}
 
 	close(release)
+
 	if err := <-response; err != nil {
 		t.Fatal(err)
 	}
+
 	if err := <-shutdown; err != nil {
 		t.Fatal(err)
 	}
@@ -408,10 +467,12 @@ func TestHandleRestartRestartsSchedule(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "main.cwasm"), []byte("cwasm"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
 	s := testSupervisor()
 	s.runner, _, _ = startTestRunner(t)
 	s.cfg.wasmtime = os.Args[0]
 	s.cfg.stateDir = t.TempDir()
+
 	a, err := s.spawn("demo", dir, appConfig{
 		Health: "/",
 		Host:   "demo.localhost",
@@ -424,16 +485,20 @@ func TestHandleRestartRestartsSchedule(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.stop(a)
+
 	s.register(a)
+
 	if a.scheduleCancel == nil {
 		t.Fatal("spawn should start the schedule")
 	}
 
 	rec := httptest.NewRecorder()
 	s.handleRestart(rec, httptest.NewRequest(http.MethodPost, "/apps/demo/restart", nil), a)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("restart status = %d: %s", rec.Code, rec.Body.String())
 	}
+
 	if a.scheduleCancel == nil {
 		t.Error("handleRestart did not restart the schedule")
 	}
@@ -442,10 +507,13 @@ func TestHandleRestartRestartsSchedule(t *testing.T) {
 func TestDrainApp(t *testing.T) {
 	a := &app{name: "demo"}
 	a.requests.Add(1)
+
 	if drainApp(a, 20*time.Millisecond) {
 		t.Error("drain finished while a request was active")
 	}
+
 	a.requests.Done()
+
 	if !drainApp(a, time.Second) {
 		t.Error("drain did not finish after the request ended")
 	}
@@ -454,6 +522,7 @@ func TestDrainApp(t *testing.T) {
 func TestHandleProxyTracksInFlightRequests(t *testing.T) {
 	received := make(chan struct{})
 	release := make(chan struct{})
+
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		close(received)
 		<-release
@@ -465,6 +534,7 @@ func TestHandleProxyTracksInFlightRequests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	port, err := strconv.Atoi(parsed.Port())
 	if err != nil {
 		t.Fatal(err)
@@ -476,18 +546,23 @@ func TestHandleProxyTracksInFlightRequests(t *testing.T) {
 	s.hosts["demo.localhost"] = a
 
 	done := make(chan struct{})
+
 	go func() {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.Host = "demo.localhost"
 		s.handleProxy(httptest.NewRecorder(), req)
 		close(done)
 	}()
+
 	<-received
+
 	if drainApp(a, 20*time.Millisecond) {
 		t.Error("drain finished while a proxied request was in flight")
 	}
+
 	close(release)
 	<-done
+
 	if !drainApp(a, time.Second) {
 		t.Error("drain did not finish after the proxied request completed")
 	}
@@ -503,6 +578,7 @@ func TestHandlerLetsAppHostsOwnAdminPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	port, err := strconv.Atoi(parsed.Port())
 	if err != nil {
 		t.Fatal(err)
@@ -518,6 +594,7 @@ func TestHandlerLetsAppHostsOwnAdminPaths(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "http://demo.localhost/admin/", nil)
 	req.Host = "demo.localhost"
 	handler.ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusOK || rec.Body.String() != "app /admin/" {
 		t.Errorf("app host admin path = %d %q, want 200 \"app /admin/\"", rec.Code, rec.Body.String())
 	}
@@ -526,6 +603,7 @@ func TestHandlerLetsAppHostsOwnAdminPaths(t *testing.T) {
 	req = httptest.NewRequest(http.MethodGet, "http://admin.localhost/healthz", nil)
 	req.Host = "admin.localhost"
 	handler.ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusOK || rec.Body.String() != "ok\n" {
 		t.Errorf("non-app healthz = %d %q, want 200 \"ok\\n\"", rec.Code, rec.Body.String())
 	}
@@ -553,19 +631,23 @@ func TestShouldLogAccessSamplesAndKeepsErrors(t *testing.T) {
 	s.cfg.accessLog = true
 	s.cfg.accessLogEvery = 3
 	a := &app{name: "demo"}
+
 	for index := 1; index <= 6; index++ {
 		want := index%3 == 0
 		if got := s.shouldLogAccess(a, 200); got != want {
 			t.Errorf("sample %d = %v, want %v", index, got, want)
 		}
 	}
+
 	if !s.shouldLogAccess(a, 500) {
 		t.Error("server error was suppressed")
 	}
+
 	s.cfg.accessLog = false
 	if s.shouldLogAccess(a, 200) {
 		t.Error("access log was disabled but a line was logged")
 	}
+
 	if !s.shouldLogAccess(a, 500) {
 		t.Error("access log off suppressed a server error")
 	}
@@ -573,10 +655,12 @@ func TestShouldLogAccessSamplesAndKeepsErrors(t *testing.T) {
 
 func BenchmarkManyAppsSnapshot(b *testing.B) {
 	s := testSupervisor()
+
 	for index := range 200 {
 		name := fmt.Sprintf("app-%03d", index)
 		s.apps[name] = &app{name: name, cfg: appConfig{Host: name + ".localhost"}, cmd: &exec.Cmd{}, ready: true}
 	}
+
 	for b.Loop() {
 		_ = s.snapshot()
 	}

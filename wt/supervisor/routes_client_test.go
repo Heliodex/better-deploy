@@ -63,22 +63,29 @@ type routeClientEntry struct {
 func routeClientEntries() []routeClientEntry {
 	s := &supervisor{}
 	seen := map[string]struct{}{}
+
 	var entries []routeClientEntry
+
 	for _, table := range []*routeTable{s.buildAppRoutes(), s.adminRoutes()} {
 		for _, route := range table.routes {
 			pattern := "/" + strings.Join(route.pattern, "/")
 			if _, ok := seen[pattern]; ok {
 				continue
 			}
+
 			seen[pattern] = struct{}{}
+
 			name, ok := routeClientNames[pattern]
 			if !ok {
 				panic("missing route client name for " + pattern)
 			}
+
 			entries = append(entries, routeClientEntry{name: name, pattern: pattern})
 		}
 	}
+
 	sort.Slice(entries, func(i, j int) bool { return entries[i].name < entries[j].name })
+
 	return entries
 }
 
@@ -87,50 +94,70 @@ func renderRouteClient(entries []routeClientEntry) string {
 	b.WriteString("// Code generated from the supervisor route table. DO NOT EDIT.\n\n")
 	b.WriteString("const enc = encodeURIComponent\n\n")
 	b.WriteString("export const routes = {\n")
+
 	for _, entry := range entries {
 		segments := routeSegments(entry.pattern)
+
 		var params []string
+
 		template := ""
+
+		var templateSb94 strings.Builder
+
 		for i, segment := range segments {
 			if i > 0 {
-				template += "/"
+				templateSb94.WriteString("/")
 			}
+
 			if name, ok := strings.CutPrefix(segment, "{"); ok {
 				name, _ = strings.CutSuffix(name, "}")
 				if rest, isRest := strings.CutSuffix(name, "..."); isRest {
 					params = append(params, rest+" = \"\"")
-					template += "${" + rest + "}"
+					templateSb94.WriteString("${" + rest + "}")
 				} else {
 					params = append(params, name+": string")
-					template += "${enc(" + name + ")}"
+					templateSb94.WriteString("${enc(" + name + ")}")
 				}
+
 				continue
 			}
-			template += segment
+
+			templateSb94.WriteString(segment)
 		}
+
+		template += templateSb94.String()
+
 		if len(params) == 0 {
 			fmt.Fprintf(&b, "\t%s: \"/%s\",\n", entry.name, template)
 			continue
 		}
+
 		fmt.Fprintf(&b, "\t%s: (%s): string => `/%s`,\n", entry.name, strings.Join(params, ", "), template)
 	}
+
 	b.WriteString("}\n")
+
 	return b.String()
 }
 
 func TestGeneratedRouteClient(t *testing.T) {
 	want := renderRouteClient(routeClientEntries())
+
 	const path = "web/src/lib/routes.gen.ts"
+
 	got, err := os.ReadFile(path)
 	if *updateRouteClient {
 		if err := os.WriteFile(path, []byte(want), 0o644); err != nil {
 			t.Fatal(err)
 		}
+
 		return
 	}
+
 	if err != nil {
 		t.Fatalf("%s is missing; run go test -run TestGeneratedRouteClient -update-routes: %v", path, err)
 	}
+
 	if string(got) != want {
 		t.Fatalf("%s is stale; run go test -run TestGeneratedRouteClient -update-routes", path)
 	}

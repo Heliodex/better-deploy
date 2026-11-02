@@ -35,8 +35,10 @@ func TestPublicAndAdminHandlersSeparateRoutes(t *testing.T) {
 		if tc.token {
 			req.Header.Set("Authorization", "Bearer secret")
 		}
+
 		rec := httptest.NewRecorder()
 		tc.handler.ServeHTTP(rec, req)
+
 		if rec.Code != tc.status {
 			t.Errorf("%s: %s %s = %d, want %d", tc.name, tc.method, tc.target, rec.Code, tc.status)
 		}
@@ -53,6 +55,7 @@ func TestPublicHandlerProxiesAppHosts(t *testing.T) {
 	req.Host = "demo.localhost"
 	rec := httptest.NewRecorder()
 	s.publicHandler().ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusOK || rec.Body.String() != "app" {
 		t.Errorf("public app host = %d %q, want 200 \"app\"", rec.Code, rec.Body.String())
 	}
@@ -60,30 +63,38 @@ func TestPublicHandlerProxiesAppHosts(t *testing.T) {
 
 func TestListenAdminUnixSocketIsPrivateAndCleanedUp(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "admin.sock")
+
 	network, address, err := parseAdminListen("unix:" + path)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	listener, cleanup, err := listenAdmin(network, address)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if info.Mode().Perm() != 0o600 {
 		t.Errorf("socket mode = %o, want 600", info.Mode().Perm())
 	}
+
 	_ = listener.Close()
 	// A closed Unix listener leaves its socket path behind; a second bind must remove the stale socket.
 	listener, cleanup2, err := listenAdmin(network, address)
 	if err != nil {
 		t.Fatalf("rebind over a stale socket: %v", err)
 	}
+
 	_ = listener.Close()
+
 	cleanup2()
 	cleanup()
+
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Errorf("socket still exists after cleanup: %v", err)
 	}
@@ -98,6 +109,7 @@ func TestUntrustedEmptyTokenCannotReachAdmin(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, target, nil)
 		rec := httptest.NewRecorder()
 		s.adminHandler().ServeHTTP(rec, req)
+
 		if rec.Code != http.StatusUnauthorized {
 			t.Errorf("GET %s with no token = %d, want 401", target, rec.Code)
 		}
@@ -106,6 +118,7 @@ func TestUntrustedEmptyTokenCannotReachAdmin(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/admin/", nil)
 	rec := httptest.NewRecorder()
 	s.adminHandler().ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Errorf("GET /admin/ with no token = %d, want the public panel shell", rec.Code)
 	}
@@ -113,6 +126,7 @@ func TestUntrustedEmptyTokenCannotReachAdmin(t *testing.T) {
 	req = httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{}`))
 	rec = httptest.NewRecorder()
 	s.adminHandler().ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("login with no token = %d, want 401", rec.Code)
 	}
@@ -126,6 +140,7 @@ func TestAdminStaticIsPublicWhileAPIRemainsProtected(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/admin/", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Errorf("GET /admin/ without a token = %d, want 200", rec.Code)
 	}
@@ -133,6 +148,7 @@ func TestAdminStaticIsPublicWhileAPIRemainsProtected(t *testing.T) {
 	req = httptest.NewRequest(http.MethodGet, "/apps", nil)
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("GET /apps without a token = %d, want 401", rec.Code)
 	}
@@ -142,12 +158,15 @@ func TestValidateTenantConfig(t *testing.T) {
 	if err := validateTenantConfig(config{tenantMode: tenantTrusted}); err != nil {
 		t.Errorf("trusted without a token should be allowed: %v", err)
 	}
+
 	if err := validateTenantConfig(config{tenantMode: tenantUntrusted}); err == nil {
 		t.Error("untrusted without a token should be rejected")
 	}
+
 	if err := validateTenantConfig(config{tenantMode: tenantUntrusted, token: "secret"}); err != nil {
 		t.Errorf("untrusted with a token should be allowed: %v", err)
 	}
+
 	if err := validateTenantConfig(config{tenantMode: "open"}); err == nil {
 		t.Error("an unknown tenant mode should be rejected")
 	}
@@ -165,10 +184,12 @@ func TestParseAdminListen(t *testing.T) {
 			t.Errorf("%q: %v", input, err)
 			continue
 		}
+
 		if network != want.network || address != want.address {
 			t.Errorf("%q = %s %s, want %s %s", input, network, address, want.network, want.address)
 		}
 	}
+
 	for _, bad := range []string{"", "unix:", "tcp:"} {
 		if _, _, err := parseAdminListen(bad); err == nil {
 			t.Errorf("%q should be rejected", bad)

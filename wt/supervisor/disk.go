@@ -32,20 +32,25 @@ func (s *supervisor) appDataUsage(name string) (bytes, entries int64, err error)
 	if err := walkUsage(dataDir, &bytes, &entries); err != nil {
 		return bytes, entries, err
 	}
+
 	storageDir := filepath.Join(s.cfg.stateDir, ".storage", name)
+
 	storageEntries, err := os.ReadDir(storageDir)
 	if err != nil && !os.IsNotExist(err) {
 		return bytes, entries, err
 	}
+
 	for _, entry := range storageEntries {
 		// storage.db, storage.db-wal and storage.db-shm are the database; changes.log is not part of the quota.
 		if entry.IsDir() || !strings.HasPrefix(entry.Name(), "storage.db") {
 			continue
 		}
+
 		info, err := entry.Info()
 		if err != nil {
 			return bytes, entries, err
 		}
+
 		bytes += info.Size()
 		entries++
 	}
@@ -54,6 +59,7 @@ func (s *supervisor) appDataUsage(name string) (bytes, entries int64, err error)
 	if err := walkUsage(blobDir, &bytes, &entries); err != nil {
 		return bytes, entries, err
 	}
+
 	return bytes, entries, nil
 }
 
@@ -66,10 +72,12 @@ func (s *supervisor) appDataBytes(name string) (int64, error) {
 // diskBytes returns cached app-data usage: /data, the app's SQLite database files and its blobs, excluding logs, backups and deployment history.
 func (s *supervisor) diskBytes(a *app) int64 {
 	now := time.Now()
+
 	a.disk.mu.Lock()
 	if !a.disk.at.IsZero() && now.Sub(a.disk.at) < diskUsageInterval {
 		bytes := a.disk.bytes
 		a.disk.mu.Unlock()
+
 		return bytes
 	}
 	a.disk.mu.Unlock()
@@ -78,10 +86,12 @@ func (s *supervisor) diskBytes(a *app) int64 {
 	if err != nil {
 		log.Printf("app %s: disk usage: %v", a.name, err)
 	}
+
 	a.disk.mu.Lock()
 	a.disk.bytes = bytes
 	a.disk.at = now
 	a.disk.mu.Unlock()
+
 	return bytes
 }
 
@@ -91,12 +101,15 @@ func (s *supervisor) enforceDiskQuota(a *app) bool {
 	if a == nil || !s.cfg.untrusted() {
 		return false
 	}
+
 	a.mu.Lock()
 	limit := int64(a.cfg.DiskMB) << 20
 	a.mu.Unlock()
+
 	if limit <= 0 && maxAppEntries <= 0 {
 		return false
 	}
+
 	bytes, entries, err := s.appDataUsage(a.name)
 	if err != nil {
 		log.Printf("app %s: disk quota check: %v", a.name, err)
@@ -104,6 +117,7 @@ func (s *supervisor) enforceDiskQuota(a *app) bool {
 	}
 
 	var message string
+
 	switch {
 	case limit > 0 && bytes > limit:
 		message = fmt.Sprintf("disk quota exceeded: %d bytes of %d bytes used; app stopped", bytes, limit)
@@ -120,6 +134,7 @@ func (s *supervisor) enforceDiskQuota(a *app) bool {
 	s.cancelRestart(a)
 	s.drainAndStop(a, "disk quota")
 	s.broadcast()
+
 	return true
 }
 
@@ -127,10 +142,12 @@ func (s *supervisor) enforceDiskQuota(a *app) bool {
 func (s *supervisor) monitorDiskQuota() {
 	ticker := time.NewTicker(diskUsageInterval)
 	defer ticker.Stop()
+
 	for range ticker.C {
 		if s.stopping.Load() {
 			return
 		}
+
 		for _, a := range s.allApps() {
 			s.enforceDiskQuota(a)
 		}
@@ -149,22 +166,29 @@ func walkUsage(root string, bytes, entries *int64) error {
 			if os.IsNotExist(walkErr) {
 				return nil
 			}
+
 			return walkErr
 		}
+
 		if path == root {
 			return nil
 		}
+
 		*entries++
+
 		if entry.IsDir() {
 			return nil
 		}
+
 		info, err := entry.Info()
 		if err != nil {
 			return err
 		}
+
 		if info.Mode().IsRegular() {
 			*bytes += info.Size()
 		}
+
 		return nil
 	})
 }
@@ -175,12 +199,15 @@ func treeBytes(root string) (int64, error) {
 		if os.IsNotExist(err) {
 			return 0, nil
 		}
+
 		return 0, err
 	}
+
 	var total, entries int64
 	if err := walkUsage(root, &total, &entries); err != nil {
 		return 0, err
 	}
+
 	return total, nil
 }
 
@@ -190,9 +217,11 @@ func pathWithin(inner, outer string) bool {
 	if err != nil {
 		return false
 	}
+
 	if rel == "." {
 		return true
 	}
+
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
@@ -202,12 +231,14 @@ func (s *supervisor) diskTotals() (diskTotals, error) {
 	if err != nil {
 		return diskTotals{}, fmt.Errorf("apps directory: %w", err)
 	}
+
 	state, err := treeBytes(s.cfg.stateDir)
 	if err != nil {
 		return diskTotals{}, fmt.Errorf("state directory: %w", err)
 	}
 
 	totals := diskTotals{appsBytes: apps, stateBytes: state}
+
 	switch {
 	case pathWithin(s.cfg.stateDir, s.cfg.appsDir):
 		totals.totalBytes = apps
@@ -216,6 +247,7 @@ func (s *supervisor) diskTotals() (diskTotals, error) {
 	default:
 		totals.totalBytes = apps + state
 	}
+
 	return totals, nil
 }
 
@@ -224,11 +256,13 @@ func (s *supervisor) overBudget() bool {
 	if s.cfg.diskBudgetBytes <= 0 {
 		return false
 	}
+
 	totals, err := s.diskTotals()
 	if err != nil {
 		log.Printf("disk budget: %v", err)
 		return false
 	}
+
 	return overByteBudget(s.cfg.diskBudgetBytes, totals.totalBytes)
 }
 
@@ -238,17 +272,21 @@ func (s *supervisor) rejectOverBudget(w http.ResponseWriter) bool {
 	if s.cfg.diskBudgetBytes <= 0 {
 		return false
 	}
+
 	totals, err := s.diskTotals()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "measure disk usage: "+err.Error())
 		return true
 	}
+
 	if !overByteBudget(s.cfg.diskBudgetBytes, totals.totalBytes) {
 		return false
 	}
+
 	writeError(w, http.StatusInsufficientStorage, fmt.Sprintf(
 		"global disk budget exceeded: %d of %d bytes used; free space or raise WT_DISK_BUDGET_MB",
 		totals.totalBytes, s.cfg.diskBudgetBytes))
+
 	return true
 }
 
@@ -265,11 +303,13 @@ func (s *supervisor) handleUsage(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAuth(w, r) {
 		return
 	}
+
 	totals, err := s.diskTotals()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "measure disk usage: "+err.Error())
 		return
 	}
+
 	budget := s.cfg.diskBudgetBytes
 	writeJSON(w, http.StatusOK, diskUsageResponse{
 		AppsBytes:   totals.appsBytes,
@@ -284,16 +324,19 @@ func (s *supervisor) handleUsage(w http.ResponseWriter, r *http.Request) {
 func (s *supervisor) monitorDiskBudget() {
 	ticker := time.NewTicker(diskBudgetInterval)
 	defer ticker.Stop()
+
 	budget := byteBudget{name: "disk budget", limit: s.cfg.diskBudgetBytes}
 	for range ticker.C {
 		if s.stopping.Load() {
 			return
 		}
+
 		totals, err := s.diskTotals()
 		if err != nil {
 			log.Printf("disk budget: %v", err)
 			continue
 		}
+
 		budget.observe(totals.totalBytes)
 	}
 }

@@ -62,5 +62,6 @@ func (s *storageServer) buildStorageRoutes() *routeTable {
 	rt.add(http.MethodPost, "/v1/transaction", withStorageApp(s.transaction))
 	rt.add(http.MethodGet, "/v1/schema", withStorageApp(s.readSchema))
 	rt.add(http.MethodPost, "/v1/migrate", withStorageApp(s.runMigration))
+
 	return rt
 }

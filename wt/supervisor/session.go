@@ -31,14 +31,17 @@ func (s *supervisor) setAuthCookie(w http.ResponseWriter, r *http.Request, token
 func (s *supervisor) loginGuard(scope string) *loginLimiter {
 	s.loginMu.Lock()
 	defer s.loginMu.Unlock()
+
 	if s.loginLimiters == nil {
 		s.loginLimiters = map[string]*loginLimiter{}
 	}
+
 	limiter := s.loginLimiters[scope]
 	if limiter == nil {
 		limiter = newLoginLimiter()
 		s.loginLimiters[scope] = limiter
 	}
+
 	return limiter
 }
 
@@ -48,6 +51,7 @@ func (s *supervisor) loginKey(r *http.Request) string {
 	if key == "" {
 		return remoteHost(r)
 	}
+
 	return key
 }
 

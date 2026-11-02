@@ -26,18 +26,22 @@ type capabilitiesResponse struct {
 func supervisorBuildInfo() (string, string) {
 	name := version
 	commit := ""
+
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
 		return name, commit
 	}
+
 	if info.Main.Version != "" && info.Main.Version != "(devel)" {
 		name = info.Main.Version
 	}
+
 	for _, setting := range info.Settings {
 		if setting.Key == "vcs.revision" {
 			commit = setting.Value
 		}
 	}
+
 	return name, commit
 }
 
@@ -47,11 +51,13 @@ func (s *supervisor) canCompile() bool {
 		if s.cfg.wasmtimeCompiler == "" {
 			return
 		}
+
 		cmd := exec.Command(s.cfg.wasmtimeCompiler, "compile", "--help")
 		cmd.Stdout = io.Discard
 		cmd.Stderr = io.Discard
 		s.compilerOK = cmd.Run() == nil
 	})
+
 	return s.compilerOK
 }
 
@@ -60,9 +66,11 @@ func (s *supervisor) handleCapabilities(w http.ResponseWriter, r *http.Request) 
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
+
 	if _, ok := s.requireIdentity(w, r); !ok {
 		return
 	}
+
 	name, commit := supervisorBuildInfo()
 	writeJSON(w, http.StatusOK, capabilitiesResponse{
 		Version:        name,

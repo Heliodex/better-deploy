@@ -15,14 +15,17 @@ func dropPrivileges() {
 	if os.Getenv("WT_DROP_PRIVILEGES") != "1" || os.Geteuid() != 0 {
 		return
 	}
+
 	uid := int(envInt64("WT_RUN_UID", 10001))
 	gid := int(envInt64("WT_RUN_GID", 10001))
 	appsDir := env("WT_APPS_DIR", "./apps")
+
 	stateDir := env("WT_STATE_DIR", "./state")
 	for _, dir := range []string{appsDir, stateDir} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			log.Fatalf("drop privileges: create %s: %v", dir, err)
 		}
+
 		if err := chownTree(dir, uid, gid); err != nil {
 			log.Fatalf("drop privileges: chown %s: %v", dir, err)
 		}
@@ -34,12 +37,15 @@ func dropPrivileges() {
 			log.Fatalf("drop privileges: chown %s: %v", parent, err)
 		}
 	}
+
 	if err := syscall.Setgroups([]int{gid}); err != nil {
 		log.Fatalf("drop privileges: setgroups: %v", err)
 	}
+
 	if err := syscall.Setgid(gid); err != nil {
 		log.Fatalf("drop privileges: setgid: %v", err)
 	}
+
 	if err := syscall.Setuid(uid); err != nil {
 		log.Fatalf("drop privileges: setuid: %v", err)
 	}

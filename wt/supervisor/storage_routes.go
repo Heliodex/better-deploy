@@ -14,23 +14,29 @@ import (
 
 func readStorageJSON(w http.ResponseWriter, r *http.Request, out any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, maxStorageBody)
+
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
 		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			writeError(w, http.StatusRequestEntityTooLarge, "request body is too large")
 			return false
 		}
+
 		writeStorageError(w, fmt.Errorf("%w: read body: %w", errStorageInvalid, err))
+
 		return false
 	}
+
 	if len(data) == 0 {
 		writeStorageError(w, fmt.Errorf("%w: empty body", errStorageInvalid))
 		return false
 	}
+
 	if err := json.Unmarshal(data, out); err != nil {
 		writeStorageError(w, fmt.Errorf("%w: invalid JSON: %w", errStorageInvalid, err))
 		return false
 	}
+
 	return true
 }
 
@@ -40,10 +46,12 @@ func (s *storageServer) exec(w http.ResponseWriter, r *http.Request, app string)
 	if !readStorageJSON(w, r, &req) {
 		return
 	}
+
 	if err := validateStorageSQL(req.SQL); err != nil {
 		writeStorageError(w, err)
 		return
 	}
+
 	params, err := decodeStorageParams(req.Params)
 	if err != nil {
 		writeStorageError(w, err)
@@ -53,33 +61,45 @@ func (s *storageServer) exec(w http.ResponseWriter, r *http.Request, app string)
 	ctx, cancel := context.WithTimeout(r.Context(), storageTimeout)
 	defer cancel()
 
-	var result storageResult
-	var collector *rowChangeCollector
+	var (
+		result    storageResult
+		collector *rowChangeCollector
+	)
+
 	err = s.withWriteConn(ctx, app, func(conn *sql.Conn, changes *rowChangeCollector) error {
 		collector = changes
+
 		unregister, err := requireStorageAuthorizer(conn, false)
 		if err != nil {
 			return err
 		}
+
 		defer func() { _ = unregister() }()
+
 		res, err := conn.ExecContext(ctx, req.SQL, params...)
 		if err != nil {
 			return err
 		}
+
 		result.RowsAffected, _ = res.RowsAffected()
 		result.LastInsertID, _ = res.LastInsertId()
+
 		return nil
 	})
 	if err != nil {
 		writeStorageError(w, err)
 		return
 	}
+
 	var rows []rowChange
+
 	truncated := false
+
 	if collector != nil {
 		rows = collector.rows
 		truncated = collector.omitted > 0
 	}
+
 	s.logChanges(app, []storageChange{{
 		Time:          time.Now().UTC(),
 		RequestID:     r.Header.Get(requestIDHeader),
@@ -97,11 +117,14 @@ func (s *storageServer) logBatchChanges(app string, r *http.Request, req storage
 	changes := make([]storageChange, len(req.Statements))
 	for i, statement := range req.Statements {
 		var rows []rowChange
+
 		truncated := false
+
 		if collector != nil {
 			rows = collector.rows[starts[i]:ends[i]]
 			truncated = collector.omitted > 0
 		}
+
 		changes[i] = storageChange{
 			Time:          time.Now().UTC(),
 			RequestID:     r.Header.Get(requestIDHeader),
@@ -112,6 +135,7 @@ func (s *storageServer) logBatchChanges(app string, r *http.Request, req storage
 			RowsTruncated: truncated,
 		}
 	}
+
 	s.logChanges(app, changes)
 }
 
@@ -121,16 +145,19 @@ func (s *storageServer) batch(w http.ResponseWriter, r *http.Request, app string
 	if !readStorageJSON(w, r, &req) {
 		return
 	}
+
 	for i, statement := range req.Statements {
 		if statement.Query {
 			writeStorageError(w, fmt.Errorf("%w: batch statement %d cannot query", errStorageInvalid, i+1))
 			return
 		}
 	}
+
 	params, ok := validateStorageStatements(w, req.Statements, true)
 	if !ok {
 		return
 	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), storageTimeout)
 	defer cancel()
 
@@ -139,6 +166,7 @@ func (s *storageServer) batch(w http.ResponseWriter, r *http.Request, app string
 		writeStorageError(w, err)
 		return
 	}
+
 	s.logBatchChanges(app, r, req, results, starts, ends, collector)
 	writeJSON(w, http.StatusOK, storageStatementsResponse{Results: results})
 }
@@ -149,42 +177,54 @@ func readStorageRows(rows *sql.Rows, maxRows int) (columns []string, encoded [][
 	if err != nil {
 		return nil, nil, false, err
 	}
+
 	if len(columns) > maxStorageColumns {
-		return nil, nil, false, fmt.Errorf("query returns too many columns")
+		return nil, nil, false, errors.New("query returns too many columns")
 	}
 
 	values := make([]any, len(columns))
+
 	dest := make([]any, len(columns))
 	for i := range values {
 		dest[i] = &values[i]
 	}
+
 	total := 0
+
 	for rows.Next() {
 		if len(encoded) >= maxRows {
 			truncated = true
 			break
 		}
+
 		if err := rows.Scan(dest...); err != nil {
 			return nil, nil, false, err
 		}
+
 		size := 0
 		for _, value := range values {
 			size += storageValueSize(value)
 		}
+
 		if total+size > maxStorageResult {
 			truncated = true
 			break
 		}
+
 		total += size
+
 		row := make([]any, len(values))
 		for i, value := range values {
 			row[i] = encodeStorageValue(value)
 		}
+
 		encoded = append(encoded, row)
 	}
+
 	if err := rows.Err(); err != nil {
 		return nil, nil, false, err
 	}
+
 	return columns, encoded, truncated, nil
 }
 
@@ -194,15 +234,18 @@ func (s *storageServer) query(w http.ResponseWriter, r *http.Request, app string
 	if !readStorageJSON(w, r, &req) {
 		return
 	}
+
 	if err := validateStorageSQL(req.SQL); err != nil {
 		writeStorageError(w, err)
 		return
 	}
+
 	params, err := decodeStorageParams(req.Params)
 	if err != nil {
 		writeStorageError(w, err)
 		return
 	}
+
 	maxRows := req.MaxRows
 	if maxRows <= 0 || maxRows > maxStorageRows {
 		maxRows = maxStorageRows
@@ -212,6 +255,7 @@ func (s *storageServer) query(w http.ResponseWriter, r *http.Request, app string
 	defer cancel()
 
 	result := storageResult{Columns: []string{}, Rows: [][]any{}}
+
 	err = s.withReadConn(ctx, app, func(conn *sql.Conn) error {
 		unregister, err := requireStorageAuthorizer(conn, true)
 		if err != nil {
@@ -226,12 +270,14 @@ func (s *storageServer) query(w http.ResponseWriter, r *http.Request, app string
 		defer rows.Close()
 
 		result.Columns, result.Rows, result.Truncated, err = readStorageRows(rows, maxRows)
+
 		return err
 	})
 	if err != nil {
 		writeStorageError(w, err)
 		return
 	}
+
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -241,15 +287,18 @@ func (s *storageServer) writeReturning(w http.ResponseWriter, r *http.Request, a
 	if !readStorageJSON(w, r, &req) {
 		return
 	}
+
 	if err := validateStorageSQL(req.SQL); err != nil {
 		writeStorageError(w, err)
 		return
 	}
+
 	params, err := decodeStorageParams(req.Params)
 	if err != nil {
 		writeStorageError(w, err)
 		return
 	}
+
 	maxRows := req.MaxRows
 	if maxRows <= 0 || maxRows > maxStorageRows {
 		maxRows = maxStorageRows
@@ -259,27 +308,35 @@ func (s *storageServer) writeReturning(w http.ResponseWriter, r *http.Request, a
 	defer cancel()
 
 	var collector *rowChangeCollector
+
 	result := storageResult{Columns: []string{}, Rows: [][]any{}}
+
 	err = s.withWriteConn(ctx, app, func(conn *sql.Conn, changes *rowChangeCollector) error {
 		collector = changes
+
 		unregister, err := requireStorageAuthorizer(conn, false)
 		if err != nil {
 			return err
 		}
+
 		defer func() { _ = unregister() }()
 
 		rows, err := conn.QueryContext(ctx, req.SQL, params...)
 		if err != nil {
 			return err
 		}
+
 		result.Columns, result.Rows, result.Truncated, err = readStorageRows(rows, maxRows)
 		closeErr := rows.Close() //nolint:sqlclosecheck // Rows are closed explicitly so the close error can be returned.
+
 		if err != nil {
 			return err
 		}
+
 		if closeErr != nil {
 			return closeErr
 		}
+
 		return conn.QueryRowContext(ctx, "select changes()").Scan(&result.RowsAffected)
 	})
 	if err != nil {
@@ -288,11 +345,14 @@ func (s *storageServer) writeReturning(w http.ResponseWriter, r *http.Request, a
 	}
 
 	var rows []rowChange
+
 	truncated := false
+
 	if collector != nil {
 		rows = collector.rows
 		truncated = collector.omitted > 0
 	}
+
 	s.logChanges(app, []storageChange{{
 		Time:          time.Now().UTC(),
 		RequestID:     r.Header.Get(requestIDHeader),
@@ -310,8 +370,10 @@ func (s *storageServer) acquireQuery(w http.ResponseWriter, r *http.Request) boo
 	if s.querySem == nil {
 		return true
 	}
+
 	timer := time.NewTimer(storageQueueTimeout)
 	defer timer.Stop()
+
 	select {
 	case s.querySem <- struct{}{}:
 		return true
@@ -329,6 +391,7 @@ func (s *storageServer) handle(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="wt-storage"`)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+
 		return
 	}
 	// Publish traffic is part of the event bus and does not consume a query slot.
@@ -338,12 +401,15 @@ func (s *storageServer) handle(w http.ResponseWriter, r *http.Request) {
 			writeStorageError(w, errStorageTempBudget)
 			return
 		}
+
 		if !s.acquireQuery(w, r) {
 			return
 		}
+
 		if s.querySem != nil {
 			defer func() { <-s.querySem }()
 		}
 	}
+
 	s.storageRoutes().serve(w, r, app)
 }

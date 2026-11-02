@@ -110,6 +110,7 @@ func seccompFilter(arch uint32, denied []uintptr) []unix.SockFilter {
 			unix.SockFilter{Code: unix.BPF_RET | unix.BPF_K, K: seccompRetErrno | uint32(unix.EPERM)},
 		)
 	}
+
 	return append(filter, unix.SockFilter{Code: unix.BPF_RET | unix.BPF_K, K: seccompRetAllow})
 }
 
@@ -118,13 +119,17 @@ func installSeccomp() error {
 	if err != nil {
 		return err
 	}
+
 	filter := seccompFilter(arch, deniedSyscalls())
 	program := unix.SockFprog{Len: uint16(len(filter)), Filter: &filter[0]}
+
 	if err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); err != nil {
 		return fmt.Errorf("set no_new_privs: %w", err)
 	}
+
 	if err := unix.Prctl(unix.PR_SET_SECCOMP, unix.SECCOMP_MODE_FILTER, uintptr(unsafe.Pointer(&program)), 0, 0); err != nil {
 		return fmt.Errorf("install seccomp filter: %w", err)
 	}
+
 	return nil
 }

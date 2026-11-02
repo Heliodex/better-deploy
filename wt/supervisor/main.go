@@ -203,6 +203,7 @@ type supervisor struct {
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
+
 	data, _ := json.Marshal(value)
 	_, _ = w.Write(append(data, '\n'))
 }
@@ -218,6 +219,7 @@ func readJSONBody(w http.ResponseWriter, r *http.Request, limit int64, target an
 		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return false
 	}
+
 	return true
 }
 
@@ -226,8 +228,10 @@ func requireMethod(w http.ResponseWriter, r *http.Request, method string) bool {
 	if r.Method == method {
 		return true
 	}
+
 	w.Header().Set("Allow", method)
 	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 	return false
 }
 
@@ -244,6 +248,7 @@ func (s *supervisor) info(a *app) appInfo {
 	info.CurrentDigest = a.digest
 	info.Ready = a.ready
 	info.Maintenance = a.cfg.Maintenance
+
 	info.UID = a.uid
 	if a.cmd != nil && a.cmd.Process != nil && !a.exited {
 		info.PID = a.cmd.Process.Pid
@@ -257,6 +262,7 @@ func (s *supervisor) info(a *app) appInfo {
 	info.HistoryBytes = s.historyBytes(a)
 	info.OverQuota = info.DiskLimitBytes > 0 && info.DiskBytes > info.DiskLimitBytes
 	info.CPUPercent, info.MemoryBytes, info.SampledAt = a.resourceStats()
+
 	return info
 }
 
@@ -264,10 +270,12 @@ func (s *supervisor) handleApps(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
+
 	identity, ok := s.requireIdentity(w, r)
 	if !ok {
 		return
 	}
+
 	snapshot := s.snapshot()
 	if !identity.isAdmin() {
 		filtered := snapshot[:0]
@@ -276,8 +284,10 @@ func (s *supervisor) handleApps(w http.ResponseWriter, r *http.Request) {
 				filtered = append(filtered, info)
 			}
 		}
+
 		snapshot = filtered
 	}
+
 	writeJSON(w, http.StatusOK, snapshot)
 }
 
@@ -285,6 +295,7 @@ func (s *supervisor) handleApps(w http.ResponseWriter, r *http.Request) {
 func (s *supervisor) lookup(name string) *app {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
 	return s.apps[name]
 }
 
@@ -292,10 +303,12 @@ func (s *supervisor) lookup(name string) *app {
 func (s *supervisor) allApps() []*app {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
 	apps := make([]*app, 0, len(s.apps))
 	for _, a := range s.apps {
 		apps = append(apps, a)
 	}
+
 	return apps
 }
 
@@ -335,12 +348,15 @@ func (s *supervisor) stopAll() {
 		wg.Add(1)
 		go func(a *app) {
 			defer wg.Done()
+
 			s.drainAndStop(a, "shutdown")
+
 			if a.logs != nil {
 				a.logs.close()
 			}
 		}(a)
 	}
+
 	wg.Wait()
 }
 
@@ -352,6 +368,7 @@ func (s *supervisor) handleAppRoot(w http.ResponseWriter, r *http.Request, name 
 		if !ok {
 			return
 		}
+
 		a.sampleResources(time.Now())
 		writeJSON(w, http.StatusOK, s.info(a))
 	case http.MethodDelete:
@@ -368,10 +385,12 @@ func (s *supervisor) handleAppLogs(w http.ResponseWriter, r *http.Request, name,
 	if !ok {
 		return
 	}
+
 	if action == "logs/stream" {
 		s.handleLogStream(w, r, a)
 		return
 	}
+
 	s.handleLogs(w, r, a)
 }
 
@@ -398,6 +417,7 @@ func (s *supervisor) requireAppMethod(w http.ResponseWriter, r *http.Request, na
 	if !requireMethod(w, r, method) {
 		return nil, false
 	}
+
 	return s.requireApp(w, r, name)
 }
 
@@ -405,10 +425,12 @@ func (s *supervisor) requireAppMethod(w http.ResponseWriter, r *http.Request, na
 func (s *supervisor) handleAppAudited(w http.ResponseWriter, r *http.Request, identity authIdentity, name, action string, handler routeHandler, params map[string]string) {
 	recorder := &auditWriter{ResponseWriter: w}
 	handler(recorder, r, params)
+
 	status := recorder.status
 	if status == 0 {
 		status = http.StatusOK
 	}
+
 	s.appendAudit(identity, r, auditAction(r.Method, action), name, status, auditError(recorder.body.Bytes()))
 }
 
@@ -418,37 +440,47 @@ func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+
 	route, params, allowed := s.appRoutes().match(r.Method, r.URL.Path)
 	if route == nil {
 		if len(allowed) > 0 {
 			w.Header().Set("Allow", strings.Join(allowed, ", "))
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 			return
 		}
+
 		http.NotFound(w, r)
+
 		return
 	}
+
 	name := params["name"]
 	if !validName(name) {
 		http.Error(w, "invalid app name", http.StatusBadRequest)
 		return
 	}
+
 	if !identity.canAccessApp(name) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
+
 	action := ""
 	if route.action != nil {
 		action = route.action(params)
 	}
+
 	if !identity.canPerformAppAction(r, action) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
+
 	if s.audit != nil && r.Method != http.MethodGet && r.Method != http.MethodHead {
 		s.handleAppAudited(w, r, identity, name, action, route.handler, params)
 		return
 	}
+
 	route.handler(w, r, params)
 }
 
@@ -458,10 +490,13 @@ func loopbackListen(addr string) bool {
 	if err != nil {
 		return false
 	}
+
 	if host == "localhost" {
 		return true
 	}
+
 	ip := net.ParseIP(host)
+
 	return ip != nil && ip.IsLoopback()
 }
 
@@ -471,13 +506,16 @@ func validateAppFetchListen(value string) error {
 	if err != nil {
 		return fmt.Errorf("app fetch listen %q: use a loopback address such as 127.0.0.1:0", value)
 	}
+
 	if strings.EqualFold(host, "localhost") {
 		return nil
 	}
+
 	ip := net.ParseIP(host)
 	if ip == nil || !ip.IsLoopback() {
 		return fmt.Errorf("app fetch listen %q must be loopback", value)
 	}
+
 	return nil
 }
 
@@ -486,10 +524,12 @@ func main() {
 		runnerMain()
 		return
 	}
+
 	if len(os.Args) > 1 && os.Args[1] == nsInitArg {
 		nsInitMain(os.Args[2:])
 		return
 	}
+
 	log.SetFlags(log.LstdFlags | log.LUTC)
 	dropPrivileges()
 	serve(startSupervisor(parseConfig()))

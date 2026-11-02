@@ -115,6 +115,7 @@ func schemaTableColumns(ctx context.Context, conn *sql.Conn, table string) ([]st
 	defer rows.Close()
 
 	columns := []storageColumn{}
+
 	for rows.Next() {
 		var (
 			cid     int
@@ -128,15 +129,19 @@ func schemaTableColumns(ctx context.Context, conn *sql.Conn, table string) ([]st
 		if err := rows.Scan(&cid, &name, &kind, &notNull, &def, &pk, &hidden); err != nil {
 			return nil, err
 		}
+
 		if hidden != 0 {
 			continue
 		}
+
 		column := storageColumn{Name: name, Type: kind, NotNull: notNull != 0, PrimaryKey: pk}
 		if def.Valid {
 			column.Default = &def.String
 		}
+
 		columns = append(columns, column)
 	}
+
 	return columns, rows.Err()
 }
 
@@ -146,10 +151,12 @@ func schemaTableIndexes(ctx context.Context, conn *sql.Conn, table string) ([]st
 	if err != nil {
 		return nil, err
 	}
+
 	var (
 		indexes []storageIndex
 		names   []string
 	)
+
 	for rows.Next() {
 		var (
 			seq     int
@@ -162,12 +169,15 @@ func schemaTableIndexes(ctx context.Context, conn *sql.Conn, table string) ([]st
 			closeErr := rows.Close() //nolint:sqlclosecheck // Rows are closed explicitly so the close error can be returned.
 			return nil, errors.Join(err, closeErr)
 		}
+
 		indexes = append(indexes, storageIndex{Name: name, Unique: unique != 0, Origin: origin, Partial: partial != 0, Columns: []storageIndexColumn{}})
 		names = append(names, name)
 	}
+
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
+
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -177,6 +187,7 @@ func schemaTableIndexes(ctx context.Context, conn *sql.Conn, table string) ([]st
 		if err != nil {
 			return nil, err
 		}
+
 		for columnRows.Next() {
 			var (
 				seqno int
@@ -187,20 +198,26 @@ func schemaTableIndexes(ctx context.Context, conn *sql.Conn, table string) ([]st
 				closeErr := columnRows.Close() //nolint:sqlclosecheck // Rows are closed explicitly so the close error can be returned.
 				return nil, errors.Join(err, closeErr)
 			}
+
 			var column *string
+
 			if value.Valid {
 				name := value.String
 				column = &name
 			}
+
 			indexes[i].Columns = append(indexes[i].Columns, column)
 		}
+
 		if err := columnRows.Close(); err != nil {
 			return nil, err
 		}
+
 		if err := columnRows.Err(); err != nil {
 			return nil, err
 		}
 	}
+
 	return indexes, nil
 }
 
@@ -213,6 +230,7 @@ func schemaTableForeignKeys(ctx context.Context, conn *sql.Conn, table string) (
 	defer rows.Close()
 
 	foreignKeys := []storageForeignKey{}
+
 	for rows.Next() {
 		var (
 			id       int
@@ -227,6 +245,7 @@ func schemaTableForeignKeys(ctx context.Context, conn *sql.Conn, table string) (
 		if err := rows.Scan(&id, &seq, &refTable, &from, &to, &onUpdate, &onDelete, &match); err != nil {
 			return nil, err
 		}
+
 		foreignKey := storageForeignKey{
 			ID:       id,
 			Seq:      seq,
@@ -240,8 +259,10 @@ func schemaTableForeignKeys(ctx context.Context, conn *sql.Conn, table string) (
 			target := to.String
 			foreignKey.To = &target
 		}
+
 		foreignKeys = append(foreignKeys, foreignKey)
 	}
+
 	return foreignKeys, rows.Err()
 }
 
@@ -251,10 +272,12 @@ func tableStats(ctx context.Context, conn *sql.Conn, table string) (int64, int64
 	if err := conn.QueryRowContext(ctx, "select count(*) from "+quoteSQLiteIdentifier(table)).Scan(&rows); err != nil {
 		return 0, 0, err
 	}
+
 	var bytes int64
 	if err := conn.QueryRowContext(ctx, "select coalesce(sum(pgsize), 0) from dbstat where name = ?", table).Scan(&bytes); err != nil {
 		bytes = 0
 	}
+
 	return rows, bytes, nil
 }
 
@@ -264,10 +287,12 @@ func schemaViews(ctx context.Context, conn *sql.Conn) ([]storageView, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	var (
 		views []storageView
 		names []string
 	)
+
 	for rows.Next() {
 		var (
 			name string
@@ -277,12 +302,15 @@ func schemaViews(ctx context.Context, conn *sql.Conn) ([]storageView, error) {
 			closeErr := rows.Close() //nolint:sqlclosecheck // Rows are closed explicitly so the close error can be returned.
 			return nil, errors.Join(err, closeErr)
 		}
+
 		views = append(views, storageView{Name: name, SQL: ddl.String, Columns: []storageColumn{}})
 		names = append(names, name)
 	}
+
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
+
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -293,8 +321,10 @@ func schemaViews(ctx context.Context, conn *sql.Conn) ([]storageView, error) {
 			// Some views cannot be introspected, for example a view over a dropped table. Keep the view and leave its columns empty.
 			continue
 		}
+
 		views[i].Columns = columns
 	}
+
 	return views, nil
 }
 
@@ -304,9 +334,11 @@ func schemaMigrations(ctx context.Context, conn *sql.Conn) ([]storageMigrationRe
 	if err := conn.QueryRowContext(ctx, `select count(*) from sqlite_master where type = 'table' and lower(name) = ?`, storageMigrationsTable).Scan(&exists); err != nil {
 		return nil, err
 	}
+
 	if exists == 0 {
 		return []storageMigrationRecord{}, nil
 	}
+
 	rows, err := conn.QueryContext(ctx, "select version, checksum, applied_at from "+quoteSQLiteIdentifier(storageMigrationsTable)+" order by version")
 	if err != nil {
 		return nil, err
@@ -314,13 +346,16 @@ func schemaMigrations(ctx context.Context, conn *sql.Conn) ([]storageMigrationRe
 	defer rows.Close()
 
 	migrations := []storageMigrationRecord{}
+
 	for rows.Next() {
 		var record storageMigrationRecord
 		if err := rows.Scan(&record.Version, &record.Checksum, &record.AppliedAt); err != nil {
 			return nil, err
 		}
+
 		migrations = append(migrations, record)
 	}
+
 	return migrations, rows.Err()
 }
 
@@ -335,64 +370,82 @@ func (s *storageServer) schema(ctx context.Context, app string, stats bool) (sto
 		if err := conn.QueryRowContext(ctx, "pragma user_version").Scan(&result.Version); err != nil {
 			return err
 		}
+
 		rows, err := conn.QueryContext(ctx, `select name from sqlite_master where type = 'table' and lower(substr(name, 1, 7)) <> 'sqlite_' and lower(name) <> ? order by name`, storageMigrationsTable)
 		if err != nil {
 			return err
 		}
+
 		names := []string{}
+
 		for rows.Next() {
 			var name string
 			if err := rows.Scan(&name); err != nil {
 				closeErr := rows.Close() //nolint:sqlclosecheck // Rows are closed explicitly so the close error can be returned.
 				return errors.Join(err, closeErr)
 			}
+
 			names = append(names, name)
 		}
+
 		if err := rows.Close(); err != nil {
 			return err
 		}
+
 		if err := rows.Err(); err != nil {
 			return err
 		}
+
 		for _, name := range names {
 			columns, err := schemaTableColumns(ctx, conn, name)
 			if err != nil {
 				return err
 			}
+
 			indexes, err := schemaTableIndexes(ctx, conn, name)
 			if err != nil {
 				return err
 			}
+
 			foreignKeys, err := schemaTableForeignKeys(ctx, conn, name)
 			if err != nil {
 				return err
 			}
+
 			table := storageTable{Name: name, Columns: columns, Indexes: indexes, ForeignKeys: foreignKeys}
 			if stats {
 				rowCount, bytes, err := tableStats(ctx, conn, name)
 				if err != nil {
 					return err
 				}
+
 				table.Rows, table.Bytes = &rowCount, &bytes
 			}
+
 			result.Tables = append(result.Tables, table)
 		}
+
 		if result.Views, err = schemaViews(ctx, conn); err != nil {
 			return err
 		}
+
 		if result.Migrations, err = schemaMigrations(ctx, conn); err != nil {
 			return err
 		}
+
 		return nil
 	})
+
 	return result, err
 }
 
 func (s *storageServer) schemaVersion(ctx context.Context, app string) (int, error) {
 	var version int
+
 	err := s.withConn(ctx, app, func(conn *sql.Conn) error {
 		return conn.QueryRowContext(ctx, "pragma user_version").Scan(&version)
 	})
+
 	return version, err
 }
 
@@ -400,10 +453,12 @@ func (s *storageServer) schemaVersion(ctx context.Context, app string) (int, err
 func storageMigrationChecksum(version int, statements []storageStatement) string {
 	hash := sha256.New()
 	_, _ = fmt.Fprintf(hash, "version:%d\n", version)
+
 	_, _ = fmt.Fprintf(hash, "statements:%d\n", len(statements))
 	for _, statement := range statements {
 		_, _ = fmt.Fprintf(hash, "sql:%d:", len(statement.SQL))
 		_, _ = hash.Write([]byte(statement.SQL))
+
 		_, _ = fmt.Fprintf(hash, "\nparams:%d\n", len(statement.Params))
 		for _, param := range statement.Params {
 			_, _ = fmt.Fprintf(hash, "param:%d:", len(param))
@@ -411,6 +466,7 @@ func storageMigrationChecksum(version int, statements []storageStatement) string
 			_, _ = hash.Write([]byte{'\n'})
 		}
 	}
+
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
@@ -438,10 +494,12 @@ func prepareMigration(version int, statements []storageStatement) ([][]any, stri
 	if version < 1 || version > maxStorageMigrationVersion {
 		return nil, "", fmt.Errorf("%w: version must be between 1 and %d", errStorageInvalid, maxStorageMigrationVersion)
 	}
+
 	params, err := decodeStorageStatements(statements, false)
 	if err != nil {
 		return nil, "", err
 	}
+
 	return params, storageMigrationChecksum(version, statements), nil
 }
 
@@ -456,21 +514,26 @@ func applyMigration(ctx context.Context, conn *sql.Conn, version int, statements
 	if err := ensureStorageMigrationsTable(ctx, tx); err != nil {
 		return false, err
 	}
+
 	var current int
 	if err := tx.QueryRowContext(ctx, "pragma user_version").Scan(&current); err != nil {
 		return false, err
 	}
+
 	if current >= version {
 		stored, ok, err := storedMigrationChecksum(ctx, tx, version)
 		if err != nil {
 			return false, err
 		}
+
 		if !ok {
 			return false, fmt.Errorf("%w: version %d has no bookkeeping row", errStorageMigrationChecksum, version)
 		}
+
 		if stored != checksum {
 			return false, fmt.Errorf("%w: version %d was applied with a different checksum", errStorageMigrationChecksum, version)
 		}
+
 		return false, nil
 	}
 
@@ -489,15 +552,18 @@ func applyMigration(ctx context.Context, conn *sql.Conn, version int, statements
 	if err := unregister(); err != nil {
 		return false, err
 	}
+
 	if _, err := tx.ExecContext(ctx,
 		"insert into "+quoteSQLiteIdentifier(storageMigrationsTable)+" (version, checksum, applied_at) values (?, ?, ?)",
 		version, checksum, time.Now().UTC().Format(time.RFC3339Nano),
 	); err != nil {
 		return false, err
 	}
+
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf("pragma user_version = %d", version)); err != nil {
 		return false, err
 	}
+
 	return true, tx.Commit()
 }
 
@@ -507,15 +573,20 @@ func (s *storageServer) migrate(ctx context.Context, app string, version int, st
 	if err != nil {
 		return storageMigrationResponse{}, err
 	}
+
 	applied := false
+
 	err = s.withConn(ctx, app, func(conn *sql.Conn) error {
 		var err error
+
 		applied, err = applyMigration(ctx, conn, version, statements, params, checksum)
+
 		return err
 	})
 	if err != nil {
 		return storageMigrationResponse{}, err
 	}
+
 	return storageMigrationResponse{Version: version, Applied: applied}, nil
 }
 
@@ -524,15 +595,19 @@ func (s *storageServer) readSchema(w http.ResponseWriter, r *http.Request, app s
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 		return
 	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), storageTimeout)
 	defer cancel()
+
 	schema, err := s.schema(ctx, app, statsRequested(r))
 	if err != nil {
 		writeStorageError(w, err)
 		return
 	}
+
 	writeJSON(w, http.StatusOK, schema)
 }
 
@@ -542,16 +617,20 @@ func (s *storageServer) runMigration(w http.ResponseWriter, r *http.Request, app
 	if !readStorageJSON(w, r, &req) {
 		return
 	}
+
 	timeout := s.migrationTimeout
 	if timeout <= 0 {
 		timeout = defaultStorageMigrationTimeout
 	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
+
 	result, err := s.migrate(ctx, app, req.Version, req.Statements)
 	if err != nil {
 		writeStorageError(w, err)
 		return
 	}
+
 	writeJSON(w, http.StatusOK, result)
 }

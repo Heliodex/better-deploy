@@ -15,28 +15,35 @@ func backupTreeAcyclic(tree backupTree) bool {
 			if _, ok := seen[id]; ok {
 				return false
 			}
+
 			seen[id] = struct{}{}
+
 			node, ok := tree.Nodes[id]
 			if !ok {
 				break
 			}
+
 			id = node.Parent
 		}
 	}
+
 	return true
 }
 
 // backupOldestRoot returns the lexicographically oldest root, which is also the oldest snapshot.
 func backupOldestRoot(tree backupTree) string {
 	root := ""
+
 	for name, node := range tree.Nodes {
 		if node.Parent != "" {
 			continue
 		}
+
 		if root == "" || name < root {
 			root = name
 		}
 	}
+
 	return root
 }
 
@@ -57,46 +64,55 @@ func (m *backupManager) readTreeLocked(app string) (backupTree, bool, error) {
 	default:
 		return tree, false, err
 	}
+
 	if tree.Nodes == nil {
 		tree.Nodes = map[string]backupNode{}
 		changed = true
 	}
+
 	return tree, changed, nil
 }
 
 // chainMissingNodes links snapshots the index has not recorded to the current node, so a file written just before a crash still has a place in the tree.
 func chainMissingNodes(tree *backupTree, chronological []backupInfo) bool {
 	changed := false
+
 	parent := tree.Current
 	if len(tree.Nodes) == 0 {
 		parent = ""
 	} else if _, ok := tree.Nodes[parent]; !ok {
 		parent = ""
 	}
+
 	for _, file := range chronological {
 		if _, ok := tree.Nodes[file.Name]; ok {
 			continue
 		}
+
 		tree.Nodes[file.Name] = backupNode{Parent: parent, Kind: backupKindLegacy}
 		parent = file.Name
 		changed = true
 	}
+
 	return changed
 }
 
 // repairParentLinks detaches nodes whose parent was pruned or never existed.
 func repairParentLinks(tree *backupTree) bool {
 	changed := false
+
 	for name, node := range tree.Nodes {
 		if node.Parent == "" {
 			continue
 		}
+
 		if _, ok := tree.Nodes[node.Parent]; !ok {
 			node.Parent = ""
 			tree.Nodes[name] = node
 			changed = true
 		}
 	}
+
 	return changed
 }
 
@@ -113,6 +129,7 @@ func flattenTree(tree *backupTree, chronological []backupInfo) {
 func adoptSingleRoot(tree *backupTree) bool {
 	root := backupOldestRoot(*tree)
 	changed := false
+
 	for name, node := range tree.Nodes {
 		if node.Parent == "" && name != root {
 			node.Parent = root
@@ -120,6 +137,7 @@ func adoptSingleRoot(tree *backupTree) bool {
 			changed = true
 		}
 	}
+
 	return changed
 }
 
@@ -128,23 +146,28 @@ func syncCurrentNode(tree *backupTree, chronological []backupInfo) bool {
 	if _, ok := tree.Nodes[tree.Current]; ok {
 		return false
 	}
+
 	tree.Current = ""
 	if len(chronological) > 0 {
 		tree.Current = chronological[len(chronological)-1].Name
 	}
+
 	return true
 }
 
 // reconcileTree makes the index match the files on disk and reports whether it changed.
 func reconcileTree(tree *backupTree, files []backupInfo) bool {
 	changed := false
+
 	existing := make(map[string]struct{}, len(files))
 	for _, file := range files {
 		existing[file.Name] = struct{}{}
 	}
+
 	for name := range tree.Nodes {
 		if _, ok := existing[name]; !ok {
 			delete(tree.Nodes, name)
+
 			changed = true
 		}
 	}
@@ -155,19 +178,25 @@ func reconcileTree(tree *backupTree, files []backupInfo) bool {
 	if chainMissingNodes(tree, chronological) {
 		changed = true
 	}
+
 	if repairParentLinks(tree) {
 		changed = true
 	}
+
 	if !backupTreeAcyclic(*tree) {
 		flattenTree(tree, chronological)
+
 		changed = true
 	}
+
 	if adoptSingleRoot(tree) {
 		changed = true
 	}
+
 	if syncCurrentNode(tree, chronological) {
 		changed = true
 	}
+
 	return changed
 }
 
@@ -177,6 +206,7 @@ func (m *backupManager) loadTreeLocked(app string, files []backupInfo) (backupTr
 	if err != nil {
 		return tree, false, err
 	}
+
 	return tree, reconcileTree(&tree, files) || changed, nil
 }
 
@@ -185,16 +215,20 @@ func (m *backupManager) saveTreeLocked(app string, tree backupTree) error {
 	if tree.Nodes == nil {
 		tree.Nodes = map[string]backupNode{}
 	}
+
 	if err := os.MkdirAll(m.appDir(app), 0o755); err != nil {
 		return fmt.Errorf("backup dir: %w", err)
 	}
+
 	data, err := json.Marshal(tree)
 	if err != nil {
 		return err
 	}
+
 	if err := writeFileAtomic(m.treePath(app), append(data, '\n')); err != nil {
 		return fmt.Errorf("write backup tree: %w", err)
 	}
+
 	return nil
 }
 
@@ -205,36 +239,46 @@ func backupPathNames(tree backupTree) map[string]struct{} {
 		if _, seen := protected[id]; seen {
 			break
 		}
+
 		protected[id] = struct{}{}
+
 		node, ok := tree.Nodes[id]
 		if !ok {
 			break
 		}
+
 		id = node.Parent
 	}
+
 	return protected
 }
 
 // backupOldestLeaf returns the oldest node with no children outside the protected branch.
 func backupOldestLeaf(tree backupTree, protected map[string]struct{}) string {
 	children := map[string]int{}
+
 	for _, node := range tree.Nodes {
 		if node.Parent != "" {
 			children[node.Parent]++
 		}
 	}
+
 	oldest := ""
+
 	for name := range tree.Nodes {
 		if _, ok := protected[name]; ok {
 			continue
 		}
+
 		if children[name] > 0 {
 			continue
 		}
+
 		if oldest == "" || name < oldest {
 			oldest = name
 		}
 	}
+
 	return oldest
 }
 
@@ -244,10 +288,12 @@ func backupPathChild(tree backupTree, root string, protected map[string]struct{}
 		if node.Parent != root {
 			continue
 		}
+
 		if _, ok := protected[name]; ok {
 			return name
 		}
 	}
+
 	return ""
 }
 
@@ -257,19 +303,25 @@ func (m *backupManager) pruneLocked(app string, keep int) error {
 	if err != nil {
 		return err
 	}
+
 	tree := state.Tree
 	if len(tree.Nodes) <= keep {
 		return nil
 	}
+
 	changed := false
+
 	for len(tree.Nodes) > keep {
 		protected := backupPathNames(tree)
 		if leaf := backupOldestLeaf(tree, protected); leaf != "" {
 			if err := m.removeSnapshot(app, leaf); err != nil {
 				return err
 			}
+
 			delete(tree.Nodes, leaf)
+
 			changed = true
+
 			continue
 		}
 
@@ -277,22 +329,28 @@ func (m *backupManager) pruneLocked(app string, keep int) error {
 		if root == "" || root == tree.Current {
 			break
 		}
+
 		child := backupPathChild(tree, root, protected)
 		if err := m.removeSnapshot(app, root); err != nil {
 			return err
 		}
+
 		delete(tree.Nodes, root)
+
 		if child != "" {
 			node := tree.Nodes[child]
 			node.Parent = ""
 			tree.Nodes[child] = node
 		}
+
 		changed = true
 	}
+
 	if changed {
 		if err := m.saveTreeLocked(app, tree); err != nil {
 			return err
 		}
 	}
+
 	return m.gcBlobs(app)
 }

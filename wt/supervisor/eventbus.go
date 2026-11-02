@@ -5,6 +5,7 @@ package main
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -57,6 +58,7 @@ func newEventBus() *eventBus {
 func (b *eventBus) log(app string) *appEventLog {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
 	log := b.apps[app]
 	if log == nil {
 		log = &appEventLog{
@@ -65,34 +67,42 @@ func (b *eventBus) log(app string) *appEventLog {
 		}
 		b.apps[app] = log
 	}
+
 	return log
 }
 
 // publish appends an event to the app's ring and fans it out without ever blocking the publisher.
 func (b *eventBus) publish(app, topic string, data jsontext.Value) (busEvent, error) {
 	if b == nil {
-		return busEvent{}, fmt.Errorf("event bus is unavailable")
+		return busEvent{}, errors.New("event bus is unavailable")
 	}
+
 	topic = strings.TrimSpace(topic)
 	if topic == "" || len(topic) > eventMaxTopic || strings.ContainsAny(topic, "\x00\r\n") {
 		return busEvent{}, fmt.Errorf("topic must be 1 to %d bytes without control characters", eventMaxTopic)
 	}
+
 	if len(data) == 0 {
 		data = jsontext.Value("null")
 	}
+
 	if len(data) > eventMaxBody {
-		return busEvent{}, fmt.Errorf("event data is too large")
+		return busEvent{}, errors.New("event data is too large")
 	}
+
 	log := b.log(app)
 	event := busEvent{Topic: topic, Time: time.Now().UTC(), Data: data}
+
 	log.mu.Lock()
 	log.next++
 	event.ID = log.next
 	log.ring.add(event)
+
 	for sub := range log.subs {
 		if sub.topic != "" && sub.topic != topic {
 			continue
 		}
+
 		select {
 		case sub.ch <- event:
 		default:
@@ -100,6 +110,7 @@ func (b *eventBus) publish(app, topic string, data jsontext.Value) (busEvent, er
 		}
 	}
 	log.mu.Unlock()
+
 	return event, nil
 }
 
@@ -108,27 +119,35 @@ func (b *eventBus) publish(app, topic string, data jsontext.Value) (busEvent, er
 func (b *eventBus) subscribe(app, topic string, since *int64) (sub *busSubscriber, replay []busEvent, oldest int64, gap bool) {
 	log := b.log(app)
 	sub = &busSubscriber{topic: topics(topic), ch: make(chan busEvent, eventSubBuffer)}
+
 	log.mu.Lock()
 	defer log.mu.Unlock()
+
 	if log.ring.len() > 0 {
 		oldest = log.ring.at(0).ID
 	}
+
 	if since != nil {
 		if log.ring.len() > 0 && *since < oldest-1 {
 			gap = true
 		}
+
 		for i := 0; i < log.ring.len(); i++ {
 			event := log.ring.at(i)
 			if event.ID <= *since {
 				continue
 			}
+
 			if sub.topic != "" && sub.topic != event.Topic {
 				continue
 			}
+
 			replay = append(replay, event)
 		}
 	}
+
 	log.subs[sub] = struct{}{}
+
 	return sub, replay, oldest, gap
 }
 
@@ -142,12 +161,15 @@ func (b *eventBus) unsubscribe(app string, sub *busSubscriber) {
 	if b == nil || sub == nil {
 		return
 	}
+
 	b.mu.Lock()
 	log := b.apps[app]
 	b.mu.Unlock()
+
 	if log == nil {
 		return
 	}
+
 	log.mu.Lock()
 	delete(log.subs, sub)
 	log.mu.Unlock()
@@ -158,18 +180,22 @@ func (b *eventBus) remove(app string) {
 	if b == nil {
 		return
 	}
+
 	b.mu.Lock()
 	log := b.apps[app]
 	delete(b.apps, app)
 	b.mu.Unlock()
+
 	if log == nil {
 		return
 	}
+
 	log.mu.Lock()
 	for sub := range log.subs {
 		close(sub.ch)
 		delete(log.subs, sub)
 	}
+
 	log.ring.reset()
 	log.mu.Unlock()
 }
@@ -179,5 +205,6 @@ func (e busEvent) json() []byte {
 	if err != nil {
 		return nil
 	}
+
 	return data
 }

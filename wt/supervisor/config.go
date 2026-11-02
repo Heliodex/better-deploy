@@ -77,6 +77,7 @@ type appConfigResponse struct {
 func configETag(cfg appConfig) string {
 	data, _ := json.Marshal(cfg)
 	sum := sha256.Sum256(data)
+
 	return `"` + hex.EncodeToString(sum[:]) + `"`
 }
 
@@ -88,6 +89,7 @@ func etagMatches(header, etag string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -97,22 +99,27 @@ func configResponse(cfg appConfig) appConfigResponse {
 	if schedule == nil {
 		schedule = []scheduleConfig{}
 	}
+
 	hosts := cfg.Hosts
 	if hosts == nil {
 		hosts = []string{}
 	}
+
 	callers := cfg.AllowCallers
 	if callers == nil {
 		callers = []string{}
 	}
+
 	egress := cfg.Egress
 	if egress == nil {
 		egress = []egressRule{}
 	}
+
 	dependsOn := cfg.DependsOn
 	if dependsOn == nil {
 		dependsOn = []string{}
 	}
+
 	return appConfigResponse{
 		Name:               cfg.Name,
 		Host:               cfg.Host,
@@ -160,6 +167,7 @@ func applySlice[T any](dst *[]T, src *[]T) {
 func mergeConfigEnv(current map[string]string, patch map[string]*string) map[string]string {
 	env := make(map[string]string, len(current)+len(patch))
 	maps.Copy(env, current)
+
 	for key, value := range patch {
 		if value == nil {
 			delete(env, key)
@@ -167,6 +175,7 @@ func mergeConfigEnv(current map[string]string, patch map[string]*string) map[str
 			env[key] = *value
 		}
 	}
+
 	return env
 }
 
@@ -195,6 +204,7 @@ func applyConfigPatch(cfg appConfig, patch appConfigPatch) appConfig {
 	applySlice(&cfg.Egress, patch.Egress)
 	applySlice(&cfg.Schedule, patch.Schedule)
 	cfg.Env = mergeConfigEnv(cfg.Env, patch.Env)
+
 	return cfg
 }
 
@@ -203,6 +213,7 @@ func appConfigPermission(untrusted bool) os.FileMode {
 	if untrusted {
 		return 0o600
 	}
+
 	return 0o644
 }
 
@@ -214,10 +225,12 @@ func persistAppConfig(dir string, cfg appConfig, mode string) error {
 	if err != nil {
 		return err
 	}
+
 	perm := appConfigPermission(mode == tenantUntrusted)
 	if err := writeFileAtomicMode(filepath.Join(dir, "app.json"), append(data, '\n'), perm); err != nil {
 		return fmt.Errorf("write app.json: %w", err)
 	}
+
 	return nil
 }
 
@@ -228,14 +241,17 @@ func (s *supervisor) validateConfigPatch(w http.ResponseWriter, a *app, cfg appC
 		writeError(w, http.StatusBadRequest, err.Error())
 		return cfg, false
 	}
+
 	if err := s.hostConflictError(next, a.name); err != nil {
 		writeError(w, http.StatusConflict, err.Error())
 		return cfg, false
 	}
+
 	if err := s.dependencyCycleError(a.name, next.DependsOn); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return cfg, false
 	}
+
 	if s.cfg.untrusted() && cfg.DiskMB != next.DiskMB && s.quota.enabled() {
 		a.mu.Lock()
 		uid := a.uid
@@ -248,6 +264,7 @@ func (s *supervisor) validateConfigPatch(w http.ResponseWriter, a *app, cfg appC
 			}
 		}
 	}
+
 	return next, true
 }
 
@@ -265,6 +282,7 @@ func (s *supervisor) activateConfigPatch(a *app, cfg, next appConfig) bool {
 	s.mu.Lock()
 	a.mu.Lock()
 	oldConfig := a.cfg
+
 	a.cfg = next
 	if cfg.Health != next.Health || cfg.healthInterval != next.healthInterval {
 		a.nextHealth = time.Time{}
@@ -276,19 +294,24 @@ func (s *supervisor) activateConfigPatch(a *app, cfg, next appConfig) bool {
 	if s.storage != nil && cfg.DiskMB != next.DiskMB {
 		s.storage.setQuota(a.name, int64(next.DiskMB)<<20)
 	}
+
 	if s.jobs != nil && cfg.JobConcurrency != next.JobConcurrency {
 		s.jobs.setConcurrency(a.name, next.JobConcurrency)
 	}
+
 	if !slices.Equal(cfg.Schedule, next.Schedule) {
 		a.mu.Lock()
 		running := a.cmd != nil && !a.exited
 		a.mu.Unlock()
+
 		if running {
 			s.stopSchedule(a)
 			s.startSchedule(a)
 		}
 	}
+
 	s.broadcast()
+
 	return configRestartRequired(cfg, next)
 }
 
@@ -298,15 +321,19 @@ func (s *supervisor) handleAppConfigGet(w http.ResponseWriter, r *http.Request, 
 	if !ok {
 		return
 	}
+
 	a.mu.Lock()
 	cfg := a.cfg
 	a.mu.Unlock()
+
 	etag := configETag(cfg)
 	w.Header().Set("ETag", etag)
+
 	if ifNoneMatch := r.Header.Get("If-None-Match"); ifNoneMatch != "" && etagMatches(ifNoneMatch, etag) {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
+
 	response := configResponse(cfg)
 	response.SecretKeys = s.secrets.keys(name)
 	writeJSON(w, http.StatusOK, response)
@@ -315,6 +342,7 @@ func (s *supervisor) handleAppConfigGet(w http.ResponseWriter, r *http.Request, 
 // handleAppConfigPatch validates and applies one JSON patch to the app config.
 func (s *supervisor) handleAppConfigPatch(w http.ResponseWriter, r *http.Request, name string) {
 	defer s.lockApp(name)()
+
 	a, ok := s.requireApp(w, r, name)
 	if !ok {
 		return
@@ -328,15 +356,18 @@ func (s *supervisor) handleAppConfigPatch(w http.ResponseWriter, r *http.Request
 	a.mu.Lock()
 	cfg := a.cfg
 	a.mu.Unlock()
+
 	currentETag := configETag(cfg)
 	if ifMatch := r.Header.Get("If-Match"); ifMatch != "" && !etagMatches(ifMatch, currentETag) {
 		writeError(w, http.StatusPreconditionFailed, "config has changed; reload and retry")
 		return
 	}
+
 	next, ok := s.validateConfigPatch(w, a, cfg, patch)
 	if !ok {
 		return
 	}
+
 	if err := persistAppConfig(a.dir, next, s.cfg.tenantMode); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -355,11 +386,14 @@ func (s *supervisor) handleAppConfig(w http.ResponseWriter, r *http.Request, nam
 	if r.Method != http.MethodGet && r.Method != http.MethodPatch {
 		w.Header().Set("Allow", "GET, PATCH")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 		return
 	}
+
 	if r.Method == http.MethodGet {
 		s.handleAppConfigGet(w, r, name)
 		return
 	}
+
 	s.handleAppConfigPatch(w, r, name)
 }

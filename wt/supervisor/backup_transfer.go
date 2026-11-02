@@ -5,6 +5,7 @@ package main
 import (
 	"archive/tar"
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -21,19 +22,24 @@ func writeTarFile(tw *tar.Writer, name, path string) error {
 		return err
 	}
 	defer file.Close()
+
 	info, err := file.Stat()
 	if err != nil {
 		return err
 	}
+
 	header, err := tar.FileInfoHeader(info, "")
 	if err != nil {
 		return err
 	}
+
 	header.Name = name
 	if err := tw.WriteHeader(header); err != nil {
 		return err
 	}
+
 	_, err = io.CopyN(tw, file, info.Size())
+
 	return err
 }
 
@@ -43,6 +49,7 @@ func (m *backupManager) exportSnapshot(app, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	m.lock(app)
 	defer m.unlock(app)
 
@@ -51,6 +58,7 @@ func (m *backupManager) exportSnapshot(app, name string) (string, error) {
 	databaseInfo, databaseErr := os.Stat(database)
 	archiveInfo, archiveErr := os.Stat(archive)
 	hasDatabase := databaseErr == nil && databaseInfo.Mode().IsRegular()
+
 	hasData := archiveErr == nil && archiveInfo.Mode().IsRegular()
 	if !hasDatabase && !hasData {
 		return "", errBackupNotFound
@@ -60,33 +68,41 @@ func (m *backupManager) exportSnapshot(app, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	output := temp.Name()
 	gz := gzip.NewWriter(temp)
 	tw := tar.NewWriter(gz)
+
 	writeErr := error(nil)
 	if hasDatabase {
 		writeErr = writeTarFile(tw, name, database)
 	}
+
 	if writeErr == nil && hasData {
 		writeErr = writeTarFile(tw, filepath.Base(archive), archive)
 	}
+
 	if writeErr == nil {
 		writeErr = tw.Close()
 	} else {
 		_ = tw.Close()
 	}
+
 	if writeErr == nil {
 		writeErr = gz.Close()
 	} else {
 		_ = gz.Close()
 	}
+
 	if closeErr := temp.Close(); writeErr == nil {
 		writeErr = closeErr
 	}
+
 	if writeErr != nil {
 		_ = os.Remove(output)
 		return "", writeErr
 	}
+
 	return output, nil
 }
 
@@ -95,54 +111,65 @@ func extractSnapshot(src, temp string) (database, archive string, err error) {
 	if err := extractTarGzLimited(src, temp, maxBackupExtractBytes, maxBackupTarFiles); err != nil {
 		return "", "", err
 	}
+
 	entries, err := os.ReadDir(temp)
 	if err != nil {
 		return "", "", err
 	}
+
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
+
 		path := filepath.Join(temp, entry.Name())
 		switch {
 		case strings.HasSuffix(entry.Name(), backupFileSuffix):
 			if database != "" {
-				return "", "", fmt.Errorf("snapshot contains more than one database")
+				return "", "", errors.New("snapshot contains more than one database")
 			}
+
 			database = path
 		case strings.HasSuffix(entry.Name(), backupDataSuffix):
 			if archive != "" {
-				return "", "", fmt.Errorf("snapshot contains more than one data archive")
+				return "", "", errors.New("snapshot contains more than one data archive")
 			}
+
 			archive = path
 		}
 	}
+
 	if database == "" && archive == "" {
-		return "", "", fmt.Errorf("snapshot has no database or data archive")
+		return "", "", errors.New("snapshot has no database or data archive")
 	}
+
 	if database != "" {
 		if err := checkBackupDatabase(database); err != nil {
 			return "", "", fmt.Errorf("snapshot database: %w", err)
 		}
 	}
+
 	return database, archive, nil
 }
 
 // placeImportedSnapshot moves the extracted database and data archive into the backup directory.
 func (m *backupManager) placeImportedSnapshot(app, name, database, archive string) (path, dataPath string, err error) {
 	path = filepath.Join(m.appDir(app), name)
+
 	dataPath = m.dataPath(app, name)
 	if database != "" {
 		if err := m.adoptBackupFile(app, database, path); err != nil {
 			return "", "", err
 		}
 	}
+
 	if archive != "" {
 		if err := m.adoptBackupFile(app, archive, dataPath); err != nil {
 			_ = os.Remove(path)
 			return "", "", err
 		}
 	}
+
 	return path, dataPath, nil
 }
 
@@ -152,17 +179,22 @@ func (m *backupManager) recordImportedSnapshot(app, name string, now time.Time, 
 	if err != nil {
 		_ = os.Remove(path)
 		_ = os.Remove(dataPath)
+
 		return backupInfo{}, err
 	}
+
 	hash, err := snapshotHash(path, dataPath)
 	if err != nil {
 		log.Printf("backup %s: hash import: %v", app, err)
 	}
+
 	tree := state.Tree
+
 	tree.Nodes[name] = backupNode{Parent: tree.Current, Kind: backupKindImport, Hash: hash}
 	if err := m.saveTreeLocked(app, tree); err != nil {
 		_ = os.Remove(path)
 		_ = os.Remove(dataPath)
+
 		return backupInfo{}, err
 	}
 	// Keep the imported snapshot even when the app's keep limit is already full; the next snapshot or settings change prunes it.
@@ -170,10 +202,12 @@ func (m *backupManager) recordImportedSnapshot(app, name string, now time.Time, 
 	if infoD, err := os.Stat(path); err == nil {
 		info.Size = infoD.Size()
 	}
+
 	if infoD, err := os.Stat(dataPath); err == nil {
 		info.DataSize = infoD.Size()
 		info.HasData = true
 	}
+
 	return info, nil
 }
 
@@ -187,18 +221,23 @@ func (m *backupManager) importSnapshot(app, src string) (backupInfo, error) {
 		return backupInfo{}, err
 	}
 	defer os.RemoveAll(temp)
+
 	database, archive, err := extractSnapshot(src, temp)
 	if err != nil {
 		return backupInfo{}, err
 	}
+
 	if err := os.MkdirAll(m.appDir(app), 0o755); err != nil {
 		return backupInfo{}, err
 	}
+
 	now := time.Now().UTC()
 	name, now := m.backupName(app, now)
+
 	path, dataPath, err := m.placeImportedSnapshot(app, name, database, archive)
 	if err != nil {
 		return backupInfo{}, err
 	}
+
 	return m.recordImportedSnapshot(app, name, now, path, dataPath)
 }

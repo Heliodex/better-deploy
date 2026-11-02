@@ -14,10 +14,12 @@ import (
 func TestParseProcStat(t *testing.T) {
 	// Fields after the closing parenthesis start at the state field, so utime and stime are fields 14 and 15.
 	line := []byte("1234 (wasmtime) S 1 1234 1234 0 -1 4194560 100 0 0 0 12 34 0 0 20 0 1 0 12345 100000 100 18446744073709551615")
+
 	ticks, err := parseProcStat(line)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if ticks != 46 {
 		t.Errorf("ticks = %d, want 46", ticks)
 	}
@@ -25,10 +27,12 @@ func TestParseProcStat(t *testing.T) {
 
 func TestParseProcStatHandlesParensInCommand(t *testing.T) {
 	line := []byte("1234 (wasm)time) S 1 1234 1234 0 -1 4194560 100 0 0 0 7 8 0 0 20 0 1 0 12345 100000 100 18446744073709551615")
+
 	ticks, err := parseProcStat(line)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if ticks != 15 {
 		t.Errorf("ticks = %d, want 15", ticks)
 	}
@@ -52,13 +56,16 @@ func TestParseProcStatm(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	want := int64(250 * os.Getpagesize())
 	if memory != want {
 		t.Errorf("memory = %d, want %d", memory, want)
 	}
+
 	if _, err := parseProcStatm([]byte("1000")); err == nil {
 		t.Error("expected an error for a short statm line")
 	}
+
 	if _, err := parseProcStatm([]byte("1000 nope")); err == nil {
 		t.Error("expected an error for a non-numeric resident page count")
 	}
@@ -87,6 +94,7 @@ func TestSampleResourcesReadsSelf(t *testing.T) {
 	if _, err := os.Stat("/proc/self/stat"); err != nil {
 		t.Skip("procfs is unavailable")
 	}
+
 	app := &app{started: time.Now().Add(-2 * time.Second)}
 	app.cmd = &exec.Cmd{Process: &os.Process{Pid: os.Getpid()}}
 	app.sampleResources(time.Now())
@@ -95,6 +103,7 @@ func TestSampleResourcesReadsSelf(t *testing.T) {
 	if memory <= 0 {
 		t.Errorf("memory = %d, want a positive RSS", memory)
 	}
+
 	if cpu < 0 {
 		t.Errorf("cpu = %v, want a non-negative percentage", cpu)
 	}
@@ -105,6 +114,7 @@ func TestSampleResourcesClearsStoppedApp(t *testing.T) {
 	app.stats.cpuPercent = 42
 	app.stats.memoryBytes = 1 << 20
 	app.sampleResources(time.Now())
+
 	cpu, memory, _ := app.resourceStats()
 	if cpu != 0 || memory != 0 {
 		t.Errorf("stopped app stats = %v, %d; want 0, 0", cpu, memory)
@@ -113,16 +123,20 @@ func TestSampleResourcesClearsStoppedApp(t *testing.T) {
 
 func TestAppendHistoryTrims(t *testing.T) {
 	stats := &appStats{}
+
 	base := time.Now()
 	for i := range resourceHistoryPoints + 10 {
 		stats.appendHistory(base.Add(time.Duration(i)*resourceSampleInterval), float64(i), int64(i))
 	}
+
 	if len(stats.history) != resourceHistoryPoints {
 		t.Fatalf("history length = %d, want %d", len(stats.history), resourceHistoryPoints)
 	}
+
 	if got := stats.history[0].CPUPercent; got != 10 {
 		t.Errorf("oldest CPU = %v, want 10", got)
 	}
+
 	if got := stats.history[len(stats.history)-1].CPUPercent; got != float64(resourceHistoryPoints+9) {
 		t.Errorf("newest CPU = %v, want %d", got, resourceHistoryPoints+9)
 	}
@@ -137,15 +151,19 @@ func TestHandleResourcesReturnsHistory(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/apps/demo/resources", nil)
 	req.Header.Set("Authorization", "Bearer secret")
+
 	rec := httptest.NewRecorder()
 	s.handleApp(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
+
 	var out resourceHistoryResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatal(err)
 	}
+
 	if len(out.Samples) != 1 || out.Samples[0].CPUPercent != 1.5 {
 		t.Errorf("samples = %+v, want the seeded sample", out.Samples)
 	}
@@ -157,18 +175,23 @@ func TestHandleResourcesEmptyHistory(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/apps/demo/resources", nil)
 	req.Header.Set("Authorization", "Bearer secret")
+
 	rec := httptest.NewRecorder()
 	s.handleApp(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
+
 	var out resourceHistoryResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatal(err)
 	}
+
 	if out.Samples == nil {
 		t.Error("samples is nil; want an empty array")
 	}
+
 	if len(out.Samples) != 0 {
 		t.Errorf("samples = %+v, want none", out.Samples)
 	}
@@ -191,10 +214,12 @@ func TestPersistResourcesRoundTrip(t *testing.T) {
 	loaded.cfg.stateDir = dir
 	b := &app{name: "demo"}
 	loaded.loadResourceHistory(b)
+
 	got := b.resourceHistory()
 	if len(got) != 2 {
 		t.Fatalf("samples = %+v, want 2", got)
 	}
+
 	if got[0].CPUPercent != 1.5 || got[1].CPUPercent != 2.5 || got[1].MemoryBytes != 2<<20 {
 		t.Errorf("samples = %+v, want the persisted values in order", got)
 	}
@@ -206,6 +231,7 @@ func TestLoadResourceHistoryMissingAndCorrupt(t *testing.T) {
 	s.cfg.stateDir = dir
 	a := &app{name: "demo"}
 	s.loadResourceHistory(a)
+
 	if len(a.resourceHistory()) != 0 {
 		t.Fatalf("missing file loaded %+v, want none", a.resourceHistory())
 	}
@@ -213,10 +239,13 @@ func TestLoadResourceHistoryMissingAndCorrupt(t *testing.T) {
 	if err := os.MkdirAll(s.resourcesDir(), 0o755); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(filepath.Join(s.resourcesDir(), "demo.json"), []byte("not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
 	s.loadResourceHistory(a)
+
 	if len(a.resourceHistory()) != 0 {
 		t.Errorf("corrupt file loaded %+v, want none", a.resourceHistory())
 	}
@@ -228,11 +257,13 @@ func TestLoadResourceHistoryTrimsStale(t *testing.T) {
 	s.cfg.stateDir = dir
 	now := time.Now().UTC()
 	history := make([]resourceSample, 1, 1+resourceHistoryPoints+5)
+
 	history[0] = resourceSample{At: now.Add(-resourceHistoryWindow - time.Minute), CPUPercent: 9999, MemoryBytes: 9999}
 	for i := range resourceHistoryPoints + 5 {
 		// Tightly spaced so every fresh sample is inside the window; only the stale one is cut.
 		history = append(history, resourceSample{At: now.Add(-time.Duration(resourceHistoryPoints+4-i) * 100 * time.Millisecond), CPUPercent: float64(i), MemoryBytes: int64(i)})
 	}
+
 	a := &app{name: "demo"}
 	a.stats.history = history
 	s.apps["demo"] = a
@@ -242,15 +273,18 @@ func TestLoadResourceHistoryTrimsStale(t *testing.T) {
 	loaded.cfg.stateDir = dir
 	b := &app{name: "demo"}
 	loaded.loadResourceHistory(b)
+
 	got := b.resourceHistory()
 	if len(got) != resourceHistoryPoints {
 		t.Fatalf("samples = %d, want %d", len(got), resourceHistoryPoints)
 	}
+
 	for _, sample := range got {
 		if sample.CPUPercent == 9999 {
 			t.Fatalf("stale sample survived the load: %+v", got)
 		}
 	}
+
 	if last := got[len(got)-1]; last.CPUPercent != float64(resourceHistoryPoints+4) {
 		t.Errorf("newest CPU = %v, want %d", last.CPUPercent, resourceHistoryPoints+4)
 	}

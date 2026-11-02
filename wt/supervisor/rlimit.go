@@ -27,5 +27,6 @@ func rlimitPlan(cfg appConfig) []rlimitSpec {
 			Value:    uint64(cfg.DiskMB) << 20,
 		})
 	}
+
 	return append(plan, rlimitSpec{Resource: unix.RLIMIT_CORE, Name: "RLIMIT_CORE", Value: 0})
 }

@@ -16,6 +16,7 @@ func (s *supervisor) runSchedule(ctx context.Context, a *app, entry scheduleConf
 		log.Printf("app %s: schedule %s: %v", a.name, entry.Path, err)
 		return
 	}
+
 	method := entry.Method
 	if method == "" {
 		method = defaultScheduleMethod
@@ -26,29 +27,37 @@ func (s *supervisor) runSchedule(ctx context.Context, a *app, entry scheduleConf
 
 	ticker := time.NewTicker(every)
 	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 		}
+
 		if s.stopping.Load() {
 			return
 		}
+
 		request, err := http.NewRequestWithContext(ctx, method, target, nil)
 		if err != nil {
 			log.Printf("app %s: schedule %s: %v", a.name, entry.Path, err)
 			continue
 		}
+
 		response, err := client.Do(request)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
 			}
+
 			log.Printf("app %s: schedule %s: %v", a.name, entry.Path, err)
+
 			continue
 		}
+
 		_, _ = io.Copy(io.Discard, response.Body)
+
 		_ = response.Body.Close()
 		if response.StatusCode >= http.StatusBadRequest {
 			log.Printf("app %s: schedule %s: %s", a.name, entry.Path, response.Status)
@@ -62,6 +71,7 @@ func (s *supervisor) stopSchedule(a *app) {
 	cancel := a.scheduleCancel
 	a.scheduleCancel = nil
 	a.mu.Unlock()
+
 	if cancel != nil {
 		cancel()
 	}
@@ -72,13 +82,17 @@ func (s *supervisor) startSchedule(a *app) {
 	a.mu.Lock()
 	entries := append([]scheduleConfig(nil), a.cfg.Schedule...)
 	a.mu.Unlock()
+
 	if len(entries) == 0 {
 		return
 	}
+
 	ctx, cancel := context.WithCancel(context.Background())
+
 	a.mu.Lock()
 	a.scheduleCancel = cancel
 	a.mu.Unlock()
+
 	for _, entry := range entries {
 		go s.runSchedule(ctx, a, entry)
 	}

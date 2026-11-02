@@ -21,25 +21,32 @@ import (
 // snapshotHash fingerprints a snapshot's database and data archive so an unchanged snapshot is not recorded twice. Missing files are part of the hash so legacy database-only snapshots differ from new ones.
 func snapshotHash(paths ...string) (string, error) {
 	hash := sha256.New()
+
 	for _, path := range paths {
 		file, err := os.Open(path)
 		if os.IsNotExist(err) {
 			_, _ = hash.Write([]byte("missing\x00"))
 			continue
 		}
+
 		if err != nil {
 			return "", err
 		}
+
 		_, copyErr := io.Copy(hash, file)
 		closeErr := file.Close()
+
 		if copyErr != nil {
 			return "", copyErr
 		}
+
 		if closeErr != nil {
 			return "", closeErr
 		}
+
 		_, _ = hash.Write([]byte{0})
 	}
+
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
@@ -49,53 +56,68 @@ func archiveData(src, dst string) error {
 	if err != nil {
 		return err
 	}
+
 	gz := gzip.NewWriter(file)
 	tw := tar.NewWriter(gz)
+
 	writeErr := filepath.WalkDir(src, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			if os.IsNotExist(err) && path == src {
 				return nil
 			}
+
 			return err
 		}
+
 		rel, err := filepath.Rel(src, path)
 		if err != nil {
 			return err
 		}
+
 		if rel == "." {
 			return nil
 		}
+
 		info, err := entry.Info()
 		if err != nil {
 			return err
 		}
+
 		if !entry.IsDir() && !info.Mode().IsRegular() {
 			log.Printf("backup: skipping non-regular %s", rel)
 			return nil
 		}
+
 		header, err := tar.FileInfoHeader(info, "")
 		if err != nil {
 			return err
 		}
+
 		header.Name = filepath.ToSlash(rel)
 		if entry.IsDir() {
 			header.Name += "/"
 		}
+
 		if err := tw.WriteHeader(header); err != nil {
 			return err
 		}
+
 		if !info.Mode().IsRegular() {
 			return nil
 		}
+
 		in, err := os.Open(path)
 		if err != nil {
 			return err
 		}
+
 		_, copyErr := io.CopyN(tw, in, info.Size())
 		closeErr := in.Close()
+
 		if copyErr != nil {
 			return copyErr
 		}
+
 		return closeErr
 	})
 	if writeErr != nil {
@@ -103,23 +125,30 @@ func archiveData(src, dst string) error {
 		_ = gz.Close()
 		_ = file.Close()
 		_ = os.Remove(dst)
+
 		return writeErr
 	}
+
 	if err := tw.Close(); err != nil {
 		_ = gz.Close()
 		_ = file.Close()
 		_ = os.Remove(dst)
+
 		return err
 	}
+
 	if err := gz.Close(); err != nil {
 		_ = file.Close()
 		_ = os.Remove(dst)
+
 		return err
 	}
+
 	if err := file.Close(); err != nil {
 		_ = os.Remove(dst)
 		return err
 	}
+
 	return nil
 }
 
@@ -128,9 +157,11 @@ func validBackupName(name string) (string, error) {
 	if name == "" || filepath.Base(name) != name || !strings.HasPrefix(name, backupFilePrefix) || !strings.HasSuffix(name, backupFileSuffix) {
 		return "", errInvalidBackupName
 	}
+
 	if _, ok := backupTime(name); !ok {
 		return "", errInvalidBackupName
 	}
+
 	return name, nil
 }
 
@@ -139,9 +170,11 @@ func (m *backupManager) removeSnapshot(app, name string) error {
 	if err := os.Remove(filepath.Join(m.appDir(app), name)); err != nil && !os.IsNotExist(err) {
 		return err
 	}
+
 	if err := os.Remove(m.dataPath(app, name)); err != nil && !os.IsNotExist(err) {
 		return err
 	}
+
 	return nil
 }
 
@@ -151,59 +184,75 @@ func (m *backupManager) stageSnapshot(app, name string, withDB bool) (dataDir st
 	if err != nil {
 		return "", false, "", err
 	}
+
 	m.lock(app)
 	defer m.unlock(app)
+
 	database := filepath.Join(m.appDir(app), name)
 	hasDatabase := false
+
 	if info, err := os.Stat(database); err == nil && info.Mode().IsRegular() {
 		if err := checkBackupDatabase(database); err != nil {
 			return "", false, "", fmt.Errorf("backup is not a valid database: %w", err)
 		}
+
 		hasDatabase = true
 	} else if err != nil && !os.IsNotExist(err) {
 		return "", false, "", err
 	}
+
 	archive := m.dataPath(app, name)
+
 	hasData = false
 	if info, err := os.Stat(archive); err == nil && info.Mode().IsRegular() {
 		hasData = true
 	} else if err != nil && !os.IsNotExist(err) {
 		return "", false, "", err
 	}
+
 	if !hasDatabase && !hasData {
 		return "", false, "", errBackupNotFound
 	}
+
 	if err := os.MkdirAll(m.dataDir, 0o755); err != nil {
 		return "", hasData, "", err
 	}
+
 	if hasData {
 		dataDir, err = os.MkdirTemp(m.dataDir, "."+app+".restore-")
 		if err != nil {
 			return "", true, "", err
 		}
+
 		if err := extractTarGzLimited(archive, dataDir, maxBackupExtractBytes, maxBackupTarFiles); err != nil {
 			_ = os.RemoveAll(dataDir)
 			return "", true, "", err
 		}
 	}
+
 	if withDB && hasDatabase {
 		temp, err := os.CreateTemp(m.dataDir, "."+app+".db-*")
 		if err != nil {
 			_ = os.RemoveAll(dataDir)
 			return "", hasData, "", err
 		}
+
 		dbFile = temp.Name()
 		if err := temp.Close(); err != nil {
 			_ = os.Remove(dbFile)
 			_ = os.RemoveAll(dataDir)
+
 			return "", hasData, "", err
 		}
+
 		if err := copyFile(database, dbFile); err != nil {
 			_ = os.Remove(dbFile)
 			_ = os.RemoveAll(dataDir)
+
 			return "", hasData, "", err
 		}
 	}
+
 	return dataDir, hasData, dbFile, nil
 }
 
@@ -213,6 +262,7 @@ func (m *backupManager) stageData(app, name string) (string, bool, error) {
 	if dbFile != "" {
 		_ = os.Remove(dbFile)
 	}
+
 	return dataDir, hasData, err
 }
 
@@ -220,6 +270,7 @@ func (m *backupManager) stageData(app, name string) (string, bool, error) {
 func (m *backupManager) markCurrent(app, name string) error {
 	m.lock(app)
 	defer m.unlock(app)
+
 	return m.markCurrentLocked(app, name)
 }
 
@@ -229,11 +280,14 @@ func (m *backupManager) markCurrentLocked(app, name string) error {
 	if err != nil {
 		return err
 	}
+
 	tree := state.Tree
 	if _, ok := tree.Nodes[name]; !ok {
 		tree.Nodes[name] = backupNode{Parent: tree.Current, Kind: backupKindLegacy}
 	}
+
 	tree.Current = name
+
 	return m.saveTreeLocked(app, tree)
 }
 
@@ -241,6 +295,7 @@ func (m *backupManager) markCurrentLocked(app, name string) error {
 func (m *backupManager) installData(app, temp string) error {
 	m.lock(app)
 	defer m.unlock(app)
+
 	return replaceDir(temp, filepath.Join(m.dataDir, app))
 }
 
@@ -250,29 +305,36 @@ func (m *backupManager) restore(ctx context.Context, app, name string) error {
 	if err != nil {
 		return err
 	}
+
 	m.lock(app)
 	defer m.unlock(app)
+
 	path := filepath.Join(m.appDir(app), name)
 	hasDatabase := false
+
 	if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
 		if err := checkBackupDatabase(path); err != nil {
 			return fmt.Errorf("backup is not a valid database: %w", err)
 		}
+
 		hasDatabase = true
 	} else if err != nil && !os.IsNotExist(err) {
 		return err
 	} else if _, err := os.Stat(m.dataPath(app, name)); err != nil {
 		return errBackupNotFound
 	}
+
 	if hasDatabase {
 		if err := m.storage.restoreFrom(ctx, app, path); err != nil {
 			return err
 		}
 	}
+
 	state, err := m.stateLocked(app)
 	if err != nil {
 		return err
 	}
+
 	tree := state.Tree
 	if _, ok := tree.Nodes[name]; !ok {
 		tree.Nodes[name] = backupNode{Parent: tree.Current, Kind: backupKindLegacy}
@@ -282,7 +344,9 @@ func (m *backupManager) restore(ctx context.Context, app, name string) error {
 	if err := m.saveTreeLocked(app, tree); err != nil {
 		return err
 	}
+
 	log.Printf("backup %s: restored %s", app, name)
+
 	return nil
 }
 
@@ -293,6 +357,7 @@ func (m *backupManager) backupName(app string, now time.Time) (string, time.Time
 		now = now.Add(time.Nanosecond)
 		name = backupFilePrefix + now.Format(backupTimeLayout) + backupFileSuffix
 	}
+
 	return name, now
 }
 
@@ -302,13 +367,16 @@ func (m *backupManager) parentSnapshotHash(app, parent string, tree *backupTree)
 	if node.Hash != "" {
 		return node.Hash
 	}
+
 	hash, err := snapshotHash(filepath.Join(m.appDir(app), parent), m.dataPath(app, parent))
 	if err != nil {
 		log.Printf("backup %s: hash current: %v", app, err)
 		return ""
 	}
+
 	node.Hash = hash
 	tree.Nodes[parent] = node
+
 	return hash
 }
 
@@ -329,15 +397,19 @@ func (m *backupManager) writeSnapshotCandidate(ctx context.Context, app string, 
 			return false, "", err
 		}
 	}
+
 	if err := archiveData(filepath.Join(m.dataDir, app), candidate.dataTemp); err != nil {
 		_ = os.Remove(candidate.temp)
 		_ = os.Remove(candidate.dataTemp)
+
 		return false, "", fmt.Errorf("archive data: %w", err)
 	}
+
 	hash, err := snapshotHash(candidate.temp, candidate.dataTemp)
 	if err != nil {
 		log.Printf("backup %s: hash candidate: %v", app, err)
 	}
+
 	return hasDatabase, hash, nil
 }
 
@@ -347,24 +419,30 @@ func (m *backupManager) installSnapshot(candidate snapshotCandidate) (size, data
 		if err := m.adoptBackupFile(candidate.app, candidate.temp, candidate.path); err != nil {
 			_ = os.Remove(candidate.temp)
 			_ = os.Remove(candidate.dataTemp)
+
 			return 0, 0, fmt.Errorf("install backup: %w", err)
 		}
 	}
+
 	if err := m.adoptBackupFile(candidate.app, candidate.dataTemp, candidate.dataPath); err != nil {
 		_ = os.Remove(candidate.path)
 		return 0, 0, fmt.Errorf("install data backup: %w", err)
 	}
+
 	if candidate.hasDatabase {
 		info, err := os.Stat(candidate.path)
 		if err != nil {
 			return 0, 0, err
 		}
+
 		size = info.Size()
 	}
+
 	dataInfo, err := os.Stat(candidate.dataPath)
 	if err != nil {
 		return 0, 0, err
 	}
+
 	return size, dataInfo.Size(), nil
 }
 
@@ -374,14 +452,17 @@ func (m *backupManager) createLocked(ctx context.Context, app, kind string) (bac
 	if err != nil {
 		return backupInfo{}, err
 	}
+
 	state, err := m.stateLocked(app)
 	if err != nil {
 		return backupInfo{}, err
 	}
+
 	parent := state.Tree.Current
 	if _, ok := state.Tree.Nodes[parent]; !ok {
 		parent = ""
 	}
+
 	if err := os.MkdirAll(m.appDir(app), 0o755); err != nil {
 		return backupInfo{}, fmt.Errorf("backup dir: %w", err)
 	}
@@ -397,24 +478,30 @@ func (m *backupManager) createLocked(ctx context.Context, app, kind string) (bac
 	candidate.dataTemp = candidate.dataPath + backupTempSuffix
 	_ = os.Remove(candidate.temp)
 	_ = os.Remove(candidate.dataTemp)
+
 	hasDatabase, candidateHash, err := m.writeSnapshotCandidate(ctx, app, candidate)
 	if err != nil {
 		return backupInfo{}, err
 	}
+
 	candidate.hasDatabase = hasDatabase
 
 	tree := state.Tree
+
 	parentHash := ""
 	if parent != "" {
 		parentHash = m.parentSnapshotHash(app, parent, &tree)
 	}
+
 	if candidateHash != "" && candidateHash == parentHash {
 		_ = os.Remove(candidate.temp)
 		_ = os.Remove(candidate.dataTemp)
+
 		tree.Checked = now
 		if err := m.saveTreeLocked(app, tree); err != nil {
 			log.Printf("backup %s: save tree: %v", app, err)
 		}
+
 		return backupInfo{}, errBackupUnchanged
 	}
 
@@ -422,15 +509,19 @@ func (m *backupManager) createLocked(ctx context.Context, app, kind string) (bac
 	if err != nil {
 		return backupInfo{}, err
 	}
+
 	tree.Nodes[name] = backupNode{Parent: parent, Kind: kind, Hash: candidateHash}
 	tree.Current = name
+
 	tree.Checked = now
 	if err := m.saveTreeLocked(app, tree); err != nil {
 		// The file is already a valid snapshot; the next load will add it as a child of the previous current node.
 		log.Printf("backup %s: save tree: %v", app, err)
 	}
+
 	if err := m.pruneLocked(app, settings.Keep); err != nil {
 		log.Printf("backup %s: prune: %v", app, err)
 	}
+
 	return backupInfo{Name: name, Size: size, DataSize: dataSize, HasData: true, CreatedAt: now, Parent: parent, Kind: kind}, nil
 }

@@ -20,6 +20,7 @@ func normalizeRoutePath(path string) string {
 			segments[i] = "{}"
 		}
 	}
+
 	return "/" + strings.Join(segments, "/")
 }
 
@@ -32,15 +33,19 @@ func (s *supervisor) routeEntries() []routeInfo {
 		s.adminRoutes(),
 		s.publicRoutes(),
 	}
+
 	var entries []routeInfo
+
 	for _, table := range tables {
 		for _, route := range table.routes {
 			if route.method == "" {
 				continue
 			}
+
 			entries = append(entries, routeInfo{method: route.method, path: normalizeRoutePath("/" + strings.Join(route.pattern, "/"))})
 		}
 	}
+
 	return entries
 }
 
@@ -55,15 +60,19 @@ func TestOpenAPIDocumentsRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	documented := map[string]struct{}{}
 	path := ""
+
 	for line := range strings.SplitSeq(string(data), "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(line, "  /") || strings.HasPrefix(line, "  \"/") {
 			raw := strings.Trim(strings.TrimSuffix(trimmed, ":"), "\"")
 			path = normalizeRoutePath(raw)
+
 			continue
 		}
+
 		switch trimmed {
 		case "get:", "post:", "put:", "patch:", "delete:", "head:", "options:":
 			if path != "" && strings.HasPrefix(line, "    ") {
@@ -71,6 +80,7 @@ func TestOpenAPIDocumentsRoutes(t *testing.T) {
 			}
 		}
 	}
+
 	for _, entry := range (&supervisor{}).routeEntries() {
 		key := strings.ToUpper(entry.method) + " " + entry.path
 		if _, ok := documented[key]; !ok {

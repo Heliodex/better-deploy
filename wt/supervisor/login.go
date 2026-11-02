@@ -39,13 +39,16 @@ func newLoginLimiter() *loginLimiter {
 func (l *loginLimiter) allow(key string, now time.Time) (bool, time.Duration) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
 	attempt := l.attempts[key]
 	if attempt.blockedUntil.After(now) {
 		return false, attempt.blockedUntil.Sub(now)
 	}
+
 	if !attempt.firstFailure.IsZero() && now.Sub(attempt.firstFailure) > loginWindow {
 		delete(l.attempts, key)
 	}
+
 	return true, 0
 }
 
@@ -53,14 +56,17 @@ func (l *loginLimiter) allow(key string, now time.Time) (bool, time.Duration) {
 func (l *loginLimiter) fail(key string, now time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
 	attempt := l.attempts[key]
 	if attempt.firstFailure.IsZero() || now.Sub(attempt.firstFailure) > loginWindow {
 		attempt = loginAttempt{firstFailure: now}
 	}
+
 	attempt.failures++
 	if attempt.failures >= loginMaxFailures {
 		attempt.blockedUntil = now.Add(loginLockout)
 	}
+
 	l.attempts[key] = attempt
 }
 
@@ -68,6 +74,7 @@ func (l *loginLimiter) fail(key string, now time.Time) {
 func (l *loginLimiter) reset(key string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
 	delete(l.attempts, key)
 }
 
@@ -75,36 +82,45 @@ func (l *loginLimiter) reset(key string) {
 func (s *supervisor) handleLogin(w http.ResponseWriter, r *http.Request) {
 	limiter := s.loginGuard("operator")
 	key := s.loginKey(r)
+
 	now := time.Now()
 	if allowed, wait := limiter.allow(key, now); !allowed {
 		writeRetryAfter(w, wait)
 		s.appendAudit(authIdentity{Name: "anonymous"}, r, "login.failed", "", http.StatusTooManyRequests, "too many attempts")
 		writeError(w, http.StatusTooManyRequests, "too many login attempts; try again later")
+
 		return
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxConfigRequestBytes)
+
 	var req loginRequest
 	if err := json.UnmarshalRead(r.Body, &req); err != nil {
 		limiter.fail(key, now)
 		s.appendAudit(authIdentity{Name: "anonymous"}, r, "login.failed", "", http.StatusBadRequest, err.Error())
 		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+
 		return
 	}
+
 	token := strings.TrimSpace(req.Token)
 	identity := anonymousAdmin()
+
 	if s.authRequired() {
 		var ok bool
+
 		identity, ok = s.identityForToken(token)
 		if !ok {
 			limiter.fail(key, now)
 			s.appendAudit(authIdentity{Name: "anonymous"}, r, "login.failed", "", http.StatusUnauthorized, "invalid token")
 			writeError(w, http.StatusUnauthorized, "invalid token")
+
 			return
 		}
 	} else {
 		token = ""
 	}
+
 	limiter.reset(key)
 	w.Header().Set("Cache-Control", "no-store")
 	s.setAuthCookie(w, r, token, authCookieMaxAge)

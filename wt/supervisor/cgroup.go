@@ -46,21 +46,26 @@ func enableControllersAt(dir string, required []string) error {
 	if err != nil {
 		return fmt.Errorf("read cgroup controllers under %s (cgroup v2 required): %w", dir, err)
 	}
+
 	available := map[string]bool{}
 	for name := range strings.FieldsSeq(string(controllers)) {
 		available[strings.TrimPrefix(name, "+")] = true
 	}
+
 	var missing []string
+
 	for _, name := range required {
 		if !available[name] {
 			missing = append(missing, name)
 		}
 	}
+
 	if len(missing) > 0 {
 		return &missingControllersError{dir: dir, missing: missing}
 	}
 
 	subtreePath := filepath.Join(dir, "cgroup.subtree_control")
+
 	existing, err := os.ReadFile(subtreePath)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("read %s: %w", subtreePath, err)
@@ -68,12 +73,15 @@ func enableControllersAt(dir string, required []string) error {
 	// cgroup.subtree_control reads back bare names ("cpu memory") but only accepts "+name"/"-name" writes.
 	enabled := map[string]bool{}
 	tokens := make([]string, 0, len(required))
+
 	for token := range strings.FieldsSeq(string(existing)) {
 		name := strings.TrimPrefix(token, "+")
 		enabled[name] = true
 		tokens = append(tokens, "+"+name)
 	}
+
 	changed := false
+
 	for _, name := range required {
 		if !enabled[name] {
 			tokens = append(tokens, "+"+name)
@@ -81,11 +89,13 @@ func enableControllersAt(dir string, required []string) error {
 			changed = true
 		}
 	}
+
 	if changed || len(strings.Fields(string(existing))) == 0 {
 		if err := os.WriteFile(subtreePath, []byte(strings.Join(tokens, " ")+"\n"), 0o644); err != nil {
 			return fmt.Errorf("enable cgroup controllers under %s: %w", dir, err)
 		}
 	}
+
 	return nil
 }
 
@@ -94,16 +104,20 @@ func enableControllersAt(dir string, required []string) error {
 // so try the parent once and re-read before failing closed.
 func (m *cgroupManager) enableControllers() error {
 	if strings.TrimSpace(m.root) == "" {
-		return fmt.Errorf("WT_CGROUP_ROOT is empty")
+		return errors.New("WT_CGROUP_ROOT is empty")
 	}
+
 	if err := os.MkdirAll(m.root, 0o755); err != nil {
 		return fmt.Errorf("create cgroup root %s: %w", m.root, err)
 	}
+
 	required := strings.Fields(requiredControllers)
+
 	err := enableControllersAt(m.root, required)
 	if err == nil {
 		return nil
 	}
+
 	if _, ok := errors.AsType[*missingControllersError](err); !ok {
 		return err
 	}
@@ -112,15 +126,19 @@ func (m *cgroupManager) enableControllers() error {
 	if parent == m.root {
 		return err
 	}
+
 	if _, statErr := os.Stat(filepath.Join(parent, "cgroup.controllers")); statErr != nil {
 		return err
 	}
+
 	if parentErr := enableControllersAt(parent, required); parentErr != nil {
 		return fmt.Errorf("%w (enabling parent %s: %w)", err, parent, parentErr)
 	}
+
 	if err := enableControllersAt(m.root, required); err != nil {
 		return fmt.Errorf("cgroup controllers under %s after enabling parent %s: %w", m.root, parent, err)
 	}
+
 	return nil
 }
 
@@ -135,6 +153,7 @@ func memoryMax(memoryMB int) string {
 	if memoryMB <= 0 {
 		return "max"
 	}
+
 	return strconv.FormatInt(int64(memoryMB)<<20, 10)
 }
 
@@ -143,22 +162,27 @@ func (m *cgroupManager) create(name string, cfg appConfig) (string, error) {
 	if err := m.enableControllers(); err != nil {
 		return "", err
 	}
+
 	path := m.path(name)
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		return "", fmt.Errorf("create cgroup %s: %w", path, err)
 	}
+
 	cpu := cfg.CPUMillicores
 	if cpu <= 0 {
 		cpu = defaultCPUMillicores
 	}
+
 	pids := cfg.PidsMax
 	if pids <= 0 {
 		pids = defaultPidsMax
 	}
+
 	ioWeight := cfg.IOWeight
 	if ioWeight <= 0 {
 		ioWeight = defaultIOWeight
 	}
+
 	files := []struct{ name, value string }{
 		{"cpu.max", cpuMax(cpu)},
 		{"memory.max", memoryMax(cfg.MemoryMB)},
@@ -172,6 +196,7 @@ func (m *cgroupManager) create(name string, cfg appConfig) (string, error) {
 			return "", fmt.Errorf("write %s in %s: %w", file.name, path, err)
 		}
 	}
+
 	return path, nil
 }
 
@@ -181,6 +206,7 @@ func (m *cgroupManager) addPID(name string, pid int) error {
 	if err := os.WriteFile(path, []byte(strconv.Itoa(pid)+"\n"), 0o644); err != nil {
 		return fmt.Errorf("add pid %d to %s: %w", pid, path, err)
 	}
+
 	return nil
 }
 
@@ -191,8 +217,10 @@ func (m *cgroupManager) remove(name string) error {
 		if os.IsNotExist(err) {
 			return nil
 		}
+
 		return fmt.Errorf("stat cgroup %s: %w", path, err)
 	}
+
 	kill := filepath.Join(path, "cgroup.kill")
 	if _, err := os.Stat(kill); err == nil {
 		if err := os.WriteFile(kill, []byte("1"), 0o644); err != nil {
@@ -222,6 +250,7 @@ func (m *cgroupManager) close() {
 	if err != nil {
 		return
 	}
+
 	for _, entry := range entries {
 		if entry.IsDir() {
 			_ = m.remove(entry.Name())

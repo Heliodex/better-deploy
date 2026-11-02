@@ -22,15 +22,19 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	defer in.Close()
+
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		return err
 	}
+
 	_, copyErr := io.Copy(out, in)
 	closeErr := out.Close()
+
 	if copyErr != nil {
 		return copyErr
 	}
+
 	return closeErr
 }
 
@@ -40,8 +44,10 @@ func copyOptional(src, dst, name string) error {
 		if os.IsNotExist(err) {
 			return nil
 		}
+
 		return fmt.Errorf("copy %s: %w", name, err)
 	}
+
 	return nil
 }
 
@@ -51,24 +57,30 @@ func copyStatic(src, dst string) error {
 	if info, err := os.Stat(root); err != nil || !info.IsDir() {
 		return nil
 	}
+
 	return filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
+
 		if entry.IsDir() {
 			return nil
 		}
+
 		if !entry.Type().IsRegular() {
 			return nil
 		}
+
 		rel, err := filepath.Rel(src, path)
 		if err != nil {
 			return err
 		}
+
 		target := filepath.Join(dst, rel)
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return err
 		}
+
 		return copyFile(path, target)
 	})
 }
@@ -78,11 +90,13 @@ func copyBundle(src, dst string) error {
 	if err := copyFile(filepath.Join(src, "app.json"), filepath.Join(dst, "app.json")); err != nil {
 		return fmt.Errorf("copy app.json: %w", err)
 	}
+
 	for _, name := range []string{"main.cwasm", "main.wasm", artifactName} {
 		if err := copyOptional(src, dst, name); err != nil {
 			return err
 		}
 	}
+
 	return copyStatic(src, dst)
 }
 
@@ -92,62 +106,77 @@ func fileDigest(path string) (string, error) {
 		return "", err
 	}
 	defer file.Close()
+
 	hash := sha256.New()
 	if _, err := io.Copy(hash, file); err != nil {
 		return "", err
 	}
+
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 // storeStatic content-addresses every regular file under source/static and hardlinks it into dst/static at the same relative path. It returns the path-to-digest map and the unique bytes stored.
 func (m *deploymentManager) storeStatic(app, source, dst string) (map[string]string, int64, error) {
 	root := filepath.Join(source, "static")
+
 	info, err := os.Stat(root)
 	if os.IsNotExist(err) {
 		return nil, 0, nil
 	}
+
 	if err != nil {
 		return nil, 0, err
 	}
+
 	if !info.IsDir() {
 		return nil, 0, nil
 	}
 
 	files := map[string]string{}
 	seen := map[string]struct{}{}
+
 	var total int64
+
 	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
+
 		if entry.IsDir() || !entry.Type().IsRegular() {
 			return nil
 		}
+
 		rel, err := filepath.Rel(root, path)
 		if err != nil {
 			return err
 		}
+
 		stored, size, err := m.storeBlob(app, path)
 		if err != nil {
 			return fmt.Errorf("store static %s: %w", rel, err)
 		}
+
 		target := filepath.Join(dst, "static", rel)
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return err
 		}
+
 		if err := m.content(app).link(stored, target); err != nil {
 			return fmt.Errorf("link static %s: %w", rel, err)
 		}
+
 		files[filepath.ToSlash(rel)] = stored
 		if _, ok := seen[stored]; !ok {
 			seen[stored] = struct{}{}
 			total += size
 		}
+
 		return nil
 	})
 	if err != nil {
 		return nil, 0, err
 	}
+
 	return files, total, nil
 }
 
@@ -164,29 +193,36 @@ func (r componentRecord) digest() (digest string, size int64, ok bool) {
 	if r.wasmDigest != "" {
 		return r.wasmDigest, r.wasmSize, true
 	}
+
 	if r.cwasmDigest != "" {
 		return r.cwasmDigest, r.cwasmSize, true
 	}
+
 	return "", 0, false
 }
 
 // storeComponent stores and links main.cwasm and main.wasm into the deployment directory.
 func (m *deploymentManager) storeComponent(app, source, temp string) (componentRecord, error) {
 	record := componentRecord{files: map[string]string{}}
+
 	for _, name := range []string{"main.cwasm", "main.wasm"} {
 		info, err := os.Stat(filepath.Join(source, name))
 		if err != nil {
 			continue
 		}
+
 		stored, size, err := m.storeBlob(app, filepath.Join(source, name))
 		if err != nil {
 			return record, fmt.Errorf("store %s: %w", name, err)
 		}
+
 		if err := m.content(app).link(stored, filepath.Join(temp, name)); err != nil {
 			return record, fmt.Errorf("link %s: %w", name, err)
 		}
+
 		record.files[name] = stored
 		record.bytes += size
+
 		switch name {
 		case "main.cwasm":
 			record.cwasmDigest, record.cwasmSize = stored, info.Size()
@@ -194,6 +230,7 @@ func (m *deploymentManager) storeComponent(app, source, temp string) (componentR
 			record.wasmDigest, record.wasmSize = stored, info.Size()
 		}
 	}
+
 	return record, nil
 }
 
@@ -203,40 +240,51 @@ func (m *deploymentManager) stageDeployment(app, id, source, temp string) (compo
 	if err != nil {
 		return record, nil, 0, err
 	}
+
 	if _, _, ok := record.digest(); !ok {
 		return record, nil, 0, errNoComponent
 	}
+
 	if err := copyFile(filepath.Join(source, "app.json"), filepath.Join(temp, "app.json")); err != nil {
 		return record, nil, 0, err
 	}
+
 	if err := copyOptional(source, temp, artifactName); err != nil {
 		return record, nil, 0, err
 	}
+
 	static, staticBytes, err := m.storeStatic(app, source, temp)
 	if err != nil {
 		return record, nil, 0, err
 	}
+
 	total := record.bytes + staticBytes
+
 	for _, name := range []string{"app.json", artifactName} {
 		if info, err := os.Stat(filepath.Join(temp, name)); err == nil {
 			total += info.Size()
 		}
 	}
+
 	if err := copyOptional(filepath.Join(m.appDir(app), id), temp, deploymentLogName); err != nil {
 		return record, nil, 0, err
 	}
+
 	return record, static, total, nil
 }
 
 // deploymentMetadata fills the history entry for a successful bundle.
 func deploymentMetadata(previous deploymentInfo, id string, now time.Time, record componentRecord, static map[string]string, total int64, artifact artifactInfo) deploymentInfo {
 	digest, size, _ := record.digest()
+
 	if previous.QueuedAt.IsZero() {
 		previous.QueuedAt = now
 	}
+
 	if previous.StartedAt.IsZero() {
 		previous.StartedAt = now
 	}
+
 	previous.ID = id
 	previous.DeployedAt = now
 	previous.FinishedAt = now
@@ -252,6 +300,7 @@ func deploymentMetadata(previous deploymentInfo, id string, now time.Time, recor
 	previous.Static = static
 	previous.Status = deploymentStatusOK
 	previous.Error = ""
+
 	return previous
 }
 
@@ -261,9 +310,11 @@ func writeDeploymentMeta(temp string, info deploymentInfo) error {
 	if err != nil {
 		return err
 	}
+
 	if err := os.WriteFile(filepath.Join(temp, deploymentMetaName), append(meta, '\n'), 0o644); err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -272,6 +323,7 @@ func (m *deploymentManager) recordAt(app, id string, previous deploymentInfo, so
 	if err := validDeploymentID(id); err != nil {
 		return deploymentInfo{}, err
 	}
+
 	temp, err := os.MkdirTemp(m.appDir(app), ".record-")
 	if err != nil {
 		return deploymentInfo{}, err
@@ -279,21 +331,27 @@ func (m *deploymentManager) recordAt(app, id string, previous deploymentInfo, so
 	defer os.RemoveAll(temp)
 
 	artifact, _ := readArtifact(source)
+
 	record, static, total, err := m.stageDeployment(app, id, source, temp)
 	if err != nil {
 		return deploymentInfo{}, err
 	}
+
 	now := time.Now().UTC()
+
 	recorded := deploymentMetadata(previous, id, now, record, static, total, artifact)
 	if err := writeDeploymentMeta(temp, recorded); err != nil {
 		return deploymentInfo{}, err
 	}
+
 	if err := replaceDir(temp, filepath.Join(m.appDir(app), id)); err != nil {
 		return deploymentInfo{}, err
 	}
+
 	if err := m.prune(app); err != nil {
 		log.Printf("deploy history %s: prune: %v", app, err)
 	}
+
 	return recorded, nil
 }
 
@@ -303,6 +361,7 @@ func (m *deploymentManager) record(app, source string) (deploymentInfo, error) {
 	if err != nil {
 		return deploymentInfo{}, err
 	}
+
 	return m.recordAt(app, id, deploymentInfo{QueuedAt: now}, source)
 }
 
@@ -311,10 +370,12 @@ func (m *deploymentManager) recordFailure(app, digest, message string) (deployme
 	if len(message) > deploymentErrorBytes {
 		message = message[:deploymentErrorBytes] + "…"
 	}
+
 	id, now, err := m.newID(app)
 	if err != nil {
 		return deploymentInfo{}, err
 	}
+
 	temp, err := os.MkdirTemp(m.appDir(app), ".failure-")
 	if err != nil {
 		return deploymentInfo{}, err
@@ -328,19 +389,24 @@ func (m *deploymentManager) recordFailure(app, digest, message string) (deployme
 		Status:     deploymentStatusFail,
 		Error:      message,
 	}
+
 	meta, err := json.Marshal(recorded)
 	if err != nil {
 		return deploymentInfo{}, err
 	}
+
 	if err := os.WriteFile(filepath.Join(temp, deploymentMetaName), append(meta, '\n'), 0o644); err != nil {
 		return deploymentInfo{}, err
 	}
+
 	if err := os.Rename(temp, filepath.Join(m.appDir(app), id)); err != nil {
 		return deploymentInfo{}, err
 	}
+
 	if err := m.prune(app); err != nil {
 		log.Printf("deploy history %s: prune: %v", app, err)
 	}
+
 	return recorded, nil
 }
 
@@ -349,11 +415,14 @@ func (s *supervisor) historyBytes(a *app) int64 {
 	if s.deployments == nil {
 		return 0
 	}
+
 	now := time.Now()
+
 	a.history.mu.Lock()
 	if !a.history.at.IsZero() && now.Sub(a.history.at) < diskUsageInterval {
 		bytes := a.history.bytes
 		a.history.mu.Unlock()
+
 		return bytes
 	}
 	a.history.mu.Unlock()
@@ -362,10 +431,12 @@ func (s *supervisor) historyBytes(a *app) int64 {
 	if err != nil {
 		log.Printf("app %s: deployment history usage: %v", a.name, err)
 	}
+
 	a.history.mu.Lock()
 	a.history.bytes = bytes
 	a.history.at = now
 	a.history.mu.Unlock()
+
 	return bytes
 }
 
@@ -383,9 +454,11 @@ func (s *supervisor) recordDeployment(name, dir string) {
 	if s.deployments == nil {
 		return
 	}
+
 	if _, err := s.deployments.record(name, dir); err != nil {
 		log.Printf("deploy history %s: %v", name, err)
 	}
+
 	s.resetHistoryUsage(name)
 }
 
@@ -394,10 +467,12 @@ func (s *supervisor) recordDeploymentFailure(name, digest string, cause error) {
 	if s.deployments == nil || cause == nil {
 		return
 	}
+
 	message := s.redactAppText(name, cause.Error())
 	if _, err := s.deployments.recordFailure(name, digest, message); err != nil {
 		log.Printf("deploy history %s: %v", name, err)
 	}
+
 	s.resetHistoryUsage(name)
 }
 
@@ -408,20 +483,25 @@ func (s *supervisor) handleDeployments(w http.ResponseWriter, _ *http.Request, n
 			return
 		}
 	}
+
 	if s.deployments == nil {
 		writeError(w, http.StatusServiceUnavailable, "deployment history unavailable")
 		return
 	}
+
 	list, err := s.deployments.list(name)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	if s.lookup(name) == nil && len(list) == 0 {
 		writeError(w, http.StatusNotFound, "app not found")
 		return
 	}
+
 	running := ""
+
 	if a := s.lookup(name); a != nil {
 		a.mu.Lock()
 		running = a.digest
@@ -432,12 +512,16 @@ func (s *supervisor) handleDeployments(w http.ResponseWriter, _ *http.Request, n
 		if list[i].Status != "" && list[i].Status != deploymentStatusOK {
 			continue
 		}
+
 		if running == "" || list[i].Digest != running {
 			continue
 		}
+
 		list[i].Current = true
+
 		break
 	}
+
 	writeJSON(w, http.StatusOK, list)
 }
 
@@ -447,49 +531,60 @@ func (s *supervisor) handleDeploymentInfo(w http.ResponseWriter, _ *http.Request
 		writeError(w, http.StatusServiceUnavailable, "deployment history unavailable")
 		return
 	}
+
 	info, err := s.deployments.info(name, id)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
+
 	if a := s.lookup(name); a != nil && (info.Status == "" || info.Status == deploymentStatusOK) {
 		a.mu.Lock()
 		running := a.digest
 		a.mu.Unlock()
+
 		info.Current = running != "" && info.Digest == running
 	}
+
 	writeJSON(w, http.StatusOK, info)
 }
 
 func (s *supervisor) handleRollback(w http.ResponseWriter, r *http.Request, name, id string) {
 	defer s.lockApp(name)()
+
 	if _, ok := s.requireApp(w, r, name); !ok {
 		return
 	}
+
 	if s.deployments == nil {
 		writeError(w, http.StatusServiceUnavailable, "deployment history unavailable")
 		return
 	}
+
 	bundle, err := s.deployments.bundle(name, id)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
+
 	dir, err := os.MkdirTemp(s.cfg.appsDir, "."+name+".rollback-")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "create rollback directory")
 		return
 	}
 	defer os.RemoveAll(dir)
+
 	if err := copyBundle(bundle, dir); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	cfg, err := readAppConfig(dir, name, s.cfg.domain, s.cfg.tenantMode)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+
 	cfg.Name = name
 	if err := s.hostConflictError(cfg, name); err != nil {
 		writeError(w, http.StatusConflict, err.Error())
@@ -501,23 +596,30 @@ func (s *supervisor) handleRollback(w http.ResponseWriter, r *http.Request, name
 			writeError(w, http.StatusServiceUnavailable, "backups unavailable")
 			return
 		}
+
 		next := s.rollbackAtomic(w, r.Context(), name, dir, cfg, backup)
 		if next == nil {
 			return
 		}
+
 		writeJSON(w, http.StatusOK, s.info(next))
+
 		return
 	}
+
 	digest := sourceDigest(dir)
+
 	next, mode, err := s.installBundle(w, name, cfg, dir, digest, "rolled back")
 	if err != nil {
 		s.metrics.observeDeploy(name, "rollback-failed")
 		s.recordDeploymentFailure(name, digest, err)
+
 		return
 	}
+
 	s.metrics.observeDeploy(name, "rollback")
 	s.recordDeployment(name, next.dir)
-	w.Header().Set("X-WT-Wasm-Digest", next.digest)
-	w.Header().Set("X-WT-Deploy-Mode", mode)
+	w.Header().Set("X-Wt-Wasm-Digest", next.digest)
+	w.Header().Set("X-Wt-Deploy-Mode", mode)
 	writeJSON(w, http.StatusOK, s.info(next))
 }

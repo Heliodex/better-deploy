@@ -16,6 +16,7 @@ func newBoundedRing[T any](maxItems, maxBytes int, size func(T) int) *boundedRin
 // add appends one item and drops the oldest until both limits hold.
 func (r *boundedRing[T]) add(item T) {
 	r.items = append(r.items, item)
+
 	r.bytes += r.size(item)
 	for len(r.items) > r.maxItems || (r.bytes > r.maxBytes && len(r.items) > 1) {
 		dropped := r.items[0]

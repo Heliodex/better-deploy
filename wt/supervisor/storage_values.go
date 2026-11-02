@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -15,16 +16,19 @@ import (
 func decodeStorageBlob(raw jsontext.Value) ([]byte, error) {
 	var object map[string]string
 	if err := json.Unmarshal(raw, &object); err != nil {
-		return nil, fmt.Errorf("object parameters must be {\"$b64\": \"...\"}")
+		return nil, errors.New("object parameters must be {\"$b64\": \"...\"}")
 	}
+
 	encoded, ok := object["$b64"]
 	if !ok {
-		return nil, fmt.Errorf("object parameters must be {\"$b64\": \"...\"}")
+		return nil, errors.New("object parameters must be {\"$b64\": \"...\"}")
 	}
+
 	value, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		return nil, fmt.Errorf("invalid base64: %w", err)
 	}
+
 	return value, nil
 }
 
@@ -33,6 +37,7 @@ func decodeStorageNumber(text string) (any, error) {
 	if strings.ContainsAny(text, ".eE") {
 		return strconv.ParseFloat(text, 64)
 	}
+
 	return strconv.ParseInt(text, 10, 64)
 }
 
@@ -40,8 +45,9 @@ func decodeStorageNumber(text string) (any, error) {
 func decodeStorageValue(raw jsontext.Value) (any, error) {
 	text := strings.TrimSpace(string(raw))
 	if text == "" {
-		return nil, fmt.Errorf("empty value")
+		return nil, errors.New("empty value")
 	}
+
 	switch text[0] {
 	case 'n':
 		return nil, nil
@@ -54,6 +60,7 @@ func decodeStorageValue(raw jsontext.Value) (any, error) {
 		if err := json.Unmarshal(raw, &value); err != nil {
 			return nil, err
 		}
+
 		return value, nil
 	case '{':
 		return decodeStorageBlob(raw)
@@ -67,14 +74,17 @@ func decodeStorageParams(raw []jsontext.Value) ([]any, error) {
 	if len(raw) > maxStorageParams {
 		return nil, fmt.Errorf("%w: too many parameters (max %d)", errStorageInvalid, maxStorageParams)
 	}
+
 	params := make([]any, len(raw))
 	for i, value := range raw {
 		decoded, err := decodeStorageValue(value)
 		if err != nil {
 			return nil, fmt.Errorf("%w: parameter %d: %w", errStorageInvalid, i+1, err)
 		}
+
 		params[i] = decoded
 	}
+
 	return params, nil
 }
 
@@ -89,6 +99,7 @@ func encodeStorageValue(value any) any {
 		if math.IsNaN(value) || math.IsInf(value, 0) {
 			return nil
 		}
+
 		return value
 	default:
 		return value

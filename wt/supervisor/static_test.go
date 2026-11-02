@@ -13,6 +13,7 @@ import (
 func staticTestApp(t *testing.T) *app {
 	t.Helper()
 	dir := t.TempDir()
+
 	files := map[string]string{
 		"static/index.html":            "<html>spa</html>",
 		"static/_app/immutable/app.js": "console.log('app')",
@@ -23,10 +24,12 @@ func staticTestApp(t *testing.T) *app {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
 		}
+
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
+
 	return &app{name: "demo", dir: dir}
 }
 
@@ -46,20 +49,25 @@ func TestServeStaticFiles(t *testing.T) {
 	for _, tc := range cases {
 		req := httptest.NewRequest(http.MethodGet, "http://demo.localhost"+tc.path, nil)
 		req.Header.Set("Accept", tc.accept)
+
 		rec := httptest.NewRecorder()
 		if got := a.serveStatic(rec, req); got != tc.served {
 			t.Errorf("%s served = %v, want %v", tc.path, got, tc.served)
 			continue
 		}
+
 		if !tc.served {
 			continue
 		}
+
 		if rec.Code != http.StatusOK {
 			t.Errorf("%s status = %d", tc.path, rec.Code)
 		}
+
 		if rec.Body.String() != tc.body {
 			t.Errorf("%s body = %q, want %q", tc.path, rec.Body.String(), tc.body)
 		}
+
 		if got := rec.Header().Get("Cache-Control"); got != tc.cache {
 			t.Errorf("%s cache-control = %q, want %q", tc.path, got, tc.cache)
 		}
@@ -67,6 +75,7 @@ func TestServeStaticFiles(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "http://demo.localhost/", nil)
 	req.Header.Set("Accept", "text/html")
+
 	if a.serveStatic(httptest.NewRecorder(), req) {
 		t.Error("POST was served from static files")
 	}
@@ -80,11 +89,14 @@ func TestStoppedAppDoesNotServeStatic(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "http://demo.localhost/", nil)
 	req.Header.Set("Accept", "text/html")
+
 	rec := httptest.NewRecorder()
 	s.handleProxy(rec, req)
+
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("stopped app status = %d, want 503", rec.Code)
 	}
+
 	if strings.Contains(rec.Body.String(), "spa") {
 		t.Error("stopped app served its static index")
 	}
@@ -93,8 +105,10 @@ func TestStoppedAppDoesNotServeStatic(t *testing.T) {
 	a.cmd = &exec.Cmd{}
 	a.ready = true
 	a.mu.Unlock()
+
 	rec = httptest.NewRecorder()
 	s.handleProxy(rec, req)
+
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "spa") {
 		t.Errorf("running app static response = %d %q", rec.Code, rec.Body.String())
 	}
@@ -102,6 +116,7 @@ func TestStoppedAppDoesNotServeStatic(t *testing.T) {
 
 func TestStaticFileRejectsTraversal(t *testing.T) {
 	a := staticTestApp(t)
+
 	dir := a.staticDir()
 	for _, path := range []string{"/../main.cwasm", "/..%2fmain.cwasm", "/./../main.cwasm", "/"} {
 		if _, ok := staticFile(dir, path); ok {
@@ -113,6 +128,7 @@ func TestStaticFileRejectsTraversal(t *testing.T) {
 func TestServePrecompressedStatic(t *testing.T) {
 	a := staticTestApp(t)
 	dir := a.staticDir()
+
 	files := map[string]string{
 		"_app/immutable/app.js.br": "br-app",
 		"_app/immutable/app.js.gz": "gz-app",
@@ -122,6 +138,7 @@ func TestServePrecompressedStatic(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+
 	for _, test := range []struct{ accept, body, encoding string }{
 		{"br, gzip", "br-app", "br"},
 		{"gzip", "gz-app", "gzip"},
@@ -130,16 +147,20 @@ func TestServePrecompressedStatic(t *testing.T) {
 	} {
 		req := httptest.NewRequest(http.MethodGet, "http://demo.localhost/_app/immutable/app.js", nil)
 		req.Header.Set("Accept-Encoding", test.accept)
+
 		rec := httptest.NewRecorder()
 		if !a.serveStatic(rec, req) {
 			t.Fatalf("%s was not served", test.accept)
 		}
+
 		if rec.Body.String() != test.body || rec.Header().Get("Content-Encoding") != test.encoding {
 			t.Errorf("%s = encoding %q body %q, want %q %q", test.accept, rec.Header().Get("Content-Encoding"), rec.Body.String(), test.encoding, test.body)
 		}
+
 		if rec.Header().Get("Content-Type") == "" {
 			t.Errorf("%s has no content type", test.accept)
 		}
+
 		if !strings.Contains(rec.Header().Get("Vary"), "Accept-Encoding") {
 			t.Errorf("%s Vary = %q", test.accept, rec.Header().Get("Vary"))
 		}

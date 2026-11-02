@@ -54,15 +54,19 @@ func (s *storageServer) databaseTables(ctx context.Context, app string) ([]strin
 			return err
 		}
 		defer rows.Close()
+
 		for rows.Next() {
 			var name string
 			if err := rows.Scan(&name); err != nil {
 				return err
 			}
+
 			tables = append(tables, name)
 		}
+
 		return rows.Err()
 	})
+
 	return tables, err
 }
 
@@ -74,30 +78,39 @@ func (s *storageServer) databaseStats(ctx context.Context, app string) ([]databa
 		if err != nil {
 			return err
 		}
+
 		names := []string{}
+
 		for rows.Next() {
 			var name string
 			if err := rows.Scan(&name); err != nil {
 				closeErr := rows.Close() //nolint:sqlclosecheck // Rows are closed explicitly so the close error can be returned.
 				return errors.Join(err, closeErr)
 			}
+
 			names = append(names, name)
 		}
+
 		if err := rows.Close(); err != nil {
 			return err
 		}
+
 		if err := rows.Err(); err != nil {
 			return err
 		}
+
 		for _, name := range names {
 			rowCount, bytes, err := tableStats(ctx, conn, name)
 			if err != nil {
 				return err
 			}
+
 			stats = append(stats, databaseTableStats{Name: name, Rows: rowCount, Bytes: bytes})
 		}
+
 		return nil
 	})
+
 	return stats, err
 }
 
@@ -115,15 +128,19 @@ func (s *storageServer) databaseRows(ctx context.Context, app, table string, lim
 		Limit:   limit,
 		Offset:  offset,
 	}
+
 	err := s.withConn(ctx, app, func(conn *sql.Conn) error {
 		var name string
+
 		err := conn.QueryRowContext(ctx, `select name from sqlite_master where type = 'table' and name = ?`, table).Scan(&name)
 		if errors.Is(err, sql.ErrNoRows) {
 			return errDatabaseTableNotFound
 		}
+
 		if err != nil {
 			return err
 		}
+
 		if isSQLiteInternalTable(name) {
 			return errDatabaseTableNotFound
 		}
@@ -132,6 +149,7 @@ func (s *storageServer) databaseRows(ctx context.Context, app, table string, lim
 		if err := conn.QueryRowContext(ctx, "select count(*) from "+quoted).Scan(&result.Total); err != nil {
 			return err
 		}
+
 		rows, err := conn.QueryContext(ctx, "select * from "+quoted+" limit ? offset ?", limit, offset)
 		if err != nil {
 			return err
@@ -142,39 +160,48 @@ func (s *storageServer) databaseRows(ctx context.Context, app, table string, lim
 		if err != nil {
 			return err
 		}
+
 		result.Columns = columns
 		result.Rows = encoded
+
 		result.Truncated = truncated
 		if offset+len(result.Rows) < result.Total {
 			result.Truncated = true
 		}
+
 		return nil
 	})
 	if err != nil {
 		return databaseRowsResponse{}, err
 	}
+
 	return result, nil
 }
 
 // databaseRowsParam reads the page size and offset, writing 400 when either is out of range.
 func databaseRowsParam(w http.ResponseWriter, r *http.Request) (limit, offset int, ok bool) {
 	limit = defaultDatabaseRows
+
 	if value := r.URL.Query().Get("limit"); value != "" {
 		parsed, err := strconv.Atoi(value)
 		if err != nil || parsed < 1 || parsed > maxDatabaseRows {
 			writeError(w, http.StatusBadRequest, fmt.Sprintf("limit must be between 1 and %d", maxDatabaseRows))
 			return 0, 0, false
 		}
+
 		limit = parsed
 	}
+
 	if value := r.URL.Query().Get("offset"); value != "" {
 		parsed, err := strconv.Atoi(value)
 		if err != nil || parsed < 0 {
 			writeError(w, http.StatusBadRequest, "offset must be 0 or more")
 			return 0, 0, false
 		}
+
 		offset = parsed
 	}
+
 	return limit, offset, true
 }
 
@@ -183,10 +210,12 @@ func (s *supervisor) requireStorage(w http.ResponseWriter, r *http.Request, name
 	if _, ok := s.requireApp(w, r, name); !ok {
 		return false
 	}
+
 	if s.storage == nil {
 		http.Error(w, "database unavailable", http.StatusServiceUnavailable)
 		return false
 	}
+
 	return true
 }
 
@@ -194,32 +223,40 @@ func (s *supervisor) handleDatabase(w http.ResponseWriter, r *http.Request, name
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
+
 	if !s.requireStorage(w, r, name) {
 		return
 	}
+
 	if !s.storage.hasDatabase(name) {
 		writeJSON(w, http.StatusOK, databaseOverviewResponse{Tables: []string{}})
 		return
 	}
+
 	tables, err := s.storage.databaseTables(r.Context(), name)
 	if err != nil {
 		writeStorageError(w, err)
 		return
 	}
+
 	version, err := s.storage.schemaVersion(r.Context(), name)
 	if err != nil {
 		writeStorageError(w, err)
 		return
 	}
+
 	response := databaseOverviewResponse{Database: true, Tables: tables, Version: version}
+
 	if statsRequested(r) {
 		stats, err := s.storage.databaseStats(r.Context(), name)
 		if err != nil {
 			writeStorageError(w, err)
 			return
 		}
+
 		response.Stats = stats
 	}
+
 	writeJSON(w, http.StatusOK, response)
 }
 
@@ -227,31 +264,38 @@ func (s *supervisor) handleDatabaseRows(w http.ResponseWriter, r *http.Request, 
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
+
 	if !s.requireStorage(w, r, name) {
 		return
 	}
+
 	if !s.storage.hasDatabase(name) {
 		writeError(w, http.StatusBadRequest, errNoStorageDatabase.Error())
 		return
 	}
+
 	table := strings.TrimSpace(r.URL.Query().Get("table"))
 	if table == "" {
 		writeError(w, http.StatusBadRequest, "table is required")
 		return
 	}
+
 	limit, offset, ok := databaseRowsParam(w, r)
 	if !ok {
 		return
 	}
+
 	result, err := s.storage.databaseRows(r.Context(), name, table, limit, offset)
 	if errors.Is(err, errDatabaseTableNotFound) {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
+
 	if err != nil {
 		writeStorageError(w, err)
 		return
 	}
+
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -273,28 +317,35 @@ func (s *supervisor) handleDatabaseExport(w http.ResponseWriter, r *http.Request
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
+
 	if !s.requireStorage(w, r, name) {
 		return
 	}
+
 	if !s.storage.hasDatabase(name) {
 		writeError(w, http.StatusBadRequest, errNoStorageDatabase.Error())
 		return
 	}
+
 	temp, err := os.CreateTemp(s.cfg.stateDir, ".database-export-*.db")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "create export file")
 		return
 	}
+
 	path := temp.Name()
 	_ = temp.Close()
+
 	defer os.Remove(path)
 
 	ctx, cancel := context.WithTimeout(r.Context(), storageMaintenanceTimeout)
 	defer cancel()
+
 	if err := s.storage.backupTo(ctx, name, path); err != nil {
 		writeStorageError(w, err)
 		return
 	}
+
 	w.Header().Set("Content-Type", "application/vnd.sqlite3")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name+".db"))
 	http.ServeFile(w, r, path)
@@ -305,10 +356,12 @@ func (s *supervisor) handleDatabaseImport(w http.ResponseWriter, r *http.Request
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
+
 	if !s.requireStorage(w, r, name) {
 		return
 	}
 	defer s.lockApp(name)()
+
 	if s.rejectOverBudget(w) {
 		return
 	}
@@ -318,9 +371,11 @@ func (s *supervisor) handleDatabaseImport(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "parse database upload: "+err.Error())
 		return
 	}
+
 	if r.MultipartForm != nil {
 		defer func() { _ = r.MultipartForm.RemoveAll() }()
 	}
+
 	file, _, err := r.FormFile("database")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "missing database field")
@@ -333,17 +388,23 @@ func (s *supervisor) handleDatabaseImport(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "create import file")
 		return
 	}
+
 	path := temp.Name()
 	defer os.Remove(path)
+
 	if _, err := io.Copy(temp, io.LimitReader(file, maxBackupExtractBytes)); err != nil {
 		_ = temp.Close()
+
 		writeError(w, http.StatusBadRequest, "read database: "+err.Error())
+
 		return
 	}
+
 	if err := temp.Close(); err != nil {
 		writeError(w, http.StatusInternalServerError, "close import file")
 		return
 	}
+
 	if err := checkBackupDatabase(path); err != nil {
 		writeError(w, http.StatusBadRequest, "not a valid SQLite database: "+err.Error())
 		return
@@ -351,10 +412,12 @@ func (s *supervisor) handleDatabaseImport(w http.ResponseWriter, r *http.Request
 
 	ctx, cancel := context.WithTimeout(r.Context(), storageMaintenanceTimeout)
 	defer cancel()
+
 	if err := s.storage.restoreFrom(ctx, name, path); err != nil {
 		writeStorageError(w, err)
 		return
 	}
+
 	log.Printf("database %s: imported %s", name, path)
 	writeJSON(w, http.StatusOK, databaseImportResponse{Imported: true})
 }
@@ -364,24 +427,31 @@ func (s *supervisor) handleDatabaseMaintenance(w http.ResponseWriter, r *http.Re
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
+
 	if !s.requireStorage(w, r, name) {
 		return
 	}
+
 	if !s.storage.hasDatabase(name) {
 		writeError(w, http.StatusBadRequest, errNoStorageDatabase.Error())
 		return
 	}
+
 	var req databaseMaintenanceRequest
 	if !readStorageJSON(w, r, &req) {
 		return
 	}
+
 	op := strings.ToLower(strings.TrimSpace(req.Op))
+
 	ctx, cancel := context.WithTimeout(r.Context(), storageMaintenanceTimeout)
 	defer cancel()
+
 	result, err := s.storage.maintenance(ctx, name, op)
 	if err != nil {
 		writeStorageError(w, err)
 		return
 	}
+
 	writeJSON(w, http.StatusOK, databaseMaintenanceResponse{Op: op, Result: result})
 }

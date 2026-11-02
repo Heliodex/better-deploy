@@ -27,9 +27,11 @@ func TestMetricsEndpointRendersCountersAndGauges(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleMetrics(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("metrics = %d: %s", rec.Code, rec.Body.String())
 	}
+
 	for _, want := range []string{
 		`wt_requests_total{app="demo",method="GET",status="200"} 1`,
 		`wt_request_duration_seconds_count{app="demo",method="GET"} 1`,
@@ -49,6 +51,7 @@ func TestMetricsEndpointRendersCountersAndGauges(t *testing.T) {
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	s.handleMetrics(rec, req)
+
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("unauthenticated metrics = %d, want 401", rec.Code)
 	}

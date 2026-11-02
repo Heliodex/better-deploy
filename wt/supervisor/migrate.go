@@ -23,9 +23,11 @@ func (s *supervisor) migrateApp(a *app, port int, done <-chan struct{}) error {
 	if timeout <= 0 {
 		timeout = 5 * time.Minute
 	}
+
 	a.mu.Lock()
 	startup := a.cfg.startupLimit()
 	a.mu.Unlock()
+
 	readyBy := time.Now().Add(startup)
 	deadline := time.Now().Add(timeout + 10*time.Second)
 	client := &http.Client{
@@ -35,7 +37,9 @@ func (s *supervisor) migrateApp(a *app, port int, done <-chan struct{}) error {
 		},
 	}
 	target := fmt.Sprintf("http://127.0.0.1:%d%s", port, migratePath)
+
 	var last string
+
 	wait := 50 * time.Millisecond
 
 	for {
@@ -43,9 +47,11 @@ func (s *supervisor) migrateApp(a *app, port int, done <-chan struct{}) error {
 		if err != nil {
 			return err
 		}
+
 		response, err := client.Do(request)
 		if err == nil {
 			body, _ := io.ReadAll(io.LimitReader(response.Body, 4<<10))
+
 			_ = response.Body.Close()
 			switch {
 			case response.StatusCode == http.StatusNoContent || response.StatusCode == http.StatusOK:
@@ -67,14 +73,17 @@ func (s *supervisor) migrateApp(a *app, port int, done <-chan struct{}) error {
 				return fmt.Errorf("migrate endpoint: %w", err)
 			}
 		}
+
 		if time.Now().After(deadline) {
 			return fmt.Errorf("migration timed out: %s", last)
 		}
+
 		select {
 		case <-done:
 			return fmt.Errorf("app exited before migration: %s", last)
 		case <-time.After(wait):
 		}
+
 		wait = min(wait*2, time.Second)
 	}
 }

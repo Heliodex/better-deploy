@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"slices"
@@ -12,20 +13,25 @@ func validDNSName(host string) bool {
 	if host == "" || len(host) > 253 {
 		return false
 	}
+
 	for label := range strings.SplitSeq(host, ".") {
 		if len(label) == 0 || len(label) > 63 {
 			return false
 		}
+
 		if label[0] == '-' || label[len(label)-1] == '-' {
 			return false
 		}
+
 		for _, r := range label {
 			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
 				continue
 			}
+
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -44,6 +50,7 @@ func validHostPattern(host string) bool {
 	if suffix, ok := strings.CutPrefix(host, "*."); ok {
 		return strings.Contains(suffix, ".") && validDNSName(suffix) && net.ParseIP(suffix) == nil
 	}
+
 	return validHost(host)
 }
 
@@ -53,18 +60,23 @@ func validateAppHost(host, domain string) error {
 		if !strings.Contains(suffix, ".") || !validDNSName(suffix) || net.ParseIP(suffix) != nil {
 			return fmt.Errorf("invalid host %q", host)
 		}
+
 		return nil
 	}
+
 	if isReservedHostName(host) {
 		return fmt.Errorf("host %q is reserved for the supervisor", host)
 	}
+
 	if !validDNSName(host) {
 		return fmt.Errorf("invalid host %q", host)
 	}
+
 	domain = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(domain)), ".")
 	if domain != "" && host == domain {
 		return fmt.Errorf("host %q is reserved for the supervisor", host)
 	}
+
 	return nil
 }
 
@@ -72,21 +84,27 @@ func validateAppHost(host, domain string) error {
 func normalizeAppHosts(hosts []string, primary, domain string) ([]string, error) {
 	normalized := []string{}
 	seen := map[string]bool{primary: true}
+
 	for _, raw := range hosts {
 		host := strings.ToLower(strings.TrimSpace(raw))
 		if host == "" {
-			return nil, fmt.Errorf("hosts must not contain an empty host")
+			return nil, errors.New("hosts must not contain an empty host")
 		}
+
 		if err := validateAppHost(host, domain); err != nil {
 			return nil, err
 		}
+
 		if seen[host] {
 			continue
 		}
+
 		seen[host] = true
 		normalized = append(normalized, host)
 	}
+
 	slices.Sort(normalized)
+
 	return normalized, nil
 }
 
@@ -96,11 +114,13 @@ func appHosts(cfg appConfig) []string {
 	if cfg.Host != "" {
 		hosts = append(hosts, cfg.Host)
 	}
+
 	for _, host := range cfg.Hosts {
 		if host != "" && host != cfg.Host {
 			hosts = append(hosts, host)
 		}
 	}
+
 	return hosts
 }
 
@@ -110,9 +130,12 @@ func hostMatchesPattern(host, pattern string) bool {
 		if !strings.HasSuffix(host, "."+suffix) {
 			return false
 		}
+
 		label := strings.TrimSuffix(host, "."+suffix)
+
 		return label != "" && !strings.Contains(label, ".")
 	}
+
 	return host == pattern
 }
 
@@ -121,7 +144,9 @@ func hostPatternsOverlap(a, b string) bool {
 	if a == b {
 		return true
 	}
+
 	aWildcard := strings.HasPrefix(a, "*.")
+
 	bWildcard := strings.HasPrefix(b, "*.")
 	switch {
 	case aWildcard && bWildcard:
@@ -141,11 +166,14 @@ func listenHost(address string) string {
 	if address == "" || strings.HasPrefix(strings.ToLower(address), "unix:") {
 		return ""
 	}
+
 	host, _, err := net.SplitHostPort(address)
 	if err != nil {
 		host = address
 	}
+
 	host = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
+
 	return strings.Trim(host, "[]")
 }
 
@@ -155,18 +183,22 @@ func (s *supervisor) reservedHost(host string) bool {
 	if host == "" {
 		return false
 	}
+
 	if isReservedHostName(host) {
 		return true
 	}
+
 	domain := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(s.cfg.domain)), ".")
 	if domain != "" && host == domain {
 		return true
 	}
+
 	for _, address := range []string{s.cfg.listen, s.cfg.adminListen} {
 		if listenHost(address) == host {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -174,19 +206,23 @@ func (s *supervisor) reservedHost(host string) bool {
 func (s *supervisor) hostConflictError(cfg appConfig, except string) error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
 	for _, host := range appHosts(cfg) {
 		if s.reservedHost(host) {
 			return fmt.Errorf("host %q is reserved for the supervisor", host)
 		}
+
 		for existing, owner := range s.hosts {
 			if owner == nil || owner.name == except {
 				continue
 			}
+
 			if hostPatternsOverlap(host, existing) {
 				return fmt.Errorf("host %q is already used by another app", host)
 			}
 		}
 	}
+
 	return nil
 }
 
@@ -197,6 +233,7 @@ func (s *supervisor) setAppHostsLocked(a *app, old, next appConfig) {
 			delete(s.hosts, host)
 		}
 	}
+
 	for _, host := range appHosts(next) {
 		s.hosts[host] = a
 	}

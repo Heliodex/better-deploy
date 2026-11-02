@@ -11,14 +11,17 @@ type appLocks struct {
 func (l *appLocks) get(name string) *sync.Mutex {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
 	if l.locks == nil {
 		l.locks = map[string]*sync.Mutex{}
 	}
+
 	lock := l.locks[name]
 	if lock == nil {
 		lock = &sync.Mutex{}
 		l.locks[name] = lock
 	}
+
 	return lock
 }
 
@@ -26,5 +29,6 @@ func (l *appLocks) get(name string) *sync.Mutex {
 func (s *supervisor) lockApp(name string) func() {
 	lock := s.deployLocks.get(name)
 	lock.Lock()
+
 	return lock.Unlock
 }

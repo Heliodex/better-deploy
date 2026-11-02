@@ -20,16 +20,18 @@ import (
 func (s *supervisor) waitForPort(a *app, finder *portFinder, done <-chan struct{}, deadline time.Time) error {
 	timer := time.NewTimer(time.Until(deadline))
 	defer timer.Stop()
+
 	select {
 	case port := <-finder.port:
 		a.mu.Lock()
 		a.port = port
 		a.mu.Unlock()
+
 		return nil
 	case <-done:
-		return fmt.Errorf("wasmtime exited before it reported a serve address")
+		return errors.New("wasmtime exited before it reported a serve address")
 	case <-timer.C:
-		return fmt.Errorf("wasmtime did not report a serve address within the startup timeout")
+		return errors.New("wasmtime did not report a serve address within the startup timeout")
 	}
 }
 
@@ -38,6 +40,7 @@ func (s *supervisor) waitReady(a *app, done <-chan struct{}) error {
 	a.mu.Lock()
 	limit := a.cfg.startupLimit()
 	a.mu.Unlock()
+
 	return s.waitReadyUntil(a, done, time.Now().Add(limit))
 }
 
@@ -48,8 +51,11 @@ func (s *supervisor) waitReadyUntil(a *app, done <-chan struct{}, deadline time.
 	port := a.port
 	limit := a.cfg.startupLimit()
 	a.mu.Unlock()
+
 	target := fmt.Sprintf("http://127.0.0.1:%d%s", port, health)
+
 	var lastFailure string
+
 	wait := 50 * time.Millisecond
 
 	for {
@@ -58,31 +64,41 @@ func (s *supervisor) waitReadyUntil(a *app, done <-chan struct{}, deadline time.
 			return fmt.Errorf("wasmtime exited before %s answered", target)
 		default:
 		}
+
 		timeout := min(healthCheckTimeout, max(time.Until(deadline), time.Millisecond))
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 		if err != nil {
 			cancel()
 			return err
 		}
+
 		response, err := healthClient.Do(request)
+
 		cancel()
+
 		if err == nil {
 			body, _ := io.ReadAll(io.LimitReader(response.Body, 512))
+
 			_ = response.Body.Close()
 			if response.StatusCode >= http.StatusOK && response.StatusCode < http.StatusMultipleChoices {
 				return nil
 			}
+
 			lastFailure = fmt.Sprintf("status %s: %s", response.Status, strings.TrimSpace(string(body)))
 		} else {
 			lastFailure = err.Error()
 		}
+
 		if time.Now().After(deadline) {
 			if lastFailure != "" {
 				return fmt.Errorf("no healthy response on %s within %s (last: %s)", target, limit, lastFailure)
 			}
+
 			return fmt.Errorf("no response on %s within %s", target, limit)
 		}
+
 		time.Sleep(wait)
 		wait = min(wait*2, time.Second)
 	}
@@ -92,10 +108,13 @@ func (s *supervisor) waitReadyUntil(a *app, done <-chan struct{}, deadline time.
 func (a *app) beginRequest() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
 	if a.draining || a.retired {
 		return false
 	}
+
 	a.requests.Add(1)
+
 	return true
 }
 
@@ -113,16 +132,19 @@ func (s *supervisor) kill(a *app) {
 	cmd := a.cmd
 	done := a.done
 	a.mu.Unlock()
+
 	if cmd == nil || cmd.Process == nil {
 		return
 	}
 
 	log.Printf("app %s: stopping pid %d", a.name, cmd.Process.Pid)
 	_ = cmd.Process.Signal(syscall.SIGTERM)
+
 	select {
 	case <-done:
 	case <-time.After(stopTimeout):
 		_ = cmd.Process.Kill()
+
 		<-done
 	}
 }
@@ -132,11 +154,13 @@ func (s *supervisor) stop(a *app) {
 	if a == nil {
 		return
 	}
+
 	a.mu.Lock()
 	a.retired = true
 	a.healthOK = false
 	a.ready = false
 	iso := a.isolation
+
 	a.isolation = nil
 	if a.timer != nil {
 		a.timer.Stop()
@@ -145,9 +169,11 @@ func (s *supervisor) stop(a *app) {
 	a.mu.Unlock()
 	s.stopSchedule(a)
 	s.kill(a)
+
 	if iso == nil {
 		iso = &isolationPlan{app: a}
 	}
+
 	iso.close(s)
 }
 
@@ -156,10 +182,13 @@ func (s *supervisor) drainAndStop(a *app, action string) {
 	if a == nil {
 		return
 	}
+
 	a.markDraining()
+
 	if !drainApp(a, drainTimeout) {
 		log.Printf("%s %s: still handling requests after %s", action, a.name, drainTimeout)
 	}
+
 	s.stop(a)
 }
 
@@ -167,6 +196,7 @@ func (s *supervisor) drainAndStop(a *app, action string) {
 func (s *supervisor) cancelRestart(a *app) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
 	if a.timer != nil {
 		a.timer.Stop()
 		a.timer = nil
@@ -179,17 +209,21 @@ func (s *supervisor) register(a *app) {
 	if old := s.apps[a.name]; old != nil {
 		s.removeAppHostsLocked(old, old.cfg)
 	}
+
 	s.removeAppHostsLocked(a, a.cfg)
+
 	s.apps[a.name] = a
 	for _, host := range appHosts(a.cfg) {
 		s.hosts[host] = a
 	}
 	s.mu.Unlock()
+
 	if s.jobs != nil {
 		if err := s.jobs.start(a.name, a.cfg.JobConcurrency); err != nil {
 			log.Printf("jobs %s: %v", a.name, err)
 		}
 	}
+
 	s.broadcast()
 }
 
@@ -197,12 +231,15 @@ func (s *supervisor) register(a *app) {
 func (s *supervisor) scheduleRestart(a *app, delay time.Duration) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
 	if a.retired || s.stopping.Load() {
 		return
 	}
+
 	if a.timer != nil {
 		a.timer.Stop()
 	}
+
 	a.timer = time.AfterFunc(delay, func() {
 		if !s.stopping.Load() {
 			s.restart(a)
@@ -221,26 +258,32 @@ func (s *supervisor) scheduleRetry(a *app) {
 // restart ensures the artifact and launches a new process under the app lock.
 func (s *supervisor) restart(a *app) {
 	defer s.lockApp(a.name)()
+
 	a.mu.Lock()
 	if a.retired || s.stopping.Load() || a.cmd != nil {
 		a.mu.Unlock()
 		return
 	}
+
 	dir := a.dir
 	requireEpoch := a.cfg.requestTimeout > 0
 	a.mu.Unlock()
 
 	cwasm := filepath.Join(dir, "main.cwasm")
+
 	epoch, err := s.ensureArtifact(dir, requireEpoch)
 	if err != nil {
 		log.Printf("app %s: restart: %v", a.name, err)
 		s.scheduleRetry(a)
+
 		return
 	}
+
 	a.mu.Lock()
 	a.wasmEpoch = epoch
 	a.digest = sourceDigest(dir)
 	a.mu.Unlock()
+
 	if err := s.launch(a, cwasm); err != nil {
 		log.Printf("app %s: restart: %v", a.name, err)
 		s.kill(a)
@@ -254,19 +297,23 @@ func (s *supervisor) spawn(name, dir string, cfg appConfig) (*app, error) {
 	if err := os.MkdirAll(filepath.Join(s.cfg.stateDir, name), 0o755); err != nil {
 		return nil, fmt.Errorf("state dir: %w", err)
 	}
+
 	if s.storage != nil {
 		s.storage.setQuota(name, int64(cfg.DiskMB)<<20)
 	}
 
 	cwasm := filepath.Join(dir, "main.cwasm")
+
 	epoch, err := s.ensureArtifact(dir, cfg.requestTimeout > 0)
 	if err != nil {
 		return nil, err
 	}
+
 	logs, err := newAppLog(filepath.Join(s.cfg.stateDir, ".logs", name))
 	if err != nil {
 		return nil, fmt.Errorf("app logs: %w", err)
 	}
+
 	logs.setSecrets(s.appRedactionValues(name))
 	a := &app{
 		name:      name,
@@ -280,11 +327,14 @@ func (s *supervisor) spawn(name, dir string, cfg appConfig) (*app, error) {
 		wasmEpoch: epoch,
 	}
 	s.loadResourceHistory(a)
+
 	if err := s.launch(a, cwasm); err != nil {
 		s.stop(a)
 		return nil, err
 	}
+
 	s.startSchedule(a)
+
 	return a, nil
 }
 
@@ -294,22 +344,27 @@ func (s *supervisor) finishExit(a *app, cmd *exec.Cmd, done chan struct{}, exitE
 	if a.cmd != cmd {
 		a.mu.Unlock()
 		close(done)
+
 		return
 	}
+
 	a.cmd = nil
 	a.exited = true
 	a.workPID = 0
 	a.healthOK = false
+
 	a.ready = false
 	if exitErr != nil {
 		a.lastError = exitErr.Error()
 	}
+
 	ran := time.Since(a.started)
 	if ran > 30*time.Second {
 		a.delay = time.Second
 	} else {
 		a.delay = min(max(a.delay*2, time.Second), 30*time.Second)
 	}
+
 	retired := a.retired
 	delay := a.delay
 	a.mu.Unlock()
@@ -319,9 +374,11 @@ func (s *supervisor) finishExit(a *app, cmd *exec.Cmd, done chan struct{}, exitE
 	if exitErr != nil {
 		log.Printf(message, a.name, exitErr)
 	}
+
 	if retired || s.stopping.Load() {
 		return
 	}
+
 	log.Printf("app %s: restarting in %s", a.name, delay)
 	s.scheduleRestart(a, delay)
 }
@@ -332,6 +389,7 @@ func (s *supervisor) finishRunnerExit(a *app, cmd *exec.Cmd, done chan struct{},
 	if nsRoot != "" {
 		_ = os.RemoveAll(nsRoot)
 	}
+
 	s.finishExit(a, cmd, done, exitErr, "app %s: exited: %v")
 }
 
@@ -361,7 +419,9 @@ func (s *supervisor) consumeRunnerStream(a *app, cmd *exec.Cmd, done chan struct
 			} else if event.Code != 0 {
 				exitErr = fmt.Errorf("exited with code %d", event.Code)
 			}
+
 			s.finishRunnerExit(a, cmd, done, nsRoot, exitErr)
+
 			return
 		}
 	}
@@ -374,15 +434,19 @@ func (s *supervisor) adoptApp(name, dir string, cfg appConfig, info runnerAppInf
 		s.storage.setQuota(name, int64(cfg.DiskMB)<<20)
 		s.storage.restoreToken(name, info.StorageToken)
 	}
+
 	logs, err := newAppLog(filepath.Join(s.cfg.stateDir, ".logs", name))
 	if err != nil {
 		return nil, fmt.Errorf("app logs: %w", err)
 	}
+
 	logs.setSecrets(s.appRedactionValues(name))
+
 	epoch := false
 	if artifact, err := readArtifact(dir); err == nil {
 		epoch = artifact.Epoch
 	}
+
 	a := &app{
 		name:      name,
 		dir:       dir,
@@ -402,22 +466,28 @@ func (s *supervisor) adoptApp(name, dir string, cfg appConfig, info runnerAppInf
 	if a.started.IsZero() {
 		a.started = time.Now().UTC()
 	}
+
 	a.lastHealthy = time.Now().UTC()
+
 	a.nextHealth = time.Now().Add(cfg.probeInterval())
 	if cfg.MaxConcurrent > 0 {
 		a.slots = make(chan struct{}, cfg.MaxConcurrent)
 	}
+
 	cmd := &exec.Cmd{Process: &os.Process{Pid: info.PID}}
 	a.cmd = cmd
 	a.exited = false
 	s.loadResourceHistory(a)
 
 	stream := s.runner.Stream(info.ID)
+
 	logging := log.New(os.Stderr, "["+name+"] ", 0).Writer()
 	go s.consumeRunnerStream(a, cmd, a.done, stream, io.MultiWriter(a.logs, logging), "")
+
 	a.isolation = &isolationPlan{app: a}
 	a.proxy = s.newProxy(a)
 	s.startSchedule(a)
+
 	return a, nil
 }
 
@@ -427,9 +497,11 @@ func (s *supervisor) loadApps() error {
 	if os.IsNotExist(err) {
 		return os.MkdirAll(s.cfg.appsDir, 0o755)
 	}
+
 	if err != nil {
 		return err
 	}
+
 	snapshot := map[string]runnerAppInfo{}
 	for _, info := range s.runnerSnapshot {
 		snapshot[info.Name] = info
@@ -440,15 +512,18 @@ func (s *supervisor) loadApps() error {
 		if !entry.IsDir() || !validName(name) {
 			continue
 		}
+
 		dir := filepath.Join(s.cfg.appsDir, name)
 		if info, ok := snapshot[name]; ok && info.Dir != "" {
 			dir = info.Dir
 		}
+
 		cfg, err := readAppConfig(dir, name, s.cfg.domain, s.cfg.tenantMode)
 		if err != nil {
 			log.Printf("app %s: %v (skipped)", name, err)
 			continue
 		}
+
 		if info, ok := snapshot[name]; ok && len(info.Config) > 0 {
 			var stored appConfig
 			if err := json.Unmarshal(info.Config, &stored); err == nil {
@@ -457,41 +532,54 @@ func (s *supervisor) loadApps() error {
 				}
 			}
 		}
+
 		if err := s.hostConflictError(cfg, name); err != nil {
 			log.Printf("app %s: %v; skipped", name, err)
 			continue
 		}
+
 		if info, ok := snapshot[name]; ok {
 			a, err := s.adoptApp(name, dir, cfg, info)
 			delete(snapshot, name)
+
 			if err != nil {
 				log.Printf("app %s: adopt: %v (skipped)", name, err)
+
 				_ = s.runner.Stop(info.ID)
+
 				continue
 			}
+
 			s.register(a)
+
 			continue
 		}
+
 		a, err := s.spawn(name, dir, cfg)
 		if err != nil {
 			log.Printf("app %s: %v (skipped)", name, err)
 			continue
 		}
+
 		s.register(a)
 	}
 
 	for name, info := range snapshot {
 		log.Printf("app %s: running without an app directory; stopping it", name)
+
 		_ = s.runner.Stop(info.ID)
 	}
+
 	for _, a := range s.allApps() {
 		a.mu.Lock()
 		name := a.name
 		deps := append([]string(nil), a.cfg.DependsOn...)
 		a.mu.Unlock()
+
 		if err := s.dependencyCycleError(name, deps); err != nil {
 			return fmt.Errorf("app %s: %w", name, err)
 		}
 	}
+
 	return nil
 }

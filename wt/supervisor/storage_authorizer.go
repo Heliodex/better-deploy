@@ -105,10 +105,12 @@ func storageInternalMutation(action sqlite.AuthorizerActionCode, arg1, arg2 stri
 func storageAuthorizer(readOnly bool) sqlite.AuthorizerFn {
 	// A table-valued pragma function such as pragma_table_info presents the same AuthPragma action as a PRAGMA statement. Track the table-function read that precedes it so reads keep working while actual PRAGMA statements stay denied.
 	inPragmaTableFunction := false
+
 	return func(action sqlite.AuthorizerActionCode, arg1, arg2, _, _ string) sqlite.AuthorizerReturnCode {
 		if storageInternalMutation(action, arg1, arg2) {
 			return sqlite.AuthorizerDeny
 		}
+
 		switch action {
 		case sqlite.AuthSelect:
 			inPragmaTableFunction = false
@@ -121,12 +123,15 @@ func storageAuthorizer(readOnly bool) sqlite.AuthorizerFn {
 			if alwaysAllowedStoragePragmas[name] {
 				return sqlite.AuthorizerOK
 			}
+
 			if inPragmaTableFunction {
 				inPragmaTableFunction = false
+
 				if safeReadStoragePragmas[name] {
 					return sqlite.AuthorizerOK
 				}
 			}
+
 			return sqlite.AuthorizerDeny
 		case sqlite.AuthAttach, sqlite.AuthDetach, sqlite.AuthTransaction, sqlite.AuthSavepoint:
 			return sqlite.AuthorizerDeny
@@ -140,9 +145,11 @@ func storageAuthorizer(readOnly bool) sqlite.AuthorizerFn {
 				return sqlite.AuthorizerDeny
 			}
 		}
+
 		if readOnly && readOnlyStorageWriteActions[action] {
 			return sqlite.AuthorizerDeny
 		}
+
 		return sqlite.AuthorizerOK
 	}
 }
@@ -153,6 +160,7 @@ func registerStorageAuthorizer(driverConn any, fn sqlite.AuthorizerFn) error {
 	if !ok {
 		return errStorageAuthorizerUnsupported
 	}
+
 	return registerer.RegisterAuthorizer(fn)
 }
 
@@ -164,6 +172,7 @@ func installStorageAuthorizer(conn *sql.Conn, readOnly bool) (func() error, erro
 	if err != nil {
 		return nil, err
 	}
+
 	return func() error {
 		return conn.Raw(func(driverConn any) error {
 			return registerStorageAuthorizer(driverConn, nil)
@@ -184,5 +193,6 @@ func requireStorageAuthorizer(conn *sql.Conn, readOnly bool) (func() error, erro
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", errStorageUnavailable, err)
 	}
+
 	return unregister, nil
 }

@@ -25,6 +25,7 @@ func TestParseScheduleInterval(t *testing.T) {
 			t.Errorf("%q => %v, %v; want %v", every, got, err, want)
 		}
 	}
+
 	for _, every := range []string{"", "0s", "500ms", "25h", "soon"} {
 		if _, err := parseScheduleInterval(scheduleConfig{Path: "/tick", Every: every}); err == nil {
 			t.Errorf("%q should be rejected", every)
@@ -35,10 +36,12 @@ func TestParseScheduleInterval(t *testing.T) {
 func TestReadAppConfigValidatesSchedule(t *testing.T) {
 	writeConfig := func(t *testing.T, body string) string {
 		t.Helper()
+
 		dir := t.TempDir()
 		if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
+
 		return dir
 	}
 
@@ -61,10 +64,12 @@ func TestReadAppConfigValidatesSchedule(t *testing.T) {
 
 func TestScheduleCallsEndpoint(t *testing.T) {
 	var calls atomic.Int64
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Errorf("method = %s, want POST", r.Method)
 		}
+
 		calls.Add(1)
 	}))
 	defer server.Close()
@@ -73,6 +78,7 @@ func TestScheduleCallsEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	port, err := strconv.Atoi(parsed.Port())
 	if err != nil {
 		t.Fatal(err)
@@ -86,6 +92,7 @@ func TestScheduleCallsEndpoint(t *testing.T) {
 			{Method: http.MethodPost, Path: "/tick", Every: "1s"},
 		}},
 	}
+
 	s.startSchedule(a)
 	defer s.stop(a)
 
@@ -93,14 +100,18 @@ func TestScheduleCallsEndpoint(t *testing.T) {
 	for calls.Load() < 2 && time.Now().Before(deadline) {
 		time.Sleep(20 * time.Millisecond)
 	}
+
 	if got := calls.Load(); got < 2 {
 		t.Fatalf("endpoint called %d times, want at least 2", got)
 	}
 
 	// Stopping the app cancels its schedule.
 	s.stop(a)
+
 	stoppedAt := calls.Load()
+
 	time.Sleep(1200 * time.Millisecond)
+
 	if got := calls.Load(); got != stoppedAt {
 		t.Errorf("schedule kept firing after stop: %d -> %d", stoppedAt, got)
 	}

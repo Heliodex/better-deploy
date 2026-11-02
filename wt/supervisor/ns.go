@@ -8,6 +8,7 @@ package main
 
 import (
 	"debug/elf"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -51,15 +52,19 @@ func resolveBinary(name string) (string, error) {
 		if err != nil {
 			return "", err
 		}
+
 		path = resolved
 	}
+
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return "", err
 	}
+
 	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
 		return resolved, nil
 	}
+
 	return abs, nil
 }
 
@@ -69,21 +74,26 @@ func elfInterp(path string) (interp string, isELF bool, err error) {
 	if _, err := os.Stat(path); err != nil {
 		return "", false, err
 	}
+
 	file, err := elf.Open(path)
 	if err != nil {
 		return "", false, nil
 	}
 	defer file.Close()
+
 	for _, prog := range file.Progs {
 		if prog.Type != elf.PT_INTERP {
 			continue
 		}
+
 		data := make([]byte, prog.Filesz)
 		if _, err := prog.ReadAt(data, 0); err != nil {
 			return "", true, err
 		}
+
 		return strings.TrimRight(string(data), "\x00"), true, nil
 	}
+
 	return "", true, nil
 }
 
@@ -100,18 +110,22 @@ func namespaceFiles(dynamic bool) []string {
 	if dynamic {
 		candidates = append(candidates, "/etc/ld.so.cache")
 	}
+
 	if _, err := os.Stat("/etc/ssl/certs/ca-certificates.crt"); err == nil {
 		candidates = append(candidates, "/etc/ssl/certs/ca-certificates.crt")
 	} else if info, err := os.Stat("/etc/ssl/certs"); err == nil && info.IsDir() {
 		candidates = append(candidates, "/etc/ssl/certs")
 	}
+
 	files := make([]string, 0, len(candidates))
 	for _, path := range candidates {
 		if _, err := os.Stat(path); err == nil {
 			files = append(files, path)
 		}
 	}
+
 	sort.Strings(files)
+
 	return files
 }
 
@@ -121,22 +135,28 @@ func namespaceLibDirs(interp string) []string {
 	if interp == "" {
 		return nil
 	}
+
 	candidates := []string{"/lib", "/lib64", "/usr/lib", "/usr/lib64"}
 	if dir := filepath.Dir(interp); dir != "." && dir != "/" {
 		candidates = append(candidates, dir)
 	}
+
 	seen := map[string]bool{}
+
 	dirs := make([]string, 0, len(candidates))
 	for _, dir := range candidates {
 		if seen[dir] {
 			continue
 		}
+
 		seen[dir] = true
 		if info, err := os.Stat(dir); err == nil && info.IsDir() {
 			dirs = append(dirs, dir)
 		}
 	}
+
 	sort.Strings(dirs)
+
 	return dirs
 }
 
@@ -145,13 +165,16 @@ func namespaceLibDirs(interp string) []string {
 func (s *supervisor) namespaceIDs(iso *isolationPlan) (int, int, bool, error) {
 	if iso != nil && iso.uid > 0 {
 		if os.Geteuid() != 0 {
-			return 0, 0, false, fmt.Errorf("untrusted app namespaces need root")
+			return 0, 0, false, errors.New("untrusted app namespaces need root")
 		}
+
 		return iso.uid, iso.gid, true, nil
 	}
+
 	if os.Geteuid() == 0 {
-		return 0, 0, false, fmt.Errorf("app namespaces in trusted mode need a non-root supervisor; use untrusted mode or run the supervisor as a non-root user")
+		return 0, 0, false, errors.New("app namespaces in trusted mode need a non-root supervisor; use untrusted mode or run the supervisor as a non-root user")
 	}
+
 	return os.Geteuid(), os.Getegid(), false, nil
 }
 
@@ -160,25 +183,31 @@ func (s *supervisor) namespaceIDs(iso *isolationPlan) (int, int, bool, error) {
 // The parent removes it when the process exits.
 func (s *supervisor) newNamespaceRoot(a *app) (string, error) {
 	base := filepath.Join(s.cfg.stateDir, ".ns")
+
 	mode := os.FileMode(0o700)
 	if s.cfg.untrusted() {
 		// The helper is root and needs to traverse .ns. It is not listable.
 		mode = 0o711
 	}
+
 	if err := os.MkdirAll(base, mode); err != nil {
 		return "", fmt.Errorf("namespace root: %w", err)
 	}
+
 	if err := os.Chmod(base, mode); err != nil {
 		return "", fmt.Errorf("namespace root permissions: %w", err)
 	}
+
 	root, err := os.MkdirTemp(base, a.name+"-")
 	if err != nil {
 		return "", fmt.Errorf("create namespace root: %w", err)
 	}
+
 	if err := os.Chmod(root, 0o700); err != nil {
 		_ = os.RemoveAll(root)
 		return "", fmt.Errorf("namespace root permissions: %w", err)
 	}
+
 	return root, nil
 }
 
@@ -189,10 +218,12 @@ func (s *supervisor) buildNamespacePlan(a *app, root string, clearGroups bool) (
 	if err != nil {
 		return nsPlan{}, fmt.Errorf("resolve wasmtime: %w", err)
 	}
+
 	interp, isELF, err := elfInterp(wasmtime)
 	if err != nil {
 		return nsPlan{}, fmt.Errorf("inspect %s: %w", wasmtime, err)
 	}
+
 	if !isELF {
 		return nsPlan{}, fmt.Errorf("app namespaces need an ELF wasmtime binary, %s is not ELF", wasmtime)
 	}
@@ -201,19 +232,23 @@ func (s *supervisor) buildNamespacePlan(a *app, root string, clearGroups bool) (
 	if err != nil {
 		return nsPlan{}, fmt.Errorf("app dir: %w", err)
 	}
+
 	dataDir := filepath.Join(s.cfg.stateDir, a.name)
 	if info, err := os.Stat(dataDir); err != nil || !info.IsDir() {
 		return nsPlan{}, fmt.Errorf("data dir %s is not a directory", dataDir)
 	}
 
 	dynamic := interp != ""
+
 	a.mu.Lock()
 	cfg := a.cfg
 	a.mu.Unlock()
+
 	var limits []rlimitSpec
 	if s.cfg.untrusted() {
 		limits = rlimitPlan(cfg)
 	}
+
 	return nsPlan{
 		Root:        root,
 		Hostname:    a.name,
@@ -250,13 +285,16 @@ func resetNamespaceRoots(stateDir string, untrusted bool) error {
 	if err := os.RemoveAll(base); err != nil {
 		return fmt.Errorf("reset namespace roots: %w", err)
 	}
+
 	mode := os.FileMode(0o700)
 	if untrusted {
 		mode = 0o711
 	}
+
 	if err := os.MkdirAll(base, mode); err != nil {
 		return fmt.Errorf("create namespace roots: %w", err)
 	}
+
 	return os.Chmod(base, mode)
 }
 
@@ -266,14 +304,17 @@ func (s *supervisor) prepareNamespaces(a *app, iso *isolationPlan) (*nsLaunch, e
 	if err != nil {
 		return nil, err
 	}
+
 	root, err := s.newNamespaceRoot(a)
 	if err != nil {
 		return nil, err
 	}
+
 	plan, err := s.buildNamespacePlan(a, root, allowSetgroups)
 	if err != nil {
 		_ = os.RemoveAll(root)
 		return nil, err
 	}
+
 	return &nsLaunch{plan: plan, hostID: hostID, hostGID: hostGID}, nil
 }

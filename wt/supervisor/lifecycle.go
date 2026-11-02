@@ -23,21 +23,26 @@ func (s *supervisor) unregister(a *app) {
 	if s.apps[a.name] == a {
 		delete(s.apps, a.name)
 	}
+
 	s.removeAppHostsLocked(a, a.cfg)
 	s.mu.Unlock()
+
 	if s.jobs != nil {
 		s.jobs.stop(a.name)
 	}
+
 	s.broadcast()
 }
 
 // handleStop drains in-flight requests and stops an app without removing it; its host returns 503 until it is started again.
 func (s *supervisor) handleStop(w http.ResponseWriter, r *http.Request, name string) {
 	defer s.lockApp(name)()
+
 	a, ok := s.requireApp(w, r, name)
 	if !ok {
 		return
 	}
+
 	s.drainAndStop(a, "stop")
 	writeJSON(w, http.StatusOK, s.info(a))
 }
@@ -48,11 +53,14 @@ func (s *supervisor) startStopped(a *app) error {
 	dir := a.dir
 	requireEpoch := a.cfg.requestTimeout > 0
 	a.mu.Unlock()
+
 	cwasm := filepath.Join(dir, "main.cwasm")
+
 	epoch, err := s.ensureArtifact(dir, requireEpoch)
 	if err != nil {
 		return err
 	}
+
 	s.stopSchedule(a)
 	a.mu.Lock()
 	a.retired = false
@@ -61,22 +69,28 @@ func (s *supervisor) startStopped(a *app) error {
 	a.wasmEpoch = epoch
 	a.digest = sourceDigest(dir)
 	a.mu.Unlock()
+
 	if err := s.launch(a, cwasm); err != nil {
 		return err
 	}
+
 	s.startSchedule(a)
+
 	if s.jobs != nil {
 		if err := s.jobs.start(a.name, a.cfg.JobConcurrency); err != nil {
 			log.Printf("jobs %s: %v", a.name, err)
 		}
 	}
+
 	a.sampleResources(time.Now())
+
 	return nil
 }
 
 // handleStart relaunches a stopped app from its existing main.cwasm.
 func (s *supervisor) handleStart(w http.ResponseWriter, r *http.Request, name string) {
 	defer s.lockApp(name)()
+
 	a, ok := s.requireApp(w, r, name)
 	if !ok {
 		return
@@ -85,20 +99,27 @@ func (s *supervisor) handleStart(w http.ResponseWriter, r *http.Request, name st
 	a.mu.Lock()
 	running := a.cmd != nil && !a.exited
 	a.mu.Unlock()
+
 	if running {
 		writeError(w, http.StatusConflict, "app is already running")
 		return
 	}
+
 	s.cancelRestart(a)
+
 	if err := s.startStopped(a); err != nil {
 		log.Printf("start %s: %v", name, err)
+
 		status := http.StatusBadGateway
 		if errors.Is(err, errNoComponent) {
 			status = http.StatusInternalServerError
 		}
+
 		writeError(w, status, "app did not start: "+err.Error())
+
 		return
 	}
+
 	writeJSON(w, http.StatusOK, s.info(a))
 }
 
@@ -109,10 +130,12 @@ func (s *supervisor) purgeAppState(name string) error {
 		s.backups.lock(name)
 		defer s.backups.unlock(name)
 	}
+
 	if s.storage != nil {
 		s.storage.closeSessionsFor(name)
 		s.storage.drop(name)
 	}
+
 	for _, dir := range []string{
 		filepath.Join(s.cfg.stateDir, name),
 		filepath.Join(s.cfg.stateDir, ".logs", name),
@@ -126,57 +149,71 @@ func (s *supervisor) purgeAppState(name string) error {
 			return err
 		}
 	}
+
 	resource := filepath.Join(s.cfg.stateDir, ".resources", name+".json")
 	if err := os.Remove(resource); err != nil && !os.IsNotExist(err) {
 		return err
 	}
+
 	if err := s.secrets.remove(name); err != nil {
 		return err
 	}
+
 	return nil
 }
 
 // handleDelete removes an app's code and process. State is kept unless ?purge=1 is set.
 func (s *supervisor) handleDelete(w http.ResponseWriter, r *http.Request, name string) {
 	defer s.lockApp(name)()
+
 	a, ok := s.requireApp(w, r, name)
 	if !ok {
 		return
 	}
 
 	purge := false
+
 	if value := r.URL.Query().Get("purge"); value != "" {
 		parsed, err := strconv.ParseBool(value)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "purge must be a boolean")
 			return
 		}
+
 		purge = parsed
 	}
 
 	s.unregister(a)
+
 	if s.bus != nil {
 		s.bus.remove(name)
 	}
+
 	s.drainAndStop(a, "delete")
+
 	if a.logs != nil {
 		a.logs.close()
 	}
+
 	s.clearAppDataQuota(name, a)
+
 	if err := os.RemoveAll(filepath.Join(s.cfg.appsDir, name)); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	if purge {
 		if err := s.purgeAppState(name); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	}
+
 	if s.deployments != nil {
 		if err := s.deployments.clearReplay(name); err != nil {
 			log.Printf("deploy replay %s: %v", name, err)
 		}
 	}
+
 	writeJSON(w, http.StatusOK, deleteAppResponse{Name: name, Purged: purge})
 }

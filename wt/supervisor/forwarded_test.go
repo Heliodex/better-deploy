@@ -11,10 +11,12 @@ import (
 
 func mustTrustedProxies(t *testing.T, value string) []netip.Prefix {
 	t.Helper()
+
 	prefixes, err := parseTrustedProxies(value)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	return prefixes
 }
 
@@ -23,9 +25,11 @@ func TestParseTrustedProxies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(prefixes) != 3 {
 		t.Fatalf("prefixes = %v, want three unique entries", prefixes)
 	}
+
 	for _, value := range []string{"127.0.0.1/33", "not-an-ip", "10.0.0.0/x", "*"} {
 		if _, err := parseTrustedProxies(value); err == nil {
 			t.Errorf("%q was accepted", value)
@@ -41,15 +45,18 @@ func TestForwardedInfoTrustsOnlyConfiguredProxies(t *testing.T) {
 	r.Header.Set("X-Forwarded-Host", "Notes.Example.com:8443")
 	r.Header.Set("X-Forwarded-Proto", "https")
 	r.Header.Set("X-Forwarded-For", "1.1.1.1, 203.0.113.5, 10.0.0.3")
+
 	info := s.forwardedInfo(r)
 	if !info.Trusted || info.Host != "notes.example.com" || info.Authority != "notes.example.com:8443" || info.Proto != "https" || info.ClientIP != "203.0.113.5" {
 		t.Errorf("trusted forwarded info = %+v", info)
 	}
+
 	if s.effectiveHost(r) != "notes.example.com" {
 		t.Errorf("effective host = %q", s.effectiveHost(r))
 	}
 
 	r.RemoteAddr = "198.51.100.9:1234"
+
 	info = s.forwardedInfo(r)
 	if info.Trusted || info.Host != "internal" || info.Authority != "internal:8080" || info.Proto != "http" || info.ClientIP != "198.51.100.9" {
 		t.Errorf("untrusted forwarded info = %+v", info)
@@ -77,7 +84,9 @@ func TestProxyRewritesForwardedHeadersCleanly(t *testing.T) {
 	type seen struct {
 		host, forwardedHost, forwardedProto, forwardedFor, realIP, forwarded, spinClient string
 	}
+
 	got := make(chan seen, 1)
+
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got <- seen{
 			host:           r.Host,
@@ -88,13 +97,16 @@ func TestProxyRewritesForwardedHeadersCleanly(t *testing.T) {
 			forwarded:      r.Header.Get("Forwarded"),
 			spinClient:     r.Header.Get(spinClientAddrHeader),
 		}
+
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer backend.Close()
+
 	parsed, err := url.Parse(backend.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	port, err := strconv.Atoi(parsed.Port())
 	if err != nil {
 		t.Fatal(err)
@@ -109,18 +121,23 @@ func TestProxyRewritesForwardedHeadersCleanly(t *testing.T) {
 	req.Header.Set("X-Forwarded-Proto", "https")
 	req.Header.Set("X-Forwarded-For", "1.1.1.1, 203.0.113.5")
 	req.Header.Set("Forwarded", `for=1.1.1.1`)
+
 	rec := httptest.NewRecorder()
 	proxy.ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("proxy = %d: %s", rec.Code, rec.Body.String())
 	}
+
 	request := <-got
 	if request.host != "notes.example.com" || request.forwardedHost != "notes.example.com" || request.forwardedProto != "https" {
 		t.Errorf("host headers = %+v", request)
 	}
+
 	if request.forwardedFor != "203.0.113.5, 192.0.2.1" || request.realIP != "203.0.113.5" || request.spinClient != "203.0.113.5" {
 		t.Errorf("client headers = %+v", request)
 	}
+
 	if request.forwarded != "" {
 		t.Errorf("Forwarded header = %q", request.forwarded)
 	}
@@ -137,8 +154,10 @@ func TestHandlerRoutesByTrustedForwardedHost(t *testing.T) {
 	req.Host = "internal:8080"
 	req.RemoteAddr = "198.51.100.7:1234"
 	req.Header.Set("Authorization", "Bearer secret")
+
 	rec := httptest.NewRecorder()
 	s.handler().ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("untrusted admin route = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -148,8 +167,10 @@ func TestHandlerRoutesByTrustedForwardedHost(t *testing.T) {
 	req.RemoteAddr = "127.0.0.1:1234"
 	req.Header.Set("Authorization", "Bearer secret")
 	req.Header.Set("X-Forwarded-Host", "notes.localhost")
+
 	rec = httptest.NewRecorder()
 	s.handler().ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("trusted forwarded host = %d, want the app route's 503", rec.Code)
 	}

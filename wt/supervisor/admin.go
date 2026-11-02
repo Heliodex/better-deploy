@@ -36,8 +36,10 @@ func newHub() *hub {
 func (h *hub) subscribe() chan []byte {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
 	messages := make(chan []byte, 4)
 	h.subs[messages] = struct{}{}
+
 	return messages
 }
 
@@ -45,12 +47,14 @@ func (h *hub) subscribe() chan []byte {
 func (h *hub) unsubscribe(messages chan []byte) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
 	delete(h.subs, messages)
 }
 
 func (h *hub) hasSubscribers() bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
 	return len(h.subs) > 0
 }
 
@@ -58,6 +62,7 @@ func (h *hub) hasSubscribers() bool {
 func (h *hub) publish(message []byte) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
 	for messages := range h.subs {
 		select {
 		case messages <- message:
@@ -82,6 +87,7 @@ func (s *supervisor) snapshot() []appInfo {
 	for _, a := range apps {
 		out = append(out, s.info(a))
 	}
+
 	return out
 }
 
@@ -90,10 +96,12 @@ func (s *supervisor) broadcast() {
 	if s.events == nil {
 		return
 	}
+
 	data, err := json.Marshal(snapshotMessage{Type: "snapshot", Apps: s.snapshot()})
 	if err != nil {
 		return
 	}
+
 	s.events.publish(data)
 }
 
@@ -102,45 +110,56 @@ func (s *supervisor) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
+
 	if _, ok := s.requireAdmin(w, r); !ok {
 		return
 	}
+
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
+
 	data, err := json.Marshal(snapshotMessage{Type: "snapshot", Apps: s.snapshot()})
 	if err != nil {
 		http.Error(w, "snapshot failed", http.StatusInternalServerError)
 		return
 	}
+
 	if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
 		return
 	}
+
 	flusher.Flush()
 
 	messages := s.events.subscribe()
 	defer s.events.unsubscribe(messages)
+
 	ticker := time.NewTicker(20 * time.Second)
 	defer ticker.Stop()
+
 	for {
 		select {
 		case message, ok := <-messages:
 			if !ok {
 				return
 			}
+
 			if _, err := fmt.Fprintf(w, "data: %s\n\n", message); err != nil {
 				return
 			}
+
 			flusher.Flush()
 		case <-ticker.C:
 			if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
 				return
 			}
+
 			flusher.Flush()
 		case <-r.Context().Done():
 			return
@@ -151,23 +170,30 @@ func (s *supervisor) handleEvents(w http.ResponseWriter, r *http.Request) {
 // handleRestart stops an app and starts it again under the app lock.
 func (s *supervisor) handleRestart(w http.ResponseWriter, _ *http.Request, a *app) {
 	defer s.lockApp(a.name)()
+
 	if s.lookup(a.name) != a {
 		http.Error(w, "app not found", http.StatusNotFound)
 		return
 	}
+
 	a.mu.Lock()
 	name := a.name
 	a.mu.Unlock()
 	s.drainAndStop(a, "restart")
+
 	if err := s.startStopped(a); err != nil {
 		log.Printf("restart %s: %v", name, err)
+
 		status := http.StatusBadGateway
 		if errors.Is(err, errNoComponent) {
 			status = http.StatusInternalServerError
 		}
+
 		writeError(w, status, "app did not restart: "+err.Error())
+
 		return
 	}
+
 	writeJSON(w, http.StatusOK, s.info(a))
 }
 
@@ -181,6 +207,7 @@ func (s *supervisor) writeBackups(w http.ResponseWriter, name, created string) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	overview.Created = created
 	writeJSON(w, http.StatusOK, overview)
 }
@@ -189,18 +216,22 @@ func (s *supervisor) handleBackupSettings(w http.ResponseWriter, r *http.Request
 	if !requireMethod(w, r, http.MethodPut) {
 		return
 	}
+
 	var settings backupSettings
 	if !readJSONBody(w, r, maxBackupRequestBytes, &settings) {
 		return
 	}
+
 	if err := settings.validate(); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+
 	if err := s.backups.saveSettings(name, settings); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	s.writeBackups(w, name, "")
 }
 
@@ -225,12 +256,15 @@ func (s *supervisor) handleBackups(w http.ResponseWriter, r *http.Request, name 
 		if s.rejectOverBudget(w) {
 			return
 		}
+
 		info, err := s.backups.create(r.Context(), name)
 		if err != nil && !errors.Is(err, errBackupUnchanged) {
 			s.metrics.observeBackup(name, "create", "failed")
 			writeBackupError(w, err)
+
 			return
 		}
+
 		s.metrics.observeBackup(name, "create", "success")
 		s.writeBackups(w, name, info.Name)
 	default:
@@ -247,43 +281,53 @@ func (s *supervisor) restoreBackupLocked(w http.ResponseWriter, ctx context.Cont
 		writeBackupError(w, err)
 		return false
 	}
+
 	if temp != "" {
 		defer os.RemoveAll(temp)
 	}
+
 	if !hasData {
 		if err := s.backups.restore(ctx, name, file); err != nil {
 			writeBackupError(w, err)
 			return false
 		}
+
 		return true
 	}
 
 	// Replacing /data needs a running guest stopped; restart it after both halves are in place.
 	a := s.lookup(name)
 	running := false
+
 	if a != nil {
 		a.mu.Lock()
 		running = a.cmd != nil && !a.exited
 		a.mu.Unlock()
+
 		if running {
 			s.stop(a)
 		}
 	}
+
 	if err := s.backups.restore(ctx, name, file); err != nil {
 		writeBackupError(w, err)
 		return false
 	}
+
 	if err := s.backups.installData(name, temp); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return false
 	}
+
 	if running {
 		if err := s.startStopped(a); err != nil {
 			log.Printf("restore %s: restart: %v", name, err)
 			writeError(w, http.StatusBadGateway, "data restored but app did not restart: "+err.Error())
+
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -291,18 +335,23 @@ func (s *supervisor) handleBackupRestore(w http.ResponseWriter, r *http.Request,
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
+
 	defer s.lockApp(name)()
+
 	if _, ok := s.requireApp(w, r, name); !ok {
 		return
 	}
+
 	if s.backups == nil {
 		http.Error(w, "backups unavailable", http.StatusServiceUnavailable)
 		return
 	}
+
 	if !s.restoreBackupLocked(w, r.Context(), name, file) {
 		s.metrics.observeBackup(name, "restore", "failed")
 		return
 	}
+
 	s.metrics.observeBackup(name, "restore", "success")
 	s.writeBackups(w, name, "")
 }
@@ -312,10 +361,12 @@ func (s *supervisor) handleBackupRoute(w http.ResponseWriter, r *http.Request, n
 	if _, ok := s.requireApp(w, r, name); !ok {
 		return
 	}
+
 	if s.backups == nil {
 		http.Error(w, "backups unavailable", http.StatusServiceUnavailable)
 		return
 	}
+
 	rest = strings.TrimPrefix(rest, "/")
 	switch {
 	case rest == "":
@@ -338,12 +389,14 @@ func (s *supervisor) handleBackupDownload(w http.ResponseWriter, r *http.Request
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
+
 	path, err := s.backups.exportSnapshot(name, file)
 	if err != nil {
 		writeBackupError(w, err)
 		return
 	}
 	defer os.Remove(path)
+
 	w.Header().Set("Content-Type", "application/gzip")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", file+".tar.gz"))
 	http.ServeFile(w, r, path)
@@ -354,17 +407,21 @@ func (s *supervisor) handleBackupImport(w http.ResponseWriter, r *http.Request, 
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
+
 	if s.rejectOverBudget(w) {
 		return
 	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, maxBackupExtractBytes)
 	if err := r.ParseMultipartForm(16 << 20); err != nil {
 		writeError(w, http.StatusBadRequest, "parse snapshot upload: "+err.Error())
 		return
 	}
+
 	if r.MultipartForm != nil {
 		defer func() { _ = r.MultipartForm.RemoveAll() }()
 	}
+
 	file, _, err := r.FormFile("snapshot")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "missing snapshot field")
@@ -377,13 +434,18 @@ func (s *supervisor) handleBackupImport(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusInternalServerError, "create import file")
 		return
 	}
+
 	archive := temp.Name()
 	defer os.Remove(archive)
+
 	if _, err := io.Copy(temp, io.LimitReader(file, maxBackupExtractBytes)); err != nil {
 		_ = temp.Close()
+
 		writeError(w, http.StatusBadRequest, "read snapshot: "+err.Error())
+
 		return
 	}
+
 	if err := temp.Close(); err != nil {
 		writeError(w, http.StatusInternalServerError, "close import file")
 		return
@@ -393,8 +455,10 @@ func (s *supervisor) handleBackupImport(w http.ResponseWriter, r *http.Request, 
 	if err != nil {
 		s.metrics.observeBackup(name, "import", "failed")
 		writeError(w, http.StatusBadRequest, "import snapshot: "+err.Error())
+
 		return
 	}
+
 	s.metrics.observeBackup(name, "import", "success")
 	s.writeBackups(w, name, info.Name)
 }
@@ -407,14 +471,17 @@ func adminStatic() http.Handler {
 			http.Error(w, "admin panel not built", http.StatusInternalServerError)
 		})
 	}
+
 	files := http.FileServer(http.FS(sub))
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/_app/immutable/") {
-			w.Header().Set("cache-control", "public, max-age=31536000, immutable")
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		} else {
 			// Entry HTML must revalidate so panels pick up new bundles after a supervisor update.
-			w.Header().Set("cache-control", "no-cache")
+			w.Header().Set("Cache-Control", "no-cache")
 		}
+
 		files.ServeHTTP(w, r)
 	})
 }

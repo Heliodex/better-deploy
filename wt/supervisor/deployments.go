@@ -90,9 +90,11 @@ func validDeploymentID(id string) error {
 	if id == "" || filepath.Base(id) != id {
 		return errDeploymentNotFound
 	}
+
 	if _, err := time.Parse(deploymentTimeLayout, id); err != nil {
 		return errDeploymentNotFound
 	}
+
 	return nil
 }
 
@@ -101,12 +103,15 @@ func (m *deploymentManager) newID(app string) (string, time.Time, error) {
 	if err := os.MkdirAll(m.appDir(app), 0o755); err != nil {
 		return "", time.Time{}, fmt.Errorf("deployment dir: %w", err)
 	}
+
 	now := time.Now().UTC()
+
 	id := now.Format(deploymentTimeLayout)
 	for exists(m.appDir(app), id) {
 		now = now.Add(time.Nanosecond)
 		id = now.Format(deploymentTimeLayout)
 	}
+
 	return id, now, nil
 }
 
@@ -118,16 +123,20 @@ func (m *deploymentManager) replayPath(app string) string {
 // readReplayFile loads the replay cache, returning the OS error when it does not exist.
 func (m *deploymentManager) readReplayFile(app string) (deploymentReplayFile, error) {
 	var file deploymentReplayFile
+
 	data, err := os.ReadFile(m.replayPath(app))
 	if err != nil {
 		return file, err
 	}
+
 	if err := json.Unmarshal(data, &file); err != nil {
 		return deploymentReplayFile{}, err
 	}
+
 	if file.Entries == nil {
 		file.Entries = map[string]deployReplayEntry{}
 	}
+
 	return file, nil
 }
 
@@ -136,14 +145,17 @@ func (m *deploymentManager) replay(app, key string, now time.Time) (deployReplay
 	if key == "" {
 		return deployReplayEntry{}, false
 	}
+
 	file, err := m.readReplayFile(app)
 	if err != nil {
 		return deployReplayEntry{}, false
 	}
+
 	entry, ok := file.Entries[key]
 	if !ok || now.Sub(entry.At) > deploymentReplayTTL {
 		return deployReplayEntry{}, false
 	}
+
 	return entry, true
 }
 
@@ -152,10 +164,12 @@ func (m *deploymentManager) storeReplay(app, key string, entry deployReplayEntry
 	if key == "" {
 		return nil
 	}
+
 	file, err := m.readReplayFile(app)
 	if err != nil {
 		file = deploymentReplayFile{Entries: map[string]deployReplayEntry{}}
 	}
+
 	if file.Entries == nil {
 		file.Entries = map[string]deployReplayEntry{}
 	}
@@ -166,28 +180,35 @@ func (m *deploymentManager) storeReplay(app, key string, entry deployReplayEntry
 			delete(file.Entries, name)
 		}
 	}
+
 	file.Entries[key] = entry
 	if len(file.Entries) > deploymentReplayKeep {
 		type agedEntry struct {
 			key string
 			at  time.Time
 		}
+
 		aged := make([]agedEntry, 0, len(file.Entries))
 		for name, existing := range file.Entries {
 			aged = append(aged, agedEntry{key: name, at: existing.At})
 		}
+
 		sort.Slice(aged, func(i, j int) bool { return aged[i].at.Before(aged[j].at) })
+
 		for _, item := range aged[:len(aged)-deploymentReplayKeep] {
 			delete(file.Entries, item.key)
 		}
 	}
+
 	data, err := json.Marshal(file)
 	if err != nil {
 		return err
 	}
+
 	if err := os.MkdirAll(m.appDir(app), 0o755); err != nil {
 		return err
 	}
+
 	return writeFileAtomicMode(m.replayPath(app), append(data, '\n'), 0o600)
 }
 
@@ -197,6 +218,7 @@ func (m *deploymentManager) clearReplay(app string) error {
 	if os.IsNotExist(err) {
 		return nil
 	}
+
 	return err
 }
 
@@ -206,17 +228,22 @@ func (m *deploymentManager) ids(app string) ([]string, error) {
 	if os.IsNotExist(err) {
 		return []string{}, nil
 	}
+
 	if err != nil {
 		return nil, err
 	}
+
 	ids := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		if !entry.IsDir() || validDeploymentID(entry.Name()) != nil {
 			continue
 		}
+
 		ids = append(ids, entry.Name())
 	}
+
 	sort.Strings(ids)
+
 	return ids, nil
 }
 
@@ -226,20 +253,24 @@ func (m *deploymentManager) list(app string) ([]deploymentInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	out := make([]deploymentInfo, 0, len(ids))
 	for _, id := range ids {
 		data, err := os.ReadFile(filepath.Join(m.appDir(app), id, deploymentMetaName))
 		if err != nil {
 			continue
 		}
+
 		var info deploymentInfo
 		if err := json.Unmarshal(data, &info); err != nil {
 			continue
 		}
+
 		out = append(out, info)
 	}
 	// ids are oldest first; return newest first.
 	sort.Slice(out, func(i, j int) bool { return out[i].ID > out[j].ID })
+
 	return out, nil
 }
 
@@ -247,14 +278,17 @@ func (m *deploymentManager) info(app, id string) (deploymentInfo, error) {
 	if err := validDeploymentID(id); err != nil {
 		return deploymentInfo{}, err
 	}
+
 	data, err := os.ReadFile(filepath.Join(m.appDir(app), id, deploymentMetaName))
 	if err != nil {
 		return deploymentInfo{}, errDeploymentNotFound
 	}
+
 	var info deploymentInfo
 	if err := json.Unmarshal(data, &info); err != nil {
 		return deploymentInfo{}, errDeploymentNotFound
 	}
+
 	return info, nil
 }
 
@@ -264,10 +298,12 @@ func (m *deploymentManager) createRun(app, digest string) (deploymentInfo, error
 	if err != nil {
 		return deploymentInfo{}, err
 	}
+
 	dir := filepath.Join(m.appDir(app), id)
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		return deploymentInfo{}, err
 	}
+
 	info := deploymentInfo{
 		ID:         id,
 		DeployedAt: now,
@@ -275,19 +311,23 @@ func (m *deploymentManager) createRun(app, digest string) (deploymentInfo, error
 		Digest:     digest,
 		Status:     deploymentStatusQueued,
 	}
+
 	data, err := json.Marshal(info)
 	if err != nil {
 		_ = os.RemoveAll(dir)
 		return deploymentInfo{}, err
 	}
+
 	if err := os.WriteFile(filepath.Join(dir, deploymentMetaName), append(data, '\n'), 0o644); err != nil {
 		_ = os.RemoveAll(dir)
 		return deploymentInfo{}, err
 	}
+
 	if err := os.WriteFile(filepath.Join(dir, deploymentLogName), nil, 0o644); err != nil {
 		_ = os.RemoveAll(dir)
 		return deploymentInfo{}, err
 	}
+
 	return info, nil
 }
 
@@ -295,19 +335,24 @@ func (m *deploymentManager) createRun(app, digest string) (deploymentInfo, error
 func (m *deploymentManager) updateRun(app, id string, update func(*deploymentInfo)) (deploymentInfo, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	info, err := m.info(app, id)
 	if err != nil {
 		return deploymentInfo{}, err
 	}
+
 	update(&info)
+
 	data, err := json.Marshal(info)
 	if err != nil {
 		return deploymentInfo{}, err
 	}
+
 	path := filepath.Join(m.appDir(app), id, deploymentMetaName)
 	if err := writeFileAtomicMode(path, append(data, '\n'), 0o644); err != nil {
 		return deploymentInfo{}, err
 	}
+
 	return info, nil
 }
 
@@ -318,14 +363,17 @@ func (m *deploymentManager) logPath(app, id string) string {
 // appendLog keeps a deployment's log bounded and never lets logging fail the install.
 func (m *deploymentManager) appendLog(app, id string, data []byte) {
 	path := m.logPath(app, id)
+
 	info, err := os.Stat(path)
 	if err == nil && info.Size()+int64(len(data)) > deploymentLogBytes {
 		return
 	}
+
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return
 	}
+
 	_, _ = file.Write(data)
 	_ = file.Close()
 }
@@ -334,10 +382,12 @@ func (m *deploymentManager) readLog(app, id string) ([]byte, error) {
 	if err := validDeploymentID(id); err != nil {
 		return nil, errDeploymentNotFound
 	}
+
 	data, err := os.ReadFile(m.logPath(app, id))
 	if os.IsNotExist(err) {
 		return nil, errDeploymentNotFound
 	}
+
 	return data, err
 }
 
@@ -346,6 +396,7 @@ func (m *deploymentManager) bundle(app, id string) (string, error) {
 	if err := validDeploymentID(id); err != nil {
 		return "", err
 	}
+
 	dir := filepath.Join(m.appDir(app), id)
 	if data, err := os.ReadFile(filepath.Join(dir, deploymentMetaName)); err == nil {
 		var info deploymentInfo
@@ -353,14 +404,17 @@ func (m *deploymentManager) bundle(app, id string) (string, error) {
 			return "", errDeploymentNotFound
 		}
 	}
+
 	if info, err := os.Stat(filepath.Join(dir, "app.json")); err != nil || !info.Mode().IsRegular() {
 		return "", errDeploymentNotFound
 	}
+
 	for _, name := range []string{"main.cwasm", "main.wasm"} {
 		if info, err := os.Stat(filepath.Join(dir, name)); err == nil && info.Mode().IsRegular() {
 			return dir, nil
 		}
 	}
+
 	return "", errDeploymentNotFound
 }
 
@@ -381,19 +435,24 @@ func (m *deploymentManager) gcBlobs(app string) error {
 	if err != nil {
 		return err
 	}
+
 	referenced := map[string]struct{}{}
+
 	for _, id := range ids {
 		data, err := os.ReadFile(filepath.Join(m.appDir(app), id, deploymentMetaName))
 		if err != nil {
 			continue
 		}
+
 		var info deploymentInfo
 		if err := json.Unmarshal(data, &info); err != nil {
 			continue
 		}
+
 		for _, digest := range info.Blobs {
 			referenced[digest] = struct{}{}
 		}
+
 		for _, digest := range info.Static {
 			referenced[digest] = struct{}{}
 		}
@@ -409,34 +468,44 @@ type fileKey struct {
 // usage counts the bytes stored for one app, following hardlinks only once.
 func (m *deploymentManager) usage(app string) (int64, error) {
 	var total int64
+
 	seen := map[fileKey]struct{}{}
+
 	err := filepath.WalkDir(m.appDir(app), func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			if os.IsNotExist(err) {
 				return nil
 			}
+
 			return err
 		}
+
 		if entry.IsDir() {
 			return nil
 		}
+
 		info, err := entry.Info()
 		if err != nil {
 			return err
 		}
+
 		if stat, ok := info.Sys().(*syscall.Stat_t); ok {
 			key := fileKey{device: uint64(stat.Dev), inode: stat.Ino} //nolint:unconvert // Stat_t.Dev is not uint64 on every platform.
 			if _, ok := seen[key]; ok {
 				return nil
 			}
+
 			seen[key] = struct{}{}
 		}
+
 		total += info.Size()
+
 		return nil
 	})
 	if os.IsNotExist(err) {
 		return 0, nil
 	}
+
 	return total, err
 }
 
@@ -453,15 +522,20 @@ func (m *deploymentManager) prune(app string) error {
 			if err != nil {
 				continue
 			}
+
 			if info.Status == deploymentStatusQueued || info.Status == deploymentStatusRunning {
 				continue
 			}
+
 			if err := os.RemoveAll(filepath.Join(m.appDir(app), id)); err != nil {
 				return false, err
 			}
+
 			ids = append(ids[:i], ids[i+1:]...)
+
 			return true, nil
 		}
+
 		return false, nil
 	}
 	for len(ids) > deploymentKeep {
@@ -469,28 +543,35 @@ func (m *deploymentManager) prune(app string) error {
 		if err != nil {
 			return err
 		}
+
 		if !removed {
 			break
 		}
 	}
+
 	for len(ids) > 1 {
 		used, err := m.usage(app)
 		if err != nil {
 			return err
 		}
+
 		if used <= deploymentMaxBytes {
 			break
 		}
+
 		removed, err := removeOldest()
 		if err != nil {
 			return err
 		}
+
 		if !removed {
 			break
 		}
+
 		if err := m.gcBlobs(app); err != nil {
 			return err
 		}
 	}
+
 	return m.gcBlobs(app)
 }

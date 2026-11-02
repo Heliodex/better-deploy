@@ -29,19 +29,23 @@ func handleEventPublish(bus *eventBus, w http.ResponseWriter, r *http.Request, a
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
+
 	if bus == nil {
 		writeError(w, http.StatusServiceUnavailable, "event bus is unavailable")
 		return
 	}
+
 	var request eventPublishRequest
 	if !readJSONBody(w, r, eventMaxBody+1024, &request) {
 		return
 	}
+
 	event, err := bus.publish(app, request.Topic, request.Data)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+
 	writeJSON(w, http.StatusAccepted, eventPublishResponse{ID: event.ID, Topic: event.Topic, Time: event.Time})
 }
 
@@ -50,27 +54,33 @@ func (s *supervisor) handleAppEvents(w http.ResponseWriter, r *http.Request, a *
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
+
 	if s.bus == nil {
 		writeError(w, http.StatusServiceUnavailable, "event bus is unavailable")
 		return
 	}
+
 	stream, ok := newSSEStream(w, "no-cache")
 	if !ok {
 		writeError(w, http.StatusInternalServerError, "streaming unsupported")
 		return
 	}
+
 	topic := strings.TrimSpace(r.URL.Query().Get("topic"))
 	if len(topic) > eventMaxTopic || strings.ContainsAny(topic, "\x00\r\n") {
 		writeError(w, http.StatusBadRequest, "invalid topic")
 		return
 	}
+
 	var since *int64
+
 	if value := r.URL.Query().Get("since"); value != "" {
 		parsed, err := strconv.ParseInt(value, 10, 64)
 		if err != nil || parsed < 0 {
 			writeError(w, http.StatusBadRequest, "since must be a non-negative event id")
 			return
 		}
+
 		since = &parsed
 	} else if value := r.Header.Get("Last-Event-ID"); value != "" {
 		parsed, err := strconv.ParseInt(value, 10, 64)
@@ -85,9 +95,11 @@ func (s *supervisor) handleAppEvents(w http.ResponseWriter, r *http.Request, a *
 	if !stream.retry(3000) {
 		return
 	}
+
 	if gap && !stream.event("gap", fmt.Appendf(nil, `{"oldest":%d}`, oldest)) {
 		return
 	}
+
 	for _, event := range replay {
 		if !writeBusEvent(stream, event) {
 			return
@@ -96,12 +108,14 @@ func (s *supervisor) handleAppEvents(w http.ResponseWriter, r *http.Request, a *
 
 	ticker := time.NewTicker(eventKeepAlive)
 	defer ticker.Stop()
+
 	for {
 		select {
 		case event, ok := <-sub.ch:
 			if !ok {
 				return
 			}
+
 			if !writeBusEvent(stream, event) {
 				return
 			}
@@ -121,6 +135,7 @@ func writeBusEvent(stream *sseStream, event busEvent) bool {
 	if data == nil {
 		return true
 	}
+
 	return stream.idEvent(event.ID, "message", data)
 }
 

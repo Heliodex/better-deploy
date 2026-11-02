@@ -8,9 +8,11 @@ func (s *storageServer) storageBlobDelete(w http.ResponseWriter, _ *http.Request
 		writeError(w, http.StatusServiceUnavailable, errBlobStoreEmpty.Error())
 		return
 	}
+
 	if err := s.blobs.remove(app, digest); err != nil {
 		writeBlobError(w, err)
 		return
 	}
+
 	w.WriteHeader(http.StatusNoContent)
 }

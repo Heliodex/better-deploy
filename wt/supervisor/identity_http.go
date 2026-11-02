@@ -57,6 +57,7 @@ func (s *supervisor) identityAppRoutes() *routeTable {
 		rt.add(http.MethodPost, identityAppPrefix+"/logout", plainHandler(s.handleIdentityLogout))
 		rt.add(http.MethodGet, identityAppPrefix+"/me", plainHandler(s.handleIdentityMe))
 		rt.add(http.MethodPost, identityAppPrefix+"/password", plainHandler(s.handleIdentityPassword))
+
 		return rt
 	})
 }
@@ -67,11 +68,14 @@ func (s *supervisor) serveIdentityApp(w http.ResponseWriter, r *http.Request) bo
 	if !routes.matches(r.URL.Path) {
 		return false
 	}
+
 	if s.identity == nil {
 		writeError(w, http.StatusServiceUnavailable, "identity is unavailable")
 		return true
 	}
+
 	routes.ServeHTTP(w, r)
+
 	return true
 }
 
@@ -99,30 +103,39 @@ func writeIdentityError(w http.ResponseWriter, err error) {
 func (s *supervisor) handleIdentityLogin(w http.ResponseWriter, r *http.Request) {
 	limiter := s.loginGuard("identity")
 	key := s.loginKey(r)
+
 	now := time.Now()
 	if allowed, wait := limiter.allow(key, now); !allowed {
 		writeRetryAfter(w, wait)
 		writeError(w, http.StatusTooManyRequests, "too many login attempts; try again later")
+
 		return
 	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+
 	var request identityLoginRequest
 	if err := json.UnmarshalRead(r.Body, &request); err != nil {
 		limiter.fail(key, now)
 		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+
 		return
 	}
+
 	user, err := s.identity.authenticate(request.Email, request.Password)
 	if err != nil {
 		limiter.fail(key, now)
 		writeIdentityError(w, err)
+
 		return
 	}
+
 	token, session, err := s.identity.newSession(user.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	limiter.reset(key)
 	s.setIdentityCookie(w, r, token)
 	w.Header().Set("Cache-Control", "no-store")
@@ -137,11 +150,13 @@ func (s *supervisor) handleIdentityLogout(w http.ResponseWriter, r *http.Request
 			writeIdentityError(w, errIdentityCSRF)
 			return
 		}
+
 		if err := s.identity.deleteSession(token); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	}
+
 	s.clearIdentityCookie(w, r)
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusNoContent)
@@ -154,6 +169,7 @@ func (s *supervisor) handleIdentityMe(w http.ResponseWriter, r *http.Request) {
 		writeIdentityError(w, errIdentityNoSession)
 		return
 	}
+
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, identityMeResponse{User: user, CSRFToken: session.CSRF})
 }
@@ -165,27 +181,33 @@ func (s *supervisor) handleIdentityPassword(w http.ResponseWriter, r *http.Reque
 		writeIdentityError(w, errIdentityNoSession)
 		return
 	}
+
 	if !identityCSRFMatches(r, session) {
 		writeIdentityError(w, errIdentityCSRF)
 		return
 	}
+
 	var request identityPasswordRequest
 	if !readJSONBody(w, r, 16<<10, &request) {
 		return
 	}
+
 	if _, err := s.identity.authenticate(user.Email, request.CurrentPassword); err != nil {
 		writeIdentityError(w, errIdentityNoUser)
 		return
 	}
+
 	if err := s.identity.setPassword(user.ID, request.NewPassword); err != nil {
 		writeIdentityError(w, err)
 		return
 	}
+
 	newToken, newSession, err := s.identity.newSession(user.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	s.setIdentityCookie(w, r, newToken)
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, identityMeResponse{User: user, CSRFToken: newSession.CSRF})
@@ -197,6 +219,7 @@ func identityCSRFMatches(r *http.Request, session identitySession) bool {
 	if value == "" || len(value) != len(session.CSRF) {
 		return false
 	}
+
 	return subtle.ConstantTimeCompare([]byte(value), []byte(session.CSRF)) == 1
 }
 
@@ -205,10 +228,12 @@ func (s *supervisor) identityAdmin(w http.ResponseWriter, r *http.Request) bool 
 	if !ok {
 		return false
 	}
+
 	if !identity.isAdmin() {
 		writeError(w, http.StatusForbidden, "admin token required")
 		return false
 	}
+
 	return true
 }
 
@@ -217,10 +242,12 @@ func (s *supervisor) handleIdentityUsers(w http.ResponseWriter, r *http.Request)
 	if !s.identityAdmin(w, r) {
 		return
 	}
+
 	if s.identity == nil {
 		writeError(w, http.StatusServiceUnavailable, "identity is unavailable")
 		return
 	}
+
 	switch r.Method {
 	case http.MethodGet:
 		writeJSON(w, http.StatusOK, identityUsersResponse{Users: s.identity.listUsers()})
@@ -229,11 +256,13 @@ func (s *supervisor) handleIdentityUsers(w http.ResponseWriter, r *http.Request)
 		if !readJSONBody(w, r, 16<<10, &request) {
 			return
 		}
+
 		user, err := s.identity.createUser(request.Email, request.Name, request.Password, request.Groups)
 		if err != nil {
 			writeIdentityError(w, err)
 			return
 		}
+
 		writeJSON(w, http.StatusCreated, user)
 	default:
 		w.Header().Set("Allow", "GET, POST")
@@ -246,14 +275,17 @@ func (s *supervisor) handleIdentityUserPassword(w http.ResponseWriter, r *http.R
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
+
 	var request identityResetPasswordRequest
 	if !readJSONBody(w, r, 16<<10, &request) {
 		return
 	}
+
 	if err := s.identity.setPassword(id, request.Password); err != nil {
 		writeIdentityError(w, err)
 		return
 	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -264,6 +296,7 @@ func (s *supervisor) handleIdentityUserGet(w http.ResponseWriter, id string) {
 		writeIdentityError(w, errIdentityUserMissing)
 		return
 	}
+
 	writeJSON(w, http.StatusOK, user)
 }
 
@@ -273,24 +306,29 @@ func (s *supervisor) handleIdentityUserUpdate(w http.ResponseWriter, r *http.Req
 	if !readJSONBody(w, r, 16<<10, &request) {
 		return
 	}
+
 	current, ok := s.identity.user(id)
 	if !ok {
 		writeIdentityError(w, errIdentityUserMissing)
 		return
 	}
+
 	name := current.Name
 	if request.Name != nil {
 		name = *request.Name
 	}
+
 	groups := current.Groups
 	if request.Groups != nil {
 		groups = *request.Groups
 	}
+
 	user, err := s.identity.updateUser(id, name, groups, request.Disabled)
 	if err != nil {
 		writeIdentityError(w, err)
 		return
 	}
+
 	writeJSON(w, http.StatusOK, user)
 }
 
@@ -300,6 +338,7 @@ func (s *supervisor) handleIdentityUserDelete(w http.ResponseWriter, id string) 
 		writeIdentityError(w, err)
 		return
 	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -308,19 +347,23 @@ func (s *supervisor) handleIdentityUser(w http.ResponseWriter, r *http.Request, 
 	if !s.identityAdmin(w, r) {
 		return
 	}
+
 	if s.identity == nil {
 		writeError(w, http.StatusServiceUnavailable, "identity is unavailable")
 		return
 	}
+
 	id, action, _ := strings.Cut(rest, "/")
 	if id == "" {
 		writeError(w, http.StatusNotFound, errIdentityUserMissing.Error())
 		return
 	}
+
 	if action == "password" {
 		s.handleIdentityUserPassword(w, r, id)
 		return
 	}
+
 	switch r.Method {
 	case http.MethodGet:
 		s.handleIdentityUserGet(w, id)

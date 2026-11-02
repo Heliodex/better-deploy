@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -12,20 +13,25 @@ import (
 func parseAdminListen(value string) (network, address string, err error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return "", "", fmt.Errorf("empty address")
+		return "", "", errors.New("empty address")
 	}
+
 	if path, ok := strings.CutPrefix(value, "unix:"); ok {
 		if strings.TrimSpace(path) == "" {
-			return "", "", fmt.Errorf("unix admin listener needs a path")
+			return "", "", errors.New("unix admin listener needs a path")
 		}
+
 		return "unix", path, nil
 	}
+
 	if address, ok := strings.CutPrefix(value, "tcp:"); ok {
 		if strings.TrimSpace(address) == "" {
-			return "", "", fmt.Errorf("tcp admin listener needs an address")
+			return "", "", errors.New("tcp admin listener needs an address")
 		}
+
 		return "tcp", address, nil
 	}
+
 	return "tcp", value, nil
 }
 
@@ -36,16 +42,19 @@ func listenAdmin(network, address string) (net.Listener, func(), error) {
 		if err != nil {
 			return nil, nil, err
 		}
+
 		return listener, func() { _ = listener.Close() }, nil
 	}
 
 	if err := os.MkdirAll(filepath.Dir(address), 0o755); err != nil {
 		return nil, nil, fmt.Errorf("admin socket dir: %w", err)
 	}
+
 	if info, err := os.Lstat(address); err == nil {
 		if info.Mode()&os.ModeSocket == 0 {
 			return nil, nil, fmt.Errorf("admin socket path %s exists and is not a socket", address)
 		}
+
 		if err := os.Remove(address); err != nil {
 			return nil, nil, fmt.Errorf("remove stale admin socket: %w", err)
 		}
@@ -57,14 +66,18 @@ func listenAdmin(network, address string) (net.Listener, func(), error) {
 	if err != nil {
 		return nil, nil, err
 	}
+
 	if err := os.Chmod(address, 0o600); err != nil {
 		_ = listener.Close()
 		_ = os.Remove(address)
+
 		return nil, nil, fmt.Errorf("chmod admin socket: %w", err)
 	}
+
 	cleanup := func() {
 		_ = listener.Close()
 		_ = os.Remove(address)
 	}
+
 	return listener, cleanup, nil
 }

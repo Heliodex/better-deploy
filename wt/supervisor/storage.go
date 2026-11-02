@@ -135,6 +135,7 @@ func newStorageServer(dir, listen string) (*storageServer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("storage listen: %w", err)
 	}
+
 	return newStorageServerOn(dir, listener)
 }
 
@@ -159,6 +160,7 @@ func newStorageServerOn(dir string, listener net.Listener) (*storageServer, erro
 	}
 	s.sessionCond = sync.NewCond(&s.sessionMu)
 	s.listener = listener
+
 	s.server = &http.Server{
 		Handler:           http.HandlerFunc(s.handle),
 		ReadHeaderTimeout: 5 * time.Second,
@@ -169,6 +171,7 @@ func newStorageServerOn(dir string, listener net.Listener) (*storageServer, erro
 		}
 	}()
 	go s.sessionLoop()
+
 	return s, nil
 }
 
@@ -178,17 +181,21 @@ func cleanStorageTemp(dir string) error {
 	if os.IsNotExist(err) {
 		return nil
 	}
+
 	if err != nil {
 		return err
 	}
+
 	for _, entry := range entries {
 		if !strings.HasPrefix(entry.Name(), "etilqs_") {
 			continue
 		}
+
 		if err := os.RemoveAll(filepath.Join(dir, entry.Name())); err != nil {
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -198,23 +205,29 @@ func (s *storageServer) setTempDir(dir string, budget int64) error {
 	if dir == "" {
 		return nil
 	}
+
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("storage temp dir: %w", err)
 	}
+
 	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
 		dir = resolved
 	}
+
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return fmt.Errorf("storage temp dir permissions: %w", err)
 	}
+
 	if err := cleanStorageTemp(dir); err != nil {
 		return fmt.Errorf("clean storage temp dir: %w", err)
 	}
+
 	s.mu.Lock()
 	s.tempDir = dir
 	s.tempBudget = &byteBudget{name: "storage temp", limit: max(budget, 0)}
 	s.mu.Unlock()
 	s.tempOver.Store(false)
+
 	return nil
 }
 
@@ -224,6 +237,7 @@ func dirSize(dir string) (int64, error) {
 	if err := walkUsage(dir, &total, &entries); err != nil {
 		return 0, err
 	}
+
 	return total, nil
 }
 
@@ -233,26 +247,33 @@ func (s *storageServer) checkTemp() {
 	dir := s.tempDir
 	budget := s.tempBudget
 	s.mu.Unlock()
+
 	if dir == "" || !budget.enabled() {
 		s.tempOver.Store(false)
+
 		if budget != nil {
 			budget.observe(0)
 		}
+
 		return
 	}
+
 	size, err := dirSize(dir)
 	if err != nil {
 		log.Printf("storage temp: measure %s: %v", dir, err)
 		return
 	}
+
 	s.tempOver.Store(budget.observe(size))
 }
 
 // monitorTemp refreshes the temp directory budget until ctx is cancelled.
 func (s *storageServer) monitorTemp(ctx context.Context) {
 	s.checkTemp()
+
 	ticker := time.NewTicker(storageTempMonitorInterval)
 	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -273,10 +294,12 @@ func (s *storageServer) endpoint() (string, int) {
 	if !ok || address == nil {
 		return "", 0
 	}
+
 	ip := address.IP
 	if ip == nil || ip.IsUnspecified() {
 		return "127.0.0.1", address.Port
 	}
+
 	return ip.String(), address.Port
 }
 
@@ -291,9 +314,11 @@ func (s *storageServer) close() {
 	s.closeSessionsFor("")
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	for _, db := range s.dbs {
 		_ = db.Close()
 	}
+
 	for _, db := range s.readDBs {
 		_ = db.Close()
 	}
@@ -307,15 +332,18 @@ func (s *storageServer) drop(app string) {
 	delete(s.dbs, app)
 	delete(s.readDBs, app)
 	delete(s.quotas, app)
+
 	for token, name := range s.tokens {
 		if name == app {
 			delete(s.tokens, token)
 		}
 	}
 	s.mu.Unlock()
+
 	if readDB != nil {
 		_ = readDB.Close()
 	}
+
 	if db != nil {
 		_ = db.Close()
 	}
@@ -325,15 +353,19 @@ func (s *storageServer) drop(app string) {
 func (s *storageServer) tokenFor(app string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	for token, name := range s.tokens {
 		if name == app {
 			return token
 		}
 	}
+
 	var b [32]byte
+
 	_, _ = rand.Read(b[:])
 	token := hex.EncodeToString(b[:])
 	s.tokens[token] = app
+
 	return token
 }
 
@@ -343,6 +375,7 @@ func (s *storageServer) restoreToken(app, token string) {
 	if token == "" {
 		return
 	}
+
 	s.mu.Lock()
 	s.tokens[token] = app
 	s.mu.Unlock()
@@ -354,18 +387,23 @@ func (s *storageServer) appForToken(token string) (string, bool) {
 	if token == "" {
 		return "", false
 	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	app, ok := s.tokens[token]
+
 	return app, ok
 }
 
 // appFor resolves the app from the request's bearer token.
 func (s *storageServer) appFor(r *http.Request) (string, bool) {
 	const prefix = "Bearer "
+
 	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), prefix)
 	if !ok {
 		return "", false
 	}
+
 	return s.appForToken(token)
 }

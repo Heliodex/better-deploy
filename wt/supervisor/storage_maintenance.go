@@ -26,45 +26,56 @@ func (s *storageServer) maintenance(ctx context.Context, app, op string) (string
 				return err
 			}
 			defer func() { _, _ = sqlite.Limit(conn, sqlite3.SQLITE_LIMIT_ATTACHED, 0) }()
+
 			_, err := conn.ExecContext(ctx, "vacuum")
+
 			return err
 		})
+
 		return "", err
 	case "optimize":
 		err := s.withConn(ctx, app, func(conn *sql.Conn) error {
 			_, err := conn.ExecContext(ctx, "pragma optimize")
 			return err
 		})
+
 		return "", err
 	case "checkpoint":
 		var busy, logFrames, checkpointed int
+
 		err := s.withConn(ctx, app, func(conn *sql.Conn) error {
 			return conn.QueryRowContext(ctx, "pragma wal_checkpoint(truncate)").Scan(&busy, &logFrames, &checkpointed)
 		})
 		if err != nil {
 			return "", err
 		}
+
 		return fmt.Sprintf("busy=%d log=%d checkpointed=%d", busy, logFrames, checkpointed), nil
 	case "integrity_check":
 		results := []string{}
+
 		err := s.withConn(ctx, app, func(conn *sql.Conn) error {
 			rows, err := conn.QueryContext(ctx, "pragma integrity_check")
 			if err != nil {
 				return err
 			}
 			defer rows.Close()
+
 			for rows.Next() {
 				var line string
 				if err := rows.Scan(&line); err != nil {
 					return err
 				}
+
 				results = append(results, line)
 			}
+
 			return rows.Err()
 		})
 		if err != nil {
 			return "", err
 		}
+
 		return strings.Join(results, "\n"), nil
 	default:
 		return "", fmt.Errorf("%w: unknown maintenance op %q; use one of %s", errStorageInvalid, op, storageMaintenanceOps)

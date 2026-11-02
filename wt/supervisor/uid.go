@@ -29,6 +29,7 @@ func newUIDAllocator(path string, base int) (*uidAllocator, error) {
 	if base <= 0 || base > 1<<31-1 {
 		return nil, fmt.Errorf("WT_APP_UID_BASE must be a positive 32-bit uid, got %d", base)
 	}
+
 	a := &uidAllocator{
 		path: path,
 		base: base,
@@ -43,6 +44,7 @@ func newUIDAllocator(path string, base int) (*uidAllocator, error) {
 		if err := json.Unmarshal(data, &state); err != nil {
 			return nil, fmt.Errorf("read %s: %w", path, err)
 		}
+
 		for name, uid := range state.Apps {
 			if validName(name) && uid >= base {
 				a.apps[name] = uid
@@ -58,34 +60,45 @@ func newUIDAllocator(path string, base int) (*uidAllocator, error) {
 	for name := range a.apps {
 		names = append(names, name)
 	}
+
 	sort.Strings(names)
+
 	changed := false
+
 	for _, name := range names {
 		uid := a.apps[name]
 		if other, ok := a.used[uid]; ok && other != name {
 			delete(a.apps, name)
+
 			changed = true
+
 			continue
 		}
+
 		a.used[uid] = name
 	}
+
 	for _, name := range names {
 		if _, ok := a.apps[name]; ok {
 			continue
 		}
+
 		uid, err := a.nextLocked()
 		if err != nil {
 			return nil, err
 		}
+
 		a.apps[name] = uid
 		a.used[uid] = name
 		changed = true
 	}
+
 	if changed {
 		if err := a.saveLocked(); err != nil {
 			return nil, err
 		}
 	}
+
 	return a, nil
 }
 
@@ -96,6 +109,7 @@ func (a *uidAllocator) nextLocked() (int, error) {
 			return uid, nil
 		}
 	}
+
 	return 0, fmt.Errorf("no free app uid at or above %d", a.base)
 }
 
@@ -104,12 +118,15 @@ func (a *uidAllocator) saveLocked() error {
 	if err != nil {
 		return err
 	}
+
 	if err := writeFileAtomic(a.path, append(data, '\n')); err != nil {
 		return fmt.Errorf("write %s: %w", a.path, err)
 	}
+
 	if err := os.Chmod(a.path, 0o600); err != nil {
 		return fmt.Errorf("chmod %s: %w", a.path, err)
 	}
+
 	return nil
 }
 
@@ -117,20 +134,26 @@ func (a *uidAllocator) saveLocked() error {
 func (a *uidAllocator) Allocate(name string) (int, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
 	if uid, ok := a.apps[name]; ok {
 		return uid, nil
 	}
+
 	uid, err := a.nextLocked()
 	if err != nil {
 		return 0, err
 	}
+
 	a.apps[name] = uid
+
 	a.used[uid] = name
 	if err := a.saveLocked(); err != nil {
 		delete(a.apps, name)
 		delete(a.used, uid)
+
 		return 0, err
 	}
+
 	return uid, nil
 }
 
@@ -138,7 +161,9 @@ func (a *uidAllocator) Allocate(name string) (int, error) {
 func (a *uidAllocator) UID(name string) (int, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
 	uid, ok := a.apps[name]
+
 	return uid, ok
 }
 
@@ -148,9 +173,11 @@ func chownTree(root string, uid, gid int) error {
 		if err != nil {
 			return err
 		}
+
 		if entry.Type()&os.ModeSymlink != 0 {
 			return os.Lchown(path, uid, gid)
 		}
+
 		return os.Chown(path, uid, gid)
 	})
 }

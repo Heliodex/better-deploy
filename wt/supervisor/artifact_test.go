@@ -27,10 +27,12 @@ func writeCompiler(t *testing.T, version, output string, fail bool) string {
 // writeCompilerWithCounter also counts compile calls, so a test can prove a cache hit skipped the compiler.
 func writeCompilerWithCounter(t *testing.T, version, output, counter string, fail bool) string {
 	t.Helper()
+
 	record := ""
 	if counter != "" {
 		record = "  printf x >> '" + counter + "'\n"
 	}
+
 	script := `#!/bin/sh
 case "$1" in
 --version)
@@ -54,10 +56,12 @@ compile)
   ;;
 esac
 `
+
 	path := filepath.Join(t.TempDir(), "wasmtime")
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
+
 	return path
 }
 
@@ -65,6 +69,7 @@ func boolText(value bool) string {
 	if value {
 		return "yes"
 	}
+
 	return "no"
 }
 
@@ -75,6 +80,7 @@ func artifactSupervisor(t *testing.T, compiler string) *supervisor {
 
 func artifactSupervisorWithCache(t *testing.T, compiler, cache string) *supervisor {
 	t.Helper()
+
 	return &supervisor{cfg: config{
 		stateDir:         t.TempDir(),
 		cacheDir:         cache,
@@ -88,26 +94,32 @@ func artifactSupervisorWithCache(t *testing.T, compiler, cache string) *supervis
 func writeBundleDir(t *testing.T, wasm, cwasm, artifact string) string {
 	t.Helper()
 	dir := t.TempDir()
+
 	for name, body := range map[string]string{"main.wasm": wasm, "main.cwasm": cwasm, artifactName: artifact} {
 		if body == "" {
 			continue
 		}
+
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
+
 	return dir
 }
 
 func compileCount(t *testing.T, counter string) int {
 	t.Helper()
+
 	data, err := os.ReadFile(counter)
 	if os.IsNotExist(err) {
 		return 0
 	}
+
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	return len(data)
 }
 
@@ -119,23 +131,29 @@ func TestEnsureArtifactRebuildsStaleArtifact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !epoch {
 		t.Error("rebuild did not report epoch support")
 	}
+
 	cwasm, err := os.ReadFile(filepath.Join(dir, "main.cwasm"))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if string(cwasm) != "rebuilt" {
 		t.Errorf("main.cwasm = %q, want rebuilt", cwasm)
 	}
+
 	artifact, err := readArtifact(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if artifact.Wasmtime != "wasmtime-cli 51.0.0" || artifact.Target != "x86_64-test" || artifact.CompiledAt.IsZero() || !artifact.Epoch {
 		t.Errorf("artifact = %+v", artifact)
 	}
+
 	if artifact.WasmSHA256 != digestText("wasm") || artifact.WasmBytes != int64(len("wasm")) {
 		t.Errorf("artifact wasm metadata = %+v, want digest %s and %d bytes", artifact, digestText("wasm"), len("wasm"))
 	}
@@ -152,16 +170,20 @@ func TestEnsureArtifactKeepsMatchingArtifact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !epoch {
 		t.Error("matching epoch artifact was not reported")
 	}
+
 	if got := compileCount(t, counter); got != 0 {
 		t.Errorf("compile calls = %d, want 0 for a matching artifact", got)
 	}
+
 	cwasm, err := os.ReadFile(filepath.Join(dir, "main.cwasm"))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if string(cwasm) != "current" {
 		t.Errorf("main.cwasm = %q, want the existing artifact", cwasm)
 	}
@@ -178,23 +200,29 @@ func TestEnsureArtifactIgnoresLegacyArtifactWithoutDigest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !epoch {
 		t.Error("rebuilt artifact did not report epoch support")
 	}
+
 	if got := compileCount(t, counter); got != 1 {
 		t.Errorf("compile calls = %d, want a rebuild for an artifact without digest or CPU", got)
 	}
+
 	cwasm, err := os.ReadFile(filepath.Join(dir, "main.cwasm"))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if string(cwasm) != "rebuilt" {
 		t.Errorf("main.cwasm = %q, want rebuilt", cwasm)
 	}
+
 	artifact, err := readArtifact(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if artifact.WasmSHA256 != digestText("wasm") || artifact.CPU != artifactCPUFeatures {
 		t.Errorf("artifact = %+v, want wasm digest and CPU policy", artifact)
 	}
@@ -204,13 +232,16 @@ func TestCachedArtifactIgnoresEmptyFile(t *testing.T) {
 	cache := t.TempDir()
 	s := artifactSupervisorWithCache(t, "wasmtime", cache)
 	key := artifactKey{WasmSHA256: digestText("wasm"), Wasmtime: "wasmtime-cli 51.0.0", Target: "x86_64-test", CPU: artifactCPUFeatures, Epoch: true}
+
 	path := s.artifactCachePath(key)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(path, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
+
 	if _, _, ok := s.cachedArtifact(key); ok {
 		t.Error("empty cache file was treated as a cache hit")
 	}
@@ -224,13 +255,16 @@ func TestEnsureArtifactKeepsCwasmWithoutCompiler(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if epoch {
 		t.Error("failed rebuild claimed epoch support")
 	}
+
 	cwasm, err := os.ReadFile(filepath.Join(dir, "main.cwasm"))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if string(cwasm) != "old" {
 		t.Errorf("main.cwasm = %q, want the existing artifact", cwasm)
 	}
@@ -260,6 +294,7 @@ func TestEnsureArtifactFailsWithoutCompilerOrCwasm(t *testing.T) {
 func TestEnsureArtifactLegacyBundle(t *testing.T) {
 	// Bundles uploaded before main.wasm was kept still start from their cwasm.
 	compiler := writeCompiler(t, "wasmtime-cli 51.0.0", "rebuilt", false)
+
 	dir := writeBundleDir(t, "", "legacy", "")
 	if epoch, err := artifactSupervisor(t, compiler).ensureArtifact(dir, true); err != nil || epoch {
 		t.Errorf("legacy bundle = %v, %v; want no epoch and no error", epoch, err)
@@ -274,6 +309,7 @@ func TestEnsureArtifactLegacyBundle(t *testing.T) {
 func TestArtifactMatches(t *testing.T) {
 	digest := digestText("wasm")
 	current := artifactInfo{Wasmtime: "wasmtime-cli 51.0.0", Target: "x86_64-test", Epoch: true, WasmSHA256: digest}
+
 	cases := []struct {
 		name     string
 		recorded artifactInfo
@@ -301,6 +337,7 @@ func TestReadArtifactRejectsInvalidJSON(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, artifactName), []byte("{"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
 	if _, err := readArtifact(dir); err == nil || !strings.Contains(err.Error(), artifactName) {
 		t.Errorf("readArtifact error = %v", err)
 	}
@@ -316,20 +353,25 @@ func TestEnsureArtifactRebuildsForEpoch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !epoch {
 		t.Error("epoch rebuild was not reported")
 	}
+
 	cwasm, err := os.ReadFile(filepath.Join(dir, "main.cwasm"))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if string(cwasm) != "rebuilt" {
 		t.Errorf("main.cwasm = %q, want rebuilt", cwasm)
 	}
+
 	artifactInfo, err := readArtifact(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !artifactInfo.Epoch {
 		t.Errorf("artifact = %+v, want epoch support recorded", artifactInfo)
 	}
@@ -344,6 +386,7 @@ func TestEnsureArtifactReusesCache(t *testing.T) {
 	if _, err := artifactSupervisorWithCache(t, compiler, cache).ensureArtifact(first, false); err != nil {
 		t.Fatal(err)
 	}
+
 	if got := compileCount(t, counter); got != 1 {
 		t.Fatalf("compile calls = %d, want 1 after the first build", got)
 	}
@@ -352,20 +395,25 @@ func TestEnsureArtifactReusesCache(t *testing.T) {
 	if _, err := artifactSupervisorWithCache(t, compiler, cache).ensureArtifact(second, false); err != nil {
 		t.Fatal(err)
 	}
+
 	if got := compileCount(t, counter); got != 1 {
 		t.Errorf("compile calls = %d, want the cache hit to skip compiling", got)
 	}
+
 	cwasm, err := os.ReadFile(filepath.Join(second, "main.cwasm"))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if string(cwasm) != "compiled" {
 		t.Errorf("main.cwasm = %q, want the cached artifact", cwasm)
 	}
+
 	artifact, err := readArtifact(second)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if artifact.WasmSHA256 != digestText("wasm") || artifact.WasmBytes != int64(len("wasm")) {
 		t.Errorf("artifact = %+v, want wasm digest and size", artifact)
 	}
@@ -380,19 +428,23 @@ func TestEnsureArtifactCacheInvalidatesOnRuntimeAndTarget(t *testing.T) {
 	if _, err := artifactSupervisorWithCache(t, oldCompiler, cache).ensureArtifact(writeBundleDir(t, "wasm", "", ""), false); err != nil {
 		t.Fatal(err)
 	}
+
 	if _, err := artifactSupervisorWithCache(t, newCompiler, cache).ensureArtifact(writeBundleDir(t, "wasm", "", ""), false); err != nil {
 		t.Fatal(err)
 	}
+
 	if got := compileCount(t, counter); got != 2 {
 		t.Fatalf("compile calls = %d, want a runtime version change to invalidate the cache", got)
 	}
 
 	otherTarget := artifactSupervisorWithCache(t, newCompiler, cache)
 	otherTarget.cfg.wasmtimeTarget = "aarch64-test"
+
 	dir := writeBundleDir(t, "wasm", "", "")
 	if _, err := otherTarget.ensureArtifact(dir, false); err != nil {
 		t.Fatal(err)
 	}
+
 	if got := compileCount(t, counter); got != 3 {
 		t.Errorf("compile calls = %d, want a target change to invalidate the cache", got)
 	}
@@ -401,6 +453,7 @@ func TestEnsureArtifactCacheInvalidatesOnRuntimeAndTarget(t *testing.T) {
 func TestArtifactKeyIncludesEpoch(t *testing.T) {
 	key := artifactKey{WasmSHA256: digestText("wasm"), Wasmtime: "wasmtime-cli 51.0.0", Target: "x86_64-test", CPU: artifactCPUFeatures, Epoch: true}
 	other := key
+
 	other.Epoch = false
 	if key.digest() == other.digest() {
 		t.Error("artifact key does not change with the epoch setting")
@@ -410,6 +463,7 @@ func TestArtifactKeyIncludesEpoch(t *testing.T) {
 func TestArtifactKeyIncludesCPUFeatures(t *testing.T) {
 	key := artifactKey{WasmSHA256: digestText("wasm"), Wasmtime: "wasmtime-cli 51.0.0", Target: "x86_64-test", CPU: artifactCPUFeatures, Epoch: true}
 	other := key
+
 	other.CPU = "native-avx2"
 	if key.digest() == other.digest() {
 		t.Error("artifact key does not change with the CPU feature policy")
@@ -421,12 +475,16 @@ func TestArtifactMatchesCPU(t *testing.T) {
 	if !artifactMatches(base, base) {
 		t.Error("identical artifacts did not match")
 	}
+
 	native := base
+
 	native.CPU = "native"
 	if artifactMatches(native, base) {
 		t.Error("a different CPU feature policy matched")
 	}
+
 	legacy := base
+
 	legacy.CPU = ""
 	if artifactMatches(legacy, base) {
 		t.Error("an artifact without a CPU field matched")
@@ -435,21 +493,26 @@ func TestArtifactMatchesCPU(t *testing.T) {
 
 func TestPruneArtifactCacheRemovesOldestAndKeepsNewEntry(t *testing.T) {
 	cache := t.TempDir()
+
 	dir := filepath.Join(cache, "cwasm")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+
 	now := time.Now()
+
 	for i, name := range []string{"oldest.cwasm", "middle.cwasm", "newest.cwasm"} {
 		path := filepath.Join(dir, name)
 		if err := os.WriteFile(path, []byte("0123456789"), 0o644); err != nil {
 			t.Fatal(err)
 		}
+
 		stamp := now.Add(time.Duration(i-2) * time.Hour)
 		if err := os.Chtimes(path, stamp, stamp); err != nil {
 			t.Fatal(err)
 		}
 	}
+
 	s := artifactSupervisorWithCache(t, "wasmtime", cache)
 	s.cfg.cacheMaxBytes = 25
 	keep := filepath.Join(dir, "newest.cwasm")
@@ -458,13 +521,16 @@ func TestPruneArtifactCacheRemovesOldestAndKeepsNewEntry(t *testing.T) {
 	if _, err := os.Stat(keep); err != nil {
 		t.Errorf("new cache entry was pruned: %v", err)
 	}
+
 	if _, err := os.Stat(filepath.Join(dir, "oldest.cwasm")); !os.IsNotExist(err) {
 		t.Errorf("oldest cache entry still exists: %v", err)
 	}
+
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(entries) != 2 {
 		t.Errorf("cache entries = %d, want the two newest after pruning", len(entries))
 	}

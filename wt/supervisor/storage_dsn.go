@@ -17,30 +17,38 @@ func storageDSN(path string, readOnly bool, quotaBytes int64, tempDir string) st
 	query.Set("_busy_timeout", "5000")
 	query.Set("_foreign_keys", "on")
 	query.Set("_synchronous", "NORMAL")
+
 	if !readOnly {
 		query.Set("_journal_mode", "WAL")
 		query.Set("_txlock", "immediate")
 	}
+
 	query.Add("_pragma", "trusted_schema(OFF)")
 	query.Add("_pragma", "temp_store(FILE)")
 	query.Add("_pragma", "cache_size(-2048)")
 	query.Add("_pragma", "mmap_size(0)")
+
 	if tempDir != "" {
 		// temp_store_directory is deprecated but remains the only in-process way to choose SQLite's temp directory.
 		query.Add("_pragma", "temp_store_directory("+sqliteString(tempDir)+")")
 	}
+
 	if !readOnly {
 		query.Add("_pragma", fmt.Sprintf("journal_size_limit(%d)", journalSizeLimit(quotaBytes)))
 		query.Add("_pragma", fmt.Sprintf("wal_autocheckpoint(%d)", walAutoCheckpoint(quotaBytes)))
 	}
+
 	if quotaBytes > 0 {
 		pages := max(quotaBytes/storagePageSize, 1)
 		query.Add("_pragma", fmt.Sprintf("max_page_count(%d)", pages))
 	}
+
 	if readOnly {
 		query.Set("_query_only", "1")
 	}
+
 	dsn.RawQuery = query.Encode()
+
 	return dsn.String()
 }
 
@@ -49,13 +57,16 @@ func journalSizeLimit(quotaBytes int64) int64 {
 	if quotaBytes <= 0 {
 		return defaultJournalSizeLimit
 	}
+
 	limit := quotaBytes / 8
 	if limit < minJournalSizeLimit {
 		return minJournalSizeLimit
 	}
+
 	if limit > defaultJournalSizeLimit {
 		return defaultJournalSizeLimit
 	}
+
 	return limit
 }
 
@@ -64,13 +75,16 @@ func walAutoCheckpoint(quotaBytes int64) int {
 	if quotaBytes <= 0 {
 		return storageWALAutoCheckpoint
 	}
+
 	pages := quotaBytes / storagePageSize / 4
 	if pages < 16 {
 		return 16
 	}
+
 	if pages > storageWALAutoCheckpoint {
 		return storageWALAutoCheckpoint
 	}
+
 	return int(pages)
 }
 
@@ -85,10 +99,12 @@ func parseStorageMigrationTimeout(value string) (time.Duration, error) {
 	if value == "" {
 		return defaultStorageMigrationTimeout, nil
 	}
+
 	timeout, err := time.ParseDuration(value)
 	if err != nil || timeout < minStorageMigrationTimeout || timeout > maxStorageMigrationTimeout {
 		return 0, fmt.Errorf("storage migration timeout %q must be a duration between %s and %s", value, minStorageMigrationTimeout, maxStorageMigrationTimeout)
 	}
+
 	return timeout, nil
 }
 
@@ -97,17 +113,21 @@ func (s *storageServer) setQuota(app string, bytes int64) {
 	if bytes < 0 {
 		bytes = 0
 	}
+
 	s.opMu.Lock()
 	s.mu.Lock()
 	if s.quotas == nil {
 		s.quotas = map[string]int64{}
 	}
+
 	old, ok := s.quotas[app]
 	if ok && old == bytes {
 		s.mu.Unlock()
 		s.opMu.Unlock()
+
 		return
 	}
+
 	s.quotas[app] = bytes
 	db := s.dbs[app]
 	readDB := s.readDBs[app]
@@ -119,6 +139,7 @@ func (s *storageServer) setQuota(app string, bytes int64) {
 	if readDB != nil {
 		_ = readDB.Close()
 	}
+
 	if db != nil {
 		_ = db.Close()
 	}

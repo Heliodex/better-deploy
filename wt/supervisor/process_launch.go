@@ -51,8 +51,10 @@ func appServeArgs(target string, cfg appConfig, epoch bool) []string {
 	if cfg.Network != "none" {
 		args = append(args, "-S", "inherit-network")
 	}
+
 	if epoch {
 		args = append(args, "-W", "epoch-interruption=y")
+
 		timeout := cfg.requestTimeout
 		if timeout <= 0 {
 			timeout = epochIdleTimeout
@@ -60,6 +62,7 @@ func appServeArgs(target string, cfg appConfig, epoch bool) []string {
 		// wasmtime parses whole seconds or milliseconds, not Go's "1h0m0s" form.
 		args = append(args, "-W", "timeout="+strconv.FormatInt(timeout.Milliseconds(), 10)+"ms")
 	}
+
 	return args
 }
 
@@ -67,11 +70,13 @@ func appServeArgs(target string, cfg appConfig, epoch bool) []string {
 // appEnv resolves secret references and adds the storage, identity and app-fetch settings.
 func (s *supervisor) appEnv(a *app, cfg appConfig, namespaced bool) (extraArgs, env []string, err error) {
 	index := map[string]int{}
+
 	set := func(key, value string) {
 		if i, ok := index[key]; ok {
 			env[i] = key + "=" + value
 			return
 		}
+
 		index[key] = len(env)
 		extraArgs = append(extraArgs, "--env", key)
 		env = append(env, key+"="+value)
@@ -81,6 +86,7 @@ func (s *supervisor) appEnv(a *app, cfg appConfig, namespaced bool) (extraArgs, 
 		set("TMPDIR", "/tmp")
 		set("HOME", "/data")
 	}
+
 	for _, key := range sortedKeys(cfg.Env) {
 		value := cfg.Env[key]
 		if name, ok := strings.CutPrefix(value, secretRefPrefix); ok {
@@ -88,44 +94,55 @@ func (s *supervisor) appEnv(a *app, cfg appConfig, namespaced bool) (extraArgs, 
 			if !found {
 				return nil, nil, fmt.Errorf("env %s: secret %q is not set for app %s", key, name, a.name)
 			}
+
 			value = secret
 		}
+
 		set(key, value)
 	}
+
 	if cfg.MemoryMB > 0 {
 		extraArgs = append(extraArgs, "-W", fmt.Sprintf("max-memory-size=%d", cfg.MemoryMB<<20))
 	}
+
 	if s.storage != nil {
 		token := s.storage.tokenFor(a.name)
 		set("WT_STORAGE_URL", s.storage.url())
 		set("WT_STORAGE_TOKEN", token)
 		set(appTokenEnv, token)
 	}
+
 	if s.blobs != nil {
 		set(appNameEnv, a.name)
 		set(blobSecretEnv, s.blobs.secretFor(a.name))
 		set(blobPrefixEnv, blobPrefix)
 	}
+
 	if cfg.Identity == identityModePlatform {
 		if secret := s.identitySecretFor(a.name); secret != "" {
 			set(identitySecretEnv, secret)
 		}
 	}
+
 	if s.fetch != nil {
 		set(appNameEnv, a.name)
 		set(appFetchURLEnv, s.fetch.url())
 		apps := s.allApps()
+
 		names := make([]string, 0, len(apps))
 		for _, other := range apps {
 			if other.name != a.name {
 				names = append(names, other.name)
 			}
 		}
+
 		slices.Sort(names)
+
 		for _, name := range names {
 			set(appURLEnvName(name), s.fetch.appURL(name))
 		}
 	}
+
 	return extraArgs, env, nil
 }
 
@@ -137,20 +154,27 @@ func (s *supervisor) appArgsFor(a *app, source string, namespaced bool) (args []
 	cfg := a.cfg
 	epoch := a.wasmEpoch
 	a.mu.Unlock()
+
 	args = appServeArgs(s.cfg.wasmtimeTarget, cfg, epoch)
+
 	dirSpec := filepath.Join(s.cfg.stateDir, a.name) + "::/data"
 	if namespaced {
 		dirSpec = "/data::/data"
 	}
+
 	args = append(args, "--dir", dirSpec)
+
 	extraArgs, env, err := s.appEnv(a, cfg, namespaced)
 	if err != nil {
 		return nil, nil, err
 	}
+
 	args = append(args, extraArgs...)
+
 	if namespaced {
 		source = "/app/main.cwasm"
 	}
+
 	return append(args, source), env, nil
 }
 
@@ -167,12 +191,14 @@ func (s *supervisor) launch(a *app, source string) error {
 	a.starting = true
 	a.port = 0
 	cfg := a.cfg
+
 	deadline := time.Now().Add(cfg.startupLimit())
 	if countBudget(cfg.MaxConcurrent).enabled() {
 		a.slots = make(chan struct{}, cfg.MaxConcurrent)
 	} else {
 		a.slots = nil
 	}
+
 	a.mu.Unlock()
 	defer func() {
 		a.mu.Lock()
@@ -184,13 +210,16 @@ func (s *supervisor) launch(a *app, source string) error {
 	if err != nil {
 		return err
 	}
+
 	session.id = a.name + "-" + newRequestID()
 	if err := s.launchRunner(a, session); err != nil {
 		return err
 	}
+
 	a.mu.Lock()
 	a.isolation = session.iso
 	a.mu.Unlock()
+
 	return nil
 }
 
@@ -202,30 +231,38 @@ func (s *supervisor) prepareLaunchSession(a *app, source string, cfg appConfig, 
 		deadline:   deadline,
 		namespaced: s.cfg.appNamespaces,
 	}
+
 	args, env, err := s.appArgsFor(a, source, session.namespaced)
 	if err != nil {
 		a.recordError(err)
 		return nil, err
 	}
+
 	session.args, session.env = args, env
+
 	if a.logs != nil {
 		a.logs.setSecrets(s.appRedactionValues(a.name))
 	}
+
 	iso, err := s.prepareIsolation(a, cfg)
 	if err != nil {
 		a.recordError(err)
 		return nil, err
 	}
+
 	session.iso = iso
 	if iso.ns == nil {
 		return session, nil
 	}
+
 	plan, err := json.Marshal(iso.ns.plan)
 	if err != nil {
 		iso.close(s)
 		return nil, fmt.Errorf("encode namespace plan: %w", err)
 	}
+
 	session.plan = plan
+
 	return session, nil
 }
 
@@ -234,10 +271,12 @@ func (s *supervisor) launchOutput(a *app) (*portFinder, *logRing, io.Writer) {
 	finder := newPortFinder()
 	logging := log.New(os.Stderr, "["+a.name+"] ", 0).Writer()
 	recent := newLogRing()
+
 	writers := []io.Writer{finder, logging, recent}
 	if a.logs != nil {
 		writers = append(writers, a.logs)
 	}
+
 	return finder, recent, io.MultiWriter(writers...)
 }
 
@@ -245,6 +284,7 @@ func (s *supervisor) launchOutput(a *app) (*portFinder, *logRing, io.Writer) {
 func (s *supervisor) launchRunner(a *app, l *launchSession) error {
 	finder, recent, out := s.launchOutput(a)
 	configData, _ := json.Marshal(l.cfg)
+
 	request := runnerStartRequest{
 		ID:         l.id,
 		Name:       a.name,
@@ -259,6 +299,7 @@ func (s *supervisor) launchRunner(a *app, l *launchSession) error {
 	if s.storage != nil {
 		request.StorageToken = s.storage.tokenFor(a.name)
 	}
+
 	if l.namespaced {
 		request.Plan = l.plan
 		request.HostID = l.iso.ns.hostID
@@ -270,16 +311,20 @@ func (s *supervisor) launchRunner(a *app, l *launchSession) error {
 	if err != nil {
 		l.iso.close(s)
 		a.recordError(err)
+
 		return err
 	}
+
 	cmd := &exec.Cmd{Process: &os.Process{Pid: started.PID}}
 	done := make(chan struct{})
+
 	a.mu.Lock()
 	a.cmd = cmd
 	a.done = done
 	a.exited = false
 	a.workPID = started.WorkPID
 	a.port = 0
+
 	a.started = time.Now().UTC()
 	if a.timer != nil {
 		a.timer.Stop()
@@ -293,19 +338,23 @@ func (s *supervisor) launchRunner(a *app, l *launchSession) error {
 		a.recordError(err)
 		s.kill(a)
 		l.iso.close(s)
+
 		return err
 	}
 	if err := l.iso.attachProcess(s, cmd.Process.Pid); err != nil {
 		return fail(err)
 	}
+
 	if l.namespaced {
 		if err := s.runner.Go(l.id); err != nil {
 			return fail(fmt.Errorf("release app start: %w", err))
 		}
 	}
+
 	if err := s.awaitAppReady(a, l, done, finder, recent); err != nil {
 		return fail(err)
 	}
+
 	return nil
 }
 
@@ -314,16 +363,21 @@ func (s *supervisor) awaitAppReady(a *app, l *launchSession, done <-chan struct{
 	if err := s.waitForPort(a, finder, done, l.deadline); err != nil {
 		return withLaunchLog(l.source, recent, err)
 	}
+
 	if err := l.iso.activate(s, l.cfg); err != nil {
 		return err
 	}
+
 	if err := s.migrateBeforeReady(a, l.cfg, done); err != nil {
 		return withLaunchLog(l.source, recent, fmt.Errorf("storage migration: %w", err))
 	}
+
 	if err := s.waitReady(a, done); err != nil {
 		return withLaunchLog(l.source, recent, err)
 	}
+
 	s.markAppReady(a)
+
 	return nil
 }
 
@@ -332,14 +386,17 @@ func (s *supervisor) migrateBeforeReady(a *app, cfg appConfig, done <-chan struc
 	if cfg.Network == "none" {
 		return nil
 	}
+
 	a.mu.Lock()
 	port := a.port
 	a.mu.Unlock()
+
 	err := s.migrateApp(a, port, done)
 	if errors.Is(err, errNoMigrateEndpoint) {
 		log.Printf("app %s: no %s endpoint; using health readiness", a.name, migratePath)
 		return nil
 	}
+
 	return err
 }
 

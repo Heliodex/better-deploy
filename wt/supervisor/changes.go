@@ -65,15 +65,18 @@ var errRowChangeTooLarge = errors.New("row change exceeds the capture budget")
 func preUpdateValues(data sqlite.SQLitePreUpdateData, new bool, budget int) ([]any, int, error) {
 	count := data.Count()
 	values := make([]any, count)
+
 	var err error
 	if new {
 		err = data.New(values...)
 	} else {
 		err = data.Old(values...)
 	}
+
 	if err != nil {
 		return nil, 0, err
 	}
+
 	total := 0
 	for _, value := range values {
 		total += storageValueSize(value)
@@ -81,10 +84,12 @@ func preUpdateValues(data sqlite.SQLitePreUpdateData, new bool, budget int) ([]a
 			return nil, total, errRowChangeTooLarge
 		}
 	}
+
 	encoded := make([]any, count)
 	for i, value := range values {
 		encoded[i] = encodeStorageValue(value)
 	}
+
 	return encoded, total, nil
 }
 
@@ -95,37 +100,48 @@ func collectRowChange(data sqlite.SQLitePreUpdateData, budget int) (rowChange, i
 	case sqlite3.SQLITE_INSERT:
 		change.Op = "insert"
 		change.RowID = data.NewRowID
+
 		newValues, size, err := preUpdateValues(data, true, budget)
 		if err != nil {
 			return rowChange{}, size, err
 		}
+
 		change.New = newValues
+
 		return change, size, nil
 	case sqlite3.SQLITE_DELETE:
 		change.Op = "delete"
 		change.RowID = data.OldRowID
+
 		oldValues, size, err := preUpdateValues(data, false, budget)
 		if err != nil {
 			return rowChange{}, size, err
 		}
+
 		change.Old = oldValues
+
 		return change, size, nil
 	case sqlite3.SQLITE_UPDATE:
 		change.Op = "update"
+
 		change.RowID = data.OldRowID
 		if change.RowID == 0 {
 			change.RowID = data.NewRowID
 		}
+
 		oldValues, oldSize, err := preUpdateValues(data, false, budget)
 		if err != nil {
 			return rowChange{}, oldSize, err
 		}
+
 		newValues, newSize, err := preUpdateValues(data, true, budget-oldSize)
 		if err != nil {
 			return rowChange{}, oldSize + newSize, err
 		}
+
 		change.Old = oldValues
 		change.New = newValues
+
 		return change, oldSize + newSize, nil
 	default:
 		return rowChange{}, 0, fmt.Errorf("unknown pre-update operation %d", data.Op)
@@ -138,22 +154,28 @@ func (c *rowChangeCollector) add(data sqlite.SQLitePreUpdateData) {
 		c.omitted++
 		return
 	}
+
 	change, size, err := collectRowChange(data, maxCollectedRowBytes-c.bytes)
 	if err != nil {
 		if !errors.Is(err, errRowChangeTooLarge) {
 			log.Printf("storage: pre-update hook: %v", err)
 		}
+
 		c.omitted++
 		if errors.Is(err, errRowChangeTooLarge) {
 			c.bytes = maxCollectedRowBytes
 		}
+
 		return
 	}
+
 	if c.bytes+size > maxCollectedRowBytes {
 		c.omitted++
 		c.bytes = maxCollectedRowBytes
+
 		return
 	}
+
 	c.rows = append(c.rows, change)
 	c.bytes += size
 }
@@ -165,34 +187,45 @@ func tableColumns(ctx context.Context, conn *sql.Conn, table string) ([]string, 
 		return nil, err
 	}
 	defer rows.Close()
+
 	columns := []string{}
+
 	for rows.Next() {
-		var cid, notnull, pk, hidden int
-		var name, columnType string
-		var defaultValue any
+		var (
+			cid, notnull, pk, hidden int
+			name, columnType         string
+			defaultValue             any
+		)
 		if err := rows.Scan(&cid, &name, &columnType, &notnull, &defaultValue, &pk, &hidden); err != nil {
 			return nil, err
 		}
+
 		columns = append(columns, name)
 	}
+
 	return columns, rows.Err()
 }
 
 // resolveColumns adds column names to collected rows. It runs after the statement or transaction has finished, when the connection can run schema queries again.
 func (c *rowChangeCollector) resolveColumns(ctx context.Context, conn *sql.Conn) {
 	cache := map[string][]string{}
+
 	for i := range c.rows {
 		row := &c.rows[i]
+
 		columns, ok := cache[row.Table]
 		if !ok {
 			resolved, err := tableColumns(ctx, conn, row.Table)
 			if err != nil {
 				log.Printf("storage: pre-update columns for %s: %v", row.Table, err)
 			}
+
 			columns = resolved
 			cache[row.Table] = columns
 		}
+
 		row.Columns = columns
+
 		needed := max(len(row.Old), len(row.New))
 		for len(row.Columns) < needed {
 			row.Columns = append(row.Columns, fmt.Sprintf("column_%d", len(row.Columns)+1))
@@ -209,9 +242,11 @@ func registerRowHook(conn *sql.Conn, collector *rowChangeCollector) error {
 		if !ok {
 			return nil
 		}
+
 		hooker.RegisterPreUpdateHook(func(data sqlite.SQLitePreUpdateData) {
 			collector.add(data)
 		})
+
 		return nil
 	})
 }
@@ -224,6 +259,7 @@ func unregisterRowHook(conn *sql.Conn) error {
 		}); ok {
 			hooker.RegisterPreUpdateHook(nil)
 		}
+
 		return nil
 	})
 }
@@ -233,10 +269,13 @@ func (s *storageServer) withWriteConn(ctx context.Context, app string, fn func(*
 	return s.withConn(ctx, app, func(conn *sql.Conn) error {
 		collector := &rowChangeCollector{}
 		registered := true
+
 		if err := registerRowHook(conn, collector); err != nil {
 			log.Printf("storage %s: pre-update hook: %v", app, err)
+
 			registered = false
 		}
+
 		if registered {
 			defer func() {
 				if err := unregisterRowHook(conn); err != nil {
@@ -244,10 +283,13 @@ func (s *storageServer) withWriteConn(ctx context.Context, app string, fn func(*
 				}
 			}()
 		}
+
 		if err := fn(conn, collector); err != nil {
 			return err
 		}
+
 		collector.resolveColumns(ctx, conn)
+
 		return nil
 	})
 }
@@ -262,17 +304,21 @@ func trimChange(change storageChange) storageChange {
 	if err != nil || len(line) <= maxChangeEntrySize {
 		return change
 	}
+
 	if len(change.Params) > 0 {
 		change.Params = []jsontext.Value{jsontext.Value([]byte(`"<params omitted: too large>"`))}
 	}
+
 	line, err = json.Marshal(change)
 	if err != nil || len(line) <= maxChangeEntrySize {
 		return change
 	}
+
 	if len(change.Rows) > 0 {
 		change.Rows = nil
 		change.RowsTruncated = true
 	}
+
 	return change
 }
 
@@ -281,11 +327,13 @@ func (s *storageServer) logChanges(app string, changes []storageChange) {
 	if len(changes) == 0 {
 		return
 	}
+
 	if s.bus != nil {
 		for _, change := range changes {
 			s.publishStorageChange(app, change)
 		}
 	}
+
 	s.changeMu.Lock()
 	defer s.changeMu.Unlock()
 
@@ -294,21 +342,27 @@ func (s *storageServer) logChanges(app string, changes []storageChange) {
 		log.Printf("storage %s: change log: %v", app, err)
 		return
 	}
+
 	path := filepath.Join(dir, changeLogName)
 
 	var data []byte
+
 	for _, change := range changes {
 		if change.Params == nil {
 			change.Params = []jsontext.Value{}
 		}
+
 		change = trimChange(change)
+
 		line, err := json.Marshal(change)
 		if err != nil {
 			continue
 		}
+
 		data = append(data, line...)
 		data = append(data, '\n')
 	}
+
 	if len(data) == 0 {
 		return
 	}
@@ -317,14 +371,17 @@ func (s *storageServer) logChanges(app string, changes []storageChange) {
 		_ = os.Remove(filepath.Join(dir, changeLogBackup))
 		_ = os.Rename(path, filepath.Join(dir, changeLogBackup))
 	}
+
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		log.Printf("storage %s: change log: %v", app, err)
 		return
 	}
+
 	if _, err := file.Write(data); err != nil {
 		log.Printf("storage %s: change log: %v", app, err)
 	}
+
 	if err := file.Close(); err != nil {
 		log.Printf("storage %s: change log: %v", app, err)
 	}
@@ -342,19 +399,24 @@ type storageBusEvent struct {
 func (s *storageServer) publishStorageChange(app string, change storageChange) {
 	event := storageBusEvent{RequestID: change.RequestID, RowsAffected: change.RowsAffected}
 	seen := map[string]struct{}{}
+
 	for _, row := range change.Rows {
 		key := row.Table + "\x00" + row.Op
 		if _, ok := seen[key]; ok {
 			continue
 		}
+
 		seen[key] = struct{}{}
+
 		event.Tables = append(event.Tables, row.Table)
 		event.Ops = append(event.Ops, row.Op)
 	}
+
 	data, err := json.Marshal(event)
 	if err != nil {
 		return
 	}
+
 	_, _ = s.bus.publish(app, "storage", jsontext.Value(data))
 }
 
@@ -365,39 +427,51 @@ func (s *storageServer) recentChanges(app string, limit int) ([]storageChange, e
 
 	dir := filepath.Join(s.dir, app)
 	changes := []storageChange{}
+
 	for _, name := range []string{changeLogBackup, changeLogName} {
 		path := filepath.Join(dir, name)
+
 		file, err := os.Open(path)
 		if os.IsNotExist(err) {
 			continue
 		}
+
 		if err != nil {
 			return nil, err
 		}
+
 		scanner := bufio.NewScanner(file)
 		scanner.Buffer(make([]byte, 64<<10), maxChangeLogBytes)
+
 		for scanner.Scan() {
 			var change storageChange
 			if err := json.Unmarshal(scanner.Bytes(), &change); err != nil {
 				continue
 			}
+
 			if change.Params == nil {
 				change.Params = []jsontext.Value{}
 			}
+
 			changes = append(changes, change)
 		}
+
 		err = scanner.Err()
 		_ = file.Close()
+
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	sort.SliceStable(changes, func(i, j int) bool { return changes[i].Time.Before(changes[j].Time) })
+
 	if len(changes) > limit {
 		changes = changes[len(changes)-limit:]
 	}
+
 	slices.Reverse(changes)
+
 	return changes, nil
 }
 
@@ -407,11 +481,13 @@ func changeLimitParam(w http.ResponseWriter, r *http.Request) (int, bool) {
 	if value == "" {
 		return defaultChangeLimit, true
 	}
+
 	parsed, err := strconv.Atoi(value)
 	if err != nil || parsed < 1 || parsed > maxChangeLimit {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("limit must be between 1 and %d", maxChangeLimit))
 		return 0, false
 	}
+
 	return parsed, true
 }
 
@@ -419,17 +495,21 @@ func (s *supervisor) handleDatabaseChanges(w http.ResponseWriter, r *http.Reques
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
+
 	if !s.requireStorage(w, r, name) {
 		return
 	}
+
 	limit, ok := changeLimitParam(w, r)
 	if !ok {
 		return
 	}
+
 	changes, err := s.storage.recentChanges(name, limit)
 	if err != nil {
 		writeStorageError(w, err)
 		return
 	}
+
 	writeJSON(w, http.StatusOK, storageChangesResponse{Changes: changes})
 }

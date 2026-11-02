@@ -4,6 +4,7 @@ package main
 
 import (
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"maps"
 	"net"
@@ -56,6 +57,7 @@ func validateTenantConfig(cfg config) error {
 		if strings.TrimSpace(cfg.token) == "" {
 			return fmt.Errorf("WT_TOKEN is required when WT_TENANT_MODE=%s", tenantUntrusted)
 		}
+
 		return nil
 	default:
 		return fmt.Errorf("WT_TENANT_MODE must be %s or %s, got %q", tenantTrusted, tenantUntrusted, cfg.tenantMode)
@@ -68,12 +70,15 @@ func validateIsolationConfig(cfg config) error {
 	if !cfg.untrusted() {
 		return nil
 	}
+
 	if !cfg.appNamespaces {
 		return fmt.Errorf("WT_APP_NAMESPACES=off is not allowed in %s mode", tenantUntrusted)
 	}
+
 	if !cfg.appSeccomp {
 		return fmt.Errorf("WT_APP_SECCOMP=off is not allowed in %s mode", tenantUntrusted)
 	}
+
 	return nil
 }
 
@@ -83,16 +88,20 @@ func validateStorageTempDir(tmp, state, apps string) error {
 	tmp = filepath.Clean(tmp)
 	state = filepath.Clean(state)
 	apps = filepath.Clean(apps)
+
 	if tmp == string(filepath.Separator) {
-		return fmt.Errorf("storage temp dir must not be the filesystem root")
+		return errors.New("storage temp dir must not be the filesystem root")
 	}
+
 	if tmp == state || tmp == apps {
 		return fmt.Errorf("storage temp dir %s must be a dedicated directory, not the state or apps directory", tmp)
 	}
+
 	separator := string(filepath.Separator)
 	if strings.HasPrefix(state, tmp+separator) || strings.HasPrefix(apps, tmp+separator) {
 		return fmt.Errorf("storage temp dir %s must not be a parent of the state or apps directory", tmp)
 	}
+
 	return nil
 }
 
@@ -100,6 +109,7 @@ func env(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
 	}
+
 	return fallback
 }
 
@@ -121,10 +131,12 @@ func envInt64(key string, fallback int64) int64 {
 	if value == "" {
 		return fallback
 	}
+
 	parsed, err := strconv.ParseInt(value, 10, 64)
 	if err != nil || parsed <= 0 {
 		return fallback
 	}
+
 	return parsed
 }
 
@@ -134,6 +146,7 @@ func envStorageMigrationTimeout() time.Duration {
 	if err != nil {
 		return defaultStorageMigrationTimeout
 	}
+
 	return timeout
 }
 
@@ -142,27 +155,35 @@ func sameRuntimeConfig(a, b appConfig) bool {
 	if a.Host != b.Host || a.Health != b.Health {
 		return false
 	}
+
 	if !maps.Equal(a.Env, b.Env) {
 		return false
 	}
+
 	if a.MemoryMB != b.MemoryMB || a.DiskMB != b.DiskMB || a.MaxConcurrent != b.MaxConcurrent {
 		return false
 	}
+
 	if a.CPUMillicores != b.CPUMillicores || a.PidsMax != b.PidsMax || a.IOWeight != b.IOWeight {
 		return false
 	}
+
 	if a.requestTimeout != b.requestTimeout || a.Network != b.Network {
 		return false
 	}
+
 	if a.StartupTimeout != b.StartupTimeout || a.HealthInterval != b.HealthInterval {
 		return false
 	}
+
 	if a.HealthFailures != b.HealthFailures || a.RestartOnUnhealthy != b.RestartOnUnhealthy {
 		return false
 	}
+
 	if !slices.Equal(a.Egress, b.Egress) {
 		return false
 	}
+
 	return slices.Equal(a.Schedule, b.Schedule)
 }
 
@@ -171,23 +192,30 @@ func normalizeAllowCallers(names []string) ([]string, error) {
 	if len(names) > maxAllowCallers {
 		return nil, fmt.Errorf("allow_callers must contain at most %d apps", maxAllowCallers)
 	}
+
 	out := make([]string, 0, len(names))
 	seen := map[string]struct{}{}
+
 	for _, name := range names {
 		name = strings.ToLower(strings.TrimSpace(name))
 		if name == "" {
 			continue
 		}
+
 		if !validName(name) {
 			return nil, fmt.Errorf("allow_callers: %q is not a valid app name", name)
 		}
+
 		if _, ok := seen[name]; ok {
 			continue
 		}
+
 		seen[name] = struct{}{}
 		out = append(out, name)
 	}
+
 	slices.Sort(out)
+
 	return out, nil
 }
 
@@ -196,26 +224,34 @@ func normalizeDependsOn(names []string, self string) ([]string, error) {
 	if len(names) > maxDependsOn {
 		return nil, fmt.Errorf("depends_on must contain at most %d apps", maxDependsOn)
 	}
+
 	out := make([]string, 0, len(names))
 	seen := map[string]struct{}{}
+
 	for _, name := range names {
 		name = strings.ToLower(strings.TrimSpace(name))
 		if name == "" {
 			continue
 		}
+
 		if name == self {
-			return nil, fmt.Errorf("depends_on must not include the app itself")
+			return nil, errors.New("depends_on must not include the app itself")
 		}
+
 		if !validName(name) {
 			return nil, fmt.Errorf("depends_on: %q is not a valid app name", name)
 		}
+
 		if _, ok := seen[name]; ok {
 			continue
 		}
+
 		seen[name] = struct{}{}
 		out = append(out, name)
 	}
+
 	slices.Sort(out)
+
 	return out, nil
 }
 
@@ -224,29 +260,37 @@ func normalizeEgress(rules []egressRule) ([]egressRule, error) {
 	if len(rules) > maxEgressRules {
 		return nil, fmt.Errorf("egress must contain at most %d rules", maxEgressRules)
 	}
+
 	out := make([]egressRule, 0, len(rules))
 	seen := map[egressRule]struct{}{}
+
 	for _, rule := range rules {
 		_, network, err := net.ParseCIDR(strings.TrimSpace(rule.CIDR))
 		if err != nil || network.IP.To4() == nil {
 			return nil, fmt.Errorf("egress %q: use an IPv4 CIDR such as 203.0.113.0/24", rule.CIDR)
 		}
+
 		if rule.Port < 1 || rule.Port > 65535 {
 			return nil, fmt.Errorf("egress %q: port must be between 1 and 65535", network)
 		}
+
 		next := egressRule{CIDR: network.String(), Port: rule.Port}
 		if _, ok := seen[next]; ok {
 			continue
 		}
+
 		seen[next] = struct{}{}
 		out = append(out, next)
 	}
+
 	slices.SortFunc(out, func(a, b egressRule) int {
 		if a.CIDR != b.CIDR {
 			return strings.Compare(a.CIDR, b.CIDR)
 		}
+
 		return a.Port - b.Port
 	})
+
 	return out, nil
 }
 
@@ -255,6 +299,7 @@ func validName(name string) bool {
 	if len(name) == 0 || len(name) > 63 {
 		return false
 	}
+
 	for i, r := range name {
 		switch {
 		case r >= 'a' && r <= 'z':
@@ -264,6 +309,7 @@ func validName(name string) bool {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -272,6 +318,7 @@ func defaultHost(name, domain string) string {
 	if domain != "" {
 		return name + "." + domain
 	}
+
 	return name + ".localhost"
 }
 
@@ -282,10 +329,12 @@ func parseRequestTimeout(value string) (time.Duration, error) {
 	if value == "" || value == "0" || strings.EqualFold(value, "none") {
 		return 0, nil
 	}
+
 	timeout, err := time.ParseDuration(value)
 	if err != nil || timeout < time.Second || timeout > 24*time.Hour {
 		return 0, fmt.Errorf("request_timeout %q must be a duration between 1s and 24h, or 0/none to disable", value)
 	}
+
 	return timeout, nil
 }
 
@@ -294,10 +343,12 @@ func parseStartupTimeout(value string) (time.Duration, error) {
 	if strings.TrimSpace(value) == "" {
 		return defaultStartupTimeout, nil
 	}
+
 	timeout, err := time.ParseDuration(value)
 	if err != nil || timeout < minStartupTimeout || timeout > maxStartupTimeout {
 		return 0, fmt.Errorf("startup_timeout %q must be a duration between %s and %s", value, minStartupTimeout, maxStartupTimeout)
 	}
+
 	return timeout, nil
 }
 
@@ -306,10 +357,12 @@ func parseHealthInterval(value string) (time.Duration, error) {
 	if strings.TrimSpace(value) == "" {
 		return defaultHealthInterval, nil
 	}
+
 	interval, err := time.ParseDuration(value)
 	if err != nil || interval < minHealthInterval || interval > maxHealthInterval {
 		return 0, fmt.Errorf("health_interval %q must be a duration between %s and %s", value, minHealthInterval, maxHealthInterval)
 	}
+
 	return interval, nil
 }
 
@@ -318,9 +371,11 @@ func parseHealthFailures(value int) (int, error) {
 	if value == 0 {
 		return defaultHealthFailures, nil
 	}
+
 	if value < minHealthFailures || value > maxHealthFailures {
 		return 0, fmt.Errorf("health_failures must be between %d and %d", minHealthFailures, maxHealthFailures)
 	}
+
 	return value, nil
 }
 
@@ -328,6 +383,7 @@ func (cfg appConfig) startupLimit() time.Duration {
 	if cfg.startupTimeout > 0 {
 		return cfg.startupTimeout
 	}
+
 	return defaultStartupTimeout
 }
 
@@ -335,6 +391,7 @@ func (cfg appConfig) probeInterval() time.Duration {
 	if cfg.healthInterval > 0 {
 		return cfg.healthInterval
 	}
+
 	return defaultHealthInterval
 }
 
@@ -342,6 +399,7 @@ func (cfg appConfig) failureLimit() int {
 	if cfg.HealthFailures > 0 {
 		return cfg.HealthFailures
 	}
+
 	return defaultHealthFailures
 }
 
@@ -351,9 +409,11 @@ func parseScheduleInterval(entry scheduleConfig) (time.Duration, error) {
 	if err != nil {
 		return 0, fmt.Errorf("invalid every %q: use a duration such as 10s", entry.Every)
 	}
+
 	if every < minScheduleInterval || every > maxScheduleInterval {
 		return 0, fmt.Errorf("every %q must be between %s and %s", entry.Every, minScheduleInterval, maxScheduleInterval)
 	}
+
 	return every, nil
 }
 
@@ -362,18 +422,23 @@ func normalizeAppAddress(cfg appConfig, name, domain string) (appConfig, error) 
 	if strings.TrimSpace(cfg.Name) == "" {
 		cfg.Name = name
 	}
+
 	if strings.TrimSpace(cfg.Host) == "" {
 		cfg.Host = defaultHost(name, domain)
 	}
+
 	cfg.Host = strings.ToLower(strings.TrimSpace(cfg.Host))
 	if err := validateAppHost(cfg.Host, domain); err != nil {
 		return cfg, err
 	}
+
 	hosts, err := normalizeAppHosts(cfg.Hosts, cfg.Host, domain)
 	if err != nil {
 		return cfg, err
 	}
+
 	cfg.Hosts = hosts
+
 	return cfg, nil
 }
 
@@ -383,17 +448,23 @@ func normalizeAppRelations(cfg appConfig, name string) (appConfig, error) {
 	if err != nil {
 		return cfg, err
 	}
+
 	cfg.AllowCallers = callers
+
 	dependsOn, err := normalizeDependsOn(cfg.DependsOn, name)
 	if err != nil {
 		return cfg, err
 	}
+
 	cfg.DependsOn = dependsOn
+
 	egress, err := normalizeEgress(cfg.Egress)
 	if err != nil {
 		return cfg, err
 	}
+
 	cfg.Egress = egress
+
 	return cfg, nil
 }
 
@@ -402,41 +473,53 @@ func validateAppSettings(cfg *appConfig) error {
 	if cfg.JobConcurrency == 0 {
 		cfg.JobConcurrency = jobDefaultConcurrency
 	}
+
 	if cfg.JobConcurrency < 1 || cfg.JobConcurrency > jobMaxConcurrency {
 		return fmt.Errorf("job_concurrency must be between 1 and %d", jobMaxConcurrency)
 	}
+
 	if cfg.Health == "" {
 		cfg.Health = defaultHealthPath
 	}
+
 	if !strings.HasPrefix(cfg.Health, "/") {
-		return fmt.Errorf("health must start with /")
+		return errors.New("health must start with /")
 	}
+
 	if cfg.Env == nil {
 		cfg.Env = map[string]string{}
 	}
+
 	for key := range cfg.Env {
 		if key == "" || strings.ContainsAny(key, "=\x00") {
 			return fmt.Errorf("invalid env key %q", key)
 		}
 	}
+
 	if cfg.MemoryMB < 0 || cfg.MemoryMB > maxMemoryMB {
 		return fmt.Errorf("memory_mb must be between 0 and %d", maxMemoryMB)
 	}
+
 	if cfg.DiskMB < 0 || cfg.DiskMB > maxDiskMB {
 		return fmt.Errorf("disk_mb must be between 0 and %d", maxDiskMB)
 	}
+
 	if cfg.MaxConcurrent < 0 {
-		return fmt.Errorf("max_concurrency must be 0 or more")
+		return errors.New("max_concurrency must be 0 or more")
 	}
+
 	if cfg.CPUMillicores < 0 || cfg.CPUMillicores > maxCPUMillicores {
 		return fmt.Errorf("cpu_millicores must be between 0 and %d", maxCPUMillicores)
 	}
+
 	if cfg.PidsMax < 0 || cfg.PidsMax > maxPidsMax {
 		return fmt.Errorf("pids_max must be between 0 and %d", maxPidsMax)
 	}
+
 	if cfg.IOWeight < 0 || cfg.IOWeight > maxIOWeight {
 		return fmt.Errorf("io_weight must be between 0 and %d", maxIOWeight)
 	}
+
 	return nil
 }
 
@@ -446,22 +529,28 @@ func applyTenantDefaults(cfg *appConfig, mode string) {
 		if cfg.MemoryMB == 0 {
 			cfg.MemoryMB = untrustedDefaultMemoryMB
 		}
+
 		if cfg.DiskMB == 0 {
 			cfg.DiskMB = untrustedDefaultDiskMB
 		}
+
 		if strings.TrimSpace(cfg.RequestTimeout) == "" {
 			cfg.RequestTimeout = untrustedDefaultRequestTimeout
 		}
+
 		if cfg.Network == "" {
 			cfg.Network = untrustedDefaultNetwork
 		}
 	}
+
 	if cfg.CPUMillicores == 0 {
 		cfg.CPUMillicores = defaultCPUMillicores
 	}
+
 	if cfg.PidsMax == 0 {
 		cfg.PidsMax = defaultPidsMax
 	}
+
 	if cfg.IOWeight == 0 {
 		cfg.IOWeight = defaultIOWeight
 	}
@@ -474,17 +563,20 @@ func normalizeAppNetwork(cfg *appConfig, mode string) error {
 		cfg.Network = "inherit"
 	case "none", "storage":
 	default:
-		return fmt.Errorf("network must be inherit, storage or none")
+		return errors.New("network must be inherit, storage or none")
 	}
+
 	cfg.Identity = strings.ToLower(strings.TrimSpace(cfg.Identity))
 	switch cfg.Identity {
 	case "", identityModePlatform:
 	default:
 		return fmt.Errorf("identity must be empty or %s", identityModePlatform)
 	}
+
 	if mode == tenantUntrusted && cfg.Network == "inherit" {
-		return fmt.Errorf("network inherit is not allowed in untrusted mode; use storage or none")
+		return errors.New("network inherit is not allowed in untrusted mode; use storage or none")
 	}
+
 	return nil
 }
 
@@ -494,28 +586,36 @@ func applyAppTimeouts(cfg *appConfig) error {
 	if err != nil {
 		return err
 	}
+
 	cfg.requestTimeout = timeout
 	if cfg.StartupTimeout == "" {
 		cfg.StartupTimeout = defaultStartupTimeout.String()
 	}
+
 	startup, err := parseStartupTimeout(cfg.StartupTimeout)
 	if err != nil {
 		return err
 	}
+
 	cfg.startupTimeout = startup
 	if cfg.HealthInterval == "" {
 		cfg.HealthInterval = defaultHealthInterval.String()
 	}
+
 	interval, err := parseHealthInterval(cfg.HealthInterval)
 	if err != nil {
 		return err
 	}
+
 	cfg.healthInterval = interval
+
 	failures, err := parseHealthFailures(cfg.HealthFailures)
 	if err != nil {
 		return err
 	}
+
 	cfg.HealthFailures = failures
+
 	return nil
 }
 
@@ -526,22 +626,27 @@ func validateAppSchedule(cfg *appConfig) error {
 		if !strings.HasPrefix(entry.Path, "/") {
 			return fmt.Errorf("schedule[%d]: path must start with /", i)
 		}
+
 		if _, err := parseScheduleInterval(*entry); err != nil {
 			return fmt.Errorf("schedule[%d]: %w", i, err)
 		}
 	}
+
 	return nil
 }
 
 // applyAppDefaults fills in tenant defaults, network and identity rules, timeouts and scheduled calls.
 func applyAppDefaults(cfg *appConfig, mode string) error {
 	applyTenantDefaults(cfg, mode)
+
 	if err := normalizeAppNetwork(cfg, mode); err != nil {
 		return err
 	}
+
 	if err := applyAppTimeouts(cfg); err != nil {
 		return err
 	}
+
 	return validateAppSchedule(cfg)
 }
 
@@ -551,16 +656,20 @@ func normalizeAppConfig(cfg appConfig, name, domain, mode string) (appConfig, er
 	if err != nil {
 		return cfg, err
 	}
+
 	cfg, err = normalizeAppRelations(cfg, name)
 	if err != nil {
 		return cfg, err
 	}
+
 	if err := validateAppSettings(&cfg); err != nil {
 		return cfg, err
 	}
+
 	if err := applyAppDefaults(&cfg, mode); err != nil {
 		return cfg, err
 	}
+
 	return cfg, nil
 }
 
@@ -578,5 +687,6 @@ func readAppConfig(dir, name, domain, mode string) (appConfig, error) {
 	default:
 		return cfg, fmt.Errorf("read app.json: %w", err)
 	}
+
 	return normalizeAppConfig(cfg, name, domain, mode)
 }

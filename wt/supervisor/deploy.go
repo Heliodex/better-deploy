@@ -35,13 +35,16 @@ func replaceDir(src, dst string) error {
 		if backup != "" {
 			_ = os.Rename(backup, dst)
 		}
+
 		return fmt.Errorf("install app: %w", err)
 	}
+
 	if backup != "" {
 		if err := os.RemoveAll(backup); err != nil {
 			log.Printf("remove old app %s: %v", backup, err)
 		}
 	}
+
 	return nil
 }
 
@@ -51,14 +54,18 @@ func archiveEntryPath(dst, entry string) (name, target string, err error) {
 	if name == "." || name == "" {
 		return "", "", nil
 	}
+
 	if path.IsAbs(name) || name == ".." || strings.HasPrefix(name, "../") {
 		return "", "", fmt.Errorf("archive entry %q escapes the app directory", entry)
 	}
+
 	target = filepath.Join(dst, filepath.FromSlash(name))
+
 	rel, err := filepath.Rel(dst, target)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", "", fmt.Errorf("archive entry %q escapes the app directory", entry)
 	}
+
 	return name, target, nil
 }
 
@@ -66,34 +73,43 @@ func extractTarDir(target, name string) error {
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		return fmt.Errorf("create directory %s: %w", name, err)
 	}
+
 	return nil
 }
 
 // extractTarReg writes one regular file, keeping the archive inside the size limit.
 func extractTarReg(tr *tar.Reader, header *tar.Header, target, name string, total *int64, maxBytes int64) error {
 	if header.Size < 0 || *total+header.Size > maxBytes {
-		return fmt.Errorf("archive is too large")
+		return errors.New("archive is too large")
 	}
+
 	*total += header.Size
+
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return fmt.Errorf("create parent of %s: %w", name, err)
 	}
+
 	mode := os.FileMode(0o644)
 	if header.FileInfo().Mode()&0o111 != 0 {
 		mode = 0o755
 	}
+
 	out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 	if err != nil {
 		return fmt.Errorf("create %s: %w", name, err)
 	}
+
 	_, copyErr := io.CopyN(out, tr, header.Size)
 	closeErr := out.Close()
+
 	if copyErr != nil {
 		return fmt.Errorf("write %s: %w", name, copyErr)
 	}
+
 	if closeErr != nil {
 		return fmt.Errorf("close %s: %w", name, closeErr)
 	}
+
 	return nil
 }
 
@@ -112,7 +128,9 @@ func extractTarGzLimited(src, dst string, maxBytes int64, maxFiles int) error {
 	defer gz.Close()
 
 	tr := tar.NewReader(gz)
+
 	var total int64
+
 	files := 0
 
 	for {
@@ -120,6 +138,7 @@ func extractTarGzLimited(src, dst string, maxBytes int64, maxFiles int) error {
 		if errors.Is(err, io.EOF) {
 			break
 		}
+
 		if err != nil {
 			return fmt.Errorf("read tar: %w", err)
 		}
@@ -128,12 +147,14 @@ func extractTarGzLimited(src, dst string, maxBytes int64, maxFiles int) error {
 		if err != nil {
 			return err
 		}
+
 		if name == "" {
 			continue
 		}
+
 		files++
 		if files > maxFiles {
-			return fmt.Errorf("archive has too many entries")
+			return errors.New("archive has too many entries")
 		}
 
 		switch header.Typeflag {
@@ -149,6 +170,7 @@ func extractTarGzLimited(src, dst string, maxBytes int64, maxFiles int) error {
 			return fmt.Errorf("archive entry %q is a link, which is not allowed", header.Name)
 		}
 	}
+
 	return nil
 }
 
@@ -159,11 +181,13 @@ func extractTarGz(src, dst string) error {
 // receiveBundle parses an uploaded bundle into a temporary directory and returns its app config.
 func (s *supervisor) receiveBundle(w http.ResponseWriter, r *http.Request, name string) (dir string, cfg appConfig, cleanup func(), ok bool) {
 	cleanup = func() {}
+
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
 	if err := r.ParseMultipartForm(16 << 20); err != nil {
 		writeError(w, http.StatusBadRequest, "parse multipart: "+err.Error())
 		return "", appConfig{}, cleanup, false
 	}
+
 	if r.MultipartForm != nil {
 		defer func() { _ = r.MultipartForm.RemoveAll() }()
 	}
@@ -180,13 +204,18 @@ func (s *supervisor) receiveBundle(w http.ResponseWriter, r *http.Request, name 
 		writeError(w, http.StatusInternalServerError, "create temp file")
 		return "", appConfig{}, cleanup, false
 	}
+
 	archiveName := archive.Name()
 	cleanup = func() { _ = os.Remove(archiveName) }
+
 	if _, err := io.Copy(archive, io.LimitReader(file, maxUploadBytes)); err != nil {
 		_ = archive.Close()
+
 		writeError(w, http.StatusBadRequest, "read artifact: "+err.Error())
+
 		return "", appConfig{}, cleanup, false
 	}
+
 	if err := archive.Close(); err != nil {
 		writeError(w, http.StatusInternalServerError, "close temp file")
 		return "", appConfig{}, cleanup, false
@@ -197,6 +226,7 @@ func (s *supervisor) receiveBundle(w http.ResponseWriter, r *http.Request, name 
 		writeError(w, http.StatusInternalServerError, "create upload directory")
 		return "", appConfig{}, cleanup, false
 	}
+
 	cleanup = func() {
 		_ = os.Remove(archiveName)
 		_ = os.RemoveAll(dir)
@@ -212,25 +242,30 @@ func (s *supervisor) receiveBundle(w http.ResponseWriter, r *http.Request, name 
 		writeError(w, http.StatusBadRequest, err.Error())
 		return "", appConfig{}, cleanup, false
 	}
+
 	cfg.Name = name
 	if err := s.hostConflictError(cfg, name); err != nil {
 		writeError(w, http.StatusConflict, err.Error())
 		return "", appConfig{}, cleanup, false
 	}
+
 	if err := s.dependencyCycleError(name, cfg.DependsOn); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return "", appConfig{}, cleanup, false
 	}
+
 	return dir, cfg, cleanup, true
 }
 
 // drainApp waits for in-flight proxied requests to finish before an old version is stopped.
 func drainApp(a *app, timeout time.Duration) bool {
 	done := make(chan struct{})
+
 	go func() {
 		a.requests.Wait()
 		close(done)
 	}()
+
 	select {
 	case <-done:
 		return true
@@ -250,9 +285,12 @@ func canDeployStatic(a *app, digest string, cfg appConfig) bool {
 	if a == nil || digest == "" {
 		return false
 	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
 	running := a.cmd != nil && !a.exited && !a.retired
+
 	return running && a.digest == digest && sameRuntimeConfig(a.cfg, cfg)
 }
 
@@ -262,21 +300,26 @@ func (s *supervisor) installStatic(a *app, cfg appConfig, dir string) error {
 	if err != nil {
 		return fmt.Errorf("read app.json: %w", err)
 	}
+
 	staged, err := os.MkdirTemp(a.dir, ".static-*")
 	if err != nil {
 		return fmt.Errorf("stage static: %w", err)
 	}
 	defer os.RemoveAll(staged)
+
 	if err := copyStatic(dir, staged); err != nil {
 		return fmt.Errorf("stage static: %w", err)
 	}
+
 	static := filepath.Join(staged, "static")
 	if err := os.MkdirAll(static, 0o755); err != nil {
 		return fmt.Errorf("stage static: %w", err)
 	}
+
 	if err := writeFileAtomicMode(filepath.Join(a.dir, "app.json"), appJSON, appConfigPermission(s.cfg.untrusted())); err != nil {
 		return fmt.Errorf("write app.json: %w", err)
 	}
+
 	if err := replaceDir(static, filepath.Join(a.dir, "static")); err != nil {
 		return fmt.Errorf("install static: %w", err)
 	}
@@ -290,6 +333,7 @@ func (s *supervisor) installStatic(a *app, cfg appConfig, dir string) error {
 	s.mu.Unlock()
 	s.broadcast()
 	log.Printf("deployed %s static only (wasm %s)", a.name, a.digest)
+
 	return nil
 }
 
@@ -303,8 +347,10 @@ func (s *supervisor) installBundle(w http.ResponseWriter, name string, cfg appCo
 		if err := s.installStatic(old, cfg, dir); err != nil {
 			log.Printf("%s %s: %v", action, name, err)
 			writeError(w, http.StatusInternalServerError, err.Error())
+
 			return nil, "", err
 		}
+
 		return old, "static", nil
 	}
 
@@ -313,6 +359,7 @@ func (s *supervisor) installBundle(w http.ResponseWriter, name string, cfg appCo
 		log.Printf("%s %s: %v", action, name, err)
 		cause := fmt.Errorf("new version did not start: %w", err)
 		writeError(w, http.StatusBadGateway, cause.Error())
+
 		return nil, "", cause
 	}
 
@@ -320,52 +367,65 @@ func (s *supervisor) installBundle(w http.ResponseWriter, name string, cfg appCo
 	if err := replaceDir(dir, finalDir); err != nil {
 		s.stop(next)
 		writeError(w, http.StatusInternalServerError, err.Error())
+
 		return nil, "", err
 	}
+
 	next.dir = finalDir
 
 	s.register(next)
+
 	if old != nil {
 		s.drainAndStop(old, action)
+
 		if old.logs != nil {
 			old.logs.close()
 		}
 	}
 
 	log.Printf("%s %s at %s (127.0.0.1:%d)", action, name, cfg.Host, next.port)
+
 	return next, "full", nil
 }
 
 // bundleDigest fingerprints the uploaded app.json, component and static files for conditional deploys.
 func bundleDigest(dir string) string {
 	hash := sha256.New()
+
 	for _, name := range []string{"main.wasm", "main.cwasm", "artifact.json", "app.json"} {
 		data, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
 			continue
 		}
+
 		_, _ = hash.Write([]byte(name + "\x00"))
 		_, _ = hash.Write(data)
 		_, _ = hash.Write([]byte{0})
 	}
+
 	root := filepath.Join(dir, "static")
 	_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil || entry.IsDir() || !entry.Type().IsRegular() {
 			return nil
 		}
+
 		rel, relErr := filepath.Rel(root, path)
 		if relErr != nil {
 			return nil
 		}
+
 		data, readErr := os.ReadFile(path)
 		if readErr != nil {
 			return nil
 		}
+
 		_, _ = hash.Write([]byte(filepath.ToSlash(rel) + "\x00"))
 		_, _ = hash.Write(data)
 		_, _ = hash.Write([]byte{0})
+
 		return nil
 	})
+
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
@@ -378,6 +438,7 @@ type deployReplayEntry struct {
 
 type deployRecorder struct {
 	http.ResponseWriter
+
 	status int
 	body   bytes.Buffer
 }
@@ -386,6 +447,7 @@ func (r *deployRecorder) WriteHeader(status int) {
 	if r.status == 0 {
 		r.status = status
 	}
+
 	r.ResponseWriter.WriteHeader(status)
 }
 
@@ -393,9 +455,11 @@ func (r *deployRecorder) Write(data []byte) (int, error) {
 	if r.status == 0 {
 		r.status = http.StatusOK
 	}
+
 	if r.body.Len() < 64<<10 {
 		_, _ = r.body.Write(data[:min(len(data), 64<<10-r.body.Len())])
 	}
+
 	return r.ResponseWriter.Write(data)
 }
 
@@ -415,6 +479,7 @@ func (s *supervisor) replayDeploy(name, key string, now time.Time) (deployReplay
 	if key == "" || s.deployments == nil {
 		return deployReplayEntry{}, false
 	}
+
 	return s.deployments.replay(name, key, now)
 }
 
@@ -423,10 +488,12 @@ func (s *supervisor) storeDeployReplay(name, key string, recorder *deployRecorde
 	if key == "" || s.deployments == nil {
 		return
 	}
+
 	status := recorder.status
 	if status == 0 {
 		status = http.StatusOK
 	}
+
 	entry := deployReplayEntry{
 		Status: status,
 		Header: recorder.Header().Clone(),
@@ -444,6 +511,7 @@ func (s *supervisor) replayDeployResponse(w http.ResponseWriter, entry deployRep
 			w.Header().Add(key, value)
 		}
 	}
+
 	w.Header().Set("Idempotency-Replayed", "true")
 	w.WriteHeader(entry.Status)
 	_, _ = w.Write(entry.Body)
@@ -464,6 +532,7 @@ func (s *supervisor) stageDeploy(w http.ResponseWriter, r *http.Request, name st
 	if !ok {
 		return nil, false
 	}
+
 	staged := &stagedDeploy{dir: dir, cfg: cfg, cleanup: cleanup}
 	// A bundle without a component keeps the running one, which makes a frontend-only deploy cheap.
 	if !exists(dir, "main.wasm") {
@@ -471,28 +540,37 @@ func (s *supervisor) stageDeploy(w http.ResponseWriter, r *http.Request, name st
 		if a == nil {
 			cleanup()
 			writeError(w, http.StatusBadRequest, "bundle has no main.wasm and the app is not running")
+
 			return nil, false
 		}
+
 		a.mu.Lock()
 		liveDir := a.dir
 		a.mu.Unlock()
+
 		for _, file := range []string{"main.wasm", "main.cwasm", artifactName} {
 			if exists(dir, file) {
 				continue
 			}
+
 			if err := copyOptional(liveDir, dir, file); err != nil {
 				cleanup()
 				writeError(w, http.StatusInternalServerError, err.Error())
+
 				return nil, false
 			}
 		}
 	}
+
 	staged.digest = sourceDigest(dir)
 	if staged.digest == "" {
 		cleanup()
 		writeError(w, http.StatusBadRequest, "bundle has no main.wasm")
+
 		return nil, false
 	}
+
 	staged.etag = `"` + bundleDigest(dir) + `"`
+
 	return staged, true
 }

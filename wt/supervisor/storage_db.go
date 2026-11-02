@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 func (s *storageServer) dbFor(app string) (*sql.DB, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	if db := s.dbs[app]; db != nil {
 		return db, nil
 	}
@@ -23,6 +25,7 @@ func (s *storageServer) dbFor(app string) (*sql.DB, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("app storage dir: %w", err)
 	}
+
 	db, err := sql.Open("sqlite", storageDSN(filepath.Join(dir, "storage.db"), false, s.quotas[app], s.tempDir))
 	if err != nil {
 		return nil, fmt.Errorf("open storage: %w", err)
@@ -34,6 +37,7 @@ func (s *storageServer) dbFor(app string) (*sql.DB, error) {
 	db.SetConnMaxIdleTime(0)
 
 	s.dbs[app] = db
+
 	return db, nil
 }
 
@@ -41,6 +45,7 @@ func (s *storageServer) dbFor(app string) (*sql.DB, error) {
 func (s *storageServer) readDBFor(app string) (*sql.DB, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	if db := s.readDBs[app]; db != nil {
 		return db, nil
 	}
@@ -49,10 +54,12 @@ func (s *storageServer) readDBFor(app string) (*sql.DB, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("app storage dir: %w", err)
 	}
+
 	db, err := sql.Open("sqlite", storageDSN(filepath.Join(dir, "storage.db"), true, s.quotas[app], s.tempDir))
 	if err != nil {
 		return nil, fmt.Errorf("open read storage: %w", err)
 	}
+
 	db.SetMaxOpenConns(maxStorageReadConns)
 	db.SetMaxIdleConns(maxStorageReadConns)
 	db.SetConnMaxLifetime(0)
@@ -60,11 +67,14 @@ func (s *storageServer) readDBFor(app string) (*sql.DB, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("open read storage: %w", err)
 	}
+
 	s.readDBs[app] = db
+
 	return db, nil
 }
 
@@ -90,22 +100,26 @@ func runSQLiteBackup(conn *sql.Conn, start func(sqliteBackup) (*sqlite.Backup, e
 	return conn.Raw(func(driverConn any) error {
 		driver, ok := driverConn.(sqliteBackup)
 		if !ok {
-			return fmt.Errorf("sqlite driver does not support online backups")
+			return errors.New("sqlite driver does not support online backups")
 		}
+
 		backup, err := start(driver)
 		if err != nil {
 			return err
 		}
+
 		for {
 			more, err := backup.Step(-1)
 			if err != nil {
 				_ = backup.Finish()
 				return err
 			}
+
 			if !more {
 				break
 			}
 		}
+
 		return backup.Finish()
 	})
 }
@@ -117,17 +131,21 @@ func checkBackupDatabase(path string) error {
 		return err
 	}
 	defer db.Close()
+
 	db.SetMaxOpenConns(1)
 
 	ctx, cancel := context.WithTimeout(context.Background(), backupCheckTimeout)
 	defer cancel()
+
 	var result string
 	if err := db.QueryRowContext(ctx, "pragma quick_check").Scan(&result); err != nil {
 		return err
 	}
+
 	if result != "ok" {
 		return fmt.Errorf("quick_check: %s", result)
 	}
+
 	return nil
 }
 
@@ -150,6 +168,7 @@ func configureStorageConn(_ context.Context, conn *sql.Conn) error {
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -157,54 +176,66 @@ func configureStorageConn(_ context.Context, conn *sql.Conn) error {
 func (s *storageServer) withConn(ctx context.Context, app string, fn func(*sql.Conn) error) error {
 	s.opMu.RLock()
 	defer s.opMu.RUnlock()
+
 	return s.withConnUnlocked(ctx, app, fn)
 }
 
 // withConnUnlocked is withConn without the restore lock; callers that already hold it use this.
 func (s *storageServer) withConnUnlocked(ctx context.Context, app string, fn func(*sql.Conn) error) (err error) {
 	start := time.Now()
+
 	defer func() {
 		if s.metrics != nil {
 			s.metrics.observeStorage(app, "write", err, time.Since(start))
 		}
 	}()
+
 	db, err := s.dbFor(app)
 	if err != nil {
 		return fmt.Errorf("%w: %w", errStorageUnavailable, err)
 	}
+
 	conn, err := db.Conn(ctx)
 	if err != nil {
 		return fmt.Errorf("%w: %w", errStorageUnavailable, err)
 	}
 	defer conn.Close()
+
 	if err := configureStorageConn(ctx, conn); err != nil {
 		return fmt.Errorf("%w: %w", errStorageUnavailable, err)
 	}
+
 	return fn(conn)
 }
 
 // withReadConn runs a read on the query-only pool. It takes the same restore lock as the write pool, so replacing a database file waits for in-flight reads.
 func (s *storageServer) withReadConn(ctx context.Context, app string, fn func(*sql.Conn) error) (err error) {
 	start := time.Now()
+
 	defer func() {
 		if s.metrics != nil {
 			s.metrics.observeStorage(app, "read", err, time.Since(start))
 		}
 	}()
+
 	s.opMu.RLock()
 	defer s.opMu.RUnlock()
+
 	db, err := s.readDBFor(app)
 	if err != nil {
 		return fmt.Errorf("%w: %w", errStorageUnavailable, err)
 	}
+
 	conn, err := db.Conn(ctx)
 	if err != nil {
 		return fmt.Errorf("%w: %w", errStorageUnavailable, err)
 	}
 	defer conn.Close()
+
 	if err := configureStorageConn(ctx, conn); err != nil {
 		return fmt.Errorf("%w: %w", errStorageUnavailable, err)
 	}
+
 	return fn(conn)
 }
 
@@ -221,9 +252,11 @@ func (s *storageServer) backupTo(ctx context.Context, app, dst string) error {
 func (s *storageServer) restoreFrom(ctx context.Context, app, src string) error {
 	s.pauseSessions()
 	defer s.resumeSessions()
+
 	s.closeSessionsForPaused(app)
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
+
 	return s.withConnUnlocked(ctx, app, func(conn *sql.Conn) error {
 		return runSQLiteBackup(conn, func(driver sqliteBackup) (*sqlite.Backup, error) {
 			return driver.NewRestore(src)

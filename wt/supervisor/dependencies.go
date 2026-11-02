@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -31,19 +32,24 @@ func (s *supervisor) walkDependencies(name string, deps []string, visiting map[s
 		if dep == name || visiting[dep] {
 			return fmt.Errorf("depends_on cycle: %s", strings.Join(append(path, dep), " -> "))
 		}
+
 		a := s.lookup(dep)
 		if a == nil {
 			continue
 		}
+
 		a.mu.Lock()
 		next := append([]string(nil), a.cfg.DependsOn...)
 		a.mu.Unlock()
+
 		visiting[dep] = true
 		if err := s.walkDependencies(dep, next, visiting, append(path, dep)); err != nil {
 			return err
 		}
+
 		delete(visiting, dep)
 	}
+
 	return nil
 }
 
@@ -52,12 +58,15 @@ func (s *supervisor) dependenciesReady(a *app) (bool, []string) {
 	a.mu.Lock()
 	deps := append([]string(nil), a.cfg.DependsOn...)
 	a.mu.Unlock()
+
 	var waiting []string
+
 	for _, dep := range deps {
 		if !s.appDependencyReady(dep, 0) {
 			waiting = append(waiting, dep)
 		}
 	}
+
 	return len(waiting) == 0, waiting
 }
 
@@ -66,35 +75,43 @@ func (s *supervisor) appDependencyReady(name string, depth int) bool {
 	if depth > maxDependsOn {
 		return false
 	}
+
 	a := s.lookup(name)
 	if a == nil {
 		return false
 	}
+
 	a.mu.Lock()
 	maintenance := a.cfg.Maintenance
 	deps := append([]string(nil), a.cfg.DependsOn...)
 	a.mu.Unlock()
+
 	if maintenance {
 		return false
 	}
+
 	if _, ready := a.servingState(); !ready {
 		return false
 	}
+
 	for _, dep := range deps {
 		if !s.appDependencyReady(dep, depth+1) {
 			return false
 		}
 	}
+
 	return true
 }
 
 // handleAppMaintenance reads or toggles an app's maintenance flag without restarting the process.
 func (s *supervisor) handleAppMaintenance(w http.ResponseWriter, r *http.Request, name string) {
 	defer s.lockApp(name)()
+
 	a, ok := s.requireApp(w, r, name)
 	if !ok {
 		return
 	}
+
 	switch r.Method {
 	case http.MethodGet:
 		a.mu.Lock()
@@ -106,14 +123,17 @@ func (s *supervisor) handleAppMaintenance(w http.ResponseWriter, r *http.Request
 		if !readJSONBody(w, r, maxConfigRequestBytes, &request) {
 			return
 		}
+
 		a.mu.Lock()
 		cfg := a.cfg
 		a.mu.Unlock()
+
 		cfg.Maintenance = request.Enabled
 		if err := persistAppConfig(a.dir, cfg, s.cfg.tenantMode); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+
 		a.mu.Lock()
 		a.cfg.Maintenance = request.Enabled
 		a.mu.Unlock()
@@ -127,13 +147,15 @@ func (s *supervisor) handleAppMaintenance(w http.ResponseWriter, r *http.Request
 
 // serveMaintenance replaces every app-host response with a supervisor page while maintenance is enabled.
 func (s *supervisor) serveMaintenance(w http.ResponseWriter, r *http.Request, a *app) {
-	w.Header().Set("Retry-After", fmt.Sprintf("%d", maintenanceRetrySeconds))
+	w.Header().Set("Retry-After", strconv.Itoa(maintenanceRetrySeconds))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusServiceUnavailable)
+
 	if r.Method == http.MethodHead {
 		return
 	}
+
 	name := html.EscapeString(a.name)
 	fmt.Fprintf(w, `<!doctype html>
 <html lang="en">

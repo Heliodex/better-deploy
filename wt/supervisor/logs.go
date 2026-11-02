@@ -40,20 +40,25 @@ type appLog struct {
 func (l *appLog) setSecrets(values []string) {
 	unique := make([]string, 0, len(values))
 	seen := map[string]struct{}{}
+
 	for _, value := range values {
 		if value == "" {
 			continue
 		}
+
 		if _, ok := seen[value]; ok {
 			continue
 		}
+
 		seen[value] = struct{}{}
 		unique = append(unique, value)
 	}
+
 	sort.Slice(unique, func(i, j int) bool {
 		if len(unique[i]) != len(unique[j]) {
 			return len(unique[i]) > len(unique[j])
 		}
+
 		return unique[i] < unique[j]
 	})
 	l.mu.Lock()
@@ -70,8 +75,10 @@ func (l *appLog) redactLocked(text string) string {
 func (l *appLog) subscribe() chan logEntry {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
 	messages := make(chan logEntry, 128)
 	l.subs[messages] = struct{}{}
+
 	return messages
 }
 
@@ -79,6 +86,7 @@ func (l *appLog) subscribe() chan logEntry {
 func (l *appLog) unsubscribe(messages chan logEntry) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
 	delete(l.subs, messages)
 }
 
@@ -114,11 +122,13 @@ func openLogFile(path string) (*os.File, int64, error) {
 	if err != nil {
 		return nil, 0, err
 	}
+
 	info, err := file.Stat()
 	if err != nil {
 		_ = file.Close()
 		return nil, 0, err
 	}
+
 	return file, info.Size(), nil
 }
 
@@ -127,10 +137,12 @@ func rotateLogFile(file *os.File, path, backup string) (*os.File, int64, error) 
 	if err := file.Close(); err != nil {
 		return nil, 0, err
 	}
+
 	_ = os.Remove(backup)
 	if err := os.Rename(path, backup); err != nil && !os.IsNotExist(err) {
 		return nil, 0, err
 	}
+
 	return openLogFile(path)
 }
 
@@ -139,13 +151,17 @@ func (l *appLog) open() error {
 	if err != nil {
 		return err
 	}
+
 	l.file, l.size = file, size
+
 	supervisorFile, supervisorSize, err := openLogFile(l.supervisorPath())
 	if err != nil {
 		_ = file.Close()
 		return err
 	}
+
 	l.supervisorFile, l.supervisorSize = supervisorFile, supervisorSize
+
 	return nil
 }
 
@@ -154,10 +170,12 @@ func newAppLog(dir string) (*appLog, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
+
 	out := &appLog{dir: dir, subs: map[chan logEntry]struct{}{}}
 	if err := out.open(); err != nil {
 		return nil, err
 	}
+
 	return out, nil
 }
 
@@ -165,14 +183,17 @@ func newAppLog(dir string) (*appLog, error) {
 func (l *appLog) close() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
 	if l.closed {
 		return
 	}
+
 	l.closed = true
 	if l.file != nil {
 		_ = l.file.Close()
 		l.file = nil
 	}
+
 	if l.supervisorFile != nil {
 		_ = l.supervisorFile.Close()
 		l.supervisorFile = nil
@@ -184,24 +205,31 @@ func (l *appLog) close() {
 func (l *appLog) logSupervisor(message string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
 	if l.closed {
 		return
 	}
+
 	message = l.redactLocked(message)
 	stamp := time.Now().UTC().Format(logTimeFormat)
+
 	data := []byte(stamp + " INFO " + message + "\n")
 	if l.supervisorSize+int64(len(data)) > maxLogBytes {
 		file, size, err := rotateLogFile(l.supervisorFile, l.supervisorPath(), l.supervisorBackupPath())
 		if err != nil {
 			return
 		}
+
 		l.supervisorFile, l.supervisorSize = file, size
 	}
+
 	written, err := l.supervisorFile.Write(data)
 	l.supervisorSize += int64(written)
+
 	if err != nil {
 		return
 	}
+
 	l.publish(logEntry{Time: stamp, Level: "info", Source: "supervisor", Message: message})
 }
 
@@ -214,12 +242,14 @@ func splitLevelPrefix(line string) (string, string) {
 	if !ok {
 		return "INFO", line
 	}
+
 	upper := strings.ToUpper(token)
 	for _, level := range logLevels {
 		if upper == level {
 			return level, rest
 		}
 	}
+
 	return "INFO", line
 }
 
@@ -228,24 +258,31 @@ func (l *appLog) writeLine(line string) error {
 	if l.closed {
 		return nil
 	}
+
 	line = guestStderr.ReplaceAllString(line, "")
 	level, message := splitLevelPrefix(line)
 	message = l.redactLocked(message)
 	stamp := time.Now().UTC().Format(logTimeFormat)
+
 	data := []byte(stamp + " " + level + " " + message + "\n")
 	if l.size+int64(len(data)) > maxLogBytes {
 		file, size, err := rotateLogFile(l.file, l.path(), l.backupPath())
 		if err != nil {
 			return err
 		}
+
 		l.file, l.size = file, size
 	}
+
 	written, err := l.file.Write(data)
 	l.size += int64(written)
+
 	if err != nil {
 		return err
 	}
+
 	l.publish(logEntry{Time: stamp, Level: strings.ToLower(level), Source: "app", Message: message})
+
 	return nil
 }
 
@@ -264,16 +301,20 @@ type logEntry struct {
 func (l *appLog) Write(p []byte) (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
 	if l.closed {
 		return len(p), nil
 	}
+
 	l.pending = append(l.pending, p...)
 	for {
 		index := bytes.IndexByte(l.pending, '\n')
 		if index < 0 {
 			break
 		}
+
 		line := string(l.pending[:index])
+
 		l.pending = l.pending[index+1:]
 		if err := l.writeLine(line); err != nil {
 			return 0, err
@@ -283,6 +324,7 @@ func (l *appLog) Write(p []byte) (int, error) {
 	if len(l.pending) > maxLogBytes {
 		l.pending = append([]byte{}, l.pending[len(l.pending)-maxLogBytes:]...)
 	}
+
 	return len(p), nil
 }
 
@@ -292,10 +334,13 @@ func parseSourcedLogLine(line, source string) logEntry {
 	if !ok {
 		return logEntry{Level: "info", Source: source, Message: line}
 	}
+
 	if _, err := time.Parse(logTimeFormat, stamp); err != nil {
 		return logEntry{Level: "info", Source: source, Message: line}
 	}
+
 	level, message := splitLevelPrefix(rest)
+
 	return logEntry{Time: stamp, Level: strings.ToLower(level), Source: source, Message: message}
 }
 
@@ -314,24 +359,30 @@ func (f logFilter) matches(entry logEntry) bool {
 	if f.level != "" && entry.Level != f.level {
 		return false
 	}
+
 	if f.source != "" && entry.Source != f.source {
 		return false
 	}
+
 	if f.query != "" && !strings.Contains(strings.ToLower(entry.Message), f.query) {
 		return false
 	}
+
 	if !f.since.IsZero() || !f.until.IsZero() {
 		stamp, err := time.Parse(time.RFC3339Nano, entry.Time)
 		if err != nil {
 			return false
 		}
+
 		if !f.since.IsZero() && stamp.Before(f.since) {
 			return false
 		}
+
 		if !f.until.IsZero() && stamp.After(f.until) {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -344,26 +395,32 @@ func (l *appLog) readLocked() ([]logEntry, error) {
 		{l.supervisorBackupPath(), l.supervisorPath(), "supervisor"},
 	}
 	out := []logEntry{}
+
 	for _, file := range files {
 		for _, path := range []string{file.backup, file.path} {
 			data, err := os.ReadFile(path)
 			if os.IsNotExist(err) {
 				continue
 			}
+
 			if err != nil {
 				return nil, err
 			}
+
 			for line := range strings.SplitSeq(string(data), "\n") {
 				if line == "" {
 					continue
 				}
+
 				entry := parseSourcedLogLine(line, file.source)
 				entry.Message = l.redactLocked(entry.Message)
 				out = append(out, entry)
 			}
 		}
 	}
+
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Time < out[j].Time })
+
 	return out, nil
 }
 
@@ -371,19 +428,23 @@ func (l *appLog) readLocked() ([]logEntry, error) {
 func (l *appLog) tailFiltered(n int, filter logFilter) ([]logEntry, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
 	all, err := l.readLocked()
 	if err != nil {
 		return nil, err
 	}
+
 	out := make([]logEntry, 0, min(n, len(all)))
 	for _, entry := range all {
 		if filter.matches(entry) {
 			out = append(out, entry)
 		}
 	}
+
 	if len(out) > n {
 		out = out[len(out)-n:]
 	}
+
 	return out, nil
 }
 
@@ -396,16 +457,19 @@ func (l *appLog) tail(n int) ([]logEntry, error) {
 func (l *appLog) allFiltered(filter logFilter) ([]logEntry, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
 	all, err := l.readLocked()
 	if err != nil {
 		return nil, err
 	}
+
 	out := make([]logEntry, 0, len(all))
 	for _, entry := range all {
 		if filter.matches(entry) {
 			out = append(out, entry)
 		}
 	}
+
 	return out, nil
 }
 
@@ -419,11 +483,13 @@ func logTailParam(w http.ResponseWriter, r *http.Request) (int, bool) {
 	if value == "" {
 		return defaultLogTail, true
 	}
+
 	parsed, err := strconv.Atoi(value)
 	if err != nil || parsed < 1 || parsed > maxLogTail {
 		writeError(w, http.StatusBadRequest, "tail must be between 1 and 5000")
 		return 0, false
 	}
+
 	return parsed, true
 }
 
@@ -438,6 +504,7 @@ func logFilterParam(w http.ResponseWriter, r *http.Request) (logFilter, bool) {
 		writeError(w, http.StatusBadRequest, "source must be app or supervisor")
 		return filter, false
 	}
+
 	if filter.level != "" {
 		switch filter.level {
 		case "trace", "debug", "info", "warn", "error", "fatal":
@@ -446,6 +513,7 @@ func logFilterParam(w http.ResponseWriter, r *http.Request) (logFilter, bool) {
 			return filter, false
 		}
 	}
+
 	for _, value := range []struct {
 		name string
 		dest *time.Time
@@ -456,9 +524,11 @@ func logFilterParam(w http.ResponseWriter, r *http.Request) (logFilter, bool) {
 				writeError(w, http.StatusBadRequest, value.name+" must be RFC3339")
 				return filter, false
 			}
+
 			*value.dest = parsed
 		}
 	}
+
 	return filter, true
 }
 
@@ -467,19 +537,23 @@ func (s *supervisor) handleLogs(w http.ResponseWriter, r *http.Request, a *app) 
 	if !ok {
 		return
 	}
+
 	filter, ok := logFilterParam(w, r)
 	if !ok {
 		return
 	}
+
 	logs := []logEntry{}
 	if a.logs != nil {
 		var err error
+
 		logs, err = a.logs.tailFiltered(tail, filter)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	}
+
 	writeJSON(w, http.StatusOK, logsResponse{Logs: logs})
 }
 
@@ -488,42 +562,55 @@ func (s *supervisor) handleLogExport(w http.ResponseWriter, r *http.Request, a *
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
+
 	filter, ok := logFilterParam(w, r)
 	if !ok {
 		return
 	}
+
 	format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
 	if format == "" {
 		format = "text"
 	}
+
 	if format != "text" && format != "jsonl" {
 		writeError(w, http.StatusBadRequest, "format must be text or jsonl")
 		return
 	}
+
 	entries := []logEntry{}
+
 	if a.logs != nil {
 		var err error
+
 		entries, err = a.logs.allFiltered(filter)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	}
+
 	w.Header().Set("Cache-Control", "no-store")
+
 	if format == "jsonl" {
 		w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
 		w.Header().Set("Content-Disposition", `attachment; filename="`+a.name+`.log.jsonl"`)
+
 		for _, entry := range entries {
 			data, err := json.Marshal(entry)
 			if err != nil {
 				continue
 			}
+
 			_, _ = w.Write(append(data, '\n'))
 		}
+
 		return
 	}
+
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+a.name+`.log"`)
+
 	for _, entry := range entries {
 		_, _ = fmt.Fprintf(w, "%s %s %s %s\n", entry.Time, entry.Level, entry.Source, entry.Message)
 	}
@@ -541,13 +628,16 @@ func (s *supervisor) handleLogStream(w http.ResponseWriter, r *http.Request, a *
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
+
 	if !s.requireAuth(w, r) {
 		return
 	}
+
 	tail, ok := logTailParam(w, r)
 	if !ok {
 		return
 	}
+
 	stream, ok := newSSEStream(w, "no-cache")
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
@@ -559,6 +649,7 @@ func (s *supervisor) handleLogStream(w http.ResponseWriter, r *http.Request, a *
 		if err != nil {
 			return false
 		}
+
 		return stream.data(data)
 	}
 
@@ -566,30 +657,38 @@ func (s *supervisor) handleLogStream(w http.ResponseWriter, r *http.Request, a *
 	if !ok {
 		return
 	}
+
 	backlog := []logEntry{}
+
 	var messages chan logEntry
+
 	if a.logs != nil {
 		var err error
+
 		backlog, err = a.logs.tailFiltered(tail, filter)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+
 		messages = a.logs.subscribe()
 		defer a.logs.unsubscribe(messages)
 	}
+
 	if !send(logStreamMessage{Type: "backlog", Logs: backlog}) {
 		return
 	}
 
 	ticker := time.NewTicker(20 * time.Second)
 	defer ticker.Stop()
+
 	for {
 		select {
 		case entry := <-messages:
 			if !filter.matches(entry) {
 				continue
 			}
+
 			if !send(logStreamMessage{Type: "line", Log: &entry}) {
 				return
 			}

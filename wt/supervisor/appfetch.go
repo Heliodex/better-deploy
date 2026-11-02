@@ -44,6 +44,7 @@ func newAppFetchServer(listen string, s *supervisor) (*appFetchServer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("app fetch listen: %w", err)
 	}
+
 	return newAppFetchServerOn(listener, s)
 }
 
@@ -53,6 +54,7 @@ func newAppFetchServerOn(listener net.Listener, s *supervisor) (*appFetchServer,
 		baseURL:    "http://" + listener.Addr().String(),
 		supervisor: s,
 	}
+
 	fetch.server = &http.Server{
 		Handler:           http.HandlerFunc(fetch.handle),
 		ReadHeaderTimeout: 5 * time.Second,
@@ -63,6 +65,7 @@ func newAppFetchServerOn(listener net.Listener, s *supervisor) (*appFetchServer,
 			log.Printf("app fetch: %v", err)
 		}
 	}()
+
 	return fetch, nil
 }
 
@@ -70,6 +73,7 @@ func (f *appFetchServer) url() string {
 	if f == nil {
 		return ""
 	}
+
 	return f.baseURL
 }
 
@@ -77,14 +81,17 @@ func (f *appFetchServer) endpoint() (string, int) {
 	if f == nil {
 		return "", 0
 	}
+
 	address, ok := f.listener.Addr().(*net.TCPAddr)
 	if !ok || address == nil {
 		return "", 0
 	}
+
 	ip := address.IP
 	if ip == nil || ip.IsUnspecified() {
 		ip = net.ParseIP("127.0.0.1")
 	}
+
 	return ip.String(), address.Port
 }
 
@@ -92,6 +99,7 @@ func (f *appFetchServer) close() {
 	if f == nil || f.server == nil {
 		return
 	}
+
 	_ = f.server.Close()
 }
 
@@ -101,6 +109,7 @@ func bearerToken(r *http.Request) string {
 	if !ok {
 		return ""
 	}
+
 	return strings.TrimSpace(token)
 }
 
@@ -110,13 +119,16 @@ func parseAppFetchPath(path string) (target, rest string, ok bool) {
 	if !ok || rest == "" {
 		return "", "", false
 	}
+
 	target, rest, found := strings.Cut(rest, "/")
 	if !validName(target) {
 		return "", "", false
 	}
+
 	if !found || rest == "" {
 		return target, "/", true
 	}
+
 	return target, "/" + rest, true
 }
 
@@ -129,6 +141,7 @@ func allowsAppCaller(allowed []string, caller string) bool {
 func appCallSignatureV2(key, caller, method, path, timestamp, bodyHash string) string {
 	mac := hmac.New(sha256.New, []byte(key))
 	_, _ = io.WriteString(mac, caller+"\n"+method+"\n"+path+"\n"+timestamp+"\n"+bodyHash)
+
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
@@ -148,44 +161,55 @@ func (s *supervisor) handleAppFetch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "app fetch unavailable")
 		return
 	}
+
 	caller, ok := s.storage.appForToken(bearerToken(r))
 	if !ok || s.lookup(caller) == nil {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="wt-app-fetch"`)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+
 		return
 	}
+
 	target, rest, ok := parseAppFetchPath(r.URL.Path)
 	if !ok {
 		http.NotFound(w, r)
 		return
 	}
+
 	a := s.lookup(target)
 	if a == nil {
 		writeError(w, http.StatusNotFound, "app not found")
 		return
 	}
+
 	a.mu.Lock()
 	cfg := a.cfg
 	a.mu.Unlock()
+
 	if !allowsAppCaller(cfg.AllowCallers, caller) {
 		writeError(w, http.StatusForbidden, "app does not allow calls from "+caller)
 		return
 	}
+
 	if rest == "/v1/publish" {
 		handleEventPublish(s.bus, w, r, target)
 		return
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxAppFetchBody)
+
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			writeError(w, http.StatusRequestEntityTooLarge, "app fetch body is too large")
 			return
 		}
+
 		writeError(w, http.StatusBadRequest, "read app fetch body: "+err.Error())
+
 		return
 	}
+
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	r.ContentLength = int64(len(body))
 	r.URL.Path = rest
@@ -197,17 +221,21 @@ func (s *supervisor) handleAppFetch(w http.ResponseWriter, r *http.Request) {
 	r.Header.Del("X-Forwarded-For")
 	r.Header.Del("X-Forwarded-Host")
 	r.Header.Del("X-Forwarded-Proto")
+
 	for key := range r.Header {
 		if strings.HasPrefix(strings.ToLower(key), "x-wt-") {
 			delete(r.Header, key)
 		}
 	}
+
 	if r.Header.Get(requestIDHeader) == "" {
 		r.Header.Set(requestIDHeader, newRequestID())
 	}
+
 	timestamp := time.Now().UTC().Format(time.RFC3339Nano)
 	bodyHash := appBodySHA256(body)
 	targetToken := s.storage.tokenFor(target)
+
 	r.Header.Set(appCallerHeader, caller)
 	r.Header.Set(appTimestampHeader, timestamp)
 	r.Header.Set(appBodyHashHeader, bodyHash)
@@ -219,6 +247,7 @@ func (s *supervisor) handleAppFetch(w http.ResponseWriter, r *http.Request) {
 func appURLEnvName(name string) string {
 	var key strings.Builder
 	key.WriteString(appURLEnvPrefix)
+
 	for _, char := range strings.ToUpper(name) {
 		switch {
 		case char >= 'A' && char <= 'Z', char >= '0' && char <= '9':
@@ -227,6 +256,7 @@ func appURLEnvName(name string) string {
 			key.WriteByte('_')
 		}
 	}
+
 	return key.String()
 }
 

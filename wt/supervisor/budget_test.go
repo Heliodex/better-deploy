@@ -12,9 +12,11 @@ import (
 
 func writeSizedFile(t *testing.T, path string, size int) {
 	t.Helper()
+
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(path, make([]byte, size), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -31,6 +33,7 @@ func TestDiskTotalsSeparateAndNested(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if totals.appsBytes != 100 || totals.stateBytes != 200 || totals.totalBytes != 300 {
 			t.Errorf("totals = %+v, want apps 100, state 200, total 300", totals)
 		}
@@ -47,6 +50,7 @@ func TestDiskTotalsSeparateAndNested(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if totals.appsBytes != 100 || totals.stateBytes != 300 || totals.totalBytes != 300 {
 			t.Errorf("totals = %+v, want apps 100, state 300, total 300", totals)
 		}
@@ -63,6 +67,7 @@ func TestDiskTotalsSeparateAndNested(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if totals.appsBytes != 300 || totals.stateBytes != 200 || totals.totalBytes != 300 {
 			t.Errorf("totals = %+v, want apps 300, state 200, total 300", totals)
 		}
@@ -80,8 +85,10 @@ func TestUsageEndpointReportsBudget(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/usage", nil)
 	req.Header.Set("Authorization", "Bearer secret")
+
 	rec := httptest.NewRecorder()
 	s.adminMux().ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("usage status = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -90,6 +97,7 @@ func TestUsageEndpointReportsBudget(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &usage); err != nil {
 		t.Fatal(err)
 	}
+
 	if usage.AppsBytes != 100 || usage.StateBytes != 200 || usage.TotalBytes != 300 ||
 		usage.BudgetBytes != 250 || !usage.OverBudget {
 		t.Errorf("usage = %+v, want apps 100, state 200, total 300, budget 250, over budget", usage)
@@ -108,9 +116,11 @@ func TestDeployRejectedOverBudget(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/apps/demo/deployments", nil)
 	rec := httptest.NewRecorder()
 	s.handleDeploymentCreate(rec, req, "demo")
+
 	if rec.Code != http.StatusInsufficientStorage {
 		t.Fatalf("over-budget deploy status = %d, want 507: %s", rec.Code, rec.Body.String())
 	}
+
 	if !strings.Contains(rec.Body.String(), "disk budget") {
 		t.Errorf("over-budget deploy message = %q, want a disk budget explanation", rec.Body.String())
 	}

@@ -10,8 +10,10 @@ func validateStorageSQL(query string) error {
 	if strings.TrimSpace(query) == "" {
 		return fmt.Errorf("%w: sql must not be empty", errStorageInvalid)
 	}
+
 	if len(query) > maxStorageSQL {
 		return fmt.Errorf("%w: sql is too long (max %d bytes)", errStorageInvalid, maxStorageSQL)
 	}
+
 	return nil
 }

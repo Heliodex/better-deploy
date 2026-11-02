@@ -8,11 +8,13 @@ func (s *storageServer) storageJobs(w http.ResponseWriter, r *http.Request, app 
 		writeError(w, http.StatusServiceUnavailable, "job queue unavailable")
 		return
 	}
+
 	store := s.jobs.store(app)
 	if store == nil {
 		writeError(w, http.StatusServiceUnavailable, "job queue unavailable")
 		return
 	}
+
 	handleJobsCollection(w, r, store)
 }
 
@@ -22,10 +24,12 @@ func (s *storageServer) storageJob(w http.ResponseWriter, r *http.Request, app, 
 		writeError(w, http.StatusServiceUnavailable, "job queue unavailable")
 		return
 	}
+
 	store := s.jobs.store(app)
 	if store == nil {
 		writeError(w, http.StatusServiceUnavailable, "job queue unavailable")
 		return
 	}
+
 	handleJobItem(w, r, store, id, verb)
 }

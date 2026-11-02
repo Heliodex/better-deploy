@@ -16,10 +16,13 @@ func TestStorageRestoreToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.close()
+
 	s.restoreToken("demo", "token-from-before-handover")
+
 	if app, ok := s.appForToken("token-from-before-handover"); !ok || app != "demo" {
 		t.Errorf("appForToken = %q, %t", app, ok)
 	}
+
 	if got := s.tokenFor("demo"); got != "token-from-before-handover" {
 		t.Errorf("tokenFor = %q, want the restored token", got)
 	}
@@ -31,15 +34,19 @@ func TestStorageTempBudgetRejectsRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.close()
+
 	dir := t.TempDir()
 	if err := s.setTempDir(dir, 10); err != nil {
 		t.Fatal(err)
 	}
+
 	blob := filepath.Join(dir, "blob")
 	if err := os.WriteFile(blob, []byte("0123456789ABCDEF"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	s.checkTemp()
+
 	if !s.tempOver.Load() {
 		t.Fatal("temp usage did not exceed the budget")
 	}
@@ -47,15 +54,19 @@ func TestStorageTempBudgetRejectsRequests(t *testing.T) {
 	token := s.tokenFor("app")
 	request := httptest.NewRequest(http.MethodPost, "/v1/query", strings.NewReader(`{"sql":"select 1"}`))
 	request.Header.Set("Authorization", "Bearer "+token)
+
 	recorder := httptest.NewRecorder()
 	s.handle(recorder, request)
+
 	if recorder.Code != http.StatusInsufficientStorage {
 		t.Fatalf("status = %d, want 507: %s", recorder.Code, recorder.Body.String())
 	}
+
 	var body storageErrorResponse
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
+
 	if body.Code != "temp_budget" {
 		t.Errorf("code = %q, want temp_budget", body.Code)
 	}
@@ -63,14 +74,19 @@ func TestStorageTempBudgetRejectsRequests(t *testing.T) {
 	if err := os.Remove(blob); err != nil {
 		t.Fatal(err)
 	}
+
 	s.checkTemp()
+
 	if s.tempOver.Load() {
 		t.Fatal("temp flag stayed set after usage fell below the budget")
 	}
+
 	request = httptest.NewRequest(http.MethodPost, "/v1/query", strings.NewReader(`{"sql":"select 1"}`))
 	request.Header.Set("Authorization", "Bearer "+token)
+
 	recorder = httptest.NewRecorder()
 	s.handle(recorder, request)
+
 	if recorder.Code != http.StatusOK {
 		t.Errorf("status after clearing = %d, want 200: %s", recorder.Code, recorder.Body.String())
 	}
@@ -82,28 +98,36 @@ func TestSetTempDirCleansOnlySQLiteTemps(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.close()
+
 	dir := t.TempDir()
 	stale := filepath.Join(dir, "etilqs_stale")
 	keep := filepath.Join(dir, "keep.txt")
+
 	if err := os.WriteFile(stale, []byte("temp"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(keep, []byte("keep"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := s.setTempDir(dir, 0); err != nil {
 		t.Fatal(err)
 	}
+
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
 		t.Errorf("stale SQLite temp file was not removed: %v", err)
 	}
+
 	if _, err := os.Stat(keep); err != nil {
 		t.Errorf("unrelated file was removed: %v", err)
 	}
+
 	info, err := os.Stat(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if info.Mode().Perm() != 0o700 {
 		t.Errorf("temp dir mode = %o, want 700", info.Mode().Perm())
 	}
@@ -112,6 +136,7 @@ func TestSetTempDirCleansOnlySQLiteTemps(t *testing.T) {
 func TestValidateStorageTempDir(t *testing.T) {
 	state := "/var/lib/wt"
 	apps := "/var/lib/wt/apps"
+
 	cases := []struct {
 		tmp  string
 		want bool
