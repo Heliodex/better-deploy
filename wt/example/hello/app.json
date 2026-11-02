@@ -1,5 +1,6 @@
 {
 	"build": "../../packages/generate.sh && go tool componentize-go -d ../../packages/wit -w wt:app/app build",
+	"build_component": "../../packages/generate.sh && go tool componentize-go -d ../../packages/wit -w wt:app/app build",
 	"health": "/healthz",
 	"host": "hello.localhost",
 	"memory_mb": 128,

@@ -25,12 +25,12 @@ func TestComponentInputHashIgnoresStaticAndOutputs(t *testing.T) {
 	write("main.go", "package main")
 	write("static/index.html", "first")
 	write("main.wasm", "wasm")
-	first, err := componentInputHash(dir, "build")
+	first, err := componentInputHash(dir, manifest{}, "build")
 	if err != nil {
 		t.Fatal(err)
 	}
 	write("static/index.html", "second")
-	afterStatic, err := componentInputHash(dir, "build")
+	afterStatic, err := componentInputHash(dir, manifest{}, "build")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +38,7 @@ func TestComponentInputHashIgnoresStaticAndOutputs(t *testing.T) {
 		t.Error("static change altered the component hash")
 	}
 	write("main.go", "package main // changed")
-	afterGo, err := componentInputHash(dir, "build")
+	afterGo, err := componentInputHash(dir, manifest{}, "build")
 	if err != nil {
 		t.Fatal(err)
 	}

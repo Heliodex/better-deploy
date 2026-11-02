@@ -173,14 +173,19 @@ func TestRunNew(t *testing.T) {
 		t.Fatal(err)
 	}
 	var manifest struct {
-		Name string `json:"name"`
-		Host string `json:"host"`
+		Name           string `json:"name"`
+		Host           string `json:"host"`
+		BuildComponent string `json:"build_component"`
+		BuildStatic    string `json:"build_static"`
 	}
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		t.Fatal(err)
 	}
 	if manifest.Name != "myapp" || manifest.Host != "myapp.localhost" {
 		t.Errorf("manifest = %+v", manifest)
+	}
+	if manifest.BuildComponent == "" || manifest.BuildStatic == "" {
+		t.Errorf("manifest is missing split build commands: %+v", manifest)
 	}
 
 	main, err := os.ReadFile(filepath.Join(dir, "main.go"))

@@ -1,5 +1,7 @@
 {
 	"build": "cd web && bun install --frozen-lockfile && bun run build && cd .. && rm -rf static && cp -r web/build static && ../../packages/generate.sh && go tool componentize-go -d ../../packages/wit -w wt:app/app build",
+	"build_component": "../../packages/generate.sh && go tool componentize-go -d ../../packages/wit -w wt:app/app build",
+	"build_static": "cd web && bun install --frozen-lockfile && bun run build && rm -rf ../static && cp -r build ../static",
 	"dev": {
 		"build": "../../packages/generate.sh && go tool componentize-go -d ../../packages/wit -w wt:app/app build",
 		"command": "bun run dev",

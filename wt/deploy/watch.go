@@ -190,12 +190,13 @@ func watchComponent(cfg *deployConfig, extra []string, done <-chan struct{}) {
 		time.Sleep(400 * time.Millisecond)
 		previous, _ = componentSourceState(cfg.dir, extra)
 		fmt.Fprintln(os.Stderr, "dev: component change, rebuilding")
-		m, data, err := buildBundle(cfg)
+		m, data, status, err := buildBundle(cfg)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "dev: component rebuild failed:", err)
 			previous, _ = componentSourceState(cfg.dir, extra)
 			continue
 		}
+		printBuildStatus(status)
 		if err := upload(cfg, m, data); err != nil {
 			fmt.Fprintln(os.Stderr, "dev: component redeploy failed:", err)
 			previous, _ = componentSourceState(cfg.dir, extra)
@@ -235,11 +236,12 @@ func watchDev(cfg *deployConfig, done <-chan struct{}) {
 		previous, _ = devSourceState(cfg.dir)
 
 		fmt.Fprintln(os.Stderr, "dev: change detected, rebuilding")
-		m, data, err := buildBundle(cfg)
+		m, data, status, err := buildBundle(cfg)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "dev: rebuild failed:", err)
 			continue
 		}
+		printBuildStatus(status)
 		if err := upload(cfg, m, data); err != nil {
 			fmt.Fprintln(os.Stderr, "dev: redeploy failed:", err)
 			continue

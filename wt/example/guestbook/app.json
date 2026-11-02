@@ -1,5 +1,8 @@
 {
 	"build": "cd web && bun install --frozen-lockfile && bun run build && cd .. && go generate ./contract/ && rm -rf static && cp -r web/build static && ../../packages/generate.sh && go tool componentize-go -d ../../packages/wit -w wt:app/app build",
+	"build_component": "go generate ./contract/ && ../../packages/generate.sh && go tool componentize-go -d ../../packages/wit -w wt:app/app build",
+	"build_static": "cd web && bun install --frozen-lockfile && bun run build && rm -rf ../static && cp -r build ../static",
+	"component_inputs": ["web/src/lib/contract.ts"],
 	"dev": {
 		"build": "go generate ./contract/ && ../../packages/generate.sh && go tool componentize-go -d ../../packages/wit -w wt:app/app build",
 		"command": "bun run dev",

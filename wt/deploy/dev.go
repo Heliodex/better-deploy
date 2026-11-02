@@ -40,7 +40,7 @@ func resolveDevConfig(args []string) (*devConfig, error) {
 	supervisor := flags.String("supervisor", env("WT_SUPERVISOR", ""), "supervisor binary (default: PATH, then build from ../../supervisor)")
 	appHostDefault := fileCfg.AppHost
 	appHost := flags.String("app-host", appHostDefault, "override the app host (default: <app>.localhost)")
-	skipBuild := flags.Bool("skip-build", false, "skip running app.json's build command")
+	skipBuild := flags.Bool("skip-build", false, "skip running app.json's build commands")
 	skipCompile := flags.Bool("skip-compile", false, "reuse an existing main.cwasm")
 	watch := flags.Bool("watch", true, "rebuild and redeploy the component when its inputs change")
 	vite := flags.Bool("vite", true, "run the SvelteKit dev server with HMR when a web directory exists")
@@ -378,13 +378,15 @@ func deployDevApps(cfg *devConfig, dirs []string, addr, target string, vite *vit
 			skipCompile: cfg.skipCompile,
 		}
 		if vite != nil && dir == vite.appDir {
-			dcfg.buildCommand = vite.build
+			dcfg.buildComponentCommand = vite.build
+			dcfg.skipStatic = true
 			viteDCfg = dcfg
 		}
-		m, data, err := buildBundle(dcfg)
+		m, data, status, err := buildBundle(dcfg)
 		if err != nil {
 			return nil, nil, err
 		}
+		printBuildStatus(status)
 		if err := upload(dcfg, m, data); err != nil {
 			return nil, nil, err
 		}
@@ -401,7 +403,7 @@ func deployDevApps(cfg *devConfig, dirs []string, addr, target string, vite *vit
 // runViteDev serves the app through Vite with HMR and optionally watches component inputs.
 func runViteDev(cfg *devConfig, vite *viteDev, viteDCfg *deployConfig, stop <-chan os.Signal, done chan struct{}) error {
 	if vite.build == "" {
-		fmt.Fprintln(os.Stderr, "dev: no dev.build; component rebuilds will run the full app.json build")
+		fmt.Fprintln(os.Stderr, "dev: no dev.build; component rebuilds will run app.json's build_component")
 	}
 	if err := writeViteDevConfig(vite, cfg.port); err != nil {
 		return err

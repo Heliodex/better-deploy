@@ -22,18 +22,40 @@ import (
 )
 
 type manifest struct {
-	Name           string            `json:"name"`
-	Host           string            `json:"host"`
-	Health         string            `json:"health"`
-	Env            map[string]string `json:"env"`
-	Build          string            `json:"build"`
-	MemoryMB       int               `json:"memory_mb,omitempty"`
-	DiskMB         int               `json:"disk_mb,omitempty"`
-	MaxConcurrent  int               `json:"max_concurrency,omitempty"`
-	RequestTimeout string            `json:"request_timeout,omitempty"`
-	Network        string            `json:"network,omitempty"`
-	Schedule       []schedule        `json:"schedule,omitempty"`
-	Dev            *appDevConfig     `json:"dev,omitempty"`
+	Name            string            `json:"name"`
+	Host            string            `json:"host"`
+	Health          string            `json:"health"`
+	Env             map[string]string `json:"env"`
+	Build           string            `json:"build"`
+	BuildComponent  string            `json:"build_component,omitempty"`
+	BuildStatic     string            `json:"build_static,omitempty"`
+	ComponentInputs []string          `json:"component_inputs,omitempty"`
+	StaticInputs    []string          `json:"static_inputs,omitempty"`
+	MemoryMB        int               `json:"memory_mb,omitempty"`
+	DiskMB          int               `json:"disk_mb,omitempty"`
+	MaxConcurrent   int               `json:"max_concurrency,omitempty"`
+	RequestTimeout  string            `json:"request_timeout,omitempty"`
+	Network         string            `json:"network,omitempty"`
+	Schedule        []schedule        `json:"schedule,omitempty"`
+	Dev             *appDevConfig     `json:"dev,omitempty"`
+}
+
+// componentBuildCommand selects the component phase, falling back to the legacy single build command.
+func (m manifest) componentBuildCommand() string {
+	if strings.TrimSpace(m.BuildComponent) != "" {
+		return m.BuildComponent
+	}
+	return strings.TrimSpace(m.Build)
+}
+
+// staticBuildCommand returns the explicit static phase. A legacy single build is handled by prepareBuilds.
+func (m manifest) staticBuildCommand() string {
+	return strings.TrimSpace(m.BuildStatic)
+}
+
+// legacyBuild reports a manifest that only has the original single build command and cannot separate component and static work.
+func (m manifest) legacyBuild() bool {
+	return strings.TrimSpace(m.BuildComponent) == "" && strings.TrimSpace(m.BuildStatic) == "" && strings.TrimSpace(m.Build) != ""
 }
 
 // appDevConfig selects the optional SvelteKit development loop for an app.
@@ -42,7 +64,7 @@ type appDevConfig struct {
 	Web string `json:"web,omitempty"`
 	// Command starts the frontend dev server; default bun run dev.
 	Command string `json:"command,omitempty"`
-	// Build rebuilds only the component; default app.json build.
+	// Build rebuilds only the component; default app.json build_component.
 	Build string `json:"build,omitempty"`
 	// Proxy lists path prefixes forwarded to the wasm app; default /api.
 	Proxy []string `json:"proxy,omitempty"`
@@ -80,9 +102,9 @@ const (
 )
 
 type deployConfig struct {
-	dir, app, host, token, wasmtime, target, appHost, out string
-	buildCommand                                          string
-	skipBuild, skipCompile, jsonOut, forceBuild           bool
+	dir, app, host, token, wasmtime, target, appHost, out   string
+	buildComponentCommand                                   string
+	skipBuild, skipCompile, skipStatic, jsonOut, forceBuild bool
 }
 
 // uploadProgress prints a coarse percentage while a bundle uploads, without buffering it a second time.
@@ -154,6 +176,16 @@ func readManifest(dir string) (manifest, error) {
 	if m.MemoryMB < 0 || m.DiskMB < 0 {
 		return m, fmt.Errorf("memory_mb and disk_mb must be 0 or more")
 	}
+	for i, value := range m.ComponentInputs {
+		if !validInputPath(value) {
+			return m, fmt.Errorf("component_inputs[%d]: %q must be a relative file or directory", i, value)
+		}
+	}
+	for i, value := range m.StaticInputs {
+		if !validInputPath(value) {
+			return m, fmt.Errorf("static_inputs[%d]: %q must be a relative file or directory", i, value)
+		}
+	}
 	for i, entry := range m.Schedule {
 		if !strings.HasPrefix(entry.Path, "/") {
 			return m, fmt.Errorf("schedule[%d]: path must start with /", i)
@@ -181,6 +213,16 @@ func validAppRelative(value string) bool {
 	}
 	clean := filepath.Clean(value)
 	return clean != ".." && !strings.HasPrefix(clean, ".."+string(filepath.Separator))
+}
+
+// validInputPath accepts a relative build input, including a sibling SDK, but rejects the app root and absolute paths.
+func validInputPath(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || filepath.IsAbs(value) || strings.HasPrefix(value, "~") {
+		return false
+	}
+	clean := filepath.Clean(value)
+	return clean != "." && clean != ".." && clean != string(filepath.Separator)
 }
 
 // normalizeDevConfig validates dev paths and fills the default proxy prefix.
@@ -224,8 +266,8 @@ func resolveConfig(args []string) (*deployConfig, error) {
 	appHost := flags.String("app-host", fileCfg.AppHost, "override the app host in the uploaded app.json")
 	config := flags.String("config", configPath, "config file (default ~/.config/wt/config.json)")
 	jsonOut := flags.Bool("json", false, "print only the raw API response")
-	forceBuild := flags.Bool("force-build", false, "rebuild the component even when its inputs are unchanged")
-	skipBuild := flags.Bool("skip-build", false, "skip running app.json's build command")
+	forceBuild := flags.Bool("force-build", false, "rebuild the component and static phases even when their inputs are unchanged")
+	skipBuild := flags.Bool("skip-build", false, "skip running app.json's build commands")
 	skipCompile := flags.Bool("skip-compile", false, "do not compile; include main.cwasm only if it already exists")
 	if err := flags.Parse(args); err != nil {
 		return nil, err
@@ -263,24 +305,20 @@ func resolveConfig(args []string) (*deployConfig, error) {
 	}, nil
 }
 
-// runBuild runs the flag build command, falling back to app.json's build command.
-func runBuild(cfg *deployConfig, m manifest) error {
+// runBuildPhase runs one named app.json build phase with the app directory as its working directory.
+func runBuildPhase(cfg *deployConfig, phase, command string) error {
 	if cfg.skipBuild {
 		return nil
 	}
-	build := cfg.buildCommand
-	if strings.TrimSpace(build) == "" {
-		build = m.Build
+	if strings.TrimSpace(command) == "" {
+		return fmt.Errorf("app.json has no %s build command; set one or pass --skip-build", phase)
 	}
-	if strings.TrimSpace(build) == "" {
-		return fmt.Errorf("app.json has no build command; set one or pass --skip-build")
-	}
-	cmd := exec.Command("sh", "-c", build)
+	cmd := exec.Command("sh", "-c", command)
 	cmd.Dir = cfg.dir
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("build: %w", err)
+		return fmt.Errorf("%s build: %w", phase, err)
 	}
 	return nil
 }
@@ -627,29 +665,30 @@ func printDeployResult(cfg *deployConfig, name string, body []byte) error {
 	return nil
 }
 
-// buildBundle runs the app build, precompiles the component and packs the upload artifact.
-func buildBundle(cfg *deployConfig) (manifest, []byte, error) {
+// buildBundle runs the app builds, precompiles the component and packs the upload artifact.
+func buildBundle(cfg *deployConfig) (manifest, []byte, buildStatus, error) {
 	m, err := readManifest(cfg.dir)
 	if err != nil {
-		return m, nil, err
+		return m, nil, buildStatus{}, err
 	}
 	if cfg.app != "" {
 		if !validName(cfg.app) {
-			return m, nil, fmt.Errorf("invalid app name %q", cfg.app)
+			return m, nil, buildStatus{}, fmt.Errorf("invalid app name %q", cfg.app)
 		}
 		m.Name = cfg.app
 	}
 	if cfg.appHost != "" {
 		m.Host = cfg.appHost
 	}
-	if _, err := prepareComponent(cfg, m); err != nil {
-		return m, nil, err
+	status, err := prepareBuilds(cfg, m)
+	if err != nil {
+		return m, nil, status, err
 	}
 	data, err := bundle(cfg.dir, m, true)
 	if err != nil {
-		return m, nil, err
+		return m, nil, status, err
 	}
-	return m, data, nil
+	return m, data, status, nil
 }
 
 // deploy builds the bundle and uploads it, omitting the component when the supervisor already runs the same wasm.
@@ -671,15 +710,20 @@ func deploy(args []string) error {
 	if cfg.appHost != "" {
 		m.Host = cfg.appHost
 	}
-	reused, err := prepareComponent(cfg, m)
+	status, err := prepareBuilds(cfg, m)
 	if err != nil {
 		return err
 	}
+	printBuildStatus(status)
+
 	keepComponent := false
-	if reused && !cfg.forceBuild {
-		if digest, err := fileDigest(filepath.Join(cfg.dir, "main.wasm")); err == nil && digest != "" && digest == serverDigest(cfg, m.Name) {
-			keepComponent = true
-		}
+	if !cfg.forceBuild && status.WasmDigest != "" {
+		keepComponent = keepRunningComponent(false, status, serverDigest(cfg, m.Name))
+	}
+	if keepComponent {
+		fmt.Fprintln(os.Stderr, "component: already running; uploading static only")
+	} else if status.WasmDigest != "" {
+		fmt.Fprintln(os.Stderr, "component: uploading")
 	}
 	data, err := bundle(cfg.dir, m, !keepComponent)
 	if err != nil {
@@ -700,9 +744,9 @@ func resolveBundleConfig(args []string) (*deployConfig, error) {
 	wasmtime := flags.String("wasmtime", firstNonEmpty(env("WT_WASMTIME", ""), fileCfg.Wasmtime, "wasmtime"), "wasmtime binary")
 	target := flags.String("target", firstNonEmpty(env("WT_WASMTIME_TARGET", ""), fileCfg.Target, "x86_64-unknown-linux-musl"), "wasmtime compile target")
 	out := flags.String("out", "", "output file (default <name>.tar.gz)")
-	skipBuild := flags.Bool("skip-build", false, "skip running app.json's build command")
+	skipBuild := flags.Bool("skip-build", false, "skip running app.json's build commands")
 	skipCompile := flags.Bool("skip-compile", false, "do not compile; include main.cwasm only if it already exists")
-	forceBuild := flags.Bool("force-build", false, "rebuild the component even when its inputs are unchanged")
+	forceBuild := flags.Bool("force-build", false, "rebuild the component and static phases even when their inputs are unchanged")
 	if err := flags.Parse(args); err != nil {
 		return nil, err
 	}
@@ -726,10 +770,11 @@ func runBundle(args []string) error {
 	if err != nil {
 		return err
 	}
-	m, data, err := buildBundle(cfg)
+	m, data, status, err := buildBundle(cfg)
 	if err != nil {
 		return err
 	}
+	printBuildStatus(status)
 	out := cfg.out
 	if out == "" {
 		out = m.Name + ".tar.gz"
