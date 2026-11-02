@@ -488,7 +488,8 @@ func validateAppSettings(cfg *appConfig) error {
 }
 
 // applyAppDefaults fills in tenant defaults, network and identity rules, timeouts and scheduled calls.
-func applyAppDefaults(cfg *appConfig, mode string) error {
+// applyTenantDefaults fills the limits that differ between trusted and untrusted mode.
+func applyTenantDefaults(cfg *appConfig, mode string) {
 	if mode == tenantUntrusted {
 		if cfg.MemoryMB == 0 {
 			cfg.MemoryMB = untrustedDefaultMemoryMB
@@ -512,6 +513,10 @@ func applyAppDefaults(cfg *appConfig, mode string) error {
 	if cfg.IOWeight == 0 {
 		cfg.IOWeight = defaultIOWeight
 	}
+}
+
+// normalizeAppNetwork validates the network and identity modes for the tenant model.
+func normalizeAppNetwork(cfg *appConfig, mode string) error {
 	switch cfg.Network {
 	case "", "inherit":
 		cfg.Network = "inherit"
@@ -528,6 +533,11 @@ func applyAppDefaults(cfg *appConfig, mode string) error {
 	if mode == tenantUntrusted && cfg.Network == "inherit" {
 		return fmt.Errorf("network inherit is not allowed in untrusted mode; use storage or none")
 	}
+	return nil
+}
+
+// applyAppTimeouts parses request, startup and health timings into their internal fields.
+func applyAppTimeouts(cfg *appConfig) error {
 	timeout, err := parseRequestTimeout(cfg.RequestTimeout)
 	if err != nil {
 		return err
@@ -554,6 +564,11 @@ func applyAppDefaults(cfg *appConfig, mode string) error {
 		return err
 	}
 	cfg.HealthFailures = failures
+	return nil
+}
+
+// validateAppSchedule checks each scheduled call's path and interval.
+func validateAppSchedule(cfg *appConfig) error {
 	for i := range cfg.Schedule {
 		entry := &cfg.Schedule[i]
 		if !strings.HasPrefix(entry.Path, "/") {
@@ -564,6 +579,17 @@ func applyAppDefaults(cfg *appConfig, mode string) error {
 		}
 	}
 	return nil
+}
+
+func applyAppDefaults(cfg *appConfig, mode string) error {
+	applyTenantDefaults(cfg, mode)
+	if err := normalizeAppNetwork(cfg, mode); err != nil {
+		return err
+	}
+	if err := applyAppTimeouts(cfg); err != nil {
+		return err
+	}
+	return validateAppSchedule(cfg)
 }
 
 // normalizeAppConfig fills in defaults and validates an app's runtime config. The optional mode applies untrusted defaults.

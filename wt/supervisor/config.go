@@ -140,83 +140,58 @@ func configResponse(cfg appConfig) appConfigResponse {
 	}
 }
 
-func applyConfigPatch(cfg appConfig, patch appConfigPatch) appConfig {
-	if patch.Host != nil {
-		cfg.Host = *patch.Host
+// applyValue overwrites a config field only when the patch names it.
+func applyValue[T any](dst *T, src *T) {
+	if src != nil {
+		*dst = *src
 	}
-	if patch.Hosts != nil {
-		cfg.Hosts = append([]string(nil), (*patch.Hosts)...)
+}
+
+// applySlice replaces a slice field with its own copy when the patch names it.
+func applySlice[T any](dst *[]T, src *[]T) {
+	if src != nil {
+		*dst = append([]T(nil), (*src)...)
 	}
-	if patch.Health != nil {
-		cfg.Health = *patch.Health
-	}
-	if patch.MemoryMB != nil {
-		cfg.MemoryMB = *patch.MemoryMB
-	}
-	if patch.DiskMB != nil {
-		cfg.DiskMB = *patch.DiskMB
-	}
-	if patch.CPUMillicores != nil {
-		cfg.CPUMillicores = *patch.CPUMillicores
-	}
-	if patch.PidsMax != nil {
-		cfg.PidsMax = *patch.PidsMax
-	}
-	if patch.IOWeight != nil {
-		cfg.IOWeight = *patch.IOWeight
-	}
-	if patch.MaxConcurrent != nil {
-		cfg.MaxConcurrent = *patch.MaxConcurrent
-	}
-	if patch.RequestTimeout != nil {
-		cfg.RequestTimeout = *patch.RequestTimeout
-	}
-	if patch.StartupTimeout != nil {
-		cfg.StartupTimeout = *patch.StartupTimeout
-	}
-	if patch.HealthInterval != nil {
-		cfg.HealthInterval = *patch.HealthInterval
-	}
-	if patch.HealthFailures != nil {
-		cfg.HealthFailures = *patch.HealthFailures
-	}
-	if patch.RestartOnUnhealthy != nil {
-		cfg.RestartOnUnhealthy = *patch.RestartOnUnhealthy
-	}
-	if patch.Network != nil {
-		cfg.Network = *patch.Network
-	}
-	if patch.Identity != nil {
-		cfg.Identity = *patch.Identity
-	}
-	if patch.Maintenance != nil {
-		cfg.Maintenance = *patch.Maintenance
-	}
-	if patch.DependsOn != nil {
-		cfg.DependsOn = append([]string(nil), (*patch.DependsOn)...)
-	}
-	if patch.JobConcurrency != nil {
-		cfg.JobConcurrency = *patch.JobConcurrency
-	}
-	if patch.AllowCallers != nil {
-		cfg.AllowCallers = append([]string(nil), (*patch.AllowCallers)...)
-	}
-	if patch.Egress != nil {
-		cfg.Egress = append([]egressRule(nil), (*patch.Egress)...)
-	}
-	if patch.Schedule != nil {
-		cfg.Schedule = append([]scheduleConfig(nil), (*patch.Schedule)...)
-	}
-	env := make(map[string]string, len(cfg.Env)+len(patch.Env))
-	maps.Copy(env, cfg.Env)
-	for key, value := range patch.Env {
+}
+
+// mergeConfigEnv applies env additions and deletions to a copy of the current map.
+func mergeConfigEnv(current map[string]string, patch map[string]*string) map[string]string {
+	env := make(map[string]string, len(current)+len(patch))
+	maps.Copy(env, current)
+	for key, value := range patch {
 		if value == nil {
 			delete(env, key)
 		} else {
 			env[key] = *value
 		}
 	}
-	cfg.Env = env
+	return env
+}
+
+func applyConfigPatch(cfg appConfig, patch appConfigPatch) appConfig {
+	applyValue(&cfg.Host, patch.Host)
+	applyValue(&cfg.Health, patch.Health)
+	applyValue(&cfg.MemoryMB, patch.MemoryMB)
+	applyValue(&cfg.DiskMB, patch.DiskMB)
+	applyValue(&cfg.CPUMillicores, patch.CPUMillicores)
+	applyValue(&cfg.PidsMax, patch.PidsMax)
+	applyValue(&cfg.IOWeight, patch.IOWeight)
+	applyValue(&cfg.MaxConcurrent, patch.MaxConcurrent)
+	applyValue(&cfg.RequestTimeout, patch.RequestTimeout)
+	applyValue(&cfg.StartupTimeout, patch.StartupTimeout)
+	applyValue(&cfg.HealthInterval, patch.HealthInterval)
+	applyValue(&cfg.HealthFailures, patch.HealthFailures)
+	applyValue(&cfg.RestartOnUnhealthy, patch.RestartOnUnhealthy)
+	applyValue(&cfg.Network, patch.Network)
+	applyValue(&cfg.Identity, patch.Identity)
+	applyValue(&cfg.Maintenance, patch.Maintenance)
+	applyValue(&cfg.JobConcurrency, patch.JobConcurrency)
+	applySlice(&cfg.Hosts, patch.Hosts)
+	applySlice(&cfg.DependsOn, patch.DependsOn)
+	applySlice(&cfg.AllowCallers, patch.AllowCallers)
+	applySlice(&cfg.Egress, patch.Egress)
+	applySlice(&cfg.Schedule, patch.Schedule)
+	cfg.Env = mergeConfigEnv(cfg.Env, patch.Env)
 	return cfg
 }
 
