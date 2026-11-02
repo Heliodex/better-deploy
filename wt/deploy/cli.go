@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json/v2"
 	"flag"
 	"fmt"
@@ -153,18 +152,6 @@ func apiDo(cfg clientOptions, method, path string, body io.Reader, contentType s
 	return resp.StatusCode, resp.Header, data, nil
 }
 
-func apiJSON(cfg clientOptions, method, path string, value any) (int, http.Header, []byte, error) {
-	var body io.Reader
-	if value != nil {
-		data, err := json.Marshal(value)
-		if err != nil {
-			return 0, nil, nil, err
-		}
-		body = bytes.NewReader(data)
-	}
-	return apiDo(cfg, method, path, body, "application/json")
-}
-
 func checkAPI(status int, body []byte) error {
 	if status >= 200 && status < 300 {
 		return nil
@@ -309,11 +296,16 @@ func runLogs(args []string) error {
 	if followValue {
 		path += "/stream"
 	}
-	separator := "?"
+	var query strings.Builder
+	separator := byte('?')
 	for key, value := range values {
-		path += separator + key + "=" + value
-		separator = "&"
+		query.WriteByte(separator)
+		query.WriteString(key)
+		query.WriteByte('=')
+		query.WriteString(value)
+		separator = '&'
 	}
+	path += query.String()
 	if followValue {
 		return followLogs(cfg, path)
 	}
@@ -402,8 +394,8 @@ func runRollback(args []string) error {
 			backup = rest[index]
 			continue
 		}
-		if strings.HasPrefix(rest[index], "--backup=") {
-			backup = strings.TrimPrefix(rest[index], "--backup=")
+		if value, ok := strings.CutPrefix(rest[index], "--backup="); ok {
+			backup = value
 			continue
 		}
 		return fmt.Errorf("unexpected argument %q", rest[index])
@@ -501,8 +493,8 @@ func runBackup(args []string) error {
 			if rest[index] == "--out" && index+1 < len(rest) {
 				index++
 				out = rest[index]
-			} else if strings.HasPrefix(rest[index], "--out=") {
-				out = strings.TrimPrefix(rest[index], "--out=")
+			} else if value, ok := strings.CutPrefix(rest[index], "--out="); ok {
+				out = value
 			}
 		}
 		if err := backupDownload(cfg, name, rest[1], out); err != nil {
@@ -758,33 +750,4 @@ func runCompletion(args []string) error {
 		return fmt.Errorf("unknown shell %q", args[0])
 	}
 	return nil
-}
-
-func commandNames() []string {
-	return []string{"apps", "logs", "deploy", "build", "bundle", "dev", "new", "rollback", "backup", "config", "open", "completion", "help"}
-}
-
-func commandHelp(command string) {
-	switch command {
-	case "apps":
-		fmt.Println("usage: wt apps [--host URL] [--token TOKEN] [--config FILE] [--json]")
-	case "logs":
-		fmt.Println("usage: wt logs <app> [--tail N] [--level LEVEL] [--source app|supervisor] [--q TEXT] [--follow] [--json]")
-	case "deploy":
-		fmt.Println("usage: wt deploy [--dir DIR] [--host URL] [--token TOKEN] [--app-host HOST] [--json]")
-	case "rollback":
-		fmt.Println("usage: wt rollback <app> <deployment-id> [--backup SNAPSHOT] [--host URL] [--token TOKEN] [--json]")
-	case "backup":
-		fmt.Println("usage: wt backup <list|create|restore|download|import> <app> ...")
-	case "config":
-		fmt.Println("usage: wt config show <app> [--json] | wt config set <app> --data JSON|--file FILE [--if-match ETAG]")
-	case "open":
-		fmt.Println("usage: wt open <app> [--print] [--host URL] [--token TOKEN]")
-	case "build", "bundle":
-		fmt.Println("usage: wt build --dir DIR --out app.tar.gz [--wasmtime PATH] [--skip-build] [--skip-compile]")
-	case "completion":
-		fmt.Println("usage: wt completion <bash|zsh|fish>")
-	default:
-		fmt.Printf("usage: wt <%s>\n", strings.Join(commandNames(), "|"))
-	}
 }

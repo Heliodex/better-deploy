@@ -185,13 +185,6 @@ func prepareComponent(cfg *deployConfig, m manifest) (bool, error) {
 	return false, nil
 }
 
-// bundleResult carries the archive and whether it omitted the component for a static-only deploy.
-type bundleResult struct {
-	manifest manifest
-	data     []byte
-	reused   bool
-}
-
 // serverDigest returns the currently running component digest, or an empty string when the app does not exist.
 func serverDigest(cfg *deployConfig, name string) string {
 	req, err := httpRequest(cfg, "GET", "/apps/"+name, nil)

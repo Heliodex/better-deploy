@@ -65,7 +65,7 @@ const artifactName = "artifact.json"
 type artifact struct {
 	Wasmtime   string    `json:"wasmtime,omitempty"`
 	Target     string    `json:"target,omitempty"`
-	CompiledAt time.Time `json:"compiled_at,omitempty"`
+	CompiledAt time.Time `json:"compiled_at"`
 	// Epoch records epoch-interruption instrumentation, which per-request wasmtime timeouts require.
 	Epoch      bool   `json:"epoch_interruption,omitempty"`
 	WasmSHA256 string `json:"wasm_sha256,omitempty"`
