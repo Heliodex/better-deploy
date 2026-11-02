@@ -10,7 +10,7 @@ import (
 func TestClientFlagsAnywhere(t *testing.T) {
 	t.Setenv("WT_DEPLOY_HOST", "")
 	t.Setenv("WT_TOKEN", "")
-	cfg, rest, err := clientFlags("logs", []string{
+	cfg, rest, err := clientFlags([]string{
 		"pulse",
 		"--host", "http://127.0.0.1:8080",
 		"--token", "secret",
@@ -30,7 +30,7 @@ func TestClientFlagsAnywhere(t *testing.T) {
 
 func TestClientFlagsDoubleDash(t *testing.T) {
 	t.Setenv("WT_DEPLOY_HOST", "http://default")
-	cfg, rest, err := clientFlags("logs", []string{"--", "--host", "literal", "pulse"}, false)
+	cfg, rest, err := clientFlags([]string{"--", "--host", "literal", "pulse"}, false)
 	if err != nil {
 		t.Fatal(err)
 	}

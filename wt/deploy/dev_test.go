@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -27,14 +28,7 @@ func TestNormalizeDevConfig(t *testing.T) {
 		t.Errorf("default supervisor proxy = %v", dev.SupervisorProxy)
 	}
 	for _, prefix := range defaultSupervisorProxy {
-		found := false
-		for _, got := range dev.SupervisorProxy {
-			if got == prefix {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.Contains(dev.SupervisorProxy, prefix) {
 			t.Errorf("default supervisor proxy is missing %s", prefix)
 		}
 	}

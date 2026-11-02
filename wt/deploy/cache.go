@@ -55,7 +55,7 @@ func readBuildCache(dir string) (buildCache, error) {
 }
 
 // commonSkipDir holds dependency, VCS and output trees that never change a component or static build.
-func commonSkipDir(path string, entry os.DirEntry) bool {
+func commonSkipDir(entry os.DirEntry) bool {
 	switch entry.Name() {
 	case ".git", "node_modules", "dist", "target", ".svelte-kit":
 		return true
@@ -66,7 +66,7 @@ func commonSkipDir(path string, entry os.DirEntry) bool {
 // appComponentSkip excludes frontend output, dependencies and generated SDK bindings from the app's component inputs.
 func appComponentSkip(root string) func(string, os.DirEntry) bool {
 	return func(path string, entry os.DirEntry) bool {
-		if commonSkipDir(path, entry) {
+		if commonSkipDir(entry) {
 			return true
 		}
 		if entry.Name() == "testdata" {
@@ -93,7 +93,7 @@ func appComponentSkip(root string) func(string, os.DirEntry) bool {
 // moduleSkipDir excludes generated bindings and test fixtures inside a replaced local module.
 func moduleSkipDir(root string) func(string, os.DirEntry) bool {
 	return func(path string, entry os.DirEntry) bool {
-		if commonSkipDir(path, entry) {
+		if commonSkipDir(entry) {
 			return true
 		}
 		if entry.Name() == "testdata" {
@@ -117,7 +117,7 @@ func moduleSkipDir(root string) func(string, os.DirEntry) bool {
 // staticSkipDir excludes SvelteKit and Vite output while keeping the frontend source, lockfile and static assets.
 func staticSkipDir(root string) func(string, os.DirEntry) bool {
 	return func(path string, entry os.DirEntry) bool {
-		if commonSkipDir(path, entry) {
+		if commonSkipDir(entry) {
 			return true
 		}
 		if filepath.Dir(path) == root {
@@ -226,7 +226,7 @@ func localReplaceDirs(dir string) ([]string, error) {
 	}
 	var paths []string
 	inBlock := false
-	for _, raw := range strings.Split(string(data), "\n") {
+	for raw := range strings.SplitSeq(string(data), "\n") {
 		line := strings.TrimSpace(raw)
 		if index := strings.Index(line, "//"); index >= 0 {
 			line = strings.TrimSpace(line[:index])

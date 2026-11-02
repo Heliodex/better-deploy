@@ -152,7 +152,7 @@ func extractClientFlags(args []string) (clientFlagValues, []string, error) {
 }
 
 // clientFlags loads global flags from any position and falls back to WT_DEPLOY_HOST, WT_TOKEN and the config file.
-func clientFlags(name string, args []string, requireHost bool) (clientOptions, []string, error) {
+func clientFlags(args []string, requireHost bool) (clientOptions, []string, error) {
 	values, rest, err := extractClientFlags(args)
 	if err != nil {
 		return clientOptions{}, nil, err
@@ -221,7 +221,7 @@ func printRawOrJSON(cfg clientOptions, body []byte) {
 }
 
 func runApps(args []string) error {
-	cfg, rest, err := clientFlags("apps", args, true)
+	cfg, rest, err := clientFlags(args, true)
 	if err != nil {
 		return err
 	}
@@ -434,7 +434,7 @@ func logPath(name string, opts logOptions) string {
 }
 
 func runLogs(args []string) error {
-	cfg, rest, err := clientFlags("logs", args, true)
+	cfg, rest, err := clientFlags(args, true)
 	if err != nil {
 		return err
 	}
@@ -453,7 +453,7 @@ func runLogs(args []string) error {
 }
 
 func runRollback(args []string) error {
-	cfg, rest, err := clientFlags("rollback", args, true)
+	cfg, rest, err := clientFlags(args, true)
 	if err != nil {
 		return err
 	}

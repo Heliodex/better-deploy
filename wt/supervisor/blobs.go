@@ -230,10 +230,7 @@ func (b *blobStore) list(app string) ([]blobInfo, error) {
 	}
 	digests := map[string]struct{}{}
 	for _, entry := range entries {
-		name := entry.Name()
-		if strings.HasSuffix(name, ".json") {
-			name = strings.TrimSuffix(name, ".json")
-		}
+		name := strings.TrimSuffix(entry.Name(), ".json")
 		if validBlobDigest(name) {
 			digests[name] = struct{}{}
 		}

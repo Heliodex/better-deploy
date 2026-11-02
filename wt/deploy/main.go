@@ -732,7 +732,6 @@ func printDeployResult(cfg *deployConfig, name string, body []byte) error {
 		fmt.Printf("  time: %s\n", time.Since(cfg.start).Round(time.Millisecond))
 	}
 	return nil
-	return nil
 }
 
 // buildBundle runs the app builds, precompiles the component and packs the upload artifact.

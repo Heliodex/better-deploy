@@ -89,7 +89,7 @@ func runBlobsGC(cfg clientOptions, name string, args []string) error {
 	dryRun := flags.Bool("dry-run", false, "report what would be removed")
 	keep := []string{}
 	flags.Func("keep", "digest to protect (repeatable or comma-separated)", func(value string) error {
-		for _, digest := range strings.Split(value, ",") {
+		for digest := range strings.SplitSeq(value, ",") {
 			if digest = strings.TrimSpace(digest); digest != "" {
 				keep = append(keep, digest)
 			}
@@ -144,7 +144,7 @@ func runBlobsGC(cfg clientOptions, name string, args []string) error {
 
 // runBlobs dispatches wt blobs <app> <list|delete|gc>.
 func runBlobs(args []string) error {
-	cfg, rest, err := clientFlags("blobs", args, true)
+	cfg, rest, err := clientFlags(args, true)
 	if err != nil {
 		return err
 	}

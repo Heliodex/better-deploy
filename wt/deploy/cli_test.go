@@ -14,14 +14,14 @@ func TestClientFlagsReadConfigFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("WT_CONFIG", path)
-	cfg, rest, err := clientFlags("apps", []string{"--json"}, true)
+	cfg, rest, err := clientFlags([]string{"--json"}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.host != "http://config.example" || cfg.token != "config-token" || !cfg.jsonOut || len(rest) != 0 {
 		t.Errorf("cfg = %+v, rest = %v", cfg, rest)
 	}
-	cfg, _, err = clientFlags("apps", []string{"--host", "http://flag.example", "--token", "flag-token"}, true)
+	cfg, _, err = clientFlags([]string{"--host", "http://flag.example", "--token", "flag-token"}, true)
 	if err != nil {
 		t.Fatal(err)
 	}

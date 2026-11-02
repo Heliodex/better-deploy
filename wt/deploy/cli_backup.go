@@ -172,7 +172,7 @@ func runBackupDownload(cfg clientOptions, name, snapshot, out string) error {
 }
 
 func runBackup(args []string) error {
-	cfg, rest, err := clientFlags("backup", args, true)
+	cfg, rest, err := clientFlags(args, true)
 	if err != nil {
 		return err
 	}

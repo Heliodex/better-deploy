@@ -52,7 +52,7 @@ type JobRequest struct {
 	Method         string            `json:"method,omitempty"`
 	Body           string            `json:"body,omitempty"`
 	Headers        map[string]string `json:"headers,omitempty"`
-	RunAt          time.Time         `json:"runAt,omitempty,omitzero"`
+	RunAt          time.Time         `json:"runAt,omitzero"`
 	MaxAttempts    int               `json:"maxAttempts,omitempty"`
 	IdempotencyKey string            `json:"idempotencyKey,omitempty"`
 }

@@ -114,7 +114,7 @@ func runConfigSet(cfg clientOptions, name string, rest []string) error {
 }
 
 func runConfig(args []string) error {
-	cfg, rest, err := clientFlags("config", args, true)
+	cfg, rest, err := clientFlags(args, true)
 	if err != nil {
 		return err
 	}

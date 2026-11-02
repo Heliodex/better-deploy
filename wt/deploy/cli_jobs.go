@@ -305,7 +305,7 @@ func validJobStatus(status string) bool {
 
 // runJobs dispatches wt jobs <app> <action>.
 func runJobs(args []string) error {
-	cfg, rest, err := clientFlags("jobs", args, true)
+	cfg, rest, err := clientFlags(args, true)
 	if err != nil {
 		return err
 	}

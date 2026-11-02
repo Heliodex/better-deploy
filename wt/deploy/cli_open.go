@@ -28,7 +28,7 @@ func appURLForHost(supervisorHost, appHost string) string {
 
 // runOpen prints the app URL and opens it with the platform handler unless --print is set.
 func runOpen(args []string) error {
-	cfg, rest, err := clientFlags("open", args, true)
+	cfg, rest, err := clientFlags(args, true)
 	if err != nil {
 		return err
 	}
