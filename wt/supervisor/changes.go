@@ -62,12 +62,12 @@ type rowChangeCollector struct {
 var errRowChangeTooLarge = errors.New("row change exceeds the capture budget")
 
 // preUpdateValues fetches a row's values, checks their encoded size against the budget, and only then base64-encodes blobs.
-func preUpdateValues(data sqlite.SQLitePreUpdateData, new bool, budget int) ([]any, int, error) {
+func preUpdateValues(data sqlite.SQLitePreUpdateData, isNew bool, budget int) ([]any, int, error) {
 	count := data.Count()
 	values := make([]any, count)
 
 	var err error
-	if new {
+	if isNew {
 		err = data.New(values...)
 	} else {
 		err = data.Old(values...)
@@ -237,7 +237,7 @@ func (c *rowChangeCollector) resolveColumns(ctx context.Context, conn *sql.Conn)
 func registerRowHook(conn *sql.Conn, collector *rowChangeCollector) error {
 	return conn.Raw(func(driverConn any) error {
 		hooker, ok := driverConn.(interface {
-			RegisterPreUpdateHook(sqlite.PreUpdateHookFn)
+			RegisterPreUpdateHook(fn sqlite.PreUpdateHookFn)
 		})
 		if !ok {
 			return nil
@@ -255,7 +255,7 @@ func registerRowHook(conn *sql.Conn, collector *rowChangeCollector) error {
 func unregisterRowHook(conn *sql.Conn) error {
 	return conn.Raw(func(driverConn any) error {
 		if hooker, ok := driverConn.(interface {
-			RegisterPreUpdateHook(sqlite.PreUpdateHookFn)
+			RegisterPreUpdateHook(fn sqlite.PreUpdateHookFn)
 		}); ok {
 			hooker.RegisterPreUpdateHook(nil)
 		}

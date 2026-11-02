@@ -29,6 +29,7 @@ func newSSEStream(w http.ResponseWriter, cacheControl string) (*sseStream, bool)
 
 // write formats and flushes one frame, reporting whether the client is still connected.
 func (s *sseStream) write(format string, args ...any) bool {
+	//nolint:gosec // Frames are built from escaped JSON or fixed SSE fields.
 	if _, err := fmt.Fprintf(s.w, format, args...); err != nil {
 		return false
 	}

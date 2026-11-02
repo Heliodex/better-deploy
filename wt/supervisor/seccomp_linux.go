@@ -106,6 +106,7 @@ func seccompFilter(arch uint32, denied []uintptr) []unix.SockFilter {
 	)
 	for _, nr := range denied {
 		filter = append(filter,
+			//nolint:gosec // Seccomp syscall numbers fit in uint32.
 			unix.SockFilter{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jf: 1, K: uint32(nr)},
 			unix.SockFilter{Code: unix.BPF_RET | unix.BPF_K, K: seccompRetErrno | uint32(unix.EPERM)},
 		)
@@ -121,6 +122,7 @@ func installSeccomp() error {
 	}
 
 	filter := seccompFilter(arch, deniedSyscalls())
+	//nolint:gosec // The filter count is bounded by the kernel limit.
 	program := unix.SockFprog{Len: uint16(len(filter)), Filter: &filter[0]}
 
 	if err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); err != nil {

@@ -188,7 +188,11 @@ func TestBlobAdminLifecycle(t *testing.T) {
 
 	info.CreatedAt = time.Now().Add(-48 * time.Hour)
 
-	data, _ = json.Marshal(info)
+	data, err = json.Marshal(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	if err := os.WriteFile(metaPath, data, 0o600); err != nil {
 		t.Fatal(err)
 	}

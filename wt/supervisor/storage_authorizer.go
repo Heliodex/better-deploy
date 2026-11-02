@@ -144,6 +144,8 @@ func storageAuthorizer(readOnly bool) sqlite.AuthorizerFn {
 			if !safeStorageVTables[strings.ToLower(arg2)] {
 				return sqlite.AuthorizerDeny
 			}
+		default:
+			// Other actions fall through to the read-only write check below.
 		}
 
 		if readOnly && readOnlyStorageWriteActions[action] {

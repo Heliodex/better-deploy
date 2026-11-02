@@ -7,6 +7,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -189,10 +190,10 @@ func setupNamespace(plan *nsPlan) error {
 }
 
 func dropBoundingCaps() error {
-	for cap := range 64 {
-		err := unix.Prctl(unix.PR_CAPBSET_DROP, uintptr(cap), 0, 0, 0)
+	for capability := range 64 {
+		err := unix.Prctl(unix.PR_CAPBSET_DROP, uintptr(capability), 0, 0, 0)
 		if err != nil && !errors.Is(err, unix.EINVAL) {
-			return fmt.Errorf("drop capability %d: %w", cap, err)
+			return fmt.Errorf("drop capability %d: %w", capability, err)
 		}
 	}
 
@@ -289,7 +290,7 @@ func childEnv() []string {
 // runApp starts the runtime as PID 2 in the namespace and stays alive as PID 1 to forward signals.
 // The child's host pid is written to the pid pipe so the supervisor can report and sample the wasmtime process rather than the helper.
 func runApp(plan *nsPlan, args []string) int {
-	cmd := exec.Command(plan.BinPath, args...)
+	cmd := exec.CommandContext(context.Background(), plan.BinPath, args...)
 	cmd.Env = childEnv()
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout

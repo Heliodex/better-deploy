@@ -597,7 +597,7 @@ func (s *supervisor) handleRollback(w http.ResponseWriter, r *http.Request, name
 			return
 		}
 
-		next := s.rollbackAtomic(w, r.Context(), name, dir, cfg, backup)
+		next := s.rollbackAtomic(r.Context(), w, name, dir, cfg, backup)
 		if next == nil {
 			return
 		}

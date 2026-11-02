@@ -29,6 +29,7 @@ func (r *boundedRing[T]) len() int {
 	return len(r.items)
 }
 
+//nolint:ireturn // The ring is generic, so at must return its type parameter.
 func (r *boundedRing[T]) at(index int) T {
 	return r.items[index]
 }

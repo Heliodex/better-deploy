@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -43,7 +44,7 @@ func (s *supervisor) migrateApp(a *app, port int, done <-chan struct{}) error {
 	wait := 50 * time.Millisecond
 
 	for {
-		request, err := http.NewRequest(http.MethodPost, target, nil)
+		request, err := http.NewRequestWithContext(context.Background(), http.MethodPost, target, nil)
 		if err != nil {
 			return err
 		}

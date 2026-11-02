@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"os/exec"
@@ -52,7 +53,7 @@ func (s *supervisor) canCompile() bool {
 			return
 		}
 
-		cmd := exec.Command(s.cfg.wasmtimeCompiler, "compile", "--help")
+		cmd := exec.CommandContext(context.Background(), s.cfg.wasmtimeCompiler, "compile", "--help")
 		cmd.Stdout = io.Discard
 		cmd.Stderr = io.Discard
 		s.compilerOK = cmd.Run() == nil

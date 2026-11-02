@@ -452,7 +452,7 @@ func (p *rollbackPlan) start(w http.ResponseWriter, name string, cfg appConfig) 
 }
 
 // rollbackAtomic installs staged code and a snapshot together. The app is stopped for the swap, then the new version starts; any failure restores the previous code, data, database and process.
-func (s *supervisor) rollbackAtomic(w http.ResponseWriter, _ context.Context, name, stagedApp string, cfg appConfig, snapshot string) *app {
+func (s *supervisor) rollbackAtomic(_ context.Context, w http.ResponseWriter, name, stagedApp string, cfg appConfig, snapshot string) *app {
 	plan, ok := s.stageRollback(w, name, stagedApp, snapshot)
 	if !ok {
 		return nil

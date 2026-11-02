@@ -24,7 +24,7 @@ func FuzzValidateStorageSQL(f *testing.F) {
 		f.Add(seed)
 	}
 
-	f.Fuzz(func(t *testing.T, query string) {
+	f.Fuzz(func(_ *testing.T, query string) {
 		_ = validateStorageSQL(query)
 	})
 }
@@ -37,7 +37,7 @@ func FuzzDecodeStorageValue(f *testing.F) {
 		f.Add(seed)
 	}
 
-	f.Fuzz(func(t *testing.T, value string) {
+	f.Fuzz(func(_ *testing.T, value string) {
 		_, _ = decodeStorageValue(jsontext.Value(value))
 	})
 }

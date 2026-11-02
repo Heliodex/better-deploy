@@ -150,7 +150,7 @@ func TestDataQuotaModeValidation(t *testing.T) {
 	cases := map[string]string{
 		"":         dataQuotaMonitor,
 		"monitor":  dataQuotaMonitor,
-		" MONITOR": dataQuotaMonitor,
+		" MONITOR": dataQuotaMonitor, //nolint:gocritic // The leading space is intentional for the trim test.
 		"setquota": dataQuotaSetquota,
 	}
 	for input, want := range cases {

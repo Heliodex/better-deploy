@@ -602,7 +602,7 @@ func (s *supervisor) handleLogExport(w http.ResponseWriter, r *http.Request, a *
 				continue
 			}
 
-			_, _ = w.Write(append(data, '\n'))
+			_, _ = w.Write(append(data, '\n')) //nolint:gosec // The body is escaped or JSON-encoded before writing.
 		}
 
 		return

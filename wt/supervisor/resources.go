@@ -204,12 +204,12 @@ func cpuPercent(previous, current uint64, elapsed time.Duration) float64 {
 
 // parseProcStat returns utime+stime from a /proc/<pid>/stat line. The command name can contain spaces and parentheses, so fields are counted after the last ')'.
 func parseProcStat(data []byte) (uint64, error) {
-	close := bytes.LastIndexByte(data, ')')
-	if close < 0 || close+2 >= len(data) {
+	end := bytes.LastIndexByte(data, ')')
+	if end < 0 || end+2 >= len(data) {
 		return 0, errors.New("malformed /proc stat")
 	}
 
-	fields := strings.Fields(string(data[close+1:]))
+	fields := strings.Fields(string(data[end+1:]))
 	// fields[0] is the process state (field 3), so utime and stime are fields 14 and 15.
 	if len(fields) < 13 {
 		return 0, errors.New("short /proc stat")

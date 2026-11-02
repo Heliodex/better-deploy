@@ -65,7 +65,7 @@ func TestReadAppConfigValidatesSchedule(t *testing.T) {
 func TestScheduleCallsEndpoint(t *testing.T) {
 	var calls atomic.Int64
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Errorf("method = %s, want POST", r.Method)
 		}

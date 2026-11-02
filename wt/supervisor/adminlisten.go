@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -38,7 +39,9 @@ func parseAdminListen(value string) (network, address string, err error) {
 // listenAdmin binds the separate admin listener. A Unix socket is created 0600 after removing a stale socket, and cleanup removes it.
 func listenAdmin(network, address string) (net.Listener, func(), error) {
 	if network != "unix" {
-		listener, err := net.Listen(network, address)
+		var listenConfig net.ListenConfig
+
+		listener, err := listenConfig.Listen(context.Background(), network, address)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -46,7 +49,7 @@ func listenAdmin(network, address string) (net.Listener, func(), error) {
 		return listener, func() { _ = listener.Close() }, nil
 	}
 
-	if err := os.MkdirAll(filepath.Dir(address), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(address), 0o750); err != nil {
 		return nil, nil, fmt.Errorf("admin socket dir: %w", err)
 	}
 
@@ -62,7 +65,9 @@ func listenAdmin(network, address string) (net.Listener, func(), error) {
 		return nil, nil, fmt.Errorf("stat admin socket: %w", err)
 	}
 
-	listener, err := net.Listen("unix", address)
+	var listenConfig net.ListenConfig
+
+	listener, err := listenConfig.Listen(context.Background(), "unix", address)
 	if err != nil {
 		return nil, nil, err
 	}

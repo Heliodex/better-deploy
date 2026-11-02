@@ -96,7 +96,7 @@ func (s *storageServer) closeSessionsForPaused(app string) {
 	s.sessionMu.Unlock()
 
 	for _, session := range closing {
-		_ = s.finishSession(session, false, context.Background())
+		_ = s.finishSession(context.Background(), session, false)
 	}
 }
 
@@ -143,7 +143,7 @@ func (s *storageServer) expireSessions(now time.Time) {
 	s.sessionMu.Unlock()
 
 	for _, session := range expired {
-		_ = s.finishSession(session, false, context.Background())
+		_ = s.finishSession(context.Background(), session, false)
 	}
 }
 
@@ -162,7 +162,7 @@ func (s *storageServer) withSession(id, app string, fn func(*storageSession) err
 	if !now.Before(session.expiresAt) {
 		delete(s.sessions, id)
 		s.sessionMu.Unlock()
-		_ = s.finishSession(session, false, context.Background())
+		_ = s.finishSession(context.Background(), session, false)
 
 		return errSessionNotFound
 	}
@@ -181,7 +181,7 @@ func (s *storageServer) withSession(id, app string, fn func(*storageSession) err
 }
 
 // closeSession removes and finishes a session, treating an expired lease as not found.
-func (s *storageServer) closeSession(id, app string, commit bool, ctx context.Context) error {
+func (s *storageServer) closeSession(ctx context.Context, id, app string, commit bool) error {
 	s.sessionMu.Lock()
 
 	session := s.sessions[id]
@@ -196,15 +196,15 @@ func (s *storageServer) closeSession(id, app string, commit bool, ctx context.Co
 	s.sessionMu.Unlock()
 
 	if expired {
-		_ = s.finishSession(session, false, context.Background())
+		_ = s.finishSession(context.Background(), session, false)
 		return errSessionNotFound
 	}
 
-	return s.finishSession(session, commit, ctx)
+	return s.finishSession(ctx, session, commit)
 }
 
 // finishSession commits or rolls back the pinned transaction, logs committed writes and releases the connection.
-func (s *storageServer) finishSession(session *storageSession, commit bool, ctx context.Context) error {
+func (s *storageServer) finishSession(ctx context.Context, session *storageSession, commit bool) error {
 	session.mu.Lock()
 	defer session.mu.Unlock()
 
@@ -282,7 +282,7 @@ func writeSessionError(w http.ResponseWriter, err error) {
 }
 
 // openSession opens one pinned write connection and starts its transaction.
-func (s *storageServer) openSession(w http.ResponseWriter, ctx context.Context, app string) (*storageSession, bool) {
+func (s *storageServer) openSession(ctx context.Context, w http.ResponseWriter, app string) (*storageSession, bool) {
 	db, err := s.dbFor(app)
 	if err != nil {
 		writeStorageError(w, fmt.Errorf("%w: %w", errStorageUnavailable, err))
@@ -376,7 +376,7 @@ func (s *storageServer) registerSession(w http.ResponseWriter, session *storageS
 
 	if s.sessionClosed {
 		s.sessionMu.Unlock()
-		_ = s.finishSession(session, false, context.Background())
+		_ = s.finishSession(context.Background(), session, false)
 
 		writeError(w, http.StatusServiceUnavailable, "storage is shutting down")
 
@@ -393,7 +393,7 @@ func (s *storageServer) registerSession(w http.ResponseWriter, session *storageS
 
 	if !countBudget(maxStorageSessions).allows(int64(appSessions)) {
 		s.sessionMu.Unlock()
-		_ = s.finishSession(session, false, context.Background())
+		_ = s.finishSession(context.Background(), session, false)
 
 		writeError(w, http.StatusTooManyRequests, "too many storage sessions")
 
@@ -411,7 +411,7 @@ func (s *storageServer) createSession(w http.ResponseWriter, r *http.Request, ap
 	ctx, cancel := context.WithTimeout(r.Context(), storageTimeout)
 	defer cancel()
 
-	session, ok := s.openSession(w, ctx, app)
+	session, ok := s.openSession(ctx, w, app)
 	if !ok {
 		return
 	}
@@ -542,7 +542,7 @@ func (s *storageServer) closeSessionRequest(w http.ResponseWriter, r *http.Reque
 	ctx, cancel := context.WithTimeout(r.Context(), storageTimeout)
 	defer cancel()
 
-	if err := s.closeSession(id, app, commit, ctx); err != nil {
+	if err := s.closeSession(ctx, id, app, commit); err != nil {
 		writeSessionError(w, err)
 		return
 	}

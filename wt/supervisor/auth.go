@@ -131,8 +131,9 @@ type authTokenCreateRequest struct {
 }
 
 type authTokenCreateResponse struct {
-	Token string `json:"token"`
 	authTokenInfo
+
+	Token string `json:"token"`
 }
 
 type authTokensResponse struct {

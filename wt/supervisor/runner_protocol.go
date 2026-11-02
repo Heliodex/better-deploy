@@ -79,7 +79,7 @@ type runnerRequest struct {
 
 // runnerConn is the supervisor side of the app runner.
 type runnerConn interface {
-	Start(runnerStartRequest) (*runnerStream, runnerEvent, error)
+	Start(request runnerStartRequest) (*runnerStream, runnerEvent, error)
 	Go(name string) error
 	Stop(name string) error
 	Stream(name string) *runnerStream

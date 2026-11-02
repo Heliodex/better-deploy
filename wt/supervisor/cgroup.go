@@ -91,7 +91,7 @@ func enableControllersAt(dir string, required []string) error {
 	}
 
 	if changed || len(strings.Fields(string(existing))) == 0 {
-		if err := os.WriteFile(subtreePath, []byte(strings.Join(tokens, " ")+"\n"), 0o644); err != nil {
+		if err := os.WriteFile(subtreePath, []byte(strings.Join(tokens, " ")+"\n"), 0o600); err != nil {
 			return fmt.Errorf("enable cgroup controllers under %s: %w", dir, err)
 		}
 	}
@@ -191,7 +191,7 @@ func (m *cgroupManager) create(name string, cfg appConfig) (string, error) {
 		{"io.weight", fmt.Sprintf("default %d", ioWeight)},
 	}
 	for _, file := range files {
-		if err := os.WriteFile(filepath.Join(path, file.name), []byte(file.value+"\n"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(path, file.name), []byte(file.value+"\n"), 0o600); err != nil {
 			_ = os.RemoveAll(path)
 			return "", fmt.Errorf("write %s in %s: %w", file.name, path, err)
 		}
@@ -203,7 +203,7 @@ func (m *cgroupManager) create(name string, cfg appConfig) (string, error) {
 // addPID places the started process in the app's cgroup.
 func (m *cgroupManager) addPID(name string, pid int) error {
 	path := filepath.Join(m.path(name), "cgroup.procs")
-	if err := os.WriteFile(path, []byte(strconv.Itoa(pid)+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(strconv.Itoa(pid)+"\n"), 0o600); err != nil {
 		return fmt.Errorf("add pid %d to %s: %w", pid, path, err)
 	}
 
@@ -223,7 +223,7 @@ func (m *cgroupManager) remove(name string) error {
 
 	kill := filepath.Join(path, "cgroup.kill")
 	if _, err := os.Stat(kill); err == nil {
-		if err := os.WriteFile(kill, []byte("1"), 0o644); err != nil {
+		if err := os.WriteFile(kill, []byte("1"), 0o600); err != nil {
 			return fmt.Errorf("kill cgroup %s: %w", path, err)
 		}
 	} else if !os.IsNotExist(err) {

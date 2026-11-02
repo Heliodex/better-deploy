@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -58,7 +59,7 @@ func newEgressManager(bin, bin6 string, storageIP string, storagePort int, runne
 // commandRunner executes one iptables invocation and includes its output in the error.
 func commandRunner(bin string) egressRun {
 	return func(args ...string) error {
-		cmd := exec.Command(bin, args...)
+		cmd := exec.CommandContext(context.Background(), bin, args...)
 
 		out, err := cmd.CombinedOutput()
 		if err != nil {

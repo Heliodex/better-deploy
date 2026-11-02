@@ -132,7 +132,7 @@ func (b *eventBus) subscribe(app, topic string, since *int64) (sub *busSubscribe
 			gap = true
 		}
 
-		for i := 0; i < log.ring.len(); i++ {
+		for i := range log.ring.len() {
 			event := log.ring.at(i)
 			if event.ID <= *since {
 				continue

@@ -90,7 +90,7 @@ func (m *metrics) endRequest(app, method string, status int, duration time.Durat
 	m.requests[requestMetricKey{app: app, method: method, status: statusText}]++
 	stat := m.durations[durationMetricKey{app: app, method: method}]
 	stat.count++
-	stat.nanos += uint64(duration)
+	stat.nanos += uint64(duration) //nolint:gosec // Durations are non-negative.
 	m.durations[durationMetricKey{app: app, method: method}] = stat
 	m.mu.Unlock()
 }
@@ -109,7 +109,7 @@ func (m *metrics) observeStorage(app, pool string, err error, duration time.Dura
 	m.storage[storageMetricKey{app: app, pool: pool, result: result}]++
 	stat := m.storageDur[storageDurationKey{app: app, pool: pool}]
 	stat.count++
-	stat.nanos += uint64(duration)
+	stat.nanos += uint64(duration) //nolint:gosec // Durations are non-negative.
 	m.storageDur[storageDurationKey{app: app, pool: pool}] = stat
 	m.mu.Unlock()
 }
@@ -199,6 +199,8 @@ func writeOutcomes(builder *strings.Builder, name, help string, values map[outco
 }
 
 // renderRequests writes request counters; the caller holds m.mu.
+//
+//nolint:dupl // Request and storage renderers use different key types.
 func (m *metrics) renderRequests(builder *strings.Builder) {
 	builder.WriteString("# HELP wt_requests_total Proxied requests by app, method and status.\n# TYPE wt_requests_total counter\n")
 
@@ -266,6 +268,8 @@ func (m *metrics) renderInflight(builder *strings.Builder) {
 }
 
 // renderStorage writes storage operation counters; the caller holds m.mu.
+//
+//nolint:dupl // Request and storage renderers use different key types.
 func (m *metrics) renderStorage(builder *strings.Builder) {
 	builder.WriteString("# HELP wt_storage_operations_total Storage operations by app, pool and result.\n# TYPE wt_storage_operations_total counter\n")
 

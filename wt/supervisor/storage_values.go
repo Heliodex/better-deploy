@@ -50,7 +50,7 @@ func decodeStorageValue(raw jsontext.Value) (any, error) {
 
 	switch text[0] {
 	case 'n':
-		return nil, nil
+		return nil, nil //nolint:nilnil // JSON null is a valid decoded value.
 	case 't':
 		return true, nil
 	case 'f':

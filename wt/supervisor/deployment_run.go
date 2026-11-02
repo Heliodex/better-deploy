@@ -358,7 +358,7 @@ func (s *supervisor) handleDeploymentLogs(w http.ResponseWriter, _ *http.Request
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(data)
+	_, _ = w.Write(data) //nolint:gosec // The body is escaped or JSON-encoded before writing.
 }
 
 // handleDeploymentLogStream sends the log so far and then follows it, ending when the deployment reaches a terminal state.

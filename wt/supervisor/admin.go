@@ -274,7 +274,7 @@ func (s *supervisor) handleBackups(w http.ResponseWriter, r *http.Request, name 
 }
 
 // restoreBackupLocked restores one snapshot while the caller holds the app lock. It writes its own error response and reports success.
-func (s *supervisor) restoreBackupLocked(w http.ResponseWriter, ctx context.Context, name, file string) bool {
+func (s *supervisor) restoreBackupLocked(ctx context.Context, w http.ResponseWriter, name, file string) bool {
 	// Legacy snapshots have no data archive; restore their database online without stopping the app.
 	temp, hasData, err := s.backups.stageData(name, file)
 	if err != nil {
@@ -347,7 +347,7 @@ func (s *supervisor) handleBackupRestore(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	if !s.restoreBackupLocked(w, r.Context(), name, file) {
+	if !s.restoreBackupLocked(r.Context(), w, name, file) {
 		s.metrics.observeBackup(name, "restore", "failed")
 		return
 	}

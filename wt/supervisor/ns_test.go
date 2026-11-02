@@ -259,10 +259,7 @@ func TestNamespaceLaunch(t *testing.T) {
 		t.Skip("/bin/sh is not available")
 	}
 
-	root, err := os.MkdirTemp("", "wt-ns-test-")
-	if err != nil {
-		t.Fatal(err)
-	}
+	root := t.TempDir()
 
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 

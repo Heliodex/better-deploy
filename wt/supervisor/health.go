@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -37,7 +38,12 @@ var healthClient = &http.Client{
 
 // probeHealth calls an app's health path and requires a 2xx response.
 func probeHealth(port int, path string) error {
-	resp, err := healthClient.Get(fmt.Sprintf("http://127.0.0.1:%d%s", port, path))
+	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d%s", port, path), nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := healthClient.Do(request)
 	if err != nil {
 		return err
 	}

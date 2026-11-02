@@ -104,10 +104,7 @@ func TestPersistAppConfigIsPrivateInUntrustedMode(t *testing.T) {
 func TestEnsureAppReadableLeavesDeployedDirectory0755(t *testing.T) {
 	parent := t.TempDir()
 
-	staged, err := os.MkdirTemp(parent, ".demo.upload-")
-	if err != nil {
-		t.Fatal(err)
-	}
+	staged := t.TempDir()
 
 	writeModeFile(t, filepath.Join(staged, "main.cwasm"), 0o600)
 

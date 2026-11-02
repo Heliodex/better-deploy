@@ -150,7 +150,7 @@ func (s *storageServer) databaseRows(ctx context.Context, app, table string, lim
 			return err
 		}
 
-		rows, err := conn.QueryContext(ctx, "select * from "+quoted+" limit ? offset ?", limit, offset)
+		rows, err := conn.QueryContext(ctx, "select * from "+quoted+" limit ? offset ?", limit, offset) //nolint:gosec,unqueryvet // The table name is a quoted identifier and its columns are dynamic.
 		if err != nil {
 			return err
 		}

@@ -121,7 +121,10 @@ func deployArchiveHeaders(t *testing.T, s *supervisor, name, archive string, que
 	result := httptest.NewRecorder()
 
 	if info.Status != deploymentStatusOK {
-		data, _ := json.Marshal(map[string]string{"error": info.Error})
+		data, err := json.Marshal(map[string]string{"error": info.Error})
+		if err != nil {
+			t.Fatal(err)
+		}
 
 		result.WriteHeader(http.StatusBadGateway)
 		result.Body.Write(data)

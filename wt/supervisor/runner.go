@@ -7,6 +7,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -73,7 +74,9 @@ func runnerMain() {
 
 	_ = os.Remove(socket)
 
-	listener, err := net.Listen("unix", socket)
+	var listenConfig net.ListenConfig
+
+	listener, err := listenConfig.Listen(context.Background(), "unix", socket)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "wt runner: listen %s: %v\n", socket, err)
 		os.Exit(1)
@@ -92,9 +95,9 @@ func runnerMain() {
 
 // watchLiveness shuts the runner down when the supervisor's liveness pipe closes.
 func (r *runnerServer) watchLiveness(liveness *os.File) {
-	var byte [1]byte
+	var b [1]byte
 	for {
-		if _, err := liveness.Read(byte[:]); err != nil {
+		if _, err := liveness.Read(b[:]); err != nil {
 			r.shutdown()
 			os.Exit(0)
 		}
@@ -250,7 +253,7 @@ func newRunnerCommand(request runnerStartRequest, output *os.File) (*exec.Cmd, *
 			return nil, nil, nil, fmt.Errorf("start pipe: %w", err)
 		}
 
-		cmd := exec.Command("/proc/self/exe", append([]string{nsInitArg}, request.Args...)...)
+		cmd := exec.CommandContext(context.Background(), "/proc/self/exe", append([]string{nsInitArg}, request.Args...)...)
 		cmd.Env = append(stripEnv(request.Env, nsPlanEnv), nsPlanEnv+"="+string(request.Plan))
 		cmd.SysProcAttr = namespaceSysProcAttr(request.HostID, request.HostGID, request.AllowSetgroups)
 		cmd.ExtraFiles = []*os.File{pidWrite, goRead}
@@ -260,7 +263,7 @@ func newRunnerCommand(request runnerStartRequest, output *os.File) (*exec.Cmd, *
 		return cmd, goWrite, pidRead, nil
 	}
 
-	cmd := exec.Command(request.Path, request.Args...)
+	cmd := exec.CommandContext(context.Background(), request.Path, request.Args...)
 	cmd.Env = request.Env
 	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGTERM}
 	cmd.Stdout = output

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json/v2"
@@ -100,7 +101,7 @@ func writeArtifact(dir string, info artifactInfo) error {
 // wasmtimeVersion reports the configured runtime's version, cached because it only changes with the binary.
 func (s *supervisor) wasmtimeVersion() string {
 	s.versionOnce.Do(func() {
-		out, err := exec.Command(s.cfg.wasmtime, "--version").Output()
+		out, err := exec.CommandContext(context.Background(), s.cfg.wasmtime, "--version").Output()
 		if err != nil {
 			log.Printf("wasmtime version: %v", err)
 			return
@@ -262,7 +263,7 @@ func (s *supervisor) compileCachedArtifact(dir, wasm string, key artifactKey) (s
 		return "", err
 	}
 
-	cmd := exec.Command(s.cfg.wasmtimeCompiler, "compile",
+	cmd := exec.CommandContext(context.Background(), s.cfg.wasmtimeCompiler, "compile",
 		"--target", s.cfg.wasmtimeTarget,
 		"-W", "component-model-async=y",
 		"-W", "epoch-interruption=y",

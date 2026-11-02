@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -51,7 +52,9 @@ func dialRunner(path string, timeout time.Duration) (*runnerClient, []runnerAppI
 	var lastErr error
 
 	for {
-		conn, err := net.DialTimeout("unix", path, 200*time.Millisecond)
+		dialer := net.Dialer{Timeout: 200 * time.Millisecond}
+
+		conn, err := dialer.DialContext(context.Background(), "unix", path)
 		if err == nil {
 			client := newRunnerClient(conn)
 			select {

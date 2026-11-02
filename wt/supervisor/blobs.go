@@ -29,7 +29,7 @@ const (
 	blobMaxUpload     = 256 << 20
 	blobContentType   = 256
 	blobSignatureSize = 32
-	blobSecretEnv     = "WT_BLOB_SECRET"
+	blobSecretEnv     = "WT_BLOB_SECRET" //nolint:gosec // Environment variable name, not a credential.
 	blobPrefixEnv     = "WT_BLOB_PREFIX"
 )
 

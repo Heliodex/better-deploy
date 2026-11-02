@@ -199,7 +199,7 @@ func TestIdentityPasswordChangeAndProxyHeaders(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.AddCookie(newCookies[0])
-	req.Header.Set("X-Wt-User-Id", "spoof")
+	req.Header.Set("X-WT-User-Id", "spoof")
 	s.identityProxyHeaders(req, "demo", true)
 
 	if got := req.Header.Get(identityUserIDHeader); got != user.ID {

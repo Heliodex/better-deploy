@@ -29,7 +29,7 @@ const (
 	identitySessionsName        = "sessions.json"
 	identityModePlatform        = "platform"
 	identityCookieName          = "wt_user"
-	identityCSRFHeader          = "X-CSRF-Token"
+	identityCSRFHeader          = "X-Csrf-Token"
 	identitySessionTTL          = 30 * 24 * time.Hour
 	identityPasswordIter        = 600_000
 	identityPasswordMin         = 10
@@ -41,7 +41,7 @@ const (
 	identityMaxUsers            = 10_000
 	identityMaxSessions         = 100_000
 	identityVersion             = 1
-	identitySecretEnv           = "WT_IDENTITY_SECRET"
+	identitySecretEnv           = "WT_IDENTITY_SECRET" //nolint:gosec // Environment variable name, not a credential.
 	identityUserIDHeader        = "X-WT-User-Id"
 	identityUserEmail           = "X-WT-User-Email"
 	identityUserName            = "X-WT-User-Name"
@@ -712,11 +712,11 @@ func (s *identityStore) session(token string) (identitySession, identityUserInfo
 		return identitySession{}, identityUserInfo{}, errIdentityNoSession
 	}
 
-	copy := *session
+	cloned := *session
 	info := user.info()
 	s.mu.Unlock()
 
-	return copy, info, nil
+	return cloned, info, nil
 }
 
 // deleteSession removes a session by its raw token.

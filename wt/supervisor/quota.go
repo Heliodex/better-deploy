@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -169,7 +170,7 @@ func (q *dataQuota) mountPoint() (string, error) {
 
 // execQuotaCommand runs a quota or findmnt command and includes its output in any error.
 func execQuotaCommand(bin string, args ...string) (string, error) {
-	cmd := exec.Command(bin, args...)
+	cmd := exec.CommandContext(context.Background(), bin, args...)
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {

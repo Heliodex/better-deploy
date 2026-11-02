@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -137,7 +138,7 @@ func (s *supervisor) startRunner() error {
 		return fmt.Errorf("runner liveness pipe: %w", err)
 	}
 
-	cmd := exec.Command("/proc/self/exe", runnerArg)
+	cmd := exec.CommandContext(context.Background(), "/proc/self/exe", runnerArg)
 
 	cmd.Env = append(minimalEnv(), runnerSocketEnv+"="+socket, runnerLivenessEnv+"=3")
 	cmd.ExtraFiles = []*os.File{read}

@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -27,7 +28,7 @@ const (
 	maxAppFetchBody      = 8 << 20
 	appFetchURLEnv       = "WT_APP_FETCH_URL"
 	appNameEnv           = "WT_APP_NAME"
-	appTokenEnv          = "WT_APP_TOKEN"
+	appTokenEnv          = "WT_APP_TOKEN" //nolint:gosec // Environment variable name, not a credential.
 	appURLEnvPrefix      = "WT_APP_URL_"
 )
 
@@ -40,7 +41,9 @@ type appFetchServer struct {
 }
 
 func newAppFetchServer(listen string, s *supervisor) (*appFetchServer, error) {
-	listener, err := net.Listen("tcp", listen)
+	var listenConfig net.ListenConfig
+
+	listener, err := listenConfig.Listen(context.Background(), "tcp", listen)
 	if err != nil {
 		return nil, fmt.Errorf("app fetch listen: %w", err)
 	}

@@ -151,7 +151,7 @@ func TestJobQueueRetriesAndDeadLetters(t *testing.T) {
 	var fail atomic.Bool
 	fail.Store(true)
 
-	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		if fail.Load() {
 			http.Error(w, "no", http.StatusServiceUnavailable)
 			return
@@ -188,7 +188,7 @@ func TestJobQueueRetriesAndDeadLetters(t *testing.T) {
 }
 
 func TestJobQueueCancelAndAPI(t *testing.T) {
-	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer target.Close()

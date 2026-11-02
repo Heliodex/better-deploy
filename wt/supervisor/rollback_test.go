@@ -203,7 +203,7 @@ func TestAtomicRollbackCompensatesWhenNewCodeFails(t *testing.T) {
 
 func TestRecoverRollbackJournalRestoresOldHalves(t *testing.T) {
 	stateDir := t.TempDir()
-	appsDir := filepath.Join(t.TempDir())
+	appsDir := t.TempDir()
 	appDir := filepath.Join(appsDir, "demo")
 	appBackup := appDir + ".rollback-test"
 	dataDir := filepath.Join(stateDir, "demo")

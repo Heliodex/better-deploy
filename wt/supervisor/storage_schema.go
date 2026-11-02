@@ -339,7 +339,7 @@ func schemaMigrations(ctx context.Context, conn *sql.Conn) ([]storageMigrationRe
 		return []storageMigrationRecord{}, nil
 	}
 
-	rows, err := conn.QueryContext(ctx, "select version, checksum, applied_at from "+quoteSQLiteIdentifier(storageMigrationsTable)+" order by version")
+	rows, err := conn.QueryContext(ctx, "select version, checksum, applied_at from "+quoteSQLiteIdentifier(storageMigrationsTable)+" order by version") //nolint:gosec // The table name is a quoted identifier.
 	if err != nil {
 		return nil, err
 	}
@@ -554,7 +554,7 @@ func applyMigration(ctx context.Context, conn *sql.Conn, version int, statements
 	}
 
 	if _, err := tx.ExecContext(ctx,
-		"insert into "+quoteSQLiteIdentifier(storageMigrationsTable)+" (version, checksum, applied_at) values (?, ?, ?)",
+		"insert into "+quoteSQLiteIdentifier(storageMigrationsTable)+" (version, checksum, applied_at) values (?, ?, ?)", //nolint:gosec // The table name is a quoted identifier.
 		version, checksum, time.Now().UTC().Format(time.RFC3339Nano),
 	); err != nil {
 		return false, err

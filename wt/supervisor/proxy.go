@@ -25,11 +25,11 @@ const (
 	proxyMaxIdlePerHost  = 16
 	proxyExpectContinue  = time.Second
 
-	requestIDHeader      = "X-Request-Id"
-	spinFullURLHeader    = "spin-full-url"
-	spinClientAddrHeader = "spin-client-addr"
-	spinBasePathHeader   = "spin-base-path"
-	spinPathInfoHeader   = "spin-path-info"
+	requestIDHeader      = "X-Request-ID"
+	spinFullURLHeader    = "Spin-Full-Url"
+	spinClientAddrHeader = "Spin-Client-Addr"
+	spinBasePathHeader   = "Spin-Base-Path"
+	spinPathInfoHeader   = "Spin-Path-Info"
 )
 
 // newRequestID returns a short random identifier that ties a proxy, app and storage request together.

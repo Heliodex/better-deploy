@@ -471,7 +471,7 @@ func (m *deploymentManager) usage(app string) (int64, error) {
 
 	seen := map[fileKey]struct{}{}
 
-	err := filepath.WalkDir(m.appDir(app), func(path string, entry fs.DirEntry, err error) error {
+	err := filepath.WalkDir(m.appDir(app), func(_ string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			if os.IsNotExist(err) {
 				return nil

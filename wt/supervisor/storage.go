@@ -131,7 +131,9 @@ type storageStatementsResponse struct {
 }
 
 func newStorageServer(dir, listen string) (*storageServer, error) {
-	listener, err := net.Listen("tcp", listen)
+	var listenConfig net.ListenConfig
+
+	listener, err := listenConfig.Listen(context.Background(), "tcp", listen)
 	if err != nil {
 		return nil, fmt.Errorf("storage listen: %w", err)
 	}

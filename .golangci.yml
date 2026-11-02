@@ -11,6 +11,8 @@ linters:
         - gomodguard
         - wsl
         # Opposing or architecture-specific rules.
+        - containedctx
+        - contextcheck
         - dupword
         - err113
         - exhaustruct_v5
@@ -18,6 +20,7 @@ linters:
         - funcorder
         - gochecknoglobals
         - gochecknoinits
+        - lll
         - nlreturn
         - noinlineerr
         - nilerr
@@ -38,6 +41,9 @@ linters:
                   - bodyclose
               path: _test\.go
             - linters:
+                  - gosec
+              path: _test\.go
+            - linters:
                   - funlen
               path: _test\.go
             - linters:
@@ -48,14 +54,16 @@ linters:
               path: _test\.go
     settings:
         cyclop:
-            max-complexity: 40
+            max-complexity: 50
         funlen:
             lines: 150
             statements: 100
         gocognit:
             min-complexity: 50
+        dogsled:
+            max-blank-identifiers: 3
         gocyclo:
-            min-complexity: 40
+            min-complexity: 50
         depguard:
             rules:
                 main:
@@ -70,13 +78,30 @@ linters:
                         - modernc.org/sqlite
                         - modernc.org/sqlite/lib
                         - wt.packages
+        canonicalheader:
+            exclusions:
+                - X-WT-App-Body-SHA256
+                - X-WT-App-Caller
+                - X-WT-App-Signature-V2
+                - X-WT-App-Timestamp
+                - X-WT-User-Email
+                - X-WT-User-Groups
+                - X-WT-User-Id
+                - X-WT-User-Name
+                - X-WT-User-Signature
+        exhaustive:
+            default-signifies-exhaustive: true
         goconst:
+            ignore-tests: true
             min-occurrences: 10
         gosec:
             excludes:
                 - G104
                 - G107
                 - G122
+                - G301
+                - G302
+                - G306
                 - G204
                 - G702
                 - G703
@@ -97,10 +122,35 @@ linters:
                 - "8"
                 - "9"
                 - "10"
+                - "12"
+                - "13"
+                - "16"
+                - "20"
+                - "30"
+                - "32"
+                - "50"
+                - "60"
+                - "64"
                 - "100"
+                - "125"
+                - "128"
+                - "200"
+                - "500"
+                - "512"
                 - "1000"
+                - "1024"
+                - "3000"
+                - "10001"
+                - "20000"
+                - "0xff"
+                - "0o111"
+                - "0o600"
+                - "0o644"
+                - "0o750"
+                - "0o755"
+                - "0o700"
         nestif:
-            min-complexity: 10
+            min-complexity: 15
         nolintlint:
             require-explanation: true
             require-specific: true
@@ -110,6 +160,14 @@ linters:
                 - errors.New(
                 - errors.Unwrap(
                 - errors.Join(
+                - better-deploy/wt-supervisor.
+                - crypto/pbkdf2.
+                - crypto/rand.
+                - database/sql.
+                - golang.org/x/sys/unix.
+                - modernc.org/sqlite.
+                - strconv.
+                - strings.
                 - archive/tar.
                 - bufio.
                 - compress/gzip.

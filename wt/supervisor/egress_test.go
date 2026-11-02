@@ -175,7 +175,7 @@ func TestEgressReplacesRulesForANewPort(t *testing.T) {
 }
 
 func TestEgressFailsClosedWithoutIptables(t *testing.T) {
-	runner := &fakeRunner{fail: func(args []string) error {
+	runner := &fakeRunner{fail: func(_ []string) error {
 		return errors.New("iptables: not found")
 	}}
 

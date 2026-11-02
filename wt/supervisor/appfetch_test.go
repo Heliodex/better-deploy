@@ -68,11 +68,11 @@ func TestAppFetchSignsCallerAndForwards(t *testing.T) {
 		}
 
 		if full := r.Header.Get(spinFullURLHeader); full != "http://target.localhost/v1/items?limit=1" {
-			t.Errorf("spin-full-url = %q", full)
+			t.Errorf("Spin-Full-Url = %q", full)
 		}
 
 		if r.Header.Get(spinClientAddrHeader) == "" {
-			t.Error("spin-client-addr is empty")
+			t.Error("Spin-Client-Addr is empty")
 		}
 
 		if string(body) != `{"value":"one"}` {

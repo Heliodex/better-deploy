@@ -69,7 +69,7 @@ func TestProxyCompressesJSON(t *testing.T) {
 }
 
 func TestProxyLeavesTextAndSSEAlone(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("data: hello\n\n"))
 	}))
