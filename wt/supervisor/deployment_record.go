@@ -150,12 +150,120 @@ func (m *deploymentManager) storeStatic(app, source, dst string) (map[string]str
 	return files, total, nil
 }
 
-func (m *deploymentManager) record(app, source string) (deploymentInfo, error) {
-	id, now, err := m.newID(app)
-	if err != nil {
-		return deploymentInfo{}, err
+// componentRecord describes the component files stored for one deployment.
+type componentRecord struct {
+	files                   map[string]string
+	cwasmDigest, wasmDigest string
+	cwasmSize, wasmSize     int64
+	bytes                   int64
+}
+
+// digest returns the preferred artifact digest, preferring the portable wasm over the cwasm.
+func (r componentRecord) digest() (digest string, size int64, ok bool) {
+	if r.wasmDigest != "" {
+		return r.wasmDigest, r.wasmSize, true
 	}
-	return m.recordAt(app, id, deploymentInfo{QueuedAt: now}, source)
+	if r.cwasmDigest != "" {
+		return r.cwasmDigest, r.cwasmSize, true
+	}
+	return "", 0, false
+}
+
+// storeComponent stores and links main.cwasm and main.wasm into the deployment directory.
+func (m *deploymentManager) storeComponent(app, source, temp string) (componentRecord, error) {
+	record := componentRecord{files: map[string]string{}}
+	for _, name := range []string{"main.cwasm", "main.wasm"} {
+		info, err := os.Stat(filepath.Join(source, name))
+		if err != nil {
+			continue
+		}
+		stored, size, err := m.storeBlob(app, filepath.Join(source, name))
+		if err != nil {
+			return record, fmt.Errorf("store %s: %w", name, err)
+		}
+		if err := linkBlob(filepath.Join(m.blobDir(app), stored), filepath.Join(temp, name)); err != nil {
+			return record, fmt.Errorf("link %s: %w", name, err)
+		}
+		record.files[name] = stored
+		record.bytes += size
+		switch name {
+		case "main.cwasm":
+			record.cwasmDigest, record.cwasmSize = stored, info.Size()
+		case "main.wasm":
+			record.wasmDigest, record.wasmSize = stored, info.Size()
+		}
+	}
+	return record, nil
+}
+
+// stageDeployment copies the manifest, artifact metadata, static files and previous log into the staging directory.
+func (m *deploymentManager) stageDeployment(app, id, source, temp string) (componentRecord, map[string]string, int64, error) {
+	record, err := m.storeComponent(app, source, temp)
+	if err != nil {
+		return record, nil, 0, err
+	}
+	if _, _, ok := record.digest(); !ok {
+		return record, nil, 0, errNoComponent
+	}
+	if err := copyFile(filepath.Join(source, "app.json"), filepath.Join(temp, "app.json")); err != nil {
+		return record, nil, 0, err
+	}
+	if err := copyOptional(source, temp, artifactName); err != nil {
+		return record, nil, 0, err
+	}
+	static, staticBytes, err := m.storeStatic(app, source, temp)
+	if err != nil {
+		return record, nil, 0, err
+	}
+	total := record.bytes + staticBytes
+	for _, name := range []string{"app.json", artifactName} {
+		if info, err := os.Stat(filepath.Join(temp, name)); err == nil {
+			total += info.Size()
+		}
+	}
+	if err := copyOptional(filepath.Join(m.appDir(app), id), temp, deploymentLogName); err != nil {
+		return record, nil, 0, err
+	}
+	return record, static, total, nil
+}
+
+// deploymentMetadata fills the history entry for a successful bundle.
+func deploymentMetadata(previous deploymentInfo, id string, now time.Time, record componentRecord, static map[string]string, total int64, artifact artifactInfo) deploymentInfo {
+	digest, size, _ := record.digest()
+	if previous.QueuedAt.IsZero() {
+		previous.QueuedAt = now
+	}
+	if previous.StartedAt.IsZero() {
+		previous.StartedAt = now
+	}
+	previous.ID = id
+	previous.DeployedAt = now
+	previous.FinishedAt = now
+	previous.Digest = digest
+	previous.Size = size
+	previous.WasmDigest = record.wasmDigest
+	previous.WasmBytes = record.wasmSize
+	previous.Runtime = artifact.Wasmtime
+	previous.Target = artifact.Target
+	previous.Rebuildable = record.files["main.wasm"] != ""
+	previous.Bytes = total
+	previous.Blobs = record.files
+	previous.Static = static
+	previous.Status = deploymentStatusOK
+	previous.Error = ""
+	return previous
+}
+
+// writeDeploymentMeta writes the entry beside the staged bundle.
+func writeDeploymentMeta(temp string, info deploymentInfo) error {
+	meta, err := json.Marshal(info)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(temp, deploymentMetaName), append(meta, '\n'), 0o644); err != nil {
+		return err
+	}
+	return nil
 }
 
 // recordAt materializes a successful bundle into an existing deployment id, keeping its log and queue timestamps.
@@ -170,86 +278,13 @@ func (m *deploymentManager) recordAt(app, id string, previous deploymentInfo, so
 	defer os.RemoveAll(temp)
 
 	artifact, _ := readArtifact(source)
-	files := map[string]string{}
-	var total, cwasmSize, wasmSize int64
-	var cwasmDigest, wasmDigest string
-	for _, name := range []string{"main.cwasm", "main.wasm"} {
-		info, err := os.Stat(filepath.Join(source, name))
-		if err != nil {
-			continue
-		}
-		stored, size, err := m.storeBlob(app, filepath.Join(source, name))
-		if err != nil {
-			return deploymentInfo{}, fmt.Errorf("store %s: %w", name, err)
-		}
-		if err := linkBlob(filepath.Join(m.blobDir(app), stored), filepath.Join(temp, name)); err != nil {
-			return deploymentInfo{}, fmt.Errorf("link %s: %w", name, err)
-		}
-		files[name] = stored
-		total += size
-		switch name {
-		case "main.cwasm":
-			cwasmDigest, cwasmSize = stored, info.Size()
-		case "main.wasm":
-			wasmDigest, wasmSize = stored, info.Size()
-		}
-	}
-	digest, size := wasmDigest, wasmSize
-	if digest == "" {
-		digest, size = cwasmDigest, cwasmSize
-	}
-	if digest == "" {
-		return deploymentInfo{}, errNoComponent
-	}
-	if err := copyFile(filepath.Join(source, "app.json"), filepath.Join(temp, "app.json")); err != nil {
-		return deploymentInfo{}, err
-	}
-	if err := copyOptional(source, temp, artifactName); err != nil {
-		return deploymentInfo{}, err
-	}
-	static, staticBytes, err := m.storeStatic(app, source, temp)
+	record, static, total, err := m.stageDeployment(app, id, source, temp)
 	if err != nil {
 		return deploymentInfo{}, err
 	}
-	for _, name := range []string{"app.json", artifactName} {
-		if info, err := os.Stat(filepath.Join(temp, name)); err == nil {
-			total += info.Size()
-		}
-	}
-	total += staticBytes
-	if err := copyOptional(filepath.Join(m.appDir(app), id), temp, deploymentLogName); err != nil {
-		return deploymentInfo{}, err
-	}
-
 	now := time.Now().UTC()
-	if previous.QueuedAt.IsZero() {
-		previous.QueuedAt = now
-	}
-	if previous.StartedAt.IsZero() {
-		previous.StartedAt = now
-	}
-	previous.ID = id
-	previous.DeployedAt = now
-	previous.FinishedAt = now
-	previous.Digest = digest
-	previous.Size = size
-	previous.WasmDigest = wasmDigest
-	previous.WasmBytes = wasmSize
-	previous.Runtime = artifact.Wasmtime
-	previous.Target = artifact.Target
-	previous.Rebuildable = files["main.wasm"] != ""
-	previous.Bytes = total
-	previous.Blobs = files
-	previous.Static = static
-	previous.Status = deploymentStatusOK
-	previous.Error = ""
-	recorded := previous
-
-	meta, err := json.Marshal(recorded)
-	if err != nil {
-		return deploymentInfo{}, err
-	}
-	if err := os.WriteFile(filepath.Join(temp, deploymentMetaName), append(meta, '\n'), 0o644); err != nil {
+	recorded := deploymentMetadata(previous, id, now, record, static, total, artifact)
+	if err := writeDeploymentMeta(temp, recorded); err != nil {
 		return deploymentInfo{}, err
 	}
 	if err := replaceDir(temp, filepath.Join(m.appDir(app), id)); err != nil {
@@ -259,6 +294,14 @@ func (m *deploymentManager) recordAt(app, id string, previous deploymentInfo, so
 		log.Printf("deploy history %s: prune: %v", app, err)
 	}
 	return recorded, nil
+}
+
+func (m *deploymentManager) record(app, source string) (deploymentInfo, error) {
+	id, now, err := m.newID(app)
+	if err != nil {
+		return deploymentInfo{}, err
+	}
+	return m.recordAt(app, id, deploymentInfo{QueuedAt: now}, source)
 }
 
 // recordFailure keeps a failed deploy attempt in history as metadata only. It has no bundle, so it can never be rolled back to, but the panel can show why the deploy did not replace the running version.
