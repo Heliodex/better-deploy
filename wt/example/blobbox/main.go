@@ -5,7 +5,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -25,6 +27,7 @@ type fileRecord struct {
 	Digest      string `json:"digest"`
 	Size        int64  `json:"size"`
 	ContentType string `json:"contentType"`
+	Owner       string `json:"owner"`
 	CreatedAt   string `json:"createdAt"`
 	DownloadURL string `json:"downloadUrl"`
 }
@@ -59,7 +62,7 @@ type blobApp struct {
 }
 
 func (a *blobApp) migrate(ctx context.Context) error {
-	return a.store.Migrate(ctx, 1, storage.Statement{SQL: `create table if not exists files (
+	err := a.store.Migrate(ctx, 1, storage.Statement{SQL: `create table if not exists files (
 		id text primary key,
 		name text not null,
 		digest text not null,
@@ -67,6 +70,23 @@ func (a *blobApp) migrate(ctx context.Context) error {
 		content_type text not null,
 		created_at text not null
 	)`})
+	if err != nil {
+		return err
+	}
+	return a.store.Migrate(ctx, 2,
+		storage.Statement{SQL: `alter table files add column owner_id text not null default ''`},
+		storage.Statement{SQL: `alter table files add column owner_name text not null default ''`},
+	)
+}
+
+// requireUser returns the signed platform user or writes a 401.
+func requireUser(w http.ResponseWriter, r *http.Request) (app.User, bool) {
+	user, ok := app.UserFromRequest(r)
+	if !ok {
+		app.WriteError(w, http.StatusUnauthorized, "sign in required")
+		return app.User{}, false
+	}
+	return user, true
 }
 
 // validateFile checks the fields shared by the upload and metadata requests.
@@ -106,7 +126,7 @@ func (a *blobApp) record(item fileRecord) (fileRecord, error) {
 }
 
 func (a *blobApp) handleListFiles(w http.ResponseWriter, r *http.Request) {
-	rows, err := a.store.Query(r.Context(), `select id, name, digest, size, content_type, created_at from files order by created_at desc`)
+	rows, err := a.store.Query(r.Context(), `select id, name, digest, size, content_type, owner_name, created_at from files order by created_at desc`)
 	if err != nil {
 		app.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -116,9 +136,12 @@ func (a *blobApp) handleListFiles(w http.ResponseWriter, r *http.Request) {
 	files := []fileRecord{}
 	for rows.Next() {
 		var item fileRecord
-		if err := rows.Scan(&item.ID, &item.Name, &item.Digest, &item.Size, &item.ContentType, &item.CreatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.Digest, &item.Size, &item.ContentType, &item.Owner, &item.CreatedAt); err != nil {
 			app.WriteError(w, http.StatusInternalServerError, err.Error())
 			return
+		}
+		if item.Digest == "" {
+			continue
 		}
 		item, err = a.record(item)
 		if err != nil {
@@ -135,6 +158,9 @@ func (a *blobApp) handleListFiles(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *blobApp) handleCreateUpload(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireUser(w, r); !ok {
+		return
+	}
 	var request uploadRequest
 	if !app.ReadJSON(w, r, maxBody, "name", &request) {
 		return
@@ -153,8 +179,16 @@ func (a *blobApp) handleCreateUpload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *blobApp) handleCreateFile(w http.ResponseWriter, r *http.Request) {
+	user, ok := requireUser(w, r)
+	if !ok {
+		return
+	}
 	var request createFileRequest
 	if !app.ReadJSON(w, r, maxBody, "name", &request) {
+		return
+	}
+	if request.Digest == "" {
+		app.WriteError(w, http.StatusBadRequest, "digest is required")
 		return
 	}
 	name, digest, contentType, err := validateFile(request.Name, request.Digest, request.ContentType, request.Size)
@@ -168,10 +202,11 @@ func (a *blobApp) handleCreateFile(w http.ResponseWriter, r *http.Request) {
 		Digest:      digest,
 		Size:        request.Size,
 		ContentType: contentType,
+		Owner:       user.Name,
 		CreatedAt:   time.Now().UTC().Format(app.TimestampFormat),
 	}
-	if _, err := a.store.Exec(r.Context(), `insert into files (id, name, digest, size, content_type, created_at) values (?, ?, ?, ?, ?, ?)`,
-		item.ID, item.Name, item.Digest, item.Size, item.ContentType, item.CreatedAt); err != nil {
+	if _, err := a.store.Exec(r.Context(), `insert into files (id, name, digest, size, content_type, owner_id, owner_name, created_at) values (?, ?, ?, ?, ?, ?, ?, ?)`,
+		item.ID, item.Name, item.Digest, item.Size, item.ContentType, user.ID, user.Name, item.CreatedAt); err != nil {
 		app.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -184,15 +219,23 @@ func (a *blobApp) handleCreateFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *blobApp) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
+	user, ok := requireUser(w, r)
+	if !ok {
+		return
+	}
 	id := r.PathValue("id")
-	var digest string
-	err := a.store.QueryRow(r.Context(), `select digest from files where id = ?`, id).Scan(&digest)
+	var digest, ownerID string
+	err := a.store.QueryRow(r.Context(), `select digest, owner_id from files where id = ?`, id).Scan(&digest, &ownerID)
 	if errors.Is(err, storage.ErrNoRows) {
 		app.WriteError(w, http.StatusNotFound, "file not found")
 		return
 	}
 	if err != nil {
 		app.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if ownerID != "" && user.ID != ownerID && !slices.Contains(user.Groups, "admin") {
+		app.WriteError(w, http.StatusForbidden, "only the owner can delete this file")
 		return
 	}
 	if _, err := a.store.Exec(r.Context(), `delete from files where id = ?`, id); err != nil {
@@ -206,6 +249,32 @@ func (a *blobApp) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handlePeer demonstrates an authenticated app-to-app call: pulse must list blobbox in allow_callers.
+func (a *blobApp) handlePeer(w http.ResponseWriter, r *http.Request) {
+	req, err := app.NewAppRequest(r.Context(), http.MethodGet, "pulse", "/api/stats", nil)
+	if err != nil {
+		app.WriteError(w, http.StatusServiceUnavailable, "pulse is unavailable")
+		return
+	}
+	resp, err := a.client.Do(req)
+	if err != nil {
+		app.WriteError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		app.WriteError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	if resp.StatusCode != http.StatusOK {
+		app.WriteError(w, http.StatusBadGateway, strings.TrimSpace(string(body)))
+		return
+	}
+	w.Header().Set("content-type", "application/json; charset=utf-8")
+	_, _ = w.Write(body)
+}
+
 // newBlobApp builds the app around one store and registers its routes.
 func newBlobApp(store *storage.Client, client *http.Client) *blobApp {
 	if client == nil {
@@ -213,6 +282,7 @@ func newBlobApp(store *storage.Client, client *http.Client) *blobApp {
 	}
 	a := &blobApp{store: store, client: client, mux: http.NewServeMux()}
 	a.mux.HandleFunc("GET /api/files", a.handleListFiles)
+	a.mux.HandleFunc("GET /api/peer", a.handlePeer)
 	a.mux.HandleFunc("POST /api/uploads", a.handleCreateUpload)
 	a.mux.HandleFunc("POST /api/files", a.handleCreateFile)
 	a.mux.HandleFunc("DELETE /api/files/{id}", a.handleDeleteFile)

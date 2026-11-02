@@ -11,6 +11,7 @@
 	},
 	"health": "/healthz",
 	"host": "pulse.localhost",
+	"allow_callers": ["blobbox"],
 	"memory_mb": 128,
 	"name": "pulse",
 	"request_timeout": "60s",

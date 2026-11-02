@@ -28,7 +28,7 @@ The first request for a precompiled Go component is tens of milliseconds on a la
   - `example/ticker` – logs a `ticker beat` line every 10 seconds from an `app.json` schedule and enqueues a durable `/jobs/beat` job with a payload, so the supervisor log tail and job queue have steady activity to show.
   - `example/guestbook` – SvelteKit static frontend with a Go JSON API; the frontend is served from the bundle's `static/` directory, not embedded in the component.
   - `example/pulse` – SvelteKit uptime dashboard over a Go API that probes URLs on a supervisor schedule, keeps latency history in SQLite and streams each cycle over the event bus.
-  - `example/blobbox` – signed-URL upload board backed by SQLite metadata and the supervisor blob store; demonstrates `app.DeleteBlob` and the blob admin/GC endpoints.
+  - `example/blobbox` – signed-URL upload board backed by SQLite metadata and the supervisor blob store; demonstrates platform identity, `app.DeleteBlob`, the blob admin/GC endpoints and an app-to-app call to pulse.
 - `supervisor/` – runs apps, proxies by `Host`, deploys bundles blue/green.
   - `supervisor/web` – SvelteKit admin panel, embedded into the supervisor binary (not tracked: `web/build`, `web/node_modules`, `web/.svelte-kit`).
 - `deploy/` – builds, precompiles and uploads an app.
@@ -203,7 +203,7 @@ if !ok {
 // user.ID, user.Email, user.Name and user.Groups are verified.
 ```
 
-The browser signs in with `POST /v1/login`, reads `GET /v1/me` for the current user and CSRF token, and sends `X-CSRF-Token` on logout and password change. Static SvelteKit pages should fetch `GET /v1/me` after hydration and keep the user in client state; there is no server-side load.
+The browser signs in with `POST /v1/login`, reads `GET /v1/me` for the current user and CSRF token, and sends `X-CSRF-Token` on logout and password change. Static SvelteKit pages should fetch `GET /v1/me` after hydration and keep the user in client state; there is no server-side load. `example/blobbox` is a runnable reference: it sets `"identity": "platform"`, shows a login form and uses `app.UserFromRequest` to require a user for uploads and deletes.
 
 ## Observability
 
@@ -428,6 +428,23 @@ Contracts stay on the frontend side as Valibot schemas. `web/src/lib/contract.ts
 
 The shared Go error body is `{"error": "...", "code": "...", "field": "..."}`. `app.WriteError` derives a stable code from the HTTP status, `app.WriteErrorField` names the request field that failed, and `app.ReadJSON` uses it for request validation. The `field` member is omitted when there is no field. Existing clients can keep reading `error`; new clients can branch on `code` and attach the message to the named input. The guestbook, pulse and scaffold `ApiError`s show that path.
 A JS component runtime for real SSR is a possible future host feature, but it is not implemented, and apps should not depend on one.
+
+## Which platform API?
+
+| Need | API | Example |
+|---|---|---|
+| Request and response state | per-app SQLite through `storage.Client` | notes, guestbook, pulse |
+| Long, delayed or retried work | durable jobs and `app.EnqueueJob` | ticker |
+| Push updates to browsers | host event bus with `app.Publish` and `EventSource` | pulse |
+| Files, images or downloads | signed blob URLs and `app.DeleteBlob` | blobbox |
+| Current signed-in user | `"identity": "platform"` and `app.UserFromRequest` | blobbox |
+| Call another app | `app.NewAppRequest` with the target's `allow_callers` | blobbox calls pulse |
+| Recurring timed call | `schedule` in `app.json` | ticker |
+| Static frontend | adapter-static output in `static/` | guestbook, pulse, blobbox |
+| Logs and levels | `app.Logf` and the per-app log stream | ticker |
+| Operator inspection | `wt apps`, `logs`, `jobs`, `blobs`, `backup`, `config` | all examples |
+
+`example/blobbox` is the reference for blobs, platform identity and app-to-app calls; `example/ticker` covers scheduled work and durable jobs; `example/pulse` covers scheduled HTTP probes and realtime events.
 
 ## What each app runs
 
@@ -712,7 +729,7 @@ if err != nil {
 resp, err := wasihttp.NewClient().Do(req)
 ```
 
-The signature covers the path the target receives, so do not rewrite the URL between `app.Caller` and the handler. A target that does not call `app.Caller` still receives the headers but is responsible for trusting them only behind this internal listener. Calls between two instances of the same app, retries and fan-out are left to the caller.
+The signature covers the path the target receives, so do not rewrite the URL between `app.Caller` and the handler. A target that does not call `app.Caller` still receives the headers but is responsible for trusting them only behind this internal listener. Calls between two instances of the same app, retries and fan-out are left to the caller. `example/blobbox` calls `example/pulse` with `app.NewAppRequest`; pulse lists blobbox in `allow_callers` and returns its stats.
 
 Explicit outbound access in untrusted mode uses `egress` in `app.json`: a list of `{"cidr":"203.0.113.0/24","port":443}` rules. Only IPv4 TCP is supported; the rules are installed with the app UID before readiness and need a restart after a change. DNS is not automatically allowed, so use an IP or CIDR, or add the resolver to the list. In trusted mode egress rules are ignored because the app already has unrestricted network access.
 

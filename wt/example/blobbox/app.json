@@ -4,6 +4,7 @@
 	"build_static": "rm -rf static && cp -r web/static static",
 	"health": "/healthz",
 	"host": "blobbox.localhost",
+	"identity": "platform",
 	"memory_mb": 128,
 	"name": "blobbox"
 }

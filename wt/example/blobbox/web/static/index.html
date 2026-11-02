@@ -42,6 +42,7 @@
 			li small { color: var(--muted); font-family: ui-monospace, monospace; }
 			.error { margin-top: 16px; padding: 12px 14px; border-radius: 12px; background: #fbe7e7; color: var(--bad); }
 			.empty { padding: 20px 0; color: var(--muted); }
+			.peer { margin-top: 10px; color: var(--accent); font-family: ui-monospace, monospace; font-size: 0.86rem; }
 			code { font-family: ui-monospace, monospace; font-size: 0.86em; }
 		</style>
 	</head>
@@ -49,8 +50,25 @@
 		<main>
 			<h1>Blob <span>Box</span></h1>
 			<p>A signed-URL upload board. Bytes go straight to the supervisor's blob store; metadata lives in SQLite.</p>
+			<p id="peer" class="peer" hidden></p>
 
-			<section class="card">
+			<section class="card auth">
+				<div id="signed-out">
+					<p>Sign in to upload and delete files.</p>
+					<form id="login-form">
+						<input id="email" type="email" placeholder="Email" autocomplete="email" required>
+						<input id="password" type="password" placeholder="Password" autocomplete="current-password" required>
+						<button type="submit">Sign in</button>
+					</form>
+					<div id="auth-status" class="error" hidden></div>
+				</div>
+				<div id="signed-in" hidden>
+					<p>Signed in as <strong id="user-name"></strong>.</p>
+					<button id="logout" class="secondary" type="button">Sign out</button>
+				</div>
+			</section>
+
+			<section class="card" id="upload-card" hidden>
 				<form id="upload-form">
 					<input id="file" type="file" required>
 					<button id="upload-button" type="submit">Upload</button>
@@ -69,6 +87,19 @@
 			const button = document.querySelector("#upload-button")
 			const status = document.querySelector("#status")
 			const list = document.querySelector("#files")
+			const loginForm = document.querySelector("#login-form")
+			const email = document.querySelector("#email")
+			const password = document.querySelector("#password")
+			const authStatus = document.querySelector("#auth-status")
+			const signedOut = document.querySelector("#signed-out")
+			const signedIn = document.querySelector("#signed-in")
+			const userName = document.querySelector("#user-name")
+			const logout = document.querySelector("#logout")
+			const uploadCard = document.querySelector("#upload-card")
+			const peer = document.querySelector("#peer")
+
+			let currentUser = null
+			let csrfToken = ""
 
 			const showError = message => {
 				status.textContent = message
@@ -81,6 +112,11 @@
 				status.textContent = ""
 			}
 
+			const showAuthError = message => {
+				authStatus.textContent = message
+				authStatus.hidden = false
+			}
+
 			const json = async (path, init) => {
 				const response = await fetch(path, init)
 				const data = await response.json().catch(() => null)
@@ -89,6 +125,36 @@
 			}
 
 			const bytes = size => size < 1024 ? `${size} B` : size < 1048576 ? `${(size / 1024).toFixed(1)} kB` : `${(size / 1048576).toFixed(1)} MB`
+
+			const setUser = user => {
+				currentUser = user
+				signedOut.hidden = user !== null
+				signedIn.hidden = user === null
+				uploadCard.hidden = user === null
+				userName.textContent = user?.name || user?.email || ""
+			}
+
+			const loadIdentity = async () => {
+				const response = await fetch("/_wt/identity/me")
+				if (!response.ok) {
+					csrfToken = ""
+					setUser(null)
+					return
+				}
+				const data = await response.json()
+				csrfToken = data.csrfToken
+				setUser(data.user)
+			}
+
+			const loadPeer = async () => {
+				try {
+					const stats = await json("/api/peer")
+					peer.textContent = `Pulse peer: ${stats.up}/${stats.monitors} monitors up, ${stats.checks24h} checks in 24h`
+					peer.hidden = false
+				} catch {
+					peer.hidden = true
+				}
+			}
 
 			const load = async () => {
 				try {
@@ -103,26 +169,61 @@
 						link.href = file.downloadUrl
 						link.textContent = file.name
 						const meta = document.createElement("small")
-						meta.textContent = `${bytes(file.size)} · ${file.contentType}`
-						const remove = document.createElement("button")
-						remove.type = "button"
-						remove.className = "secondary"
-						remove.textContent = "Delete"
-						remove.onclick = async () => {
-							clearError()
-							try {
-								const response = await fetch(`/api/files/${file.id}`, { method: "DELETE" })
-								if (!response.ok) throw new Error(response.statusText)
-								await load()
-							} catch (error) {
-								showError(error.message)
+						meta.textContent = `${bytes(file.size)} · ${file.contentType} · ${file.owner || "unknown"}`
+						row.append(link, meta)
+						if (currentUser !== null) {
+							const remove = document.createElement("button")
+							remove.type = "button"
+							remove.className = "secondary"
+							remove.textContent = "Delete"
+							remove.onclick = async () => {
+								clearError()
+								try {
+									const response = await fetch(`/api/files/${file.id}`, { method: "DELETE" })
+									if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || response.statusText)
+									await load()
+								} catch (error) {
+									showError(error.message)
+								}
 							}
+							row.append(remove)
 						}
-						row.append(link, meta, remove)
 						return row
 					}))
 				} catch (error) {
 					showError(error.message)
+				}
+			}
+
+			loginForm.onsubmit = async event => {
+				event.preventDefault()
+				authStatus.hidden = true
+				try {
+					await json("/_wt/identity/login", {
+						method: "POST",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify({ email: email.value, password: password.value }),
+					})
+					password.value = ""
+					await loadIdentity()
+					await load()
+				} catch (error) {
+					showAuthError(error.message)
+				}
+			}
+
+			logout.onclick = async () => {
+				authStatus.hidden = true
+				try {
+					const response = await fetch("/_wt/identity/logout", {
+						method: "POST",
+						headers: { "X-CSRF-Token": csrfToken },
+					})
+					if (!response.ok) throw new Error("Sign out failed")
+					await loadIdentity()
+					await load()
+				} catch (error) {
+					showAuthError(error.message)
 				}
 			}
 
@@ -160,7 +261,8 @@
 				}
 			}
 
-			void load()
+			void loadIdentity().then(load)
+			void loadPeer()
 		</script>
 	</body>
 </html>
