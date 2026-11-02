@@ -141,7 +141,7 @@ Concrete evidence from this build:
 
    Tests cover flags after the app, `--`, the exact `wt logs pulse --host ... --tail 40` path, and local/remote app URLs. The README examples and the global-flag note now match the parser; no command needs a flag-order workaround.
 
-8. [ ] **[P2] Give blobs a lifecycle helper and a recovery path.**
+8. [x] **[P2] Give blobs a lifecycle helper and a recovery path.**
 
    **Current behaviour.** `app.BlobUploadURL`, `BlobDownloadURL` and `BlobDeleteURL` cover signing and deletion. There is no list or garbage collection, and the docs correctly say the supervisor cannot know which files an app still references. An app has to store the digest in its own metadata and call delete when the record goes away. If metadata is lost, the blob stays in the store forever.
 
@@ -153,6 +153,12 @@ Concrete evidence from this build:
    - Add a small upload example so the signed-URL flow is exercised end to end.
 
    **Done when.** An app can find or purge orphaned blobs without host shell access, and a normal delete removes both the metadata and the blob.
+
+   Implemented in `fccddec`, `dc9d2ef`, `e073b9d` and `a998e32`. The supervisor now lists every digest with size, content type and age (including blobs whose metadata sidecar and file disagree), deletes one digest, and runs `POST /apps/<name>/blobs/gc` with an explicit `olderThan`, optional `keep` digests and `dryRun`. `wt-deploy blobs <app> list|delete|gc` wraps those routes; GC prints the candidate digests and supports repeated or comma-separated `--keep`.
+
+   `app.DeleteBlob(ctx, client, digest)` deletes through a new authenticated `DELETE /v1/blobs/{id}` on the storage loopback, so a handler can remove content after deleting the owning row without the admin API. A missing blob is treated as already deleted. `example/blobbox` stores file metadata in SQLite, signs upload and download URLs, calls `app.DeleteBlob` from its delete handler, and has a small upload/list/delete page.
+
+   The supervisor still cannot infer which digests an app references, so GC requires a cutoff and accepts a keep list; the dry run is the safe default in the CLI workflow. Verified live: upload through the signed URL, metadata insert, download, normal file delete removed both row and blob, and an orphan uploaded without metadata appeared in the admin list and was removed by dry-run then real GC. Tests cover admin list/delete/GC, storage-loopback deletion, `app.DeleteBlob`, CLI requests, and the full supervisor suite.
 
 9. [ ] **[P2] Fill the platform-API example gap and publish a choose-the-API map.**
 
