@@ -4,7 +4,7 @@ Architecture simplification review, 2026-11-01. This pass looks for duplicated m
 
 The short assessment: the code is clean at function level after the earlier splits, but the same concepts are still implemented two or three times. The biggest wins are removing the test-only direct launch path, giving isolation one lifecycle, and making the storage and configuration surfaces share one representation.
 
-The first eleven items below are now implemented. Item 11 leaves the client-facing sync deploy alias and static-only header in place, and a few follow-ups from earlier items remain; those are listed under "If I picked the next three".
+All eleven items below are implemented. The remaining follow-ups are narrower and are listed under "If I picked the next three".
 
 ## Small changes in this pass
 
@@ -42,7 +42,7 @@ The first eleven items below are now implemented. Item 11 leaves the client-faci
    - Declare routes as `{pattern, method, scope, body limit, handler}` and let one dispatcher apply authentication, audit, `Allow` headers and 404s.
    - Generate the OpenAPI document and the panel client from the same table, so a new route cannot be added without its contract.
    - Do this after item 3, so storage routes are already methods rather than closures.
-   - Implemented in `5d2d277`. `router.go` matches method and path segments, with one table each for app, storage, identity, admin and public routes. App entries carry the action label used for scope checks and audit, so `handleApp` no longer parses action strings. The hand-written `openapi.yaml` and panel client are not generated from the table yet; that remains the second half of this item.
+   - Implemented in `5d2d277`, `576ed7f` and `d6d6ce4`. `router.go` matches method and path segments, with one table each for app, storage, identity, admin and public routes. App entries carry the action label used for scope checks and audit, so `handleApp` no longer parses action strings. `web/src/lib/routes.gen.ts` is generated from the app and admin tables, and a test fails when `openapi.yaml` misses a method or path the tables serve. Component schemas and operation descriptions remain hand-written.
 
 6. [x] **Unify operator tokens and platform identity behind one principal and session layer.** `authStore` keeps hashed bearer tokens in a JSON file, `identityStore` keeps users, PBKDF2 hashes and sessions, and `supervisor.requireIdentity` bridges both. Login, logout, audit actors and app scope checks each special-case which store answered.
    - Define one `Principal` with an ID, kind, role and app allowlist, and one `Session` interface with `Current`, `Create` and `Delete`.
@@ -54,7 +54,7 @@ The first eleven items below are now implemented. Item 11 leaves the client-faci
    - Extract a `contentStore` keyed by digest with reference counts and `Put`, `Link`, `Prune` and `Usage` operations.
    - Keep deployment history and snapshot trees as thin policies over that store.
    - This is also the cleanest place to add an offsite or S3 target once, rather than twice.
-   - Implemented in `29da372` for deployments and app blobs: `contentStore` owns digest-named files, streaming puts, hardlinks and pruning. Backup snapshots still use their timestamped files and tree because the snapshot name is the public API; moving them onto the store is a follow-up.
+   - Implemented in `29da372` and `c5c0a8c`: `contentStore` owns digest-named files, streaming puts, hardlinks, file adoption and pruning. Deployments, app blobs and backup snapshots all use it; backup names stay public as hardlinks and pruning collects unreferenced blobs.
 
 8. [x] **Consolidate resource accounting and admission.** A global disk budget, the per-app `disk_mb` monitor, the storage temp budget, the optional `setquota` backend, the artifact cache cap, the session cap and concurrency slots each have their own measurement and rejection path. `disk.go`, `quota.go`, `budget` tests and the storage temp monitor overlap, and the error codes are not consistent.
    - Introduce one accounting component with named dimensions and a single monitor loop, then let each admission point ask for a specific dimension.
@@ -78,12 +78,12 @@ The first eleven items below are now implemented. Item 11 leaves the client-faci
     - Declare the oldest supported app and supervisor version, then delete the branches and their tests in one release.
     - Keep the data migrations, but drop the dual write and dual read paths.
     - Do this last, after the structural changes, so there is only one code path left to document.
-    - Implemented without a version gate as requested: removed the v1 `X-WT-App-Signature` from the supervisor and the SDK, required strict artifact metadata (target, CPU, epoch, wasm digest and runtime), removed the legacy `user_version` no-op migration path, removed the `/v1/login`, `/v1/logout` and `/v1/me` identity aliases, and made full deploys require `main.wasm`. The `POST /apps/<name>` sync deploy alias and the `X-WT-Static-Only` header remain because the CLI and panel still call them; dropping those needs the client move to the queued deployment resource.
+    - Implemented without a version gate as requested: removed the v1 `X-WT-App-Signature` from the supervisor and the SDK, required strict artifact metadata (target, CPU, epoch, wasm digest and runtime), removed the legacy `user_version` no-op migration path, removed the `/v1/login`, `/v1/logout` and `/v1/me` identity aliases, made full deploys require `main.wasm`, and moved the CLI, panel and e2e script to the queued deployment resource. The synchronous POST alias and the `X-WT-Static-Only` header are gone; a component-less bundle now keeps the running component.
 
 ## If I picked the next three
 
-1. Move the CLI and panel to the queued deployment resource and drop `POST /apps/<name>`; then remove the `X-WT-Static-Only` header by deriving static-only from the digest and If-Match path.
-2. Generate the OpenAPI document and panel client from the route table, which is the second half of item 5.
-3. Move backup snapshots onto `contentStore`, which is the remaining half of item 7.
+1. Generate the OpenAPI component schemas and the panel's typed response schemas from the same contract; the path and URL layer is already generated.
+2. Consolidate the remaining accounting dimensions (`setquota`, cache cap, session cap and concurrency slots) behind the budget component.
+3. Replace loopback app-to-app fetch with a typed internal call once the embedded host exists, instead of the bearer and HMAC path.
 
 Keep the invariants in `notes/fixes2.md` under "Do not regress"; none of the items above requires weakening the wasm artifact, blue/green deploys, the storage authorizer, sessions, scoped tokens or the tested isolation boundaries.
