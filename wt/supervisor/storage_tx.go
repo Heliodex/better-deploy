@@ -25,34 +25,46 @@ type storageTransactionResponse struct {
 }
 
 // transaction runs statements in one SQLite transaction and can return rows from reads as well as write counts.
+// decodeStorageStatements validates SQL and parameters for a bounded statement list.
+func decodeStorageStatements(statements []storageTransactionStatement, requireOne bool) ([][]any, error) {
+	if requireOne && len(statements) == 0 {
+		return nil, fmt.Errorf("%w: at least one statement is required", errStorageInvalid)
+	}
+	if len(statements) > maxStorageStatements {
+		return nil, fmt.Errorf("%w: at most %d statements are allowed", errStorageInvalid, maxStorageStatements)
+	}
+	params := make([][]any, len(statements))
+	for i, statement := range statements {
+		if err := validateStorageSQL(statement.SQL); err != nil {
+			return nil, fmt.Errorf("statement %d: %w", i+1, err)
+		}
+		decoded, err := decodeStorageParams(statement.Params)
+		if err != nil {
+			return nil, fmt.Errorf("statement %d: %w", i+1, err)
+		}
+		params[i] = decoded
+	}
+	return params, nil
+}
+
+// validateStorageStatements writes the validation error and reports whether the statements are usable.
+func validateStorageStatements(w http.ResponseWriter, statements []storageTransactionStatement, requireOne bool) ([][]any, bool) {
+	params, err := decodeStorageStatements(statements, requireOne)
+	if err != nil {
+		writeStorageError(w, err)
+		return nil, false
+	}
+	return params, true
+}
+
 // readTransactionRequest parses and validates one batch request.
 func readTransactionRequest(w http.ResponseWriter, r *http.Request) (storageTransactionRequest, [][]any, bool) {
 	var req storageTransactionRequest
 	if !readStorageJSON(w, r, &req) {
 		return req, nil, false
 	}
-	if len(req.Statements) == 0 {
-		writeStorageError(w, fmt.Errorf("%w: at least one statement is required", errStorageInvalid))
-		return req, nil, false
-	}
-	if len(req.Statements) > maxStorageStatements {
-		writeStorageError(w, fmt.Errorf("%w: at most %d statements are allowed", errStorageInvalid, maxStorageStatements))
-		return req, nil, false
-	}
-	params := make([][]any, len(req.Statements))
-	for i, statement := range req.Statements {
-		if err := validateStorageSQL(statement.SQL); err != nil {
-			writeStorageError(w, fmt.Errorf("statement %d: %w", i+1, err))
-			return req, nil, false
-		}
-		decoded, err := decodeStorageParams(statement.Params)
-		if err != nil {
-			writeStorageError(w, fmt.Errorf("statement %d: %w", i+1, err))
-			return req, nil, false
-		}
-		params[i] = decoded
-	}
-	return req, params, true
+	params, ok := validateStorageStatements(w, req.Statements, true)
+	return req, params, ok
 }
 
 // executeStatement runs one statement inside the transaction and records its row-change range.

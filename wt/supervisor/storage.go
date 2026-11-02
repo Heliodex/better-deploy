@@ -812,73 +812,13 @@ func (s *storageServer) exec(w http.ResponseWriter, r *http.Request, app string)
 	writeJSON(w, http.StatusOK, result)
 }
 
-// readBatchRequest parses and validates one write batch.
-func readBatchRequest(w http.ResponseWriter, r *http.Request) (storageBatchRequest, [][]any, bool) {
-	var req storageBatchRequest
-	if !readStorageJSON(w, r, &req) {
-		return req, nil, false
+// batchStatements converts write statements into the shared transaction form.
+func batchStatements(statements []storageStatement) []storageTransactionStatement {
+	out := make([]storageTransactionStatement, len(statements))
+	for i, statement := range statements {
+		out[i] = storageTransactionStatement{SQL: statement.SQL, Params: statement.Params}
 	}
-	if len(req.Statements) == 0 {
-		writeStorageError(w, fmt.Errorf("%w: at least one statement is required", errStorageInvalid))
-		return req, nil, false
-	}
-	if len(req.Statements) > maxStorageStatements {
-		writeStorageError(w, fmt.Errorf("%w: at most %d statements are allowed", errStorageInvalid, maxStorageStatements))
-		return req, nil, false
-	}
-	params := make([][]any, len(req.Statements))
-	for i, statement := range req.Statements {
-		if err := validateStorageSQL(statement.SQL); err != nil {
-			writeStorageError(w, fmt.Errorf("statement %d: %w", i+1, err))
-			return req, nil, false
-		}
-		decoded, err := decodeStorageParams(statement.Params)
-		if err != nil {
-			writeStorageError(w, fmt.Errorf("statement %d: %w", i+1, err))
-			return req, nil, false
-		}
-		params[i] = decoded
-	}
-	return req, params, true
-}
-
-// executeBatch runs every statement in one write transaction and records its row-change range.
-func (s *storageServer) executeBatch(ctx context.Context, app string, req storageBatchRequest, params [][]any) ([]storageResult, []int, []int, *rowChangeCollector, error) {
-	results := make([]storageResult, 0, len(req.Statements))
-	starts := make([]int, len(req.Statements))
-	ends := make([]int, len(req.Statements))
-	var collector *rowChangeCollector
-	err := s.withWriteConn(ctx, app, func(conn *sql.Conn, rows *rowChangeCollector) error {
-		collector = rows
-		tx, err := conn.BeginTx(ctx, nil)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-
-		unregister, err := requireStorageAuthorizer(conn, false)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = unregister() }()
-
-		for i, statement := range req.Statements {
-			starts[i] = len(rows.rows)
-			res, err := tx.ExecContext(ctx, statement.SQL, params[i]...)
-			if err != nil {
-				return fmt.Errorf("statement %d: %w", i+1, err)
-			}
-			ends[i] = len(rows.rows)
-			affected, _ := res.RowsAffected()
-			lastID, _ := res.LastInsertId()
-			results = append(results, storageResult{RowsAffected: affected, LastInsertID: lastID})
-		}
-		if err := unregister(); err != nil {
-			return err
-		}
-		return tx.Commit()
-	})
-	return results, starts, ends, collector, err
+	return out
 }
 
 // logBatchChanges turns the batch statements into change-log entries.
@@ -905,14 +845,19 @@ func (s *storageServer) logBatchChanges(app string, r *http.Request, req storage
 }
 
 func (s *storageServer) batch(w http.ResponseWriter, r *http.Request, app string) {
-	req, params, ok := readBatchRequest(w, r)
+	var req storageBatchRequest
+	if !readStorageJSON(w, r, &req) {
+		return
+	}
+	statements := batchStatements(req.Statements)
+	params, ok := validateStorageStatements(w, statements, true)
 	if !ok {
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), storageTimeout)
 	defer cancel()
 
-	results, starts, ends, collector, err := s.executeBatch(ctx, app, req, params)
+	results, starts, ends, collector, err := s.executeTransaction(ctx, app, storageTransactionRequest{Statements: statements}, params)
 	if err != nil {
 		writeStorageError(w, err)
 		return

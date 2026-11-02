@@ -439,19 +439,9 @@ func prepareMigration(version int, statements []storageStatement) ([][]any, stri
 	if version < 1 || version > maxStorageMigrationVersion {
 		return nil, "", fmt.Errorf("%w: version must be between 1 and %d", errStorageInvalid, maxStorageMigrationVersion)
 	}
-	if len(statements) > maxStorageStatements {
-		return nil, "", fmt.Errorf("%w: at most %d statements are allowed", errStorageInvalid, maxStorageStatements)
-	}
-	params := make([][]any, len(statements))
-	for i, statement := range statements {
-		if err := validateStorageSQL(statement.SQL); err != nil {
-			return nil, "", fmt.Errorf("statement %d: %w", i+1, err)
-		}
-		decoded, err := decodeStorageParams(statement.Params)
-		if err != nil {
-			return nil, "", fmt.Errorf("statement %d: %w", i+1, err)
-		}
-		params[i] = decoded
+	params, err := decodeStorageStatements(batchStatements(statements), false)
+	if err != nil {
+		return nil, "", err
 	}
 	return params, storageMigrationChecksum(version, statements), nil
 }
