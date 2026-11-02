@@ -236,24 +236,22 @@ func writeSessionError(w http.ResponseWriter, err error) {
 	}
 }
 
-func (s *storageServer) createSession(w http.ResponseWriter, r *http.Request, app string) {
-	ctx, cancel := context.WithTimeout(r.Context(), storageTimeout)
-	defer cancel()
-
+// openSession opens one pinned write connection and starts its transaction.
+func (s *storageServer) openSession(w http.ResponseWriter, ctx context.Context, app string) (*storageSession, bool) {
 	db, err := s.dbFor(app)
 	if err != nil {
 		writeStorageError(w, fmt.Errorf("%w: %v", errStorageUnavailable, err))
-		return
+		return nil, false
 	}
 	conn, err := db.Conn(ctx)
 	if err != nil {
 		writeStorageError(w, fmt.Errorf("%w: %v", errStorageUnavailable, err))
-		return
+		return nil, false
 	}
 	if err := configureStorageConn(ctx, conn); err != nil {
 		_ = conn.Close()
 		writeStorageError(w, fmt.Errorf("%w: %v", errStorageUnavailable, err))
-		return
+		return nil, false
 	}
 	collector := &rowChangeCollector{}
 	hook := true
@@ -268,7 +266,7 @@ func (s *storageServer) createSession(w http.ResponseWriter, r *http.Request, ap
 		}
 		_ = conn.Close()
 		writeStorageError(w, err)
-		return
+		return nil, false
 	}
 	if _, err := requireStorageAuthorizer(conn, false); err != nil {
 		_ = tx.Rollback()
@@ -277,7 +275,7 @@ func (s *storageServer) createSession(w http.ResponseWriter, r *http.Request, ap
 		}
 		_ = conn.Close()
 		writeStorageError(w, err)
-		return
+		return nil, false
 	}
 	id, err := newSessionID()
 	if err != nil {
@@ -288,9 +286,9 @@ func (s *storageServer) createSession(w http.ResponseWriter, r *http.Request, ap
 		}
 		_ = conn.Close()
 		writeError(w, http.StatusInternalServerError, "create session id")
-		return
+		return nil, false
 	}
-	session := &storageSession{
+	return &storageSession{
 		id:         id,
 		app:        app,
 		conn:       conn,
@@ -299,8 +297,11 @@ func (s *storageServer) createSession(w http.ResponseWriter, r *http.Request, ap
 		hook:       hook,
 		authorizer: true,
 		expiresAt:  time.Now().Add(storageSessionLease),
-	}
+	}, true
+}
 
+// registerSession enforces the per-app lease limit and adds the session to the live map.
+func (s *storageServer) registerSession(w http.ResponseWriter, session *storageSession) bool {
 	s.sessionMu.Lock()
 	for s.sessionsPaused > 0 && !s.sessionClosed {
 		s.sessionCond.Wait()
@@ -309,11 +310,11 @@ func (s *storageServer) createSession(w http.ResponseWriter, r *http.Request, ap
 		s.sessionMu.Unlock()
 		_ = s.finishSession(session, false, context.Background())
 		writeError(w, http.StatusServiceUnavailable, "storage is shutting down")
-		return
+		return false
 	}
 	appSessions := 0
 	for _, other := range s.sessions {
-		if other.app == app {
+		if other.app == session.app {
 			appSessions++
 		}
 	}
@@ -321,13 +322,25 @@ func (s *storageServer) createSession(w http.ResponseWriter, r *http.Request, ap
 		s.sessionMu.Unlock()
 		_ = s.finishSession(session, false, context.Background())
 		writeError(w, http.StatusTooManyRequests, "too many storage sessions")
+		return false
+	}
+	s.sessions[session.id] = session
+	s.sessionMu.Unlock()
+	return true
+}
+
+func (s *storageServer) createSession(w http.ResponseWriter, r *http.Request, app string) {
+	ctx, cancel := context.WithTimeout(r.Context(), storageTimeout)
+	defer cancel()
+
+	session, ok := s.openSession(w, ctx, app)
+	if !ok {
 		return
 	}
-	s.sessions[id] = session
-	expiresAt := session.expiresAt
-	s.sessionMu.Unlock()
-
-	writeJSON(w, http.StatusOK, storageSessionResponse{ID: id, ExpiresAt: expiresAt})
+	if !s.registerSession(w, session) {
+		return
+	}
+	writeJSON(w, http.StatusOK, storageSessionResponse{ID: session.id, ExpiresAt: session.expiresAt})
 }
 
 func (s *storageServer) sessionQuery(w http.ResponseWriter, r *http.Request, app, id string) {
