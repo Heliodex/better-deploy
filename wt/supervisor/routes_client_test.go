@@ -42,6 +42,7 @@ var routeClientNames = map[string]string{
 	"/identity/users":                    "identityUsers",
 	"/identity/users/{rest...}":          "identityUser",
 	"/usage":                             "usage",
+	"/capabilities":                      "capabilities",
 	"/audit":                             "audit",
 	"/metrics":                           "metrics",
 	"/events":                            "events",

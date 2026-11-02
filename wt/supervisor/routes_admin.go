@@ -22,6 +22,7 @@ func (s *supervisor) adminRoutes() *routeTable {
 			s.handleIdentityUser(w, r, params["rest"])
 		})
 		rt.add(http.MethodGet, "/usage", plainHandler(s.handleUsage))
+		rt.add(http.MethodGet, "/capabilities", plainHandler(s.handleCapabilities))
 		rt.add(http.MethodGet, "/audit", plainHandler(s.handleAudit))
 		rt.add(http.MethodGet, "/metrics", plainHandler(s.handleMetrics))
 		rt.add(http.MethodGet, "/events", plainHandler(s.handleEvents))

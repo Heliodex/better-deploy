@@ -30,6 +30,7 @@ export const routes = {
 	audit: "/audit",
 	authToken: (id: string): string => `/auth/tokens/${enc(id)}`,
 	authTokens: "/auth/tokens",
+	capabilities: "/capabilities",
 	events: "/events",
 	healthz: "/healthz",
 	identityUser: (rest = ""): string => `/identity/users/${rest}`,

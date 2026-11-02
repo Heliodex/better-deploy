@@ -192,6 +192,8 @@ type supervisor struct {
 
 	versionOnce         sync.Once
 	version             string
+	compilerOnce        sync.Once
+	compilerOK          bool
 	appRoutesCache      routeCache
 	identityRoutesCache routeCache
 	adminRoutesCache    routeCache
