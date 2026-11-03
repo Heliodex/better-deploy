@@ -24,7 +24,7 @@ const (
 	newSDKWITToken     = "__SDK_WIT__"         //nolint:gosec // Template placeholder, not a credential.
 )
 
-// The SDK module is published from wt/packages with tags such as wt/packages/v0.1.0.
+// The SDK module is published from wt/packages. Go module tags must be full semantic versions, so 1 and v1 are not recognized.
 const (
 	sdkModulePath    = "github.com/heliodex/better-deploy/wt/packages"
 	sdkModuleVersion = "v1.0.0"
