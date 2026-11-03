@@ -59,7 +59,7 @@ func newProviderFixture(t *testing.T) *providerFixture {
 		case "/.well-known/openid-configuration":
 			writeTestJSON(t, w, map[string]string{
 				"issuer":                 fixture.server.URL,
-				"authorisation_endpoint": fixture.server.URL + "/authorize",
+				"authorization_endpoint": fixture.server.URL + "/authorize",
 				"token_endpoint":         fixture.server.URL + "/token",
 				"userinfo_endpoint":      fixture.server.URL + "/userinfo",
 				"end_session_endpoint":   fixture.server.URL + "/endsession",
@@ -176,7 +176,7 @@ func fixtureClient(t *testing.T, fixture *providerFixture) *Client {
 	return client
 }
 
-func TestDiscoverAndAuthorizeURL(t *testing.T) {
+func TestDiscoverAndAuthoriseURL(t *testing.T) {
 	fixture := newProviderFixture(t)
 	client := fixtureClient(t, fixture)
 
@@ -189,19 +189,19 @@ func TestDiscoverAndAuthorizeURL(t *testing.T) {
 		t.Errorf("provider = %+v", provider)
 	}
 
-	authorizeURL, err := client.AuthoriseURL(t.Context(), "https://app.example/auth/callback/", "state", "nonce", "challenge")
+	authoriseURL, err := client.AuthoriseURL(t.Context(), "https://app.example/auth/callback/", "state", "nonce", "challenge")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	parsed, err := url.Parse(authorizeURL)
+	parsed, err := url.Parse(authoriseURL)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	query := parsed.Query()
 	if parsed.Host != strings.TrimPrefix(fixture.server.URL, "http://") || query.Get("state") != "state" || query.Get("nonce") != "nonce" || query.Get("code_challenge") != "challenge" || query.Get("code_challenge_method") != "S256" || query.Get("redirect_uri") != "https://app.example/auth/callback/" || query.Get("client_id") != fixture.clientID {
-		t.Errorf("authorize URL = %s", authorizeURL)
+		t.Errorf("authorise URL = %s", authoriseURL)
 	}
 }
 

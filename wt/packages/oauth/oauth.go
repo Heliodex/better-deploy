@@ -35,8 +35,9 @@ type Config struct {
 
 // Provider is the subset of the discovery document the client uses.
 type Provider struct {
-	Issuer                string `json:"issuer"`
-	AuthorisationEndpoint string `json:"authorisation_endpoint"`
+	Issuer string `json:"issuer"`
+	// AuthorisationEndpoint keeps the protocol's US-spelled JSON key.
+	AuthorisationEndpoint string `json:"authorization_endpoint"`
 	TokenEndpoint         string `json:"token_endpoint"`
 	UserinfoEndpoint      string `json:"userinfo_endpoint"`
 	EndSessionEndpoint    string `json:"end_session_endpoint"`
@@ -368,7 +369,7 @@ func (c *Client) Discover(ctx context.Context) (Provider, error) {
 	}
 
 	if provider.AuthorisationEndpoint == "" || provider.TokenEndpoint == "" {
-		return Provider{}, errors.New("discovery document is missing an authorization or token endpoint")
+		return Provider{}, errors.New("discovery document is missing an authorisation or token endpoint")
 	}
 
 	c.mu.Lock()
@@ -379,7 +380,7 @@ func (c *Client) Discover(ctx context.Context) (Provider, error) {
 	return provider, nil
 }
 
-// AuthoriseURL returns the authorization endpoint URL for a code flow with PKCE.
+// AuthoriseURL returns the authorisation endpoint URL for a code flow with PKCE.
 func (c *Client) AuthoriseURL(ctx context.Context, redirectURI, state, nonce, codeChallenge string) (string, error) {
 	provider, err := c.Discover(ctx)
 	if err != nil {
@@ -400,7 +401,7 @@ func (c *Client) AuthoriseURL(ctx context.Context, redirectURI, state, nonce, co
 	return provider.AuthorisationEndpoint + "?" + params.Encode(), nil
 }
 
-// Exchange redeems an authorization code for tokens.
+// Exchange redeems an authorisation code for tokens.
 func (c *Client) Exchange(ctx context.Context, code, redirectURI, verifier string) (Tokens, error) {
 	provider, err := c.Discover(ctx)
 	if err != nil {

@@ -34,7 +34,7 @@ func testIssuer(t *testing.T) string {
 
 		document, err := json.Marshal(map[string]string{
 			"issuer":                 server.URL,
-			"authorisation_endpoint": server.URL + "/authorize",
+			"authorization_endpoint": server.URL + "/authorize",
 			"token_endpoint":         server.URL + "/token",
 			"end_session_endpoint":   server.URL + "/endsession",
 		})
@@ -282,6 +282,6 @@ func TestLoginRedirectsWithPublicOrigin(t *testing.T) {
 	}
 
 	if location.Query().Get("code_challenge_method") != "S256" || location.Query().Get("state") == "" || location.Query().Get("nonce") == "" {
-		t.Errorf("authorize query = %v", location.Query())
+		t.Errorf("authorise query = %v", location.Query())
 	}
 }
