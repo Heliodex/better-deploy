@@ -14,11 +14,10 @@ import (
 
 // viteDev is the frontend dev server configuration for one app.
 type viteDev struct {
-	appDir, webDir   string
-	command, build   string
-	watch, proxy     []string
-	port             int
-	host, configPath string
+	appDir, webDir, command, build string
+	watch, proxy                   []string
+	port                           int
+	host, configPath               string
 }
 
 // freeLocalPort asks the kernel for an unused loopback port.
