@@ -19,6 +19,8 @@ func staticTestApp(t *testing.T) *app {
 		"static/_app/immutable/app.js":    "console.log('app')",
 		"static/assets/logo.svg":          "<svg></svg>",
 		"static/auth/callback/index.html": "<html>callback</html>",
+		"static/about.html":               "<html>about</html>",
+		"static/admin/page.html":          "<html>admin</html>",
 	}
 	for name, body := range files {
 		path := filepath.Join(dir, name)
@@ -46,6 +48,10 @@ func TestServeStaticFiles(t *testing.T) {
 		{"/assets/logo.svg", "image/svg+xml", "<svg></svg>", "no-cache", true},
 		{"/auth/callback/", "text/html", "<html>callback</html>", "no-cache", true},
 		{"/auth/callback/", "*/*", "<html>callback</html>", "no-cache", true},
+		{"/about", "text/html", "<html>about</html>", "no-cache", true},
+		{"/about/", "text/html", "<html>about</html>", "no-cache", true},
+		{"/about", "*/*", "<html>about</html>", "no-cache", true},
+		{"/about.html", "text/html", "<html>about</html>", "no-cache", true},
 		{"/missing", "text/html", "<html>spa</html>", "no-cache", true},
 		{"/api/notes", "*/*", "", "", false},
 	}
@@ -86,7 +92,7 @@ func TestServeStaticFiles(t *testing.T) {
 
 func TestServeStaticRespectsServerPaths(t *testing.T) {
 	a := staticTestApp(t)
-	a.cfg.ServerPaths = []string{"/auth"}
+	a.cfg.ServerPaths = []string{"/auth", "/admin"}
 
 	cases := []struct {
 		path, accept, body string
@@ -95,6 +101,9 @@ func TestServeStaticRespectsServerPaths(t *testing.T) {
 		{"/auth/login", "text/html", "", false},
 		{"/auth/login", "*/*", "", false},
 		{"/auth/callback/", "text/html", "<html>callback</html>", true},
+		{"/admin/page", "text/html", "<html>admin</html>", true},
+		{"/admin/page/", "text/html", "<html>admin</html>", true},
+		{"/admin/missing", "text/html", "", false},
 		{"/assets/logo.svg", "image/svg+xml", "<svg></svg>", true},
 		{"/authentic", "text/html", "<html>spa</html>", true},
 	}

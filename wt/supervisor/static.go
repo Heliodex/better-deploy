@@ -26,7 +26,22 @@ func (a *app) staticRouting() (string, []string) {
 	return filepath.Join(a.dir, "static"), append([]string(nil), a.cfg.ServerPaths...)
 }
 
-// staticFile maps a request path to a regular file inside dir, rejecting traversal and resolving a directory's index.html for a trailing-slash request.
+// staticRegularFile reports path as a regular file inside dir.
+func staticRegularFile(dir, path string) (string, bool) {
+	inside, err := filepath.Rel(dir, path)
+	if err != nil || inside == ".." || strings.HasPrefix(inside, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return "", false
+	}
+
+	return path, true
+}
+
+// staticFile maps a request path to a regular file inside dir, rejecting traversal, resolving a directory's index.html for a trailing-slash request, and trying <path>.html for extensionless prerendered pages.
 func staticFile(dir, requestPath string) (string, bool) {
 	clean := filepath.Clean("/" + requestPath)
 
@@ -44,6 +59,11 @@ func staticFile(dir, requestPath string) (string, bool) {
 
 	info, err := os.Stat(path)
 	if err != nil {
+		// Pages built with trailingSlash "never" are written as <route>.html.
+		if os.IsNotExist(err) && filepath.Ext(rel) == "" {
+			return staticRegularFile(dir, path+".html")
+		}
+
 		return "", false
 	}
 
@@ -52,18 +72,10 @@ func staticFile(dir, requestPath string) (string, bool) {
 			return "", false
 		}
 
-		path = filepath.Join(path, "index.html")
+		return staticRegularFile(dir, filepath.Join(path, "index.html"))
+	}
 
-		inside, err := filepath.Rel(dir, path)
-		if err != nil || inside == ".." || strings.HasPrefix(inside, ".."+string(filepath.Separator)) {
-			return "", false
-		}
-
-		info, err = os.Stat(path)
-		if err != nil || !info.Mode().IsRegular() {
-			return "", false
-		}
-	} else if !info.Mode().IsRegular() {
+	if !info.Mode().IsRegular() {
 		return "", false
 	}
 
