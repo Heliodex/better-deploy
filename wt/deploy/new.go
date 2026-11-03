@@ -27,7 +27,7 @@ const (
 // The SDK module is published from wt/packages with tags such as wt/packages/v0.1.0.
 const (
 	sdkModulePath    = "github.com/heliodex/better-deploy/wt/packages"
-	sdkModuleVersion = "v0.1.0"
+	sdkModuleVersion = "v1.0.0"
 )
 
 // Template files embedded into the binary. The template's web/node_modules and web/bun.lock are deliberately omitted so a new app starts without them. Keep this list in sync with testdata/template.
