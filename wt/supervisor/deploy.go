@@ -392,7 +392,7 @@ func (s *supervisor) installBundle(w http.ResponseWriter, name string, cfg appCo
 func bundleDigest(dir string) string {
 	hash := sha256.New()
 
-	for _, name := range []string{"main.wasm", "main.cwasm", "artifact.json", "app.json"} {
+	for _, name := range []string{"main.wasm", "main.cwasm", "artefact.json", "app.json"} {
 		data, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
 			continue

@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-const artifactName = "artifact.json"
+const artifactName = "artefact.json"
 
 // artifactInfo records how a bundle's main.cwasm was produced, so a runtime upgrade can detect a stale artifact.
 type artifactInfo struct {
@@ -448,7 +448,7 @@ func (s *supervisor) keepExistingArtifact(dir, cwasm string, recorded artifactIn
 }
 
 // ensureArtifact makes sure dir holds a main.cwasm built for this wasm and the configured runtime.
-// Bundles keep main.wasm and artifact.json so an upgraded wasmtime can rebuild the artifact instead of failing to load it.
+// Bundles keep main.wasm and artefact.json so an upgraded wasmtime can rebuild the artifact instead of failing to load it.
 // requireEpoch asks for instrumentation that supports a per-request wasmtime timeout; the returned bool reports whether the artifact has it.
 func (s *supervisor) ensureArtifact(dir string, requireEpoch bool) (bool, error) {
 	// The cache is shared by every app, so a per-app deploy lock is not enough to protect lookups, installs and pruning.

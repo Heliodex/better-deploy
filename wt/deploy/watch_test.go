@@ -23,7 +23,7 @@ func TestDevSourceStateIgnoresOutputs(t *testing.T) {
 	write("main.go")
 	write("main.wasm")
 	write("main.cwasm")
-	write("artifact.json")
+	write("artefact.json")
 	write("static/index.html")
 	write("node_modules/pkg/index.js")
 

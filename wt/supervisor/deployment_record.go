@@ -38,7 +38,7 @@ func copyFile(src, dst string) error {
 	return closeErr
 }
 
-// copyOptional copies a file when it exists, leaving legacy bundles without main.wasm or artifact.json valid.
+// copyOptional copies a file when it exists, leaving legacy bundles without main.wasm or artefact.json valid.
 func copyOptional(src, dst, name string) error {
 	if err := copyFile(filepath.Join(src, name), filepath.Join(dst, name)); err != nil {
 		if os.IsNotExist(err) {

@@ -34,7 +34,7 @@ func TestDeploymentHistoryRecordListAndPrune(t *testing.T) {
 	source := writeDeploymentSource(t, "demo.localhost")
 	for name, body := range map[string]string{
 		"main.wasm":     "wasm",
-		"artifact.json": `{"wasmtime":"wasmtime-cli 50.0.0","target":"x86_64-test"}`,
+		"artefact.json": `{"wasmtime":"wasmtime-cli 50.0.0","target":"x86_64-test"}`,
 	} {
 		if err := os.WriteFile(filepath.Join(source, name), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
@@ -76,7 +76,7 @@ func TestDeploymentHistoryRecordListAndPrune(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, name := range []string{"app.json", "main.cwasm", "main.wasm", "artifact.json", deploymentMetaName} {
+	for _, name := range []string{"app.json", "main.cwasm", "main.wasm", "artefact.json", deploymentMetaName} {
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
 			t.Errorf("%s: %v", name, err)
 		}

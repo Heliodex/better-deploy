@@ -1,6 +1,6 @@
 example/*/main.wasm
 example/*/main.cwasm
-example/*/artifact.json
+example/*/artefact.json
 example/*/.wt-build.json
 example/*/web/node_modules/
 packages/tmp/

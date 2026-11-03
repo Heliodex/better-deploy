@@ -22,7 +22,7 @@ var devIgnoredDirs = map[string]struct{}{
 var devIgnoredFiles = map[string]struct{}{
 	"main.wasm":     {},
 	"main.cwasm":    {},
-	"artifact.json": {},
+	"artefact.json": {},
 }
 
 type devFileState struct {
@@ -103,7 +103,7 @@ var componentIgnoredDirs = map[string]struct{}{
 }
 
 var componentIgnoredFiles = map[string]struct{}{
-	"artifact.json":          {},
+	"artefact.json":          {},
 	"main.cwasm":             {},
 	"main.wasm":              {},
 	".wt-build.json":         {},

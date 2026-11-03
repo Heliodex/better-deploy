@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-const artifactName = "artifact.json"
+const artifactName = "artefact.json"
 
 // artifact records how main.cwasm was produced so the supervisor can cache or rebuild it by wasm content.
 type artifact struct {
