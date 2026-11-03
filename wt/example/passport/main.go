@@ -454,7 +454,7 @@ func (a *passportApp) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	redirectURI := a.oauth.baseURL(r) + "/auth/callback"
+	redirectURI := a.oauth.baseURL(r) + "/auth/callback/"
 
 	_, err = a.store.Batch(r.Context(),
 		storage.Statement{
@@ -694,6 +694,7 @@ func newPassportApp(store *storage.Client, client *http.Client) *passportApp {
 	a.mux.HandleFunc("POST /api/checkins", a.handleCreateCheckin)
 	a.mux.HandleFunc("DELETE /api/checkins/{id}", a.handleDeleteCheckin)
 	a.mux.HandleFunc("POST /api/logout", a.handleLogout)
+	a.mux.HandleFunc("GET /auth/login", a.handleLogin)
 	a.mux.HandleFunc("POST /auth/login", a.handleLogin)
 	a.mux.HandleFunc("POST /api/auth/callback", a.handleCallback)
 

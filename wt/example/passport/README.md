@@ -6,8 +6,8 @@ Signing in uses the authorization code flow with PKCE against the public [Duende
 
 ## What it demonstrates
 
-- A browser form post starts the flow, so the login route works even though the supervisor serves HTML navigations from `static/` before the component.
-- A prerendered static callback page relays the one-time code to a JSON endpoint on the Go component.
+- `server_paths` keeps the supervisor's static fallback out of `/auth`, so a plain link to `GET /auth/login` reaches the Go component.
+- A prerendered nested SvelteKit page at `/auth/callback/` relays the one-time code to a JSON endpoint on the Go component. The supervisor serves its directory `index.html` for the trailing-slash URL.
 - The component exchanges the code back-channel with PKCE, verifies the ID token's RS256 signature against the provider's JWKS, and calls UserInfo with the access token.
 - Access, refresh and ID tokens stay in SQLite. The browser only receives an HttpOnly, SameSite session cookie whose value is stored as a SHA-256 hash.
 - Posting a check-in requires a valid session; removing one only works for its author.
@@ -17,15 +17,15 @@ Signing in uses the authorization code flow with PKCE against the public [Duende
 
 ```text
 browser                 Go component                  provider
-   |  POST /auth/login        |                           |
+   |  GET /auth/login         |                           |
    |------------------------->| state, nonce, PKCE        |
    |  302 to /connect/authorize                           |
    |<-------------------------|                           |
    |----------------------------------------------------->|
    |                      authenticate                     |
-   |  302 /auth/callback?code&state                       |
+   |  302 /auth/callback/?code&state                      |
    |<-----------------------------------------------------|
-   |  static callback page                                 |
+   |  /auth/callback/ page                                 |
    |  POST /api/auth/callback {code,state}                 |
    |------------------------->|  POST /connect/token      |
    |                          |-------------------------->|
@@ -41,7 +41,7 @@ browser                 Go component                  provider
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `POST` | `/auth/login` | Form post that sets the state cookie and redirects to the provider. |
+| `GET` | `/auth/login` | Sets the state cookie and redirects to the provider. |
 | `POST` | `/api/auth/callback` | Validates state, exchanges the code, verifies the token and creates a session. |
 | `GET` | `/api/session` | Provider metadata plus the signed-in profile, or empty user fields. |
 | `GET` | `/api/checkins?limit=50` | Newest check-ins; `mine` marks the caller's own entries. |
@@ -62,7 +62,7 @@ All settings are read from the app environment at startup.
 | `OAUTH_PROVIDER_NAME` | `Duende IdentityServer demo` | Label shown in the UI. |
 | `OAUTH_BASE_URL` | derived | Overrides the browser-facing origin used for redirect URIs. |
 
-The redirect URI is derived from the request. A same-origin form post carries the browser's `Origin`, so the scheme and port stay correct behind an ingress that terminates TLS; a loopback `Referer` covers the Vite dev server, where `Host` is rewritten to `<app>.localhost`. Set `OAUTH_BASE_URL` if neither is reliable. The redirect URI must be `<base>/auth/callback` exactly.
+The redirect URI is derived from the request. A same-origin request carries the browser's `Origin`, so the scheme and port stay correct behind an ingress that terminates TLS; a loopback `Referer` covers the Vite dev server, where `Host` is rewritten to `<app>.localhost`. Set `OAUTH_BASE_URL` if neither is reliable. The redirect URI must be `<base>/auth/callback/` exactly, including the trailing slash.
 
 ## Local deployment
 
@@ -91,11 +91,13 @@ WT_TOKEN=<supervisor-token> ./wt-deploy deploy \
   --app-host passport-wt-demo.k.hackclub.dev
 ```
 
-Then open `https://passport-wt-demo.k.hackclub.dev/`. The redirect URI sent to the provider is derived from the app host and becomes `https://passport-wt-demo.k.hackclub.dev/auth/callback`.
+Then open `https://passport-wt-demo.k.hackclub.dev/`. The redirect URI sent to the provider is derived from the app host and becomes `https://passport-wt-demo.k.hackclub.dev/auth/callback/`.
 
-## The static callback
+## Server routes and the nested callback
 
-The supervisor serves `GET`/`HEAD` from `static/` before proxying, and a request that accepts `text/html` falls back to `static/index.html`. A server-rendered `/auth/callback` route would therefore never reach the Go handler. The callback is a plain static file at `web/static/auth/callback`, served as `static/auth/callback`; its script posts the code and state to `/api/auth/callback` and then redirects to `/`. Login uses a form `POST` for the same reason. `POST` requests are never handled by the static server.
+The supervisor serves `GET`/`HEAD` from `static/` before proxying, and an unknown HTML navigation falls back to `static/index.html`. The app sets `"server_paths": ["/auth"]`, so `/auth/login` reaches the Go component instead of the SPA index; real static files under that prefix still win.
+
+The callback is a normal prerendered page at `web/src/routes/auth/callback/+page.svelte`. The supervisor serves its directory `index.html` for `/auth/callback/`, and the page posts the code and state to `/api/auth/callback` before returning to `/`. `POST` requests always reach the component. In development, `dev.proxy` includes `/auth` so Vite forwards the login and callback API calls.
 
 The app sets `paths.relative = false` in `vite.config.ts`, so assets resolve from the site root even on nested pages.
 

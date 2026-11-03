@@ -586,6 +586,37 @@ func TestReadManifestValidatesSchedule(t *testing.T) {
 	}
 }
 
+func TestReadManifestValidatesServerPaths(t *testing.T) {
+	dir := t.TempDir()
+	write := func(body string) {
+		t.Helper()
+
+		if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(body), privateFileMode); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write(`{"name":"demo","server_paths":["/auth","/api/v1"]}`)
+
+	if _, err := readManifest(dir); err != nil {
+		t.Errorf("valid server paths rejected: %v", err)
+	}
+
+	for name, body := range map[string]string{
+		"relative":  `{"name":"demo","server_paths":["auth"]}`,
+		"empty":     `{"name":"demo","server_paths":[""]}`,
+		"query":     `{"name":"demo","server_paths":["/auth?x=1"]}`,
+		"unclean":   `{"name":"demo","server_paths":["/a/../b"]}`,
+		"backslash": `{"name":"demo","server_paths":["/a\\b"]}`,
+	} {
+		write(body)
+
+		if _, err := readManifest(dir); err == nil {
+			t.Errorf("%s: expected an error", name)
+		}
+	}
+}
+
 func TestWorkspaceAppDirs(t *testing.T) {
 	root := t.TempDir()
 	for _, name := range []string{"alpha", "beta", "not-an-app"} {

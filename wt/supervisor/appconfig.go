@@ -9,6 +9,7 @@ import (
 	"maps"
 	"net"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -40,6 +41,7 @@ const (
 	untrustedDefaultNetwork        = "storage"
 	maxAllowCallers                = 128
 	maxDependsOn                   = 32
+	maxServerPaths                 = 32
 	maxEgressRules                 = 128
 )
 
@@ -212,6 +214,47 @@ func normalizeAllowCallers(names []string) ([]string, error) {
 
 		seen[name] = struct{}{}
 		out = append(out, name)
+	}
+
+	slices.Sort(out)
+
+	return out, nil
+}
+
+// normalizeServerPaths validates the path prefixes where static HTML fallback must not intercept a browser navigation. Real static files still win.
+func normalizeServerPaths(paths []string) ([]string, error) {
+	if len(paths) > maxServerPaths {
+		return nil, fmt.Errorf("server_paths must contain at most %d prefixes", maxServerPaths)
+	}
+
+	out := make([]string, 0, len(paths))
+	seen := map[string]struct{}{}
+
+	for _, raw := range paths {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			return nil, errors.New("server_paths must not contain an empty prefix")
+		}
+
+		if !strings.HasPrefix(value, "/") {
+			return nil, fmt.Errorf("server_paths: %q must start with /", value)
+		}
+
+		if strings.ContainsAny(value, "?#\\\x00\t\r\n") {
+			return nil, fmt.Errorf("server_paths: %q contains a query, fragment, backslash or whitespace", value)
+		}
+
+		clean := path.Clean(value)
+		if clean != value && clean != strings.TrimSuffix(value, "/") {
+			return nil, fmt.Errorf("server_paths: %q must be a clean absolute path", value)
+		}
+
+		if _, ok := seen[clean]; ok {
+			continue
+		}
+
+		seen[clean] = struct{}{}
+		out = append(out, clean)
 	}
 
 	slices.Sort(out)
@@ -485,6 +528,13 @@ func validateAppSettings(cfg *appConfig) error {
 	if !strings.HasPrefix(cfg.Health, "/") {
 		return errors.New("health must start with /")
 	}
+
+	serverPaths, err := normalizeServerPaths(cfg.ServerPaths)
+	if err != nil {
+		return err
+	}
+
+	cfg.ServerPaths = serverPaths
 
 	if cfg.Env == nil {
 		cfg.Env = map[string]string{}

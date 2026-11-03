@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -37,6 +38,7 @@ type manifest struct {
 	MaxConcurrent   int               `json:"max_concurrency,omitempty"`
 	RequestTimeout  string            `json:"request_timeout,omitempty"`
 	Network         string            `json:"network,omitempty"`
+	ServerPaths     []string          `json:"server_paths,omitempty"`
 	Schedule        []schedule        `json:"schedule,omitempty"`
 	Dev             *appDevConfig     `json:"dev,omitempty"`
 }
@@ -84,6 +86,7 @@ type artifact struct {
 const (
 	minScheduleInterval = time.Second
 	maxScheduleInterval = 24 * time.Hour
+	maxServerPaths      = 32
 )
 
 type deployConfig struct {
@@ -184,6 +187,10 @@ func readManifest(dir string) (manifest, error) {
 		}
 	}
 
+	if err := validateServerPaths(m.ServerPaths); err != nil {
+		return m, err
+	}
+
 	for i, entry := range m.Schedule {
 		if !strings.HasPrefix(entry.Path, "/") {
 			return m, fmt.Errorf("schedule[%d]: path must start with /", i)
@@ -202,6 +209,35 @@ func readManifest(dir string) (manifest, error) {
 	}
 
 	return m, nil
+}
+
+// validateServerPaths checks the runtime-owned prefixes where static HTML fallback must not intercept a navigation.
+func validateServerPaths(paths []string) error {
+	if len(paths) > maxServerPaths {
+		return fmt.Errorf("server_paths must contain at most %d prefixes", maxServerPaths)
+	}
+
+	for _, raw := range paths {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			return errors.New("server_paths must not contain an empty prefix")
+		}
+
+		if !strings.HasPrefix(value, "/") {
+			return fmt.Errorf("server_paths: %q must start with /", value)
+		}
+
+		if strings.ContainsAny(value, "?#\\\x00\t\r\n") {
+			return fmt.Errorf("server_paths: %q contains a query, fragment, backslash or whitespace", value)
+		}
+
+		clean := path.Clean(value)
+		if clean != value && clean != strings.TrimSuffix(value, "/") {
+			return fmt.Errorf("server_paths: %q must be a clean absolute path", value)
+		}
+	}
+
+	return nil
 }
 
 // validAppRelative keeps dev paths inside the app directory.

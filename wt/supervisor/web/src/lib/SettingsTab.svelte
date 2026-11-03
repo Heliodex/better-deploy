@@ -49,6 +49,7 @@ let healthFailures = $state(2)
 let restartOnUnhealthy = $state(false)
 let network = $state<"inherit" | "none" | "storage">("inherit")
 let allowCallers = $state("")
+let serverPaths = $state("")
 let egress = $state("")
 let confirmDelete = $state(false)
 let purge = $state(false)
@@ -76,6 +77,7 @@ $effect(() => {
 	restartOnUnhealthy = current.restart_on_unhealthy
 	network = current.network
 	allowCallers = current.allow_callers.join(", ")
+	serverPaths = current.server_paths.join(", ")
 	egress = current.egress.map((rule) => `${rule.cidr}:${rule.port}`).join(", ")
 })
 
@@ -99,6 +101,15 @@ const parseEgress = (value: string): { cidr: string; port: number }[] => {
 	}
 	return rules
 }
+
+const parsePaths = (value: string): string[] => [
+	...new Set(
+		value
+			.split(/[\s,]+/)
+			.map((entry) => entry.trim())
+			.filter((entry) => entry.length > 0),
+	),
+]
 
 const parseHosts = (value: string): string[] => [
 	...new Set(
@@ -126,6 +137,7 @@ function save(event: SubmitEvent): void {
 		network,
 		request_timeout: requestTimeout.trim(),
 		restart_on_unhealthy: restartOnUnhealthy,
+		server_paths: parsePaths(serverPaths),
 		startup_timeout: startupTimeout.trim(),
 	})
 }
@@ -307,6 +319,15 @@ async function removeSecret(key: string): Promise<void> {
 				>
 			</label>
 			<label class="flex flex-col gap-1">
+				<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Server paths</span>
+				<input
+					aria-label="Server-only path prefixes"
+					class="field"
+					placeholder="/auth, /api"
+					bind:value={serverPaths}
+				>
+			</label>
+			<label class="flex flex-col gap-1">
 				<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Egress allowlist</span>
 				<input
 					aria-label="Egress allowlist"
@@ -331,9 +352,9 @@ async function removeSecret(key: string): Promise<void> {
 				</button>
 				<p class="text-xs text-neutral-500">
 					Env values stay hidden. Memory, concurrency, timeout, network and egress changes need a restart;
-					host, host aliases, health settings and allowed callers apply immediately. Egress entries are
-					IPv4 CIDR:port pairs for explicit outbound access in untrusted mode. Use wildcard aliases such
-					as *.apps.example.com with a matching certificate.
+					host, host aliases, health settings, allowed callers and server paths apply immediately. Egress
+					entries are IPv4 CIDR:port pairs for explicit outbound access in untrusted mode. Use wildcard
+					aliases such as *.apps.example.com with a matching certificate.
 				</p>
 			</div>
 		</form>

@@ -39,6 +39,7 @@ type appConfigPatch struct {
 	DependsOn          *[]string          `json:"depends_on"`
 	JobConcurrency     *int               `json:"job_concurrency"`
 	AllowCallers       *[]string          `json:"allow_callers"`
+	ServerPaths        *[]string          `json:"server_paths"`
 	Egress             *[]egressRule      `json:"egress"`
 	Schedule           *[]scheduleConfig  `json:"schedule"`
 }
@@ -68,6 +69,7 @@ type appConfigResponse struct {
 	DependsOn          []string         `json:"depends_on"`
 	JobConcurrency     int              `json:"job_concurrency"`
 	AllowCallers       []string         `json:"allow_callers"`
+	ServerPaths        []string         `json:"server_paths"`
 	Egress             []egressRule     `json:"egress"`
 	Schedule           []scheduleConfig `json:"schedule"`
 	RestartRequired    bool             `json:"restart_required,omitempty"`
@@ -110,6 +112,11 @@ func configResponse(cfg appConfig) appConfigResponse {
 		callers = []string{}
 	}
 
+	serverPaths := cfg.ServerPaths
+	if serverPaths == nil {
+		serverPaths = []string{}
+	}
+
 	egress := cfg.Egress
 	if egress == nil {
 		egress = []egressRule{}
@@ -144,6 +151,7 @@ func configResponse(cfg appConfig) appConfigResponse {
 		DependsOn:          dependsOn,
 		JobConcurrency:     cfg.JobConcurrency,
 		AllowCallers:       callers,
+		ServerPaths:        serverPaths,
 		Egress:             egress,
 		Schedule:           schedule,
 	}
@@ -201,6 +209,7 @@ func applyConfigPatch(cfg appConfig, patch appConfigPatch) appConfig {
 	applySlice(&cfg.Hosts, patch.Hosts)
 	applySlice(&cfg.DependsOn, patch.DependsOn)
 	applySlice(&cfg.AllowCallers, patch.AllowCallers)
+	applySlice(&cfg.ServerPaths, patch.ServerPaths)
 	applySlice(&cfg.Egress, patch.Egress)
 	applySlice(&cfg.Schedule, patch.Schedule)
 	cfg.Env = mergeConfigEnv(cfg.Env, patch.Env)

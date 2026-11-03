@@ -15,9 +15,10 @@ func staticTestApp(t *testing.T) *app {
 	dir := t.TempDir()
 
 	files := map[string]string{
-		"static/index.html":            "<html>spa</html>",
-		"static/_app/immutable/app.js": "console.log('app')",
-		"static/assets/logo.svg":       "<svg></svg>",
+		"static/index.html":               "<html>spa</html>",
+		"static/_app/immutable/app.js":    "console.log('app')",
+		"static/assets/logo.svg":          "<svg></svg>",
+		"static/auth/callback/index.html": "<html>callback</html>",
 	}
 	for name, body := range files {
 		path := filepath.Join(dir, name)
@@ -43,6 +44,8 @@ func TestServeStaticFiles(t *testing.T) {
 		{"/", "text/html", "<html>spa</html>", "no-cache", true},
 		{"/_app/immutable/app.js", "*/*", "console.log('app')", "public, max-age=31536000, immutable", true},
 		{"/assets/logo.svg", "image/svg+xml", "<svg></svg>", "no-cache", true},
+		{"/auth/callback/", "text/html", "<html>callback</html>", "no-cache", true},
+		{"/auth/callback/", "*/*", "<html>callback</html>", "no-cache", true},
 		{"/missing", "text/html", "<html>spa</html>", "no-cache", true},
 		{"/api/notes", "*/*", "", "", false},
 	}
@@ -78,6 +81,66 @@ func TestServeStaticFiles(t *testing.T) {
 
 	if a.serveStatic(httptest.NewRecorder(), req) {
 		t.Error("POST was served from static files")
+	}
+}
+
+func TestServeStaticRespectsServerPaths(t *testing.T) {
+	a := staticTestApp(t)
+	a.cfg.ServerPaths = []string{"/auth"}
+
+	cases := []struct {
+		path, accept, body string
+		served             bool
+	}{
+		{"/auth/login", "text/html", "", false},
+		{"/auth/login", "*/*", "", false},
+		{"/auth/callback/", "text/html", "<html>callback</html>", true},
+		{"/assets/logo.svg", "image/svg+xml", "<svg></svg>", true},
+		{"/authentic", "text/html", "<html>spa</html>", true},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest(http.MethodGet, "http://demo.localhost"+tc.path, nil)
+		req.Header.Set("Accept", tc.accept)
+
+		rec := httptest.NewRecorder()
+		if got := a.serveStatic(rec, req); got != tc.served {
+			t.Errorf("%s served = %v, want %v", tc.path, got, tc.served)
+			continue
+		}
+
+		if tc.served && rec.Body.String() != tc.body {
+			t.Errorf("%s body = %q, want %q", tc.path, rec.Body.String(), tc.body)
+		}
+	}
+
+	a.cfg.ServerPaths = []string{"/"}
+	req := httptest.NewRequest(http.MethodGet, "http://demo.localhost/missing", nil)
+	req.Header.Set("Accept", "text/html")
+
+	if a.serveStatic(httptest.NewRecorder(), req) {
+		t.Error("root server path still fell back to index.html")
+	}
+}
+
+func TestServerPathMatch(t *testing.T) {
+	prefixes := []string{"/auth", "/api/v1"}
+
+	for path, want := range map[string]bool{
+		"/auth":         true,
+		"/auth/":        true,
+		"/auth/login":   true,
+		"/authentic":    false,
+		"/api/v1":       true,
+		"/api/v1/users": true,
+		"/api/v2":       false,
+	} {
+		if got := serverPathMatch(path, prefixes); got != want {
+			t.Errorf("serverPathMatch(%q) = %v, want %v", path, got, want)
+		}
+	}
+
+	if !serverPathMatch("/anything", []string{"/"}) {
+		t.Error("root prefix did not match")
 	}
 }
 

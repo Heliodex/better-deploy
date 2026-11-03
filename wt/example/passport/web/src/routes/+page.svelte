@@ -155,11 +155,9 @@ async function signOut(): Promise<void> {
 				{#if signedIn}
 					<a class="button" href="#wall">Read the wall <span aria-hidden="true">→</span></a>
 				{:else}
-					<form action="/auth/login" class="signin" method="post">
-						<button class="button" type="submit">
-							Sign in with OAuth <span aria-hidden="true">→</span>
-						</button>
-					</form>
+					<a class="button" href="/auth/login" rel="external"
+						>Sign in with OAuth <span aria-hidden="true">→</span></a
+					>
 				{/if}
 				<a class="text-link" href="#how">How the flow works</a>
 			</div>
@@ -260,11 +258,9 @@ async function signOut(): Promise<void> {
 					</div>
 				</dl>
 
-				<form action="/auth/login" class="signin" method="post">
-					<button class="button" type="submit">
-						Sign in at the provider <span aria-hidden="true">→</span>
-					</button>
-				</form>
+				<a class="button" href="/auth/login" rel="external"
+					>Sign in at the provider <span aria-hidden="true">→</span></a
+				>
 				<p class="hint">
 					On the Duende demo, use <code>alice</code> / <code>alice</code> (or <code>bob</code> /
 					<code>bob</code>).
@@ -743,11 +739,6 @@ async function signOut(): Promise<void> {
 	background: var(--teal-soft);
 	border: 1px solid var(--line-strong);
 	border-radius: 999px;
-}
-
-.signin {
-	display: flex;
-	align-self: flex-start;
 }
 
 .button {

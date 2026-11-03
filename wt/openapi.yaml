@@ -1764,6 +1764,10 @@ components:
         schedule:
           type: array
           items: {}
+        server_paths:
+          type: array
+          items:
+            type: string
         startup_timeout:
           type: string
       required:
@@ -1784,6 +1788,7 @@ components:
         - request_timeout
         - restart_on_unhealthy
         - schedule
+        - server_paths
         - startup_timeout
       title: AppConfig
     BackupInfo:

@@ -18,7 +18,15 @@ func (a *app) staticDir() string {
 	return filepath.Join(dir, "static")
 }
 
-// staticFile maps a request path to a regular file inside dir, rejecting traversal and directories.
+// staticRouting returns the static directory and the app's server-only path prefixes under one lock.
+func (a *app) staticRouting() (string, []string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	return filepath.Join(a.dir, "static"), append([]string(nil), a.cfg.ServerPaths...)
+}
+
+// staticFile maps a request path to a regular file inside dir, rejecting traversal and resolving a directory's index.html for a trailing-slash request.
 func staticFile(dir, requestPath string) (string, bool) {
 	clean := filepath.Clean("/" + requestPath)
 
@@ -35,11 +43,42 @@ func staticFile(dir, requestPath string) (string, bool) {
 	}
 
 	info, err := os.Stat(path)
-	if err != nil || !info.Mode().IsRegular() {
+	if err != nil {
+		return "", false
+	}
+
+	if info.IsDir() {
+		if !strings.HasSuffix(requestPath, "/") {
+			return "", false
+		}
+
+		path = filepath.Join(path, "index.html")
+
+		inside, err := filepath.Rel(dir, path)
+		if err != nil || inside == ".." || strings.HasPrefix(inside, ".."+string(filepath.Separator)) {
+			return "", false
+		}
+
+		info, err = os.Stat(path)
+		if err != nil || !info.Mode().IsRegular() {
+			return "", false
+		}
+	} else if !info.Mode().IsRegular() {
 		return "", false
 	}
 
 	return path, true
+}
+
+// serverPathMatch reports whether a request path belongs to a prefix the app handles at runtime instead of the SPA index.
+func serverPathMatch(requestPath string, prefixes []string) bool {
+	for _, prefix := range prefixes {
+		if prefix == "/" || requestPath == prefix || strings.HasPrefix(requestPath, prefix+"/") {
+			return true
+		}
+	}
+
+	return false
 }
 
 // acceptsEncoding reports whether an Accept-Encoding value permits one coding, including q=0 rejection.
@@ -122,13 +161,13 @@ func serveStaticFile(w http.ResponseWriter, r *http.Request, path, original, req
 	http.ServeFile(w, r, path)
 }
 
-// serveStatic answers a request from the bundle's static/ directory. Unknown paths fall back to index.html only for HTML navigations, so API routes still reach the component.
+// serveStatic answers a request from the bundle's static/ directory. Real files win, trailing-slash directories resolve their index.html, and only an HTML navigation outside the app's server paths falls back to the SPA index.
 func (a *app) serveStatic(w http.ResponseWriter, r *http.Request) bool {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		return false
 	}
 
-	dir := a.staticDir()
+	dir, serverPaths := a.staticRouting()
 	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 		return false
 	}
@@ -136,6 +175,10 @@ func (a *app) serveStatic(w http.ResponseWriter, r *http.Request) bool {
 	if path, original, encoding, hasVariants, ok := staticVariant(dir, r.URL.Path, r.Header.Get("Accept-Encoding")); ok {
 		serveStaticFile(w, r, path, original, r.URL.Path, encoding, hasVariants)
 		return true
+	}
+
+	if serverPathMatch(r.URL.Path, serverPaths) {
+		return false
 	}
 
 	if !strings.Contains(strings.ToLower(r.Header.Get("Accept")), "text/html") {

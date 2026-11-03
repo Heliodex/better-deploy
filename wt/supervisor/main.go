@@ -79,6 +79,7 @@ type appConfig struct {
 	DependsOn          []string          `json:"depends_on,omitempty"`
 	JobConcurrency     int               `json:"job_concurrency,omitempty"`
 	AllowCallers       []string          `json:"allow_callers,omitempty"`
+	ServerPaths        []string          `json:"server_paths,omitempty"`
 	Egress             []egressRule      `json:"egress,omitempty"`
 	Schedule           []scheduleConfig  `json:"schedule,omitempty"`
 	Dev                *appDevConfig     `json:"dev,omitempty"`

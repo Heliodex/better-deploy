@@ -145,6 +145,34 @@ func TestAppConfigPatchesHealthSettings(t *testing.T) {
 	}
 }
 
+func TestNormalizeServerPaths(t *testing.T) {
+	cfg, err := normalizeAppConfig(appConfig{
+		Name:        "demo",
+		Host:        "demo.localhost",
+		Health:      "/",
+		Env:         map[string]string{},
+		ServerPaths: []string{"/auth/", "/api/v1", "/auth", "/"},
+	}, "demo", "localhost", tenantTrusted)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(cfg.ServerPaths) != 3 || cfg.ServerPaths[0] != "/" || cfg.ServerPaths[1] != "/api/v1" || cfg.ServerPaths[2] != "/auth" {
+		t.Errorf("server paths = %v", cfg.ServerPaths)
+	}
+
+	for _, paths := range [][]string{
+		{"auth"},
+		{"/auth?x=1"},
+		{"/a/../b"},
+		{""},
+	} {
+		if _, err := normalizeAppConfig(appConfig{ServerPaths: paths}, "demo", "localhost", tenantTrusted); err == nil {
+			t.Errorf("accepted invalid server paths %v", paths)
+		}
+	}
+}
+
 func TestAppConfigRejectsTakenHost(t *testing.T) {
 	dir := t.TempDir()
 

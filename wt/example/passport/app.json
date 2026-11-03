@@ -12,5 +12,6 @@
 	"host": "passport.localhost",
 	"memory_mb": 128,
 	"name": "passport",
-	"request_timeout": "30s"
+	"request_timeout": "30s",
+	"server_paths": ["/auth"]
 }
