@@ -34,18 +34,22 @@ func (a *notesApp) migrate(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
 	_, err = a.store.Exec(ctx, `create index if not exists notes_created_idx on notes(created_at)`)
+
 	return err
 }
 
 func (a *notesApp) handleListNotes(w http.ResponseWriter, r *http.Request) {
 	limit := defaultLimit
+
 	if value := r.URL.Query().Get("limit"); value != "" {
 		parsed, err := strconv.Atoi(value)
 		if err != nil || parsed < 1 {
 			app.WriteError(w, http.StatusBadRequest, "limit must be a positive integer")
 			return
 		}
+
 		limit = min(parsed, maxLimit)
 	}
 
@@ -57,18 +61,22 @@ func (a *notesApp) handleListNotes(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	out := []contract.Note{}
+
 	for rows.Next() {
 		var item contract.Note
 		if err := rows.Scan(&item.ID, &item.Text, &item.CreatedAt); err != nil {
 			app.WriteError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+
 		out = append(out, item)
 	}
+
 	if err := rows.Err(); err != nil {
 		app.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	app.WriteJSON(w, http.StatusOK, contract.NotesResponse{Notes: out})
 }
 
@@ -83,11 +91,13 @@ func (a *notesApp) handleCreateNote(w http.ResponseWriter, r *http.Request) {
 		Text:      strings.TrimSpace(request.Text),
 		CreatedAt: time.Now().UTC().Format(app.TimestampFormat),
 	}
+
 	if _, err := a.store.Exec(r.Context(), `insert into notes (id, text, created_at) values (?, ?, ?)`,
 		item.ID, item.Text, item.CreatedAt); err != nil {
 		app.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	app.WriteJSON(w, http.StatusCreated, item)
 }
 
@@ -101,6 +111,7 @@ func newNotesApp(store *storage.Client) *notesApp {
 	a := &notesApp{store: store, mux: http.NewServeMux()}
 	a.mux.HandleFunc("GET /api/notes", a.handleListNotes)
 	a.mux.HandleFunc("POST /api/notes", a.handleCreateNote)
+
 	return a
 }
 
