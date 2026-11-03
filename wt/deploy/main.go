@@ -1113,6 +1113,8 @@ func main() {
 		err = runDoctor(args)
 	case "runtime":
 		err = runRuntime(args)
+	case "inspect":
+		err = runInspect(args)
 	case "rollback":
 		err = runRollback(args)
 	case "backup":
@@ -1133,6 +1135,7 @@ func main() {
 		fmt.Println("       wt route check <app> [--path /healthz]")
 		fmt.Println("       wt doctor [app] [--path /healthz]")
 		fmt.Println("       wt runtime [--wasmtime PATH]")
+		fmt.Println("       wt inspect <app> [--dir DIR]")
 		fmt.Println("       wt deploy [--dir DIR] [--host URL] [--token TOKEN] [--app-host HOST]")
 		fmt.Println("       wt rollback <app> <deployment-id> [--backup SNAPSHOT]")
 		fmt.Println("       wt backup <list|create|restore|download|import> <app> ...")

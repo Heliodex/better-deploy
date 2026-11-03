@@ -82,6 +82,7 @@ printf 'client-secret' | wt-deploy secrets passport set OAUTH_CLIENT_SECRET
 wt-deploy route check passport
 wt-deploy doctor passport
 wt-deploy runtime
+wt-deploy inspect passport --dir ./passport
 wt-deploy contract --dir ./passport
 wt-deploy deploy --dir ./notes --app-host notes.example.com
 wt-deploy build --dir ./notes --out notes.tar.gz
@@ -96,7 +97,7 @@ wt-deploy open notes
 wt-deploy completion bash
 ```
 
-`build` and its `bundle` alias run the component and static build phases, precompile the component when wasmtime is available and write the upload tarball; they are the local build path for the pinned Containerfile. `--force-build` rebuilds both phases, and deploys automatically use the static-only path when the server already runs the same wasm, even if a component build just ran. `deploy` asks `GET /capabilities` before building and takes the compile target from the supervisor unless `--target` is set. A successful deploy prints the app URL, digest, status and elapsed time; `--json` keeps the raw response. `apps` prints the supervisor build and runtime to stderr before the table. `logs --follow` consumes the same SSE stream as the panel, so it works through the proxy. `config show` prints the ETag on stderr. `open` launches the app host with the platform opener; `--print` prints the URL instead. `completion` emits a static bash, zsh or fish script.
+`build` and its `bundle` alias run the component and static build phases, precompile the component when wasmtime is available and write the upload tarball; they are the local build path for the pinned Containerfile. `--force-build` rebuilds both phases, and deploys automatically use the static-only path when the server already runs the same wasm, even if a component build just ran. `deploy` asks `GET /capabilities` before building and takes the compile target from the supervisor unless `--target` is set. A successful deploy prints the app URL, digest, status and elapsed time; `--json` keeps the raw response. `apps` prints the supervisor build and runtime to stderr before the table. `logs --follow` consumes the same SSE stream as the panel, so it works through the proxy. `config show` prints the ETag on stderr. `open` launches the app host with the platform opener; `--print` prints the URL instead. `inspect` combines supervisor runtime, app status, digest, latest deployment, effective runtime config, env and secret key names, a route probe and an optional comparison with the local `--dir` app.json; `--json` prints the same report for tooling. `completion` emits a static bash, zsh or fish script.
 
 ## Test
 

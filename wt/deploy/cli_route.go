@@ -17,10 +17,11 @@ import (
 const defaultRoutePath = "/"
 
 type routeAppInfo struct {
-	Name   string `json:"name"`
-	Host   string `json:"host"`
-	Status string `json:"status"`
-	Ready  bool   `json:"ready"`
+	Name          string `json:"name"`
+	Host          string `json:"host"`
+	Status        string `json:"status"`
+	Ready         bool   `json:"ready"`
+	CurrentDigest string `json:"currentDigest"`
 }
 
 type routeReport struct {
