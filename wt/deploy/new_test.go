@@ -321,6 +321,60 @@ func TestRunNew(t *testing.T) {
 	}
 }
 
+func TestRunNewContractless(t *testing.T) {
+	root := t.TempDir()
+	writeExampleLayout(t, root)
+	dir := filepath.Join(root, "example", "plainnotes")
+
+	if err := runNew([]string{"--dir", dir, "--contract", "none"}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range []string{"main.go", "main_test.go", "web/src/lib/contract.ts"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Errorf("missing %s: %v", name, err)
+		}
+	}
+
+	for _, name := range []string{"contract", "web/scripts/contract.ts"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			t.Errorf("%s should not exist in a contractless scaffold", name)
+		}
+	}
+
+	main, err := os.ReadFile(filepath.Join(dir, "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.Contains(string(main), `plainnotes/contract`) || !strings.Contains(string(main), "type note struct") {
+		t.Errorf("main.go still uses the generated contract:\n%s", main)
+	}
+
+	if _, err := parser.ParseFile(token.NewFileSet(), "main.go", main, parser.AllErrors); err != nil {
+		t.Errorf("main.go does not parse: %v", err)
+	}
+
+	manifest, err := os.ReadFile(filepath.Join(dir, "app.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.Contains(string(manifest), "go generate ./contract/") || strings.Contains(string(manifest), `web/src/lib/contract.ts`) {
+		t.Errorf("app.json still references the contract pipeline:\n%s", manifest)
+	}
+
+	if err := runNew([]string{"--dir", filepath.Join(root, "example", "badcontract"), "--contract", "prisma"}); err == nil {
+		t.Error("unknown contract mode was accepted")
+	}
+}
+
+func TestRunContractMissingGenerator(t *testing.T) {
+	if err := runContract([]string{"--dir", t.TempDir()}); err == nil || !strings.Contains(err.Error(), "no contract generator") {
+		t.Errorf("error = %v", err)
+	}
+}
+
 func TestEmbeddedSDKMatchesPackages(t *testing.T) {
 	roots := []string{"app", "storage", "wasihttp", "httpmeta", "wit", "oauth", "session"}
 	for _, root := range roots {

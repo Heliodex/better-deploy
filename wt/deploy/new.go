@@ -45,8 +45,11 @@ var sdkFS embed.FS
 //go:embed all:testdata/standalone
 var standaloneFS embed.FS
 
+//go:embed all:testdata/contractless
+var contractlessFS embed.FS
+
 type newConfig struct {
-	dir, module, sdk string
+	dir, module, sdk, contract string
 }
 
 func resolveNewConfig(args []string) (*newConfig, error) {
@@ -55,6 +58,8 @@ func resolveNewConfig(args []string) (*newConfig, error) {
 	module := flags.String("module", "", "Go module path for a standalone app (default: app name)")
 
 	sdk := flags.String("sdk", "", "copy the Go SDK from this packages directory instead of the embedded SDK")
+
+	contract := flags.String("contract", "valibot", "contract pipeline: valibot or none")
 	if err := flags.Parse(args); err != nil {
 		return nil, err
 	}
@@ -63,7 +68,13 @@ func resolveNewConfig(args []string) (*newConfig, error) {
 		return nil, fmt.Errorf("unexpected argument %q", flags.Arg(0))
 	}
 
-	return &newConfig{dir: *dir, module: *module, sdk: *sdk}, nil
+	switch *contract {
+	case "valibot", "none":
+	default:
+		return nil, fmt.Errorf("--contract must be valibot or none, got %q", *contract)
+	}
+
+	return &newConfig{dir: *dir, module: *module, sdk: *sdk, contract: *contract}, nil
 }
 
 type scaffoldMode struct {
@@ -410,6 +421,59 @@ func installStandaloneSDK(cfg *newConfig, abs, module string) (int, error) {
 	return sdkCount, nil
 }
 
+// writeContractlessScaffold replaces the generated-contract wiring with hand-written note types and removes the generator.
+func writeContractlessScaffold(abs string) (int, error) {
+	for _, name := range []string{"main.go", "main_test.go"} {
+		data, err := contractlessFS.ReadFile("testdata/contractless/" + name)
+		if err != nil {
+			return 0, err
+		}
+
+		if err := os.WriteFile(filepath.Join(abs, name), data, scaffoldFileMode); err != nil {
+			return 0, err
+		}
+	}
+
+	if err := os.RemoveAll(filepath.Join(abs, "contract")); err != nil {
+		return 0, err
+	}
+
+	if err := os.Remove(filepath.Join(abs, "web", "scripts", "contract.ts")); err != nil && !os.IsNotExist(err) {
+		return 0, err
+	}
+
+	_ = os.Remove(filepath.Join(abs, "web", "scripts"))
+
+	manifestPath := filepath.Join(abs, "app.json")
+
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return 0, err
+	}
+
+	text := strings.ReplaceAll(string(data), "go generate ./contract/ && ", "")
+	text = strings.ReplaceAll(text, `, "web/src/lib/contract.ts"`, "")
+	text = strings.ReplaceAll(text, `["web/src/lib/contract.ts"]`, "[]")
+
+	if err := os.WriteFile(manifestPath, []byte(text), scaffoldFileMode); err != nil {
+		return 0, err
+	}
+
+	contractPath := filepath.Join(abs, "web", "src", "lib", "contract.ts")
+
+	contractData, err := os.ReadFile(contractPath)
+	if err != nil {
+		return 0, err
+	}
+
+	contractText := strings.Replace(string(contractData), "// These schemas are the source of truth for the generated Go contract. The client trims before validating and the server trims before storing, so leading and trailing spaces are not part of the contract.", "// These schemas validate requests and responses in the browser. The Go notes types are hand-written in main.go.", 1)
+	if err := os.WriteFile(contractPath, []byte(contractText), scaffoldFileMode); err != nil {
+		return 0, err
+	}
+
+	return 2, nil
+}
+
 // printNewSummary shows what was created and the first commands to run.
 func printNewSummary(dir, name string, mode scaffoldMode, count int) {
 	layout := map[bool]string{true: "standalone", false: "monorepo"}[mode.standalone]
@@ -450,6 +514,15 @@ func runNew(args []string) error {
 	count, err := writeTemplateFiles(abs, name, mode)
 	if err != nil {
 		return err
+	}
+
+	if cfg.contract == "none" {
+		contractCount, err := writeContractlessScaffold(abs)
+		if err != nil {
+			return err
+		}
+
+		count += contractCount
 	}
 
 	if mode.standalone {
