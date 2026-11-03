@@ -85,15 +85,15 @@ export async function deleteMonitor(id: string): Promise<void> {
 	throw apiError(data, response.status)
 }
 
-function normalizeURL(value: string): string {
+function normaliseURL(value: string): string {
 	const trimmed = value.trim()
 	if (trimmed === "" || trimmed.includes("://")) return trimmed
 	return `https://${trimmed}`
 }
 
-// validateMonitor normalizes the URL, then uses the same schema the server was generated from.
+// validateMonitor normalises the URL, then uses the same schema the server was generated from.
 export function validateMonitor(name: string, url: string): { name: string; url: string } {
-	const input = safeParse(createMonitorSchema, { name: name.trim(), url: normalizeURL(url) })
+	const input = safeParse(createMonitorSchema, { name: name.trim(), url: normaliseURL(url) })
 	if (!input.success) throw toValidationError(input.issues)
 	return input.output
 }

@@ -219,7 +219,7 @@ func validateStoredToken(token authToken) error {
 		return fmt.Errorf("token %q has an invalid hash", token.ID)
 	}
 
-	if _, err := normalizeTokenApps(token.Role, token.Apps); err != nil {
+	if _, err := normaliseTokenApps(token.Role, token.Apps); err != nil {
 		return fmt.Errorf("token %q: %w", token.ID, err)
 	}
 
@@ -236,8 +236,8 @@ func validateRole(role string) error {
 	}
 }
 
-// normalizeTokenApps validates an app allowlist. Admin tokens imply every app. Other roles need an explicit list or "*".
-func normalizeTokenApps(role string, apps []string) ([]string, error) {
+// normaliseTokenApps validates an app allowlist. Admin tokens imply every app. Other roles need an explicit list or "*".
+func normaliseTokenApps(role string, apps []string) ([]string, error) {
 	if role == roleAdmin {
 		return []string{"*"}, nil
 	}
@@ -384,7 +384,7 @@ func (s *authStore) create(name, role string, apps []string, expiresAt time.Time
 		return "", authTokenInfo{}, err
 	}
 
-	apps, err := normalizeTokenApps(role, apps)
+	apps, err := normaliseTokenApps(role, apps)
 	if err != nil {
 		return "", authTokenInfo{}, err
 	}

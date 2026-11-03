@@ -251,7 +251,7 @@ func newJobStore(manager *jobManager, app, path string, concurrency int) (*jobSt
 		manager:     manager,
 		app:         app,
 		path:        path,
-		concurrency: normalizeJobConcurrency(concurrency),
+		concurrency: normaliseJobConcurrency(concurrency),
 		wake:        make(chan struct{}, 1),
 	}
 
@@ -264,8 +264,8 @@ func newJobStore(manager *jobManager, app, path string, concurrency int) (*jobSt
 	return store, nil
 }
 
-// normalizeJobConcurrency clamps the requested worker limit to the supported range.
-func normalizeJobConcurrency(value int) int {
+// normaliseJobConcurrency clamps the requested worker limit to the supported range.
+func normaliseJobConcurrency(value int) int {
 	if value <= 0 {
 		return jobDefaultConcurrency
 	}
@@ -366,7 +366,7 @@ func (s *jobStore) setConcurrency(value int) {
 	}
 
 	s.mu.Lock()
-	s.concurrency = normalizeJobConcurrency(value)
+	s.concurrency = normaliseJobConcurrency(value)
 	s.mu.Unlock()
 	s.signal()
 }

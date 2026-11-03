@@ -243,9 +243,9 @@ func persistAppConfig(dir string, cfg appConfig, mode string) error {
 	return nil
 }
 
-// validateConfigPatch normalizes a patch and checks host, dependency and quota constraints.
+// validateConfigPatch normalises a patch and checks host, dependency and quota constraints.
 func (s *supervisor) validateConfigPatch(w http.ResponseWriter, a *app, cfg appConfig, patch appConfigPatch) (appConfig, bool) {
-	next, err := normalizeAppConfig(applyConfigPatch(cfg, patch), a.name, s.cfg.domain, s.cfg.tenantMode)
+	next, err := normaliseAppConfig(applyConfigPatch(cfg, patch), a.name, s.cfg.domain, s.cfg.tenantMode)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return cfg, false

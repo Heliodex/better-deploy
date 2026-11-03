@@ -103,7 +103,7 @@ func TestAppConfigPatchesHealthSettings(t *testing.T) {
 	dir := t.TempDir()
 	cfg := appConfig{Name: "demo", Host: "demo.localhost", Health: "/healthz", Env: map[string]string{}}
 
-	cfg, err := normalizeAppConfig(cfg, "demo", "localhost", tenantTrusted)
+	cfg, err := normaliseAppConfig(cfg, "demo", "localhost", tenantTrusted)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,8 +145,8 @@ func TestAppConfigPatchesHealthSettings(t *testing.T) {
 	}
 }
 
-func TestNormalizeServerPaths(t *testing.T) {
-	cfg, err := normalizeAppConfig(appConfig{
+func TestNormaliseServerPaths(t *testing.T) {
+	cfg, err := normaliseAppConfig(appConfig{
 		Name:        "demo",
 		Host:        "demo.localhost",
 		Health:      "/",
@@ -167,7 +167,7 @@ func TestNormalizeServerPaths(t *testing.T) {
 		{"/a/../b"},
 		{""},
 	} {
-		if _, err := normalizeAppConfig(appConfig{ServerPaths: paths}, "demo", "localhost", tenantTrusted); err == nil {
+		if _, err := normaliseAppConfig(appConfig{ServerPaths: paths}, "demo", "localhost", tenantTrusted); err == nil {
 			t.Errorf("accepted invalid server paths %v", paths)
 		}
 	}
@@ -202,7 +202,7 @@ func TestAppConfigRejectsTakenHost(t *testing.T) {
 func TestAppConfigPatchesCallersAndEgress(t *testing.T) {
 	dir := t.TempDir()
 
-	cfg, err := normalizeAppConfig(appConfig{Name: "demo", Host: "demo.localhost", Health: "/", Env: map[string]string{}}, "demo", "localhost", tenantTrusted)
+	cfg, err := normaliseAppConfig(appConfig{Name: "demo", Host: "demo.localhost", Health: "/", Env: map[string]string{}}, "demo", "localhost", tenantTrusted)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +271,7 @@ func TestAppConfigPatchesCallersAndEgress(t *testing.T) {
 func TestAppConfigConditionalRequests(t *testing.T) {
 	dir := t.TempDir()
 
-	cfg, err := normalizeAppConfig(appConfig{Name: "demo", Host: "demo.localhost", Health: "/", Env: map[string]string{}}, "demo", "localhost", tenantTrusted)
+	cfg, err := normaliseAppConfig(appConfig{Name: "demo", Host: "demo.localhost", Health: "/", Env: map[string]string{}}, "demo", "localhost", tenantTrusted)
 	if err != nil {
 		t.Fatal(err)
 	}

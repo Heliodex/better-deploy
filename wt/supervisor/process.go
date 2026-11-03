@@ -527,8 +527,8 @@ func (s *supervisor) loadApps() error {
 		if info, ok := snapshot[name]; ok && len(info.Config) > 0 {
 			var stored appConfig
 			if err := json.Unmarshal(info.Config, &stored); err == nil {
-				if normalized, err := normalizeAppConfig(stored, name, s.cfg.domain, s.cfg.tenantMode); err == nil {
-					cfg = normalized
+				if normalised, err := normaliseAppConfig(stored, name, s.cfg.domain, s.cfg.tenantMode); err == nil {
+					cfg = normalised
 				}
 			}
 		}

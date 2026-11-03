@@ -32,7 +32,7 @@ func TestIPv6EgressEnv(t *testing.T) {
 }
 
 func TestUntrustedDefaults(t *testing.T) {
-	cfg, err := normalizeAppConfig(appConfig{}, "demo", "localhost", tenantUntrusted)
+	cfg, err := normaliseAppConfig(appConfig{}, "demo", "localhost", tenantUntrusted)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestUntrustedDefaults(t *testing.T) {
 
 func TestUntrustedExplicitTimeoutDisable(t *testing.T) {
 	for _, value := range []string{"0", "none"} {
-		cfg, err := normalizeAppConfig(appConfig{RequestTimeout: value}, "demo", "localhost", tenantUntrusted)
+		cfg, err := normaliseAppConfig(appConfig{RequestTimeout: value}, "demo", "localhost", tenantUntrusted)
 		if err != nil {
 			t.Errorf("%q: %v", value, err)
 			continue
@@ -69,21 +69,21 @@ func TestUntrustedExplicitTimeoutDisable(t *testing.T) {
 }
 
 func TestUntrustedRejectsInheritNetwork(t *testing.T) {
-	if _, err := normalizeAppConfig(appConfig{Network: "inherit"}, "demo", "localhost", tenantUntrusted); err == nil {
+	if _, err := normaliseAppConfig(appConfig{Network: "inherit"}, "demo", "localhost", tenantUntrusted); err == nil {
 		t.Error("network inherit should be rejected in untrusted mode")
 	}
 
-	if _, err := normalizeAppConfig(appConfig{Network: "none"}, "demo", "localhost", tenantUntrusted); err != nil {
+	if _, err := normaliseAppConfig(appConfig{Network: "none"}, "demo", "localhost", tenantUntrusted); err != nil {
 		t.Errorf("network none should be accepted: %v", err)
 	}
 
-	if _, err := normalizeAppConfig(appConfig{Network: "storage"}, "demo", "localhost", tenantUntrusted); err != nil {
+	if _, err := normaliseAppConfig(appConfig{Network: "storage"}, "demo", "localhost", tenantUntrusted); err != nil {
 		t.Errorf("network storage should be accepted: %v", err)
 	}
 }
 
 func TestTrustedDefaultsStayUnchanged(t *testing.T) {
-	cfg, err := normalizeAppConfig(appConfig{}, "demo", "localhost", tenantTrusted)
+	cfg, err := normaliseAppConfig(appConfig{}, "demo", "localhost", tenantTrusted)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestTrustedDefaultsStayUnchanged(t *testing.T) {
 }
 
 func TestConfigResponseIncludesResourceLimits(t *testing.T) {
-	cfg, err := normalizeAppConfig(appConfig{CPUMillicores: 500, PidsMax: 64, IOWeight: 50}, "demo", "localhost", tenantTrusted)
+	cfg, err := normaliseAppConfig(appConfig{CPUMillicores: 500, PidsMax: 64, IOWeight: 50}, "demo", "localhost", tenantTrusted)
 	if err != nil {
 		t.Fatal(err)
 	}

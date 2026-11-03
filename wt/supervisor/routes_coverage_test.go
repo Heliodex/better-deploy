@@ -12,8 +12,8 @@ type routeInfo struct {
 	path   string
 }
 
-// normalizeRoutePath replaces every captured segment so OpenAPI templates compare equal.
-func normalizeRoutePath(path string) string {
+// normaliseRoutePath replaces every captured segment so OpenAPI templates compare equal.
+func normaliseRoutePath(path string) string {
 	segments := routeSegments(path)
 	for i, segment := range segments {
 		if strings.HasPrefix(segment, "{") {
@@ -42,7 +42,7 @@ func (s *supervisor) routeEntries() []routeInfo {
 				continue
 			}
 
-			entries = append(entries, routeInfo{method: route.method, path: normalizeRoutePath("/" + strings.Join(route.pattern, "/"))})
+			entries = append(entries, routeInfo{method: route.method, path: normaliseRoutePath("/" + strings.Join(route.pattern, "/"))})
 		}
 	}
 
@@ -68,7 +68,7 @@ func TestOpenAPIDocumentsRoutes(t *testing.T) {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(line, "  /") || strings.HasPrefix(line, "  \"/") {
 			raw := strings.Trim(strings.TrimSuffix(trimmed, ":"), "\"")
-			path = normalizeRoutePath(raw)
+			path = normaliseRoutePath(raw)
 
 			continue
 		}

@@ -7,8 +7,8 @@ import (
 	"unicode"
 )
 
-// normalizeFieldName converts a generated Go field name to the JSON spelling for the common cases.
-func normalizeFieldName(name string) string {
+// normaliseFieldName converts a generated Go field name to the JSON spelling for the common cases.
+func normaliseFieldName(name string) string {
 	if name == "" {
 		return name
 	}
@@ -39,7 +39,7 @@ func lowerFieldName(message string) string {
 		end = len(rest)
 	}
 
-	return prefix + normalizeFieldName(rest[:end]) + rest[end:]
+	return prefix + normaliseFieldName(rest[:end]) + rest[end:]
 }
 
 // jsonErrorMessage trims the encoding/json/v2 wrapper from a generated validation error, leaving the field and the rule that failed.
@@ -81,7 +81,7 @@ func jsonErrorField(message, fallback string) string {
 		return fallback
 	}
 
-	return normalizeFieldName(name)
+	return normaliseFieldName(name)
 }
 
 // ReadJSON decodes a request body into out, writing a 400 with a readable field error when it cannot. field names the value a bare invalid-value error refers to.

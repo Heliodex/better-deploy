@@ -293,8 +293,8 @@ func (s *identityStore) saveSessionsLocked() error {
 	return writeFileAtomicMode(s.sessionsPath(), append(data, '\n'), 0o600)
 }
 
-// normalizeIdentityEmail lowercases and validates a platform user email.
-func normalizeIdentityEmail(value string) (string, error) {
+// normaliseIdentityEmail lowercases and validates a platform user email.
+func normaliseIdentityEmail(value string) (string, error) {
 	value = strings.ToLower(strings.TrimSpace(value))
 	if len(value) < 3 || len(value) > identityEmailMax || strings.Count(value, "@") != 1 {
 		return "", errIdentityEmail
@@ -308,8 +308,8 @@ func normalizeIdentityEmail(value string) (string, error) {
 	return value, nil
 }
 
-// normalizeIdentityName trims and bounds a display name.
-func normalizeIdentityName(value string) (string, error) {
+// normaliseIdentityName trims and bounds a display name.
+func normaliseIdentityName(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" || len(value) > identityNameMax {
 		return "", errIdentityName
@@ -318,8 +318,8 @@ func normalizeIdentityName(value string) (string, error) {
 	return value, nil
 }
 
-// normalizeIdentityGroups trims, deduplicates and sorts group names.
-func normalizeIdentityGroups(groups []string) ([]string, error) {
+// normaliseIdentityGroups trims, deduplicates and sorts group names.
+func normaliseIdentityGroups(groups []string) ([]string, error) {
 	if len(groups) > identityGroupMax {
 		return nil, errIdentityGroups
 	}
@@ -426,17 +426,17 @@ func identityTokenHash(token string) string {
 }
 
 func (s *identityStore) createUser(email, name, password string, groups []string) (identityUserInfo, error) {
-	email, err := normalizeIdentityEmail(email)
+	email, err := normaliseIdentityEmail(email)
 	if err != nil {
 		return identityUserInfo{}, err
 	}
 
-	name, err = normalizeIdentityName(name)
+	name, err = normaliseIdentityName(name)
 	if err != nil {
 		return identityUserInfo{}, err
 	}
 
-	groups, err = normalizeIdentityGroups(groups)
+	groups, err = normaliseIdentityGroups(groups)
 	if err != nil {
 		return identityUserInfo{}, err
 	}
@@ -509,12 +509,12 @@ func (s *identityStore) user(id string) (identityUserInfo, bool) {
 }
 
 func (s *identityStore) updateUser(id, name string, groups []string, disabled *bool) (identityUserInfo, error) {
-	name, err := normalizeIdentityName(name)
+	name, err := normaliseIdentityName(name)
 	if err != nil {
 		return identityUserInfo{}, err
 	}
 
-	groups, err = normalizeIdentityGroups(groups)
+	groups, err = normaliseIdentityGroups(groups)
 	if err != nil {
 		return identityUserInfo{}, err
 	}
@@ -601,7 +601,7 @@ func (s *identityStore) deleteUserSessionsLocked(userID string) {
 }
 
 func (s *identityStore) authenticate(email, password string) (identityUserInfo, error) {
-	email, err := normalizeIdentityEmail(email)
+	email, err := normaliseIdentityEmail(email)
 	if err != nil {
 		return identityUserInfo{}, errIdentityNoUser
 	}

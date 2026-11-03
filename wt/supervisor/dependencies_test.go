@@ -106,7 +106,7 @@ func TestDependencyCycles(t *testing.T) {
 		t.Errorf("acyclic graph rejected: %v", err)
 	}
 
-	if _, err := normalizeDependsOn([]string{"a"}, "a"); err == nil {
+	if _, err := normaliseDependsOn([]string{"a"}, "a"); err == nil {
 		t.Error("self dependency was accepted")
 	}
 }

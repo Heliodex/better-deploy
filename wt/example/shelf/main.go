@@ -313,7 +313,7 @@ func loadDays(ctx context.Context, id string) ([]dayCount, error) {
 	return days, nil
 }
 
-func normalizeTag(tag string) string {
+func normaliseTag(tag string) string {
 	tag = strings.ToLower(strings.TrimSpace(tag))
 	return strings.TrimPrefix(tag, "#")
 }
@@ -341,7 +341,7 @@ func parseTags(raw string) ([]string, error) {
 	tags := []string{}
 
 	for part := range strings.SplitSeq(raw, ",") {
-		tag := normalizeTag(part)
+		tag := normaliseTag(part)
 		if tag == "" || seen[tag] {
 			continue
 		}
@@ -572,7 +572,7 @@ func loadIndex(ctx context.Context, q, tag string, page int) (indexData, error) 
 
 func handleIndex(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	tag := normalizeTag(r.URL.Query().Get("tag"))
+	tag := normaliseTag(r.URL.Query().Get("tag"))
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 
 	data, err := loadIndex(r.Context(), q, tag, page)

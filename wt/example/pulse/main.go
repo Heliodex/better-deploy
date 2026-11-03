@@ -329,8 +329,8 @@ func publishCycle(ctx context.Context, result cycleResult) {
 	}
 }
 
-// normalizeName trims and validates a monitor label.
-func normalizeName(value string) (string, error) {
+// normaliseName trims and validates a monitor label.
+func normaliseName(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return "", errors.New("name is required")
@@ -343,8 +343,8 @@ func normalizeName(value string) (string, error) {
 	return value, nil
 }
 
-// normalizeURL accepts http and https only and adds https when the scheme is missing.
-func normalizeURL(value string) (string, error) {
+// normaliseURL accepts http and https only and adds https when the scheme is missing.
+func normaliseURL(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return "", errors.New("url is required")
@@ -388,13 +388,13 @@ func handleCreateMonitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	name, err := normalizeName(request.Name)
+	name, err := normaliseName(request.Name)
 	if err != nil {
 		app.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	target, err := normalizeURL(request.URL)
+	target, err := normaliseURL(request.URL)
 	if err != nil {
 		app.WriteError(w, http.StatusBadRequest, err.Error())
 		return

@@ -80,9 +80,9 @@ func validateAppHost(host, domain string) error {
 	return nil
 }
 
-// normalizeAppHosts lower-cases, validates, de-duplicates and sorts aliases, dropping the primary host when it also appears in the list.
-func normalizeAppHosts(hosts []string, primary, domain string) ([]string, error) {
-	normalized := []string{}
+// normaliseAppHosts lower-cases, validates, de-duplicates and sorts aliases, dropping the primary host when it also appears in the list.
+func normaliseAppHosts(hosts []string, primary, domain string) ([]string, error) {
+	normalised := []string{}
 	seen := map[string]bool{primary: true}
 
 	for _, raw := range hosts {
@@ -100,12 +100,12 @@ func normalizeAppHosts(hosts []string, primary, domain string) ([]string, error)
 		}
 
 		seen[host] = true
-		normalized = append(normalized, host)
+		normalised = append(normalised, host)
 	}
 
-	slices.Sort(normalized)
+	slices.Sort(normalised)
 
-	return normalized, nil
+	return normalised, nil
 }
 
 // appHosts returns the primary host followed by its aliases.

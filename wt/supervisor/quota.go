@@ -56,8 +56,8 @@ func (q *dataQuota) enabled() bool {
 	return q != nil && q.mode == dataQuotaSetquota
 }
 
-// normalizeDataQuotaMode validates WT_DATA_QUOTA_MODE and fills in the monitor default.
-func normalizeDataQuotaMode(mode string) (string, error) {
+// normaliseDataQuotaMode validates WT_DATA_QUOTA_MODE and fills in the monitor default.
+func normaliseDataQuotaMode(mode string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case "", dataQuotaMonitor:
 		return dataQuotaMonitor, nil
@@ -68,9 +68,9 @@ func normalizeDataQuotaMode(mode string) (string, error) {
 	}
 }
 
-// validateDataQuotaConfig normalizes the mode and checks the binaries that setquota mode needs.
+// validateDataQuotaConfig normalises the mode and checks the binaries that setquota mode needs.
 func validateDataQuotaConfig(cfg *config) error {
-	mode, err := normalizeDataQuotaMode(cfg.dataQuotaMode)
+	mode, err := normaliseDataQuotaMode(cfg.dataQuotaMode)
 	if err != nil {
 		return err
 	}

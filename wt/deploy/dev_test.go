@@ -16,9 +16,9 @@ import (
 	"time"
 )
 
-func TestNormalizeDevConfig(t *testing.T) {
+func TestNormaliseDevConfig(t *testing.T) {
 	dev := &appDevConfig{}
-	if err := normalizeDevConfig(dev); err != nil {
+	if err := normaliseDevConfig(dev); err != nil {
 		t.Fatal(err)
 	}
 
@@ -47,13 +47,13 @@ func TestNormalizeDevConfig(t *testing.T) {
 		"parent supervisor proxy":   {SupervisorProxy: []string{"/../events"}},
 		"large port":                {Port: 70000},
 	} {
-		if err := normalizeDevConfig(bad); err == nil {
+		if err := normaliseDevConfig(bad); err == nil {
 			t.Errorf("%s was accepted", name)
 		}
 	}
 
 	empty := &appDevConfig{SupervisorProxy: []string{}}
-	if err := normalizeDevConfig(empty); err != nil {
+	if err := normaliseDevConfig(empty); err != nil {
 		t.Fatal(err)
 	}
 
@@ -82,7 +82,7 @@ func TestViteDevConfigIncludesProxy(t *testing.T) {
 		Name: testAppName,
 		Dev:  &appDevConfig{Port: 5199, Proxy: []string{"/api", "/v1"}},
 	}
-	if err := normalizeDevConfig(m.Dev); err != nil {
+	if err := normaliseDevConfig(m.Dev); err != nil {
 		t.Fatal(err)
 	}
 
@@ -140,7 +140,7 @@ func TestViteDevConfigCanDisableSupervisorProxy(t *testing.T) {
 	}
 
 	m := manifest{Name: testAppName, Dev: &appDevConfig{Port: 5199, SupervisorProxy: []string{}}}
-	if err := normalizeDevConfig(m.Dev); err != nil {
+	if err := normaliseDevConfig(m.Dev); err != nil {
 		t.Fatal(err)
 	}
 
@@ -299,7 +299,7 @@ func TestViteDevProxy(t *testing.T) {
 	}
 
 	m := manifest{Name: "guestbook", Dev: &appDevConfig{Proxy: []string{"/api"}}}
-	if err := normalizeDevConfig(m.Dev); err != nil {
+	if err := normaliseDevConfig(m.Dev); err != nil {
 		t.Fatal(err)
 	}
 

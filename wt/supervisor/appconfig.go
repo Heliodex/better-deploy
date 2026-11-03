@@ -189,8 +189,8 @@ func sameRuntimeConfig(a, b appConfig) bool {
 	return slices.Equal(a.Schedule, b.Schedule)
 }
 
-// normalizeAllowCallers validates the target app's inbound app-to-app allowlist. Empty entries are ignored so a panel comma-separated field stays convenient.
-func normalizeAllowCallers(names []string) ([]string, error) {
+// normaliseAllowCallers validates the target app's inbound app-to-app allowlist. Empty entries are ignored so a panel comma-separated field stays convenient.
+func normaliseAllowCallers(names []string) ([]string, error) {
 	if len(names) > maxAllowCallers {
 		return nil, fmt.Errorf("allow_callers must contain at most %d apps", maxAllowCallers)
 	}
@@ -221,8 +221,8 @@ func normalizeAllowCallers(names []string) ([]string, error) {
 	return out, nil
 }
 
-// normalizeServerPaths validates the path prefixes where static HTML fallback must not intercept a browser navigation. Real static files still win.
-func normalizeServerPaths(paths []string) ([]string, error) {
+// normaliseServerPaths validates the path prefixes where static HTML fallback must not intercept a browser navigation. Real static files still win.
+func normaliseServerPaths(paths []string) ([]string, error) {
 	if len(paths) > maxServerPaths {
 		return nil, fmt.Errorf("server_paths must contain at most %d prefixes", maxServerPaths)
 	}
@@ -262,8 +262,8 @@ func normalizeServerPaths(paths []string) ([]string, error) {
 	return out, nil
 }
 
-// normalizeDependsOn validates the apps this app waits for before its host routes traffic. Forward references are allowed because a dependency may be deployed later.
-func normalizeDependsOn(names []string, self string) ([]string, error) {
+// normaliseDependsOn validates the apps this app waits for before its host routes traffic. Forward references are allowed because a dependency may be deployed later.
+func normaliseDependsOn(names []string, self string) ([]string, error) {
 	if len(names) > maxDependsOn {
 		return nil, fmt.Errorf("depends_on must contain at most %d apps", maxDependsOn)
 	}
@@ -298,8 +298,8 @@ func normalizeDependsOn(names []string, self string) ([]string, error) {
 	return out, nil
 }
 
-// normalizeEgress validates an explicit untrusted-mode outbound allowlist. CIDR rules are IPv4 only because the IPv6 chain remains deny-all.
-func normalizeEgress(rules []egressRule) ([]egressRule, error) {
+// normaliseEgress validates an explicit untrusted-mode outbound allowlist. CIDR rules are IPv4 only because the IPv6 chain remains deny-all.
+func normaliseEgress(rules []egressRule) ([]egressRule, error) {
 	if len(rules) > maxEgressRules {
 		return nil, fmt.Errorf("egress must contain at most %d rules", maxEgressRules)
 	}
@@ -460,8 +460,8 @@ func parseScheduleInterval(entry scheduleConfig) (time.Duration, error) {
 	return every, nil
 }
 
-// normalizeAppAddress fills in and validates the app name, host and host aliases.
-func normalizeAppAddress(cfg appConfig, name, domain string) (appConfig, error) {
+// normaliseAppAddress fills in and validates the app name, host and host aliases.
+func normaliseAppAddress(cfg appConfig, name, domain string) (appConfig, error) {
 	if strings.TrimSpace(cfg.Name) == "" {
 		cfg.Name = name
 	}
@@ -475,7 +475,7 @@ func normalizeAppAddress(cfg appConfig, name, domain string) (appConfig, error) 
 		return cfg, err
 	}
 
-	hosts, err := normalizeAppHosts(cfg.Hosts, cfg.Host, domain)
+	hosts, err := normaliseAppHosts(cfg.Hosts, cfg.Host, domain)
 	if err != nil {
 		return cfg, err
 	}
@@ -485,23 +485,23 @@ func normalizeAppAddress(cfg appConfig, name, domain string) (appConfig, error) 
 	return cfg, nil
 }
 
-// normalizeAppRelations validates the caller allowlist, dependencies and egress rules.
-func normalizeAppRelations(cfg appConfig, name string) (appConfig, error) {
-	callers, err := normalizeAllowCallers(cfg.AllowCallers)
+// normaliseAppRelations validates the caller allowlist, dependencies and egress rules.
+func normaliseAppRelations(cfg appConfig, name string) (appConfig, error) {
+	callers, err := normaliseAllowCallers(cfg.AllowCallers)
 	if err != nil {
 		return cfg, err
 	}
 
 	cfg.AllowCallers = callers
 
-	dependsOn, err := normalizeDependsOn(cfg.DependsOn, name)
+	dependsOn, err := normaliseDependsOn(cfg.DependsOn, name)
 	if err != nil {
 		return cfg, err
 	}
 
 	cfg.DependsOn = dependsOn
 
-	egress, err := normalizeEgress(cfg.Egress)
+	egress, err := normaliseEgress(cfg.Egress)
 	if err != nil {
 		return cfg, err
 	}
@@ -529,7 +529,7 @@ func validateAppSettings(cfg *appConfig) error {
 		return errors.New("health must start with /")
 	}
 
-	serverPaths, err := normalizeServerPaths(cfg.ServerPaths)
+	serverPaths, err := normaliseServerPaths(cfg.ServerPaths)
 	if err != nil {
 		return err
 	}
@@ -606,8 +606,8 @@ func applyTenantDefaults(cfg *appConfig, mode string) {
 	}
 }
 
-// normalizeAppNetwork validates the network and identity modes for the tenant model.
-func normalizeAppNetwork(cfg *appConfig, mode string) error {
+// normaliseAppNetwork validates the network and identity modes for the tenant model.
+func normaliseAppNetwork(cfg *appConfig, mode string) error {
 	switch cfg.Network {
 	case "", "inherit":
 		cfg.Network = "inherit"
@@ -689,7 +689,7 @@ func validateAppSchedule(cfg *appConfig) error {
 func applyAppDefaults(cfg *appConfig, mode string) error {
 	applyTenantDefaults(cfg, mode)
 
-	if err := normalizeAppNetwork(cfg, mode); err != nil {
+	if err := normaliseAppNetwork(cfg, mode); err != nil {
 		return err
 	}
 
@@ -700,14 +700,14 @@ func applyAppDefaults(cfg *appConfig, mode string) error {
 	return validateAppSchedule(cfg)
 }
 
-// normalizeAppConfig fills in defaults and validates an app's runtime config. The optional mode applies untrusted defaults.
-func normalizeAppConfig(cfg appConfig, name, domain, mode string) (appConfig, error) {
-	cfg, err := normalizeAppAddress(cfg, name, domain)
+// normaliseAppConfig fills in defaults and validates an app's runtime config. The optional mode applies untrusted defaults.
+func normaliseAppConfig(cfg appConfig, name, domain, mode string) (appConfig, error) {
+	cfg, err := normaliseAppAddress(cfg, name, domain)
 	if err != nil {
 		return cfg, err
 	}
 
-	cfg, err = normalizeAppRelations(cfg, name)
+	cfg, err = normaliseAppRelations(cfg, name)
 	if err != nil {
 		return cfg, err
 	}
@@ -723,7 +723,7 @@ func normalizeAppConfig(cfg appConfig, name, domain, mode string) (appConfig, er
 	return cfg, nil
 }
 
-// readAppConfig reads and normalizes app.json, returning an empty config when the file is absent.
+// readAppConfig reads and normalises app.json, returning an empty config when the file is absent.
 func readAppConfig(dir, name, domain, mode string) (appConfig, error) {
 	cfg := appConfig{Name: name, Env: map[string]string{}}
 
@@ -738,5 +738,5 @@ func readAppConfig(dir, name, domain, mode string) (appConfig, error) {
 		return cfg, fmt.Errorf("read app.json: %w", err)
 	}
 
-	return normalizeAppConfig(cfg, name, domain, mode)
+	return normaliseAppConfig(cfg, name, domain, mode)
 }

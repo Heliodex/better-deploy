@@ -15,7 +15,7 @@ import (
 func TestDataQuotaConfigPatchAppliesBeforePersist(t *testing.T) {
 	dir := t.TempDir()
 
-	cfg, err := normalizeAppConfig(appConfig{Name: "demo", Host: "demo.localhost", DiskMB: 128}, "demo", "localhost", tenantUntrusted)
+	cfg, err := normaliseAppConfig(appConfig{Name: "demo", Host: "demo.localhost", DiskMB: 128}, "demo", "localhost", tenantUntrusted)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestDataQuotaConfigPatchAppliesBeforePersist(t *testing.T) {
 func TestDataQuotaConfigPatchFailureKeepsConfig(t *testing.T) {
 	dir := t.TempDir()
 
-	cfg, err := normalizeAppConfig(appConfig{Name: "demo", Host: "demo.localhost", DiskMB: 128}, "demo", "localhost", tenantUntrusted)
+	cfg, err := normaliseAppConfig(appConfig{Name: "demo", Host: "demo.localhost", DiskMB: 128}, "demo", "localhost", tenantUntrusted)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestDataQuotaConfigPatchFailureKeepsConfig(t *testing.T) {
 func TestDataQuotaConfigPatchWithoutUIDIsDeferred(t *testing.T) {
 	dir := t.TempDir()
 
-	cfg, err := normalizeAppConfig(appConfig{Name: "demo", Host: "demo.localhost", DiskMB: 128}, "demo", "localhost", tenantUntrusted)
+	cfg, err := normaliseAppConfig(appConfig{Name: "demo", Host: "demo.localhost", DiskMB: 128}, "demo", "localhost", tenantUntrusted)
 	if err != nil {
 		t.Fatal(err)
 	}

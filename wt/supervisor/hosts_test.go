@@ -65,8 +65,8 @@ func TestValidHostPattern(t *testing.T) {
 	}
 }
 
-func TestNormalizeAppHostAliases(t *testing.T) {
-	cfg, err := normalizeAppConfig(appConfig{
+func TestNormaliseAppHostAliases(t *testing.T) {
+	cfg, err := normaliseAppConfig(appConfig{
 		Host:  "Demo.LocalHost",
 		Hosts: []string{"Old.Example.com", "*.Apps.Example.com", "demo.localhost", "old.example.com"},
 	}, "demo", "localhost", tenantTrusted)
@@ -83,17 +83,17 @@ func TestNormalizeAppHostAliases(t *testing.T) {
 	}
 
 	for _, host := range []string{"localhost", "127.0.0.1", "::1"} {
-		if _, err := normalizeAppConfig(appConfig{Host: host}, "demo", "localhost", tenantTrusted); err == nil {
-			t.Errorf("normalizeAppConfig accepted reserved host %q", host)
+		if _, err := normaliseAppConfig(appConfig{Host: host}, "demo", "localhost", tenantTrusted); err == nil {
+			t.Errorf("normaliseAppConfig accepted reserved host %q", host)
 		}
 	}
 
-	if _, err := normalizeAppConfig(appConfig{Host: "apps.example.com"}, "demo", "apps.example.com", tenantTrusted); err == nil {
-		t.Error("normalizeAppConfig accepted the supervisor domain root")
+	if _, err := normaliseAppConfig(appConfig{Host: "apps.example.com"}, "demo", "apps.example.com", tenantTrusted); err == nil {
+		t.Error("normaliseAppConfig accepted the supervisor domain root")
 	}
 
-	if _, err := normalizeAppConfig(appConfig{Host: "demo.example.com", Hosts: []string{"*.localhost"}}, "demo", "example.com", tenantTrusted); err == nil {
-		t.Error("normalizeAppConfig accepted a wildcard without a dotted suffix")
+	if _, err := normaliseAppConfig(appConfig{Host: "demo.example.com", Hosts: []string{"*.localhost"}}, "demo", "example.com", tenantTrusted); err == nil {
+		t.Error("normaliseAppConfig accepted a wildcard without a dotted suffix")
 	}
 }
 
@@ -198,7 +198,7 @@ func TestHandlerKeepsAdminOnReservedHost(t *testing.T) {
 func TestAppConfigHostAliases(t *testing.T) {
 	dir := t.TempDir()
 
-	cfg, err := normalizeAppConfig(appConfig{
+	cfg, err := normaliseAppConfig(appConfig{
 		Name:  "demo",
 		Host:  "demo.example.com",
 		Hosts: []string{"*.apps.example.com", "old.example.com"},
@@ -291,7 +291,7 @@ func TestInstallStaticUpdatesHostAliases(t *testing.T) {
 func TestAppConfigRejectsWildcardAliasConflict(t *testing.T) {
 	dir := t.TempDir()
 
-	cfg, err := normalizeAppConfig(appConfig{Name: "demo", Host: "demo.example.com", Env: map[string]string{}}, "demo", "example.com", tenantTrusted)
+	cfg, err := normaliseAppConfig(appConfig{Name: "demo", Host: "demo.example.com", Env: map[string]string{}}, "demo", "example.com", tenantTrusted)
 	if err != nil {
 		t.Fatal(err)
 	}

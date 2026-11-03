@@ -154,13 +154,13 @@ func TestDataQuotaModeValidation(t *testing.T) {
 		"setquota": dataQuotaSetquota,
 	}
 	for input, want := range cases {
-		got, err := normalizeDataQuotaMode(input)
+		got, err := normaliseDataQuotaMode(input)
 		if err != nil || got != want {
-			t.Errorf("normalizeDataQuotaMode(%q) = %q, %v; want %q", input, got, err, want)
+			t.Errorf("normaliseDataQuotaMode(%q) = %q, %v; want %q", input, got, err, want)
 		}
 	}
 
-	if _, err := normalizeDataQuotaMode("project"); err == nil {
+	if _, err := normaliseDataQuotaMode("project"); err == nil {
 		t.Error("an unknown quota mode should be rejected")
 	}
 

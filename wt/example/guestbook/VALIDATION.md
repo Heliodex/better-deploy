@@ -65,7 +65,7 @@ I sent the same probes to every server: missing `name`, a 41-character name, `na
 Two results matter more than the rest:
 
 - **GraphQL coerced `name: 123` to the string `"123"` and created the message.** GraphQL types describe shape, and its scalar coercion rules are not validation. Resolver errors also arrive as HTTP 200 with an `errors` array.
-- **Schema validation is not normalization.** The JSON Schema, codegen, Huma and OpenAPI prototypes validated the raw strings, then the handler trimmed them, so `"   "` passed and became an empty message. The manual REST and RPC handlers trim before checking. Any schema-first design has to either normalize before validating or encode the trimmed shape in the schema (for example, a `pattern` that rejects leading/trailing whitespace).
+- **Schema validation is not normalization.** The JSON Schema, codegen, Huma and OpenAPI prototypes validated the raw strings, then the handler trimmed them, so `"   "` passed and became an empty message. The manual REST and RPC handlers trim before checking. Any schema-first design has to either normalise before validating or encode the trimmed shape in the schema (for example, a `pattern` that rejects leading/trailing whitespace).
 
 Connect also drops unknown JSON fields silently and omits zero-valued proto fields in responses (`reactions: {}`), which is normal proto JSON but awkward for a browser client.
 

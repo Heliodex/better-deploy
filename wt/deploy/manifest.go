@@ -140,7 +140,7 @@ func readManifest(dir string) (manifest, error) {
 	}
 
 	if m.Dev != nil {
-		if err := normalizeDevConfig(m.Dev); err != nil {
+		if err := normaliseDevConfig(m.Dev); err != nil {
 			return m, err
 		}
 	}
@@ -207,8 +207,8 @@ func validInputPath(value string) bool {
 // defaultSupervisorProxy lists the supervisor-owned app-host routes the Vite dev server must forward in addition to the app API.
 var defaultSupervisorProxy = []string{"/v1/events", "/_wt/blobs", "/_wt/identity"}
 
-// normalizeDevConfig validates dev paths and fills the default proxy prefixes.
-func normalizeDevConfig(dev *appDevConfig) error {
+// normaliseDevConfig validates dev paths and fills the default proxy prefixes.
+func normaliseDevConfig(dev *appDevConfig) error {
 	if !validAppRelative(dev.Web) {
 		return fmt.Errorf("dev.web %q must stay inside the app directory", dev.Web)
 	}

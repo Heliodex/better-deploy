@@ -158,7 +158,7 @@ func (c claims) identity() Identity {
 	return identity
 }
 
-// audienceStrings normalizes an aud claim, which may be one string or an array.
+// audienceStrings normalises an aud claim, which may be one string or an array.
 func audienceStrings(value any) []string {
 	switch typed := value.(type) {
 	case string:
