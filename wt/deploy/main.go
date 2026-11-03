@@ -87,7 +87,7 @@ func resolveConfig(args []string) (*deployConfig, error) {
 	}
 
 	if *host == "" {
-		return nil, errors.New("set --host, WT_DEPLOY_HOST or host in the config file")
+		return nil, errors.New("set --host, WT_DEPLOY_HOST, or host in the config file")
 	}
 
 	return &deployConfig{

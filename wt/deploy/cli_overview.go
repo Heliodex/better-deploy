@@ -77,7 +77,7 @@ func printOverview(w io.Writer, dir string) {
 	}
 
 	if host == "" {
-		fmt.Fprintln(w, "host: not configured (set --host, WT_DEPLOY_HOST or host in the config file)")
+		fmt.Fprintln(w, "host: not configured (set --host, WT_DEPLOY_HOST, or host in the config file)")
 	} else {
 		fmt.Fprintf(w, "host: %s\n", host)
 	}
