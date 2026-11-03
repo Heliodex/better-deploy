@@ -207,7 +207,6 @@ func TestComponentSourceState(t *testing.T) {
 	files := []string{
 		"app.json",
 		"main.go",
-		"contract/generate.go",
 		"contract/contract.gen.go",
 		"web/src/App.svelte",
 		"web/src/lib/contract.ts",
@@ -233,7 +232,7 @@ func TestComponentSourceState(t *testing.T) {
 		_, ok := state[filepath.Join(root, name)]
 		return ok
 	}
-	for _, name := range []string{"app.json", "main.go", "contract/generate.go", "web/src/lib/contract.ts"} {
+	for _, name := range []string{"app.json", "main.go", "web/src/lib/contract.ts"} {
 		if !has(name) {
 			t.Errorf("%s was not watched", name)
 		}

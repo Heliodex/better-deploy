@@ -39,13 +39,11 @@ const (
 //go:embed all:testdata/template/main_test.go
 //go:embed all:testdata/template/wasm.go
 //go:embed all:testdata/template/.gitignore
-//go:embed all:testdata/template/contract
 //go:embed all:testdata/template/web/package.json
 //go:embed all:testdata/template/web/tsconfig.json
 //go:embed all:testdata/template/web/vite.config.ts
 //go:embed all:testdata/template/web/.npmrc
 //go:embed all:testdata/template/web/src
-//go:embed all:testdata/template/web/scripts
 //go:embed all:testdata/template/web/static
 var templateFS embed.FS
 
@@ -278,7 +276,7 @@ func validateLocalSDK(dir string) error {
 	return nil
 }
 
-// writeContractlessScaffold replaces the generated-contract wiring with hand-written note types and removes the generator.
+// writeContractlessScaffold replaces the generated-contract wiring with hand-written note types.
 func writeContractlessScaffold(abs string) (int, error) {
 	for _, name := range []string{"main.go", "main_test.go"} {
 		data, err := contractlessFS.ReadFile("testdata/contractless/" + name)
@@ -291,16 +289,6 @@ func writeContractlessScaffold(abs string) (int, error) {
 		}
 	}
 
-	if err := os.RemoveAll(filepath.Join(abs, "contract")); err != nil {
-		return 0, err
-	}
-
-	if err := os.Remove(filepath.Join(abs, "web", "scripts", "contract.ts")); err != nil && !os.IsNotExist(err) {
-		return 0, err
-	}
-
-	_ = os.Remove(filepath.Join(abs, "web", "scripts"))
-
 	manifestPath := filepath.Join(abs, "app.json")
 
 	data, err := os.ReadFile(manifestPath)
@@ -308,7 +296,7 @@ func writeContractlessScaffold(abs string) (int, error) {
 		return 0, err
 	}
 
-	text := strings.ReplaceAll(string(data), "go generate ./contract/ && ", "")
+	text := strings.ReplaceAll(string(data), "\t\"contract\": \"valibot\",\n", "")
 	text = strings.ReplaceAll(text, `, "web/src/lib/contract.ts"`, "")
 	text = strings.ReplaceAll(text, `["web/src/lib/contract.ts"]`, "[]")
 

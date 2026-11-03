@@ -9,7 +9,6 @@
 	},
 	"scripts": {
 		"build": "vite build",
-		"contract": "bun scripts/contract.ts",
 		"dev": "vite dev",
 		"lint": "oxlint --fix; biome check --fix",
 		"prepare": "svelte-kit sync || echo ''",

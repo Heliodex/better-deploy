@@ -7,3 +7,4 @@ main.wasm
 main.cwasm
 
 .wt-build.json
+.wt-contract-*.ts
