@@ -253,7 +253,7 @@ func main() {
 		fmt.Println("       wt open <app>")
 		fmt.Println("       wt build --dir DIR --out app.tar.gz")
 		fmt.Println("       wt dev [--dir DIR] [--port 8080] [--watch=false]")
-		fmt.Println("       wt new --dir PATH [--sdk PATH|embedded] [--module MODULE] [--contract valibot|none]")
+		fmt.Println("       wt new --dir PATH [--sdk PATH] [--module MODULE] [--contract valibot|none]")
 		fmt.Println("       wt contract [--dir DIR]")
 		fmt.Println("       wt completion <bash|zsh|fish>")
 	default:

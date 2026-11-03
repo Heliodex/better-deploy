@@ -1,9 +1,7 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json/v2"
-	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -29,7 +27,7 @@ func writeExampleLayout(t *testing.T, root string) {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(filepath.Join(root, "packages", "go.mod"), []byte("module wt.packages\n"), privateFileMode); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "packages", "go.mod"), []byte("module github.com/heliodex/better-deploy/wt/packages\n"), privateFileMode); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -315,14 +313,12 @@ func TestRunNew(t *testing.T) {
 	}
 
 	outside := filepath.Join(t.TempDir(), "elsewhere")
-	if err := runNew([]string{"--dir", outside}); err != nil {
+	if _, _, err := scaffoldNew(&newConfig{dir: outside, contract: "valibot"}); err != nil {
 		t.Fatalf("standalone scaffold: %v", err)
 	}
 
-	for _, name := range []string{"go.mod", "go.sum", "sdk/go.mod", "sdk/go.sum", "sdk/app/app.go", "sdk/generate.sh", "sdk/wit/world.wit"} {
-		if _, err := os.Stat(filepath.Join(outside, name)); err != nil {
-			t.Errorf("standalone missing %s: %v", name, err)
-		}
+	if _, err := os.Stat(filepath.Join(outside, "sdk")); !os.IsNotExist(err) {
+		t.Errorf("standalone scaffold still copies an sdk directory: %v", err)
 	}
 
 	standaloneMain, err := os.ReadFile(filepath.Join(outside, "main.go"))
@@ -339,8 +335,8 @@ func TestRunNew(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !strings.Contains(string(standaloneApp), "sh ./sdk/generate.sh") || !strings.Contains(string(standaloneApp), "./sdk/wit") {
-		t.Errorf("standalone app.json does not use the vendored SDK:\n%s", standaloneApp)
+	if !strings.Contains(string(standaloneApp), "go list -m -f '{{.Dir}}' "+sdkModulePath) || strings.Contains(string(standaloneApp), "generate.sh") {
+		t.Errorf("standalone app.json does not use the shared SDK module:\n%s", standaloneApp)
 	}
 
 	module, err := os.ReadFile(filepath.Join(outside, "go.mod"))
@@ -348,8 +344,41 @@ func TestRunNew(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !strings.Contains(string(module), "replace wt.packages => ./sdk") || !strings.Contains(string(module), "tool (") {
+	if !strings.Contains(string(module), "require "+sdkModulePath+" "+sdkModuleVersion) || strings.Contains(string(module), "replace ") || !strings.Contains(string(module), "tool (") {
 		t.Errorf("standalone go.mod is incomplete:\n%s", module)
+	}
+}
+
+func TestScaffoldNewLocalSDKReplace(t *testing.T) {
+	root := t.TempDir()
+
+	sdk := filepath.Join(root, "packages")
+	if err := os.MkdirAll(sdk, privateDirMode); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(sdk, "go.mod"), []byte("module "+sdkModulePath+"\n"), privateFileMode); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := filepath.Join(t.TempDir(), "sdkapp")
+	if _, _, err := scaffoldNew(&newConfig{dir: dir, sdk: sdk, contract: "valibot"}); err != nil {
+		t.Fatal(err)
+	}
+
+	module, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantReplace := "replace " + sdkModulePath + " => " + filepath.ToSlash(sdk)
+
+	if !strings.Contains(string(module), wantReplace) {
+		t.Errorf("go.mod has no local SDK replace %q:\n%s", wantReplace, module)
+	}
+
+	if err := validateLocalSDK(t.TempDir()); err == nil {
+		t.Error("validateLocalSDK accepted a directory without the SDK go.mod")
 	}
 }
 
@@ -358,7 +387,7 @@ func TestRunNewContractless(t *testing.T) {
 	writeExampleLayout(t, root)
 	dir := filepath.Join(root, "example", "plainnotes")
 
-	if err := runNew([]string{"--dir", dir, "--contract", "none"}); err != nil {
+	if _, _, err := scaffoldNew(&newConfig{dir: dir, contract: "none"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -404,62 +433,5 @@ func TestRunNewContractless(t *testing.T) {
 func TestRunContractMissingGenerator(t *testing.T) {
 	if err := runContract([]string{"--dir", t.TempDir()}); err == nil || !strings.Contains(err.Error(), "no contract generator") {
 		t.Errorf("error = %v", err)
-	}
-}
-
-func TestEmbeddedSDKMatchesPackages(t *testing.T) {
-	roots := []string{"app", "storage", "wasihttp", "httpmeta", "wit", "oauth", "session"}
-	for _, root := range roots {
-		source := filepath.Join("..", "packages", root)
-
-		err := filepath.WalkDir(source, func(path string, entry fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-
-			if entry.IsDir() || strings.HasSuffix(path, "_test.go") {
-				return nil
-			}
-
-			rel, err := filepath.Rel(filepath.Join("..", "packages"), path)
-			if err != nil {
-				return err
-			}
-
-			want, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-
-			got, err := os.ReadFile(filepath.Join("testdata", "sdk", rel))
-			if err != nil {
-				return fmt.Errorf("%s is missing from testdata/sdk: %w", rel, err)
-			}
-
-			if !bytes.Equal(got, want) {
-				return fmt.Errorf("testdata/sdk/%s is stale; copy %s from packages", rel, rel)
-			}
-
-			return nil
-		})
-		if err != nil {
-			t.Error(err)
-		}
-	}
-
-	for _, name := range []string{"generate.sh"} {
-		want, err := os.ReadFile(filepath.Join("..", "packages", name))
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		got, err := os.ReadFile(filepath.Join("testdata", "sdk", name))
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if !bytes.Equal(got, want) {
-			t.Errorf("testdata/sdk/%s is stale", name)
-		}
 	}
 }

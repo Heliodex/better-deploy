@@ -1,23 +1,33 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
 
 // Template placeholders substituted when scaffolding. Templates must not use these tokens otherwise.
 const (
-	newNameToken     = "__APP_NAME__"        //nolint:gosec // Template placeholder, not a credential.
-	newContractToken = "__CONTRACT_IMPORT__" //nolint:gosec // Template placeholder, not a credential.
-	newModuleToken   = "__APP_MODULE__"      //nolint:gosec // Template placeholder, not a credential.
-	newSDKGenToken   = "__SDK_GENERATE__"    //nolint:gosec // Template placeholder, not a credential.
-	newSDKWITToken   = "__SDK_WIT__"         //nolint:gosec // Template placeholder, not a credential.
+	newNameToken       = "__APP_NAME__"        //nolint:gosec // Template placeholder, not a credential.
+	newContractToken   = "__CONTRACT_IMPORT__" //nolint:gosec // Template placeholder, not a credential.
+	newModuleToken     = "__APP_MODULE__"      //nolint:gosec // Template placeholder, not a credential.
+	newSDKPathToken    = "__SDK_MODULE__"      //nolint:gosec // Template placeholder, not a credential.
+	newSDKVersionToken = "__SDK_VERSION__"     //nolint:gosec // Template placeholder, not a credential.
+	newSDKPrepareToken = "__SDK_PREPARE__"     //nolint:gosec // Template placeholder, not a credential.
+	newSDKWITToken     = "__SDK_WIT__"         //nolint:gosec // Template placeholder, not a credential.
+)
+
+// The SDK module is published from wt/packages with tags such as wt/packages/v0.1.0.
+const (
+	sdkModulePath    = "github.com/heliodex/better-deploy/wt/packages"
+	sdkModuleVersion = "v0.1.0"
 )
 
 // Template files embedded into the binary. The template's web/node_modules and web/bun.lock are deliberately omitted so a new app starts without them. Keep this list in sync with testdata/template.
@@ -39,9 +49,6 @@ const (
 //go:embed all:testdata/template/web/static
 var templateFS embed.FS
 
-//go:embed all:testdata/sdk
-var sdkFS embed.FS
-
 //go:embed all:testdata/standalone
 var standaloneFS embed.FS
 
@@ -57,7 +64,7 @@ func resolveNewConfig(args []string) (*newConfig, error) {
 	dir := flags.String("dir", ".", "directory to scaffold the app in")
 	module := flags.String("module", "", "Go module path for a standalone app (default: app name)")
 
-	sdk := flags.String("sdk", "", "copy the Go SDK from this packages directory instead of the embedded SDK")
+	sdk := flags.String("sdk", "", "replace the published Go SDK with a local wt/packages checkout")
 
 	contract := flags.String("contract", "valibot", "contract pipeline: valibot or none")
 	if err := flags.Parse(args); err != nil {
@@ -74,17 +81,27 @@ func resolveNewConfig(args []string) (*newConfig, error) {
 		return nil, fmt.Errorf("--contract must be valibot or none, got %q", *contract)
 	}
 
-	return &newConfig{dir: *dir, module: *module, sdk: *sdk, contract: *contract}, nil
+	sdkPath := ""
+
+	if *sdk != "" {
+		abs, err := filepath.Abs(*sdk)
+		if err != nil {
+			return nil, err
+		}
+
+		sdkPath = abs
+	}
+
+	return &newConfig{dir: *dir, module: *module, sdk: sdkPath, contract: *contract}, nil
 }
 
 type scaffoldMode struct {
-	monorepo      bool
-	module        string
-	contract      string
-	sdkGenerate   string
-	sdkWIT        string
-	standalone    bool
-	writeGoModule bool
+	monorepo   bool
+	module     string
+	contract   string
+	sdkPrepare string
+	sdkWIT     string
+	standalone bool
 }
 
 // exampleModule returns the Go module path for apps scaffolded directly under wt/example.
@@ -128,11 +145,11 @@ func scaffoldFor(cfg *newConfig, abs, name string) (scaffoldMode, error) {
 	if cfg.sdk == "" {
 		if module, err := exampleModule(abs); err == nil {
 			return scaffoldMode{
-				monorepo:    true,
-				module:      module,
-				contract:    module + "/" + name + "/contract",
-				sdkGenerate: "../../packages/generate.sh",
-				sdkWIT:      "../../packages/wit",
+				monorepo:   true,
+				module:     module,
+				contract:   module + "/" + name + "/contract",
+				sdkPrepare: "../../packages/generate.sh && ",
+				sdkWIT:     "../../packages/wit",
 			}, nil
 		}
 	}
@@ -147,154 +164,44 @@ func scaffoldFor(cfg *newConfig, abs, name string) (scaffoldMode, error) {
 	}
 
 	return scaffoldMode{
-		monorepo:      false,
-		module:        module,
-		contract:      module + "/contract",
-		sdkGenerate:   "sh ./sdk/generate.sh",
-		sdkWIT:        "./sdk/wit",
-		standalone:    true,
-		writeGoModule: true,
+		monorepo:   false,
+		module:     module,
+		contract:   module + "/contract",
+		sdkPrepare: "",
+		sdkWIT:     `\"$(go list -m -f '{{.Dir}}' ` + sdkModulePath + `)/wit\"`,
+		standalone: true,
 	}, nil
 }
 
-// copyEmbeddedDir copies the embedded SDK tree, preserving executable bits on shell scripts.
-func copyEmbeddedDir(root, dst string) (int, error) {
-	count := 0
-	err := fs.WalkDir(sdkFS, root, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		rel, ok := strings.CutPrefix(path, root)
-		if !ok {
-			return nil
-		}
-
-		rel = strings.TrimPrefix(rel, "/")
-
-		target := filepath.Join(dst, filepath.FromSlash(rel))
-		if entry.IsDir() {
-			return os.MkdirAll(target, privateDirMode)
-		}
-
-		data, err := sdkFS.ReadFile(path)
-		if err != nil {
-			return err
-		}
-
-		if err := os.MkdirAll(filepath.Dir(target), privateDirMode); err != nil {
-			return err
-		}
-
-		mode := os.FileMode(scaffoldFileMode)
-		if strings.HasSuffix(rel, ".sh") {
-			mode = 0o755
-		}
-
-		if err := os.WriteFile(target, data, mode); err != nil {
-			return err
-		}
-
-		count++
-
-		return nil
-	})
-
-	return count, err
-}
-
-// copyLocalDir copies a checked-out SDK, skipping generated bindings, temp files and tests.
-func copyLocalDir(src, dst string) (int, error) {
-	count := 0
-	err := filepath.WalkDir(src, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-
-		if rel == "." {
-			return nil
-		}
-
-		if entry.IsDir() && (entry.Name() == "binding" || entry.Name() == "tmp") {
-			return filepath.SkipDir
-		}
-
-		if strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-
-		target := filepath.Join(dst, rel)
-		if entry.IsDir() {
-			return os.MkdirAll(target, privateDirMode)
-		}
-
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-
-		mode := os.FileMode(scaffoldFileMode)
-		if info, err := entry.Info(); err == nil && info.Mode()&0o111 != 0 {
-			mode = 0o755
-		}
-
-		if err := os.MkdirAll(filepath.Dir(target), privateDirMode); err != nil {
-			return err
-		}
-
-		if err := os.WriteFile(target, data, mode); err != nil {
-			return err
-		}
-
-		count++
-
-		return nil
-	})
-
-	return count, err
-}
-
-// writeStandaloneGoMod writes the app's go.mod and go.sum plus the SDK's module files for a standalone scaffold.
-func writeStandaloneGoMod(abs, module string) error {
+// writeStandaloneGoMod writes the app go.mod, requiring the published SDK or a local replace.
+func writeStandaloneGoMod(abs, module, sdkPath string) error {
 	data, err := standaloneFS.ReadFile("testdata/standalone/go.mod.tmpl")
 	if err != nil {
 		return err
 	}
 
 	text := strings.ReplaceAll(string(data), newModuleToken, module)
-	if err := os.WriteFile(filepath.Join(abs, "go.mod"), []byte(text), scaffoldFileMode); err != nil {
-		return err
+	text = strings.ReplaceAll(text, newSDKPathToken, sdkModulePath)
+	text = strings.ReplaceAll(text, newSDKVersionToken, sdkModuleVersion)
+
+	if sdkPath != "" {
+		text += "\nreplace " + sdkModulePath + " => " + filepath.ToSlash(sdkPath) + "\n"
 	}
 
-	sum, err := standaloneFS.ReadFile("testdata/standalone/go.sum")
-	if err == nil {
-		if err := os.WriteFile(filepath.Join(abs, "go.sum"), sum, scaffoldFileMode); err != nil {
-			return err
-		}
-	}
+	return os.WriteFile(filepath.Join(abs, "go.mod"), []byte(text), scaffoldFileMode)
+}
 
-	sdkMod, err := standaloneFS.ReadFile("testdata/standalone/sdk.go.mod")
-	if err != nil {
-		return err
-	}
+// tidyStandaloneModule resolves the SDK and tool dependencies into go.mod and go.sum.
+func tidyStandaloneModule(abs string) {
+	cmd := exec.CommandContext(context.Background(), "go", "mod", "tidy")
+	cmd.Dir = abs
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
 
-	if err := os.WriteFile(filepath.Join(abs, "sdk", "go.mod"), sdkMod, scaffoldFileMode); err != nil {
-		return err
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "new: go mod tidy failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "new: run `go mod tidy` in %s later; for offline work, scaffold with --sdk PATH to use a local SDK checkout\n", abs)
 	}
-
-	sdkSum, err := standaloneFS.ReadFile("testdata/standalone/sdk.go.sum")
-	if err == nil {
-		if err := os.WriteFile(filepath.Join(abs, "sdk", "go.sum"), sdkSum, scaffoldFileMode); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
 // prepareNewDir creates the target if needed and reports whether it already contains files.
@@ -341,7 +248,7 @@ func writeTemplateFiles(abs, name string, mode scaffoldMode) (int, error) {
 
 		out := strings.ReplaceAll(string(data), newNameToken, name)
 		out = strings.ReplaceAll(out, newContractToken, mode.contract)
-		out = strings.ReplaceAll(out, newSDKGenToken, mode.sdkGenerate)
+		out = strings.ReplaceAll(out, newSDKPrepareToken, mode.sdkPrepare)
 
 		out = strings.ReplaceAll(out, newSDKWITToken, mode.sdkWIT)
 		if err := os.WriteFile(dst, []byte(out), scaffoldFileMode); err != nil {
@@ -364,57 +271,11 @@ func validateLocalSDK(dir string) error {
 	}
 
 	module, err := os.ReadFile(filepath.Join(dir, "go.mod"))
-	if err != nil || !strings.Contains(string(module), "module wt.packages") {
-		return fmt.Errorf("--sdk %s does not contain module wt.packages", dir)
+	if err != nil || !strings.Contains(string(module), "module "+sdkModulePath) {
+		return fmt.Errorf("--sdk %s does not contain module %s", dir, sdkModulePath)
 	}
 
 	return nil
-}
-
-// appendStandaloneIgnore keeps the copied SDK bindings and temp tree out of git.
-func appendStandaloneIgnore(abs string) error {
-	ignore, _ := os.ReadFile(filepath.Join(abs, ".gitignore"))
-	if strings.Contains(string(ignore), "sdk/binding/") {
-		return nil
-	}
-
-	appendIgnore := "sdk/binding/\nsdk/tmp/\n"
-	if err := os.WriteFile(filepath.Join(abs, ".gitignore"), append(ignore, []byte(appendIgnore)...), scaffoldFileMode); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// installStandaloneSDK copies the SDK tree and rewrites the generated module file.
-func installStandaloneSDK(cfg *newConfig, abs, module string) (int, error) {
-	var (
-		sdkCount int
-		err      error
-	)
-	if cfg.sdk != "" {
-		if err := validateLocalSDK(cfg.sdk); err != nil {
-			return 0, err
-		}
-
-		sdkCount, err = copyLocalDir(cfg.sdk, filepath.Join(abs, "sdk"))
-	} else {
-		sdkCount, err = copyEmbeddedDir("testdata/sdk", filepath.Join(abs, "sdk"))
-	}
-
-	if err != nil {
-		return 0, err
-	}
-
-	if err := writeStandaloneGoMod(abs, module); err != nil {
-		return 0, err
-	}
-
-	if err := appendStandaloneIgnore(abs); err != nil {
-		return 0, err
-	}
-
-	return sdkCount, nil
 }
 
 // writeContractlessScaffold replaces the generated-contract wiring with hand-written note types and removes the generator.
@@ -471,7 +332,7 @@ func writeContractlessScaffold(abs string) (int, error) {
 }
 
 // printNewSummary shows what was created and the first commands to run.
-func printNewSummary(dir, name string, mode scaffoldMode, count int) {
+func printNewSummary(dir, name string, mode scaffoldMode, count int, sdkPath string) {
 	layout := map[bool]string{true: "standalone", false: "monorepo"}[mode.standalone]
 	fmt.Printf("new: created %s (%d files, %s)\n", dir, count, layout)
 	fmt.Printf("next:\n  wt-deploy dev --dir %s\n", dir)
@@ -479,33 +340,35 @@ func printNewSummary(dir, name string, mode scaffoldMode, count int) {
 
 	if mode.standalone {
 		fmt.Printf("  module: %s\n", mode.module)
+
+		if sdkPath != "" {
+			fmt.Printf("  sdk: %s (local replace)\n", sdkPath)
+		} else {
+			fmt.Printf("  sdk: %s %s\n", sdkModulePath, sdkModuleVersion)
+		}
 	}
 }
 
-func runNew(args []string) error {
-	cfg, err := resolveNewConfig(args)
-	if err != nil {
-		return err
-	}
-
+// scaffoldNew writes the app files into cfg.dir and returns the chosen layout and absolute directory.
+func scaffoldNew(cfg *newConfig) (scaffoldMode, string, error) {
 	abs, err := filepath.Abs(cfg.dir)
 	if err != nil {
-		return err
+		return scaffoldMode{}, "", err
 	}
 
 	name := filepath.Base(abs)
 	if !validName(name) {
-		return fmt.Errorf("invalid app name %q: use lowercase letters, digits and hyphens", name)
+		return scaffoldMode{}, "", fmt.Errorf("invalid app name %q: use lowercase letters, digits and hyphens", name)
 	}
 
 	mode, err := scaffoldFor(cfg, abs, name)
 	if err != nil {
-		return err
+		return scaffoldMode{}, "", err
 	}
 
 	nonEmpty, err := prepareNewDir(cfg.dir, abs)
 	if err != nil {
-		return err
+		return scaffoldMode{}, "", err
 	}
 
 	if nonEmpty {
@@ -514,28 +377,51 @@ func runNew(args []string) error {
 
 	count, err := writeTemplateFiles(abs, name, mode)
 	if err != nil {
-		return err
+		return scaffoldMode{}, "", err
 	}
 
 	if cfg.contract == "none" {
 		contractCount, err := writeContractlessScaffold(abs)
 		if err != nil {
-			return err
+			return scaffoldMode{}, "", err
 		}
 
 		count += contractCount
 	}
 
 	if mode.standalone {
-		sdkCount, err := installStandaloneSDK(cfg, abs, mode.module)
-		if err != nil {
-			return err
+		if cfg.sdk != "" {
+			if err := validateLocalSDK(cfg.sdk); err != nil {
+				return scaffoldMode{}, "", err
+			}
 		}
 
-		count += sdkCount
+		if err := writeStandaloneGoMod(abs, mode.module, cfg.sdk); err != nil {
+			return scaffoldMode{}, "", err
+		}
+
+		count++
 	}
 
-	printNewSummary(cfg.dir, name, mode, count)
+	printNewSummary(cfg.dir, name, mode, count, cfg.sdk)
+
+	return mode, abs, nil
+}
+
+func runNew(args []string) error {
+	cfg, err := resolveNewConfig(args)
+	if err != nil {
+		return err
+	}
+
+	mode, abs, err := scaffoldNew(cfg)
+	if err != nil {
+		return err
+	}
+
+	if mode.standalone {
+		tidyStandaloneModule(abs)
+	}
 
 	return nil
 }
