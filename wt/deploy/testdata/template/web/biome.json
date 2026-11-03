@@ -26,18 +26,16 @@
 		"includes": [
 			"**/*.ts",
 			"**/*.js",
+			"**/*.css",
 			"**/*.svelte",
 			"**/*.json",
 			"!.svelte-kit",
 			"!build",
-			"!.celld",
-			"!.wrangler",
 			"**/*.html",
 			"!**/node_modules",
 			"!**/.svelte-kit",
 			"!**/build",
 			"!**/dist",
-			"!**/.wrangler",
 			"!static"
 		]
 	},
