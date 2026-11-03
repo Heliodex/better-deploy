@@ -16,6 +16,13 @@ var contractScript string
 
 // generateContract converts the app's Valibot registries to JSON Schema and generated Go types.
 func generateContract(dir, web, appName string) error {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+
+	dir = abs
+
 	schemas := filepath.Join(dir, web, "src", "lib", "contract.ts")
 	if _, err := os.Stat(schemas); err != nil {
 		if os.IsNotExist(err) {
