@@ -12,7 +12,7 @@ func runCompletion(args []string) error {
 		return errors.New("usage: wt completion <bash|zsh|fish>")
 	}
 
-	commands := []string{"apps", "logs", "jobs", "blobs", "deploy", "bundle", "dev", "new", "rollback", "backup", "config", "open", "completion", "help"}
+	commands := []string{"apps", "logs", "jobs", "blobs", "secrets", "deploy", "bundle", "dev", "new", "rollback", "backup", "config", "open", "completion", "help"}
 
 	switch args[0] {
 	case "bash":

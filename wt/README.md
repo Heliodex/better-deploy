@@ -390,6 +390,17 @@ DELETE /apps/<name>?purge=1     also remove the database, backups, logs, history
 
 Secrets live in a write-only per-app store under `WT_STATE_DIR/.secrets/<app>.json` (directory `0700`, file `0600`, atomic replacement) instead of `app.json`. `GET /apps/<name>/secrets` returns only `{"keys":[...]}`. `PUT /apps/<name>/secrets/<key>` takes `{"value":"..."}`, and `DELETE` removes the key; both return `{"key":"...","restart_required":true}` and never echo the value. Keys are environment-style identifiers (`[A-Za-z_][A-Za-z0-9_]*`, at most 128 bytes); values are at most 64 KiB and cannot contain NUL. The body limit is 80 KiB. The secret endpoints use the same admin token and app scope as the rest of `/apps`, and a missing app returns `404`.
 
+The CLI keeps the value off argv:
+
+```sh
+wt-deploy secrets passport list
+printf 'client-secret' | wt-deploy secrets passport set OAUTH_CLIENT_SECRET
+wt-deploy secrets passport set OAUTH_CLIENT_SECRET --file ./client-secret
+wt-deploy secrets passport delete OAUTH_CLIENT_SECRET
+```
+
+`set` reads stdin or `--file`, trims one trailing newline and never prints the value. A running process keeps its old environment until the app is restarted or redeployed.
+
 In `app.json`, an env value of `secret://NAME` resolves from that app's store at launch. Literal values pass through unchanged. A missing secret is a clear launch error and the app is not started, so the previous version keeps serving. The bundle and deployment history keep the reference, never the resolved value. Each deploy or rollback records only `secret://NAME` because `app.json` is copied as uploaded; the resolved values exist only in the supervisor's memory and the app process environment. `DELETE` without `purge` keeps the secret file as app state; `?purge=1` removes it.
 
 A running process keeps the values it started with. Setting, rotating or deleting a secret returns `restart_required: true` but does not restart the app; use `POST /apps/<name>/restart` or a deploy when the new value should apply. Redaction is best effort: the supervisor replaces whole stored values, longest first, in new app log lines, supervisor access lines, the log tail and `lastError`. Previous values stay in memory for redaction until the supervisor restarts. Existing log files, backups, `/data`, and anything an app already wrote elsewhere are not retroactively scrubbed, and a value an app transforms or logs in pieces may still appear.
