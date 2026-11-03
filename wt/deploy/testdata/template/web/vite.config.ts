@@ -10,6 +10,9 @@ export default defineConfig({
 			}),
 			compilerOptions: {
 				cssHash: ({ css, filename, hash }) => `s-${hash(filename ?? css)}`,
+				experimental: {
+					async: true,
+				},
 				modernAst: true,
 				runes: true,
 			},
