@@ -76,7 +76,7 @@ Concrete evidence from this build:
 
    Implemented in `57c14ce`. `packages/oauth` provides discovery caching, PKCE and nonce generation, authorization URLs, code exchange with optional client secret, RS256 JWKS verification, UserInfo and RP-initiated logout. `packages/session` provides opaque token issuing and hashing, cookie set/clear helpers, constant-time comparison and same-origin checks with a loopback exception for the dev server. Passport keeps only its tables, handlers and UI; its 600-line OAuth client is replaced by a small config function. Tests cover discovery, authorization URLs, PKCE, exchange and form fields, token verification with wrong nonce, audience and expiry, signature verification, UserInfo and end-session. The embedded SDK and its sync test include both packages. Verified with the full browser login and check-in flow locally.
 
-4. [ ] **[P1] Expose secrets through `wt-deploy` and stop making `app.json` the convenient secret path.**
+4. [x] **[P1] Expose secrets through `wt-deploy` and stop making `app.json` the convenient secret path.**
 
    **Current behaviour.** The supervisor has a write-only per-app secret store and resolves `secret://NAME` from `app.json` at launch. The admin API and panel can set secrets, but `wt-deploy` has no `secrets` command and no deploy-time secret input. The easiest path for an app author is a literal value in `app.json`, which is copied into the bundle and retained in deployment history. Passport avoided this by choosing a public OAuth client, but a confidential client should be normal.
 
@@ -90,7 +90,9 @@ Concrete evidence from this build:
 
    **Done when.** A confidential OAuth client can be configured without editing `app.json` or using raw curl, and no secret value appears in the bundle, deployment history or CLI output.
 
-5. [ ] **[P1] Investigate and fix concurrent request traps.**
+   Implemented in `9277362`. `wt-deploy secrets <app> list|set|delete` wraps the existing write-only secret endpoints. `set` reads from stdin or `--file`, trims one trailing newline, enforces the same 64 KiB and key rules as the supervisor, and never prints the value; `list` prints keys only. The help text, shell completion and README cover the commands. Tests cover list, set through a file, delete, bad keys, missing arguments and unknown actions. Verified live against the local supervisor: set, list, delete and an empty list.
+
+5. [x] **[P1] Investigate and fix concurrent request traps.**
 
    **Current behaviour.** Sending 50 requests at parallelism 10 to `/api/session` or `/api/checkins` produced occasional `500`s on passport. The existing pulse app showed the same response pattern. Sequential requests were clean. Wasmtime logged `worker failed: wasm trap: async-lifted export failed to produce a result` followed by `worker trapped or panicked`, and the worker recovered. Passport's page load was changed from `Promise.all` to sequential fetches to hide this in normal use, but a dashboard or any page with parallel API calls will still meet it.
 
@@ -104,6 +106,8 @@ Concrete evidence from this build:
    - Do not paper over this with frontend retries until the root cause is known.
 
    **Done when.** Concurrent API reads are clean, or the trap is classified as an expected disconnect and no longer surfaces as a `500` or a scary worker log.
+
+   Implemented in `8279dd7`. The cause was `wasmtime serve` multiplexing up to 16 concurrent requests onto one WASIp3 component instance by default; Go handlers that call outbound `wasi:http` are not safe under that reuse. The supervisor now passes `--max-instance-concurrent-reuse-count=1`, so an instance handles one request at a time and concurrency comes from separate instances. Reproduced before the fix with 100 requests at parallelism 20: guestbook returned 96 `500`s and pulse 80. After restarting the local supervisor, 200 concurrent `/api/messages`, 200 `/api/session` and 100 `/api/monitors` requests all returned `200`, with no new worker traps. `max_concurrency` remains the separate total-request cap. The README documents the flag and the failure mode.
 
 6. [ ] **[P1] Make a new app host routable without a manual ingress.**
 
