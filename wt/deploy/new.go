@@ -297,24 +297,20 @@ func writeStandaloneGoMod(abs, module string) error {
 	return nil
 }
 
-// prepareNewDir checks that the target is empty or creates it.
-func prepareNewDir(display, abs string) error {
+// prepareNewDir creates the target if needed and reports whether it already contains files.
+func prepareNewDir(display, abs string) (bool, error) {
 	entries, err := os.ReadDir(abs)
 	switch {
 	case err == nil:
-		if len(entries) > 0 {
-			return fmt.Errorf("directory %s is not empty", display)
-		}
-
-		return nil
+		return len(entries) > 0, nil
 	case os.IsNotExist(err):
 		if err := os.MkdirAll(abs, privateDirMode); err != nil {
-			return fmt.Errorf("create %s: %w", display, err)
+			return false, fmt.Errorf("create %s: %w", display, err)
 		}
 
-		return nil
+		return false, nil
 	default:
-		return err
+		return false, err
 	}
 }
 
@@ -507,8 +503,13 @@ func runNew(args []string) error {
 		return err
 	}
 
-	if err := prepareNewDir(cfg.dir, abs); err != nil {
+	nonEmpty, err := prepareNewDir(cfg.dir, abs)
+	if err != nil {
 		return err
+	}
+
+	if nonEmpty {
+		fmt.Fprintf(os.Stderr, "new: %s is not empty; overwriting matching files and leaving other files in place\n", cfg.dir)
 	}
 
 	count, err := writeTemplateFiles(abs, name, mode)

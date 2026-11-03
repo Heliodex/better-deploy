@@ -169,6 +169,29 @@ func TestTemplateHandlerUsesServeHTTP(t *testing.T) {
 	}
 }
 
+func TestPrepareNewDirAllowsNonEmpty(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "existing.txt"), []byte("keep"), privateFileMode); err != nil {
+		t.Fatal(err)
+	}
+
+	nonEmpty, err := prepareNewDir(dir, dir)
+	if err != nil || !nonEmpty {
+		t.Errorf("prepareNewDir(non-empty) = %v, %v", nonEmpty, err)
+	}
+
+	missing := filepath.Join(t.TempDir(), "fresh")
+
+	nonEmpty, err = prepareNewDir(missing, missing)
+	if err != nil || nonEmpty {
+		t.Errorf("prepareNewDir(missing) = %v, %v", nonEmpty, err)
+	}
+
+	if info, err := os.Stat(missing); err != nil || !info.IsDir() {
+		t.Errorf("prepareNewDir did not create the directory: %v", err)
+	}
+}
+
 func TestRunNew(t *testing.T) {
 	root := t.TempDir()
 	writeExampleLayout(t, root)
@@ -274,8 +297,17 @@ func TestRunNew(t *testing.T) {
 		t.Errorf("main.go does not return the generated response type:\n%s", main)
 	}
 
-	if err := runNew([]string{"--dir", dir}); err == nil {
-		t.Error("expected error scaffolding into a non-empty directory")
+	sentinel := filepath.Join(dir, "KEEP.txt")
+	if err := os.WriteFile(sentinel, []byte("keep"), privateFileMode); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runNew([]string{"--dir", dir}); err != nil {
+		t.Errorf("scaffolding into a non-empty directory: %v", err)
+	}
+
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Errorf("scaffolding removed an unrelated file: %v", err)
 	}
 
 	if err := runNew([]string{"--dir", filepath.Join(root, "example", "Bad_Name")}); err == nil {
