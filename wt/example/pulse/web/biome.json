@@ -38,8 +38,7 @@
 			"!**/build",
 			"!**/dist",
 			"!**/.wrangler",
-			"!static",
-			"!contract/schemas"
+			"!static"
 		]
 	},
 	"formatter": {
@@ -301,7 +300,7 @@
 		},
 		{
 			"includes": [
-				"web/scripts/**"
+				"scripts/**"
 			],
 			"linter": {
 				"rules": {
