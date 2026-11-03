@@ -3,6 +3,8 @@ import { sveltekit } from "@sveltejs/kit/vite"
 import { defineConfig } from "vite"
 
 export default defineConfig({
+	// wt dev runs Vite beside the supervisor, so keep both logs on screen.
+	clearScreen: false,
 	plugins: [
 		sveltekit({
 			adapter: adapter({
@@ -18,4 +20,8 @@ export default defineConfig({
 			},
 		}),
 	],
+	server: {
+		// Fail instead of silently moving to another port when the configured one is taken.
+		strictPort: true,
+	},
 })
