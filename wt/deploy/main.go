@@ -177,7 +177,12 @@ func main() {
 	command := "deploy"
 
 	args := os.Args[1:]
-	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+	if len(args) == 0 {
+		printOverview(os.Stdout, ".")
+		return
+	}
+
+	if !strings.HasPrefix(args[0], "-") {
 		command, args = args[0], args[1:]
 	}
 
@@ -231,6 +236,7 @@ func main() {
 		err = runCompletion(args)
 	case "help", "-h", "--help":
 		fmt.Println("usage: wt <command> [flags]")
+		fmt.Println("       wt                        show the local app, host and config path")
 		fmt.Println("       wt apps [--host URL] [--token TOKEN] [--json]")
 		fmt.Println("       wt logs <app> [--tail N] [--level LEVEL] [--source app|supervisor] [--q TEXT] [--follow]")
 		fmt.Println("       wt jobs <app> <list|show|enqueue|cancel|retry> ...")

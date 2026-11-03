@@ -65,6 +65,8 @@ The `wt-deploy` binary also acts as the operator CLI. Every command accepts `--h
 }
 ```
 
+Running `wt-deploy` with no command prints the current directory, the local `app.json` name and host, whether a host is configured and where the config file is expected, then points at `wt-deploy help`. It does not attempt a deploy, so a fresh directory can be scaffolded with `wt-deploy new` before any supervisor host exists. Deploy explicitly with `wt-deploy deploy`.
+
 ```sh
 wt-deploy apps
 wt-deploy logs notes --tail 200 --level warn --source app
@@ -460,18 +462,18 @@ A JS component runtime for real SSR is a possible future host feature, but it is
 
 ## Which platform API?
 
-| Need | API | Example |
-|---|---|---|
-| Request and response state | per-app SQLite through `storage.Client` | notes, guestbook, pulse |
-| Long, delayed or retried work | durable jobs and `app.EnqueueJob` | ticker |
-| Push updates to browsers | host event bus with `app.Publish` and `EventSource` | pulse |
-| Files, images or downloads | signed blob URLs and `app.DeleteBlob` | blobbox |
-| Current signed-in user | `"identity": "platform"` and `app.UserFromRequest` | blobbox |
-| Call another app | `app.NewAppRequest` with the target's `allow_callers` | blobbox calls pulse |
-| Recurring timed call | `schedule` in `app.json` | ticker |
-| Static frontend | adapter-static output in `static/` | guestbook, pulse, blobbox |
-| Logs and levels | `app.Logf` and the per-app log stream | ticker |
-| Operator inspection | `wt apps`, `logs`, `jobs`, `blobs`, `backup`, `config` | all examples |
+| Need                          | API                                                    | Example                   |
+| ----------------------------- | ------------------------------------------------------ | ------------------------- |
+| Request and response state    | per-app SQLite through `storage.Client`                | notes, guestbook, pulse   |
+| Long, delayed or retried work | durable jobs and `app.EnqueueJob`                      | ticker                    |
+| Push updates to browsers      | host event bus with `app.Publish` and `EventSource`    | pulse                     |
+| Files, images or downloads    | signed blob URLs and `app.DeleteBlob`                  | blobbox                   |
+| Current signed-in user        | `"identity": "platform"` and `app.UserFromRequest`     | blobbox                   |
+| Call another app              | `app.NewAppRequest` with the target's `allow_callers`  | blobbox calls pulse       |
+| Recurring timed call          | `schedule` in `app.json`                               | ticker                    |
+| Static frontend               | adapter-static output in `static/`                     | guestbook, pulse, blobbox |
+| Logs and levels               | `app.Logf` and the per-app log stream                  | ticker                    |
+| Operator inspection           | `wt apps`, `logs`, `jobs`, `blobs`, `backup`, `config` | all examples              |
 
 `example/blobbox` is the reference for blobs, platform identity and app-to-app calls; `example/ticker` covers scheduled work and durable jobs; `example/pulse` covers scheduled HTTP probes and realtime events.
 
@@ -556,7 +558,6 @@ Fuel (`-W fuel=N`) was the other candidate, but in `serve` it belongs to a store
 
 Old bundles without the epoch flag keep working but only get the proxy deadline. Setting `request_timeout` makes the supervisor try to rebuild them with epoch support when a compiler is configured; on the runtime-only image there is no compiler, so redeploy from a machine that has one. The e2e suite requests the hello example's `?spin=1` endpoint to verify that the guest is interrupted and the app stays up.
 `wasmtime serve` defaults to multiplexing up to 16 concurrent requests onto one WASIp3 component instance. The Go components in this stack cannot safely run concurrent handlers that call outbound `wasi:http` imports; under load that produced `worker failed: wasm trap: async-lifted export failed to produce a result` and intermittent `500`s in passport, pulse and guestbook. The supervisor passes `--max-instance-concurrent-reuse-count=1`, so one instance handles one request at a time and concurrency comes from separate instances. `max_concurrency` still caps total proxied requests per app.
-
 
 ## Scheduled work
 
