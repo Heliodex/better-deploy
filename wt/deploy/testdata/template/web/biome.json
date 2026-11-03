@@ -270,14 +270,10 @@
 					}
 				}
 			},
-			"includes": [
-				"**/package.json"
-			]
+			"includes": ["**/package.json"]
 		},
 		{
-			"includes": [
-				"**/*.svelte"
-			],
+			"includes": ["**/*.svelte"],
 			"linter": {
 				"rules": {
 					"correctness": {
@@ -297,9 +293,7 @@
 			}
 		},
 		{
-			"includes": [
-				"scripts/**"
-			],
+			"includes": ["scripts/**"],
 			"linter": {
 				"rules": {
 					"correctness": {
