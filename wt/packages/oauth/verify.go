@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-// timeNow keeps verification testable and centralizes the one clock read.
+// timeNow keeps verification testable and centralises the one clock read.
 func timeNow() time.Time {
 	return time.Now()
 }
