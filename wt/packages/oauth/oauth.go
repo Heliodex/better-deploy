@@ -27,12 +27,10 @@ const (
 
 // Config describes one OAuth client. HTTPClient must be a wasi:http client in a component; tests can pass a normal client.
 type Config struct {
-	Issuer       string
-	ClientID     string
-	ClientSecret string
-	Scopes       []string
-	HTTPClient   *http.Client
-	Timeout      time.Duration
+	Issuer, ClientID, ClientSecret string
+	Scopes                         []string
+	HTTPClient                     *http.Client
+	Timeout                        time.Duration
 }
 
 // Provider is the subset of the discovery document the client uses.
@@ -47,28 +45,16 @@ type Provider struct {
 
 // Tokens is the token endpoint response.
 type Tokens struct {
-	AccessToken      string
-	RefreshToken     string
-	IDToken          string
-	TokenType        string
-	Scope            string
-	ExpiresIn        int64
-	Error            string
-	ErrorDescription string
+	AccessToken, RefreshToken, IDToken, TokenType, Scope string
+	ExpiresIn                                            int64
+	Error, ErrorDescription                              string
 }
 
 // Identity is the user information from an ID token or UserInfo response.
 type Identity struct {
-	Subject   string
-	Name      string
-	Email     string
-	Username  string
-	Picture   string
-	Zoneinfo  string
-	Issuer    string
-	Audience  []string
-	ExpiresAt time.Time
-	IssuedAt  time.Time
+	Subject, Name, Email, Username, Picture, Zoneinfo, Issuer string
+	Audience                                                  []string
+	ExpiresAt, IssuedAt                                       time.Time
 }
 
 // Merge fills missing profile fields from a UserInfo response. A different subject is an error.
