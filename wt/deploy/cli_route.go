@@ -89,6 +89,8 @@ func probeRoute(supervisorHost, appHost, healthPath string, timeout time.Duratio
 		return report
 	}
 
+	request.Header.Set("Accept", "text/html")
+
 	client := &http.Client{
 		Timeout: timeout,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
