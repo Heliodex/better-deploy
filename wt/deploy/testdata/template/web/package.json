@@ -9,7 +9,7 @@
 	"scripts": {
 		"build": "vite build",
 		"dev": "vite dev",
-		"lint": "oxlint --fix; biome check --fix",
+		"lint": "oxlint --fix && biome check --fix",
 		"prepare": "svelte-kit sync || echo ''",
 		"preview": "vite preview",
 		"svelte:check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
