@@ -156,7 +156,7 @@ Concrete evidence from this build:
 
    Implemented in `f04d204`. `wt new --contract=none` scaffolds the same notes app with hand-written Go note types, a client-only Valibot file, no `contract/` generator and no `go generate` in `app.json` or `dev.watch`. `wt contract --dir DIR` runs the existing Valibot to JSON Schema to Go generator in one command. Tests cover the contractless scaffold, its parsed Go source, missing generator errors and the default scaffold. Verified by scaffolding a standalone contractless app outside the repo, running its Go test, Svelte check and static build, plus a full `wt-deploy build` that produced a bundle. The README documents both paths.
 
-9. [ ] **[P2] Add an effective-config inspection command.**
+9. [x] **[P2] Add an effective-config inspection command.**
 
    **Current behaviour.** An app has bundle `app.json`, runtime config from `PATCH /apps/<name>/config`, secrets, deploy flags such as `--app-host`, and the CLI config file. Each layer is reasonable, but an author has to learn which one wins. `wt config show` returns the runtime config and secret key names, but there is no single view of the effective host, URL, environment, secret references, digest, runtime, readiness and pending restart.
 
@@ -168,6 +168,8 @@ Concrete evidence from this build:
    - Use the same public URL resolution as `app.PublicURL` so the summary cannot disagree with the app.
 
    **Done when.** One command answers what the app is actually running with and why its URL or config differs from `app.json`.
+
+   Implemented in `f9e2a76`. `wt-deploy inspect <app> [--dir DIR]` combines supervisor runtime and target, app status, readiness, digest, latest deployment, effective runtime config, env and secret key names, a route probe, and an optional comparison with a local `app.json`. `--json` returns the same report for tooling. The comparison covers host, health, memory, disk, max concurrency, request timeout, network, identity, server paths and env key names, while secret values remain unavailable. Tests cover the JSON-shaped config reader, local manifest differences and the command path. Verified against the local and remote supervisors: inspect reported passport's runtime, target, digest, deployment, config, route and the expected remote host difference from the local manifest.
 
 ## Not worth changing
 
