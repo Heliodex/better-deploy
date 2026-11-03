@@ -8,6 +8,7 @@ contract/*.gen.go
 contract/schemas/
 main.wasm
 main.cwasm
+artefact.json
 
 .wt-build.json
 .wt-contract-*.ts
