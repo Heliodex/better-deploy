@@ -429,7 +429,7 @@ func startDevSupervisor(supervisor string, cfg *devConfig, appsDir, stateDir, ad
 }
 
 // deployDevApps builds and uploads every app, returning the configs and the Vite-backed one.
-func deployDevApps(cfg *devConfig, dirs []string, addr, target string, vite *viteDev) ([]*deployConfig, *deployConfig, error) {
+func deployDevApps(cfg *devConfig, dirs []string, deployAddr, target string, vite *viteDev) ([]*deployConfig, *deployConfig, error) {
 	configs := make([]*deployConfig, 0, len(dirs))
 
 	var viteDCfg *deployConfig
@@ -447,7 +447,7 @@ func deployDevApps(cfg *devConfig, dirs []string, addr, target string, vite *vit
 
 		dcfg := &deployConfig{
 			dir:         dir,
-			host:        "http://" + addr,
+			host:        "http://" + deployAddr,
 			token:       "dev",
 			wasmtime:    cfg.wasmtime,
 			target:      target,
@@ -570,7 +570,7 @@ func runDev(args []string) error {
 		_ = cmd.Wait()
 	}()
 
-	configs, viteDCfg, err := deployDevApps(cfg, dirs, addr, target, vite)
+	configs, viteDCfg, err := deployDevApps(cfg, dirs, adminAddr, target, vite)
 	if err != nil {
 		return err
 	}

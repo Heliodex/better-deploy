@@ -99,6 +99,10 @@ func TestViteDevConfigIncludesProxy(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if !filepath.IsAbs(vite.configPath) {
+		t.Errorf("config path is not absolute: %q", vite.configPath)
+	}
+
 	data, err := os.ReadFile(vite.configPath)
 	if err != nil {
 		t.Fatal(err)

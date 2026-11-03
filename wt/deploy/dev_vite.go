@@ -160,7 +160,12 @@ func writeViteDevConfig(dev *viteDev, supervisorPort int) error {
 	content.WriteString("  }\n")
 	content.WriteString("}\n")
 
-	dev.configPath = filepath.Join(dev.webDir, ".wt-dev.vite.config.ts")
+	configPath, err := filepath.Abs(filepath.Join(dev.webDir, ".wt-dev.vite.config.ts"))
+	if err != nil {
+		return fmt.Errorf("resolve vite dev config: %w", err)
+	}
+
+	dev.configPath = configPath
 	if err := os.WriteFile(dev.configPath, []byte(content.String()), privateFileMode); err != nil {
 		return fmt.Errorf("write vite dev config: %w", err)
 	}
