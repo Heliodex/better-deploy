@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"wt.packages/storage"
+	"github.com/heliodex/better-deploy/wt/packages/storage"
 )
 
 func TestNotesHandler(t *testing.T) {

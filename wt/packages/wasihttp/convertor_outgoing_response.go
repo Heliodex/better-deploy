@@ -6,7 +6,7 @@ import (
 	"net/http"
 
 	wit "go.bytecodealliance.org/pkg/wit/types"
-	wasi "wt.packages/binding/imports/wasi_http_0_3_0_types"
+	wasi "github.com/heliodex/better-deploy/wt/packages/binding/imports/wasi_http_0_3_0_types"
 )
 
 // Assert that `responseWriter` implements the required interface.

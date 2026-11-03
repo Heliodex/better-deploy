@@ -2,9 +2,9 @@ module wt.example
 
 go 1.27.1
 
-require wt.packages v0.0.0
+require github.com/heliodex/better-deploy/wt/packages v0.0.0
 
-replace wt.packages => ../packages
+replace github.com/heliodex/better-deploy/wt/packages => ../packages
 
 require (
 	dario.cat/mergo v1.0.2 // indirect

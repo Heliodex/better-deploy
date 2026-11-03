@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"time"
 
-	client "wt.packages/binding/imports/wasi_http_0_3_0_client"
-	wasi "wt.packages/binding/imports/wasi_http_0_3_0_types"
+	client "github.com/heliodex/better-deploy/wt/packages/binding/imports/wasi_http_0_3_0_client"
+	wasi "github.com/heliodex/better-deploy/wt/packages/binding/imports/wasi_http_0_3_0_types"
 )
 
 // defaultClientTimeout bounds one outbound request unless the caller sets its own deadline.

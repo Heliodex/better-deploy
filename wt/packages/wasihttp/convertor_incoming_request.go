@@ -8,8 +8,8 @@ import (
 	"strconv"
 
 	wit "go.bytecodealliance.org/pkg/wit/types"
-	wasi "wt.packages/binding/imports/wasi_http_0_3_0_types"
-	"wt.packages/httpmeta"
+	wasi "github.com/heliodex/better-deploy/wt/packages/binding/imports/wasi_http_0_3_0_types"
+	"github.com/heliodex/better-deploy/wt/packages/httpmeta"
 )
 
 // methodToString maps a standard wasi:http method to its HTTP name and rejects the "other" variant.

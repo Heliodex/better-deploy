@@ -8,7 +8,7 @@ import (
 	"time"
 
 	wit "go.bytecodealliance.org/pkg/wit/types"
-	wasi "wt.packages/binding/imports/wasi_http_0_3_0_types"
+	wasi "github.com/heliodex/better-deploy/wt/packages/binding/imports/wasi_http_0_3_0_types"
 )
 
 // toWasiMethod maps an HTTP method name to a wasi:http method, using the "other" variant for extensions.

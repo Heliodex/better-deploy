@@ -14,10 +14,10 @@ import (
 	"unicode/utf8"
 
 	"wt.example/passport/contract"
-	"wt.packages/app"
-	"wt.packages/oauth"
-	"wt.packages/session"
-	"wt.packages/storage"
+	"github.com/heliodex/better-deploy/wt/packages/app"
+	"github.com/heliodex/better-deploy/wt/packages/oauth"
+	"github.com/heliodex/better-deploy/wt/packages/session"
+	"github.com/heliodex/better-deploy/wt/packages/storage"
 )
 
 // errNoSession distinguishes a missing cookie from a storage failure when loading a session.

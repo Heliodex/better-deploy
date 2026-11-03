@@ -44,10 +44,10 @@ func fakeWasmtime(t *testing.T, dir string) string {
 func TestComponentInputHashTracksSDKAndNotFrontend(t *testing.T) {
 	root := t.TempDir()
 	app := filepath.Join(root, "app")
-	writeTestFile(t, filepath.Join(app, "go.mod"), "module demo\n\ngo 1.27.1\n\nreplace wt.packages => ../packages\n")
+	writeTestFile(t, filepath.Join(app, "go.mod"), "module demo\n\ngo 1.27.1\n\nreplace github.com/heliodex/better-deploy/wt/packages => ../packages\n")
 	writeTestFile(t, filepath.Join(app, "main.go"), "package main")
 	writeTestFile(t, filepath.Join(app, "web", "src", "+page.svelte"), "<h1>one</h1>")
-	writeTestFile(t, filepath.Join(root, "packages", "go.mod"), "module wt.packages\n\ngo 1.27.1\n")
+	writeTestFile(t, filepath.Join(root, "packages", "go.mod"), "module github.com/heliodex/better-deploy/wt/packages\n\ngo 1.27.1\n")
 	writeTestFile(t, filepath.Join(root, "packages", "app", "app.go"), "package app")
 
 	first, err := componentInputHash(app, manifest{}, "build")
@@ -93,8 +93,8 @@ func TestComponentInputHashFindsParentModule(t *testing.T) {
 	root := t.TempDir()
 	module := filepath.Join(root, "example")
 	app := filepath.Join(module, "app")
-	writeTestFile(t, filepath.Join(module, "go.mod"), "module example\n\ngo 1.27.1\n\nreplace wt.packages => ../packages\n")
-	writeTestFile(t, filepath.Join(module, "go.sum"), "wt.packages v0.0.0\n")
+	writeTestFile(t, filepath.Join(module, "go.mod"), "module example\n\ngo 1.27.1\n\nreplace github.com/heliodex/better-deploy/wt/packages => ../packages\n")
+	writeTestFile(t, filepath.Join(module, "go.sum"), "github.com/heliodex/better-deploy/wt/packages v0.0.0\n")
 	writeTestFile(t, filepath.Join(app, "main.go"), "package main")
 	writeTestFile(t, filepath.Join(module, "other", "main.go"), "package main")
 	writeTestFile(t, filepath.Join(root, "packages", "app", "app.go"), "package app")
@@ -126,7 +126,7 @@ func TestComponentInputHashFindsParentModule(t *testing.T) {
 		t.Error("parent module replace target change did not alter the component hash")
 	}
 
-	writeTestFile(t, filepath.Join(module, "go.mod"), "module example\n\ngo 1.27.1\n\nreplace wt.packages => ../packages\n// changed\n")
+	writeTestFile(t, filepath.Join(module, "go.mod"), "module example\n\ngo 1.27.1\n\nreplace github.com/heliodex/better-deploy/wt/packages => ../packages\n// changed\n")
 
 	afterModule, err := componentInputHash(app, manifest{}, "build")
 	if err != nil {

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"wt.packages/app"
+	"github.com/heliodex/better-deploy/wt/packages/app"
 )
 
 //go:embed templates/*.html

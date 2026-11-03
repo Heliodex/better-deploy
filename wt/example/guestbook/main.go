@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"wt.example/guestbook/contract"
-	"wt.packages/app"
-	"wt.packages/storage"
-	wasihttp "wt.packages/wasihttp"
+	"github.com/heliodex/better-deploy/wt/packages/app"
+	"github.com/heliodex/better-deploy/wt/packages/storage"
+	wasihttp "github.com/heliodex/better-deploy/wt/packages/wasihttp"
 )
 
 const (

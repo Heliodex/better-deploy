@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"wt.packages/oauth"
+	"github.com/heliodex/better-deploy/wt/packages/oauth"
 )
 
 // newOAuthClient reads the provider settings from the environment. The defaults point at the public Duende demo, which accepts any redirect URI for its interactive.public client.

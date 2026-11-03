@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
-	wasihttp "wt.packages/wasihttp"
+	wasihttp "github.com/heliodex/better-deploy/wt/packages/wasihttp"
 )
 
 func init() {

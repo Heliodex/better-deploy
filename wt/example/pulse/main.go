@@ -16,9 +16,9 @@ import (
 	"unicode/utf8"
 
 	"wt.example/pulse/contract"
-	"wt.packages/app"
-	"wt.packages/storage"
-	wasihttp "wt.packages/wasihttp"
+	"github.com/heliodex/better-deploy/wt/packages/app"
+	"github.com/heliodex/better-deploy/wt/packages/storage"
+	wasihttp "github.com/heliodex/better-deploy/wt/packages/wasihttp"
 )
 
 const (

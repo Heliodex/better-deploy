@@ -9,7 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"wt.packages/storage"
+	"github.com/heliodex/better-deploy/wt/packages/storage"
 )
 
 func TestBlobAppListsFiles(t *testing.T) {

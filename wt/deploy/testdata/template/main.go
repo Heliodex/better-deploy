@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"__CONTRACT_IMPORT__"
-	"wt.packages/app"
-	"wt.packages/storage"
+	"github.com/heliodex/better-deploy/wt/packages/app"
+	"github.com/heliodex/better-deploy/wt/packages/storage"
 )
 
 const (

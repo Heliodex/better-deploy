@@ -6,9 +6,9 @@ import (
 	"context"
 	"net/http"
 
-	"wt.packages/app"
-	"wt.packages/storage"
-	wasihttp "wt.packages/wasihttp"
+	"github.com/heliodex/better-deploy/wt/packages/app"
+	"github.com/heliodex/better-deploy/wt/packages/storage"
+	wasihttp "github.com/heliodex/better-deploy/wt/packages/wasihttp"
 )
 
 // init is the only wasm-specific wiring: storage, the app routes and the wasi:http export.

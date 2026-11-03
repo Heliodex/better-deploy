@@ -80,7 +80,7 @@ linters:
                         - modernc.org/sqlite
                         - modernc.org/sqlite/lib
                         - wt.example
-                        - wt.packages
+                        - github.com/heliodex/better-deploy/wt/packages
         canonicalheader:
             exclusions:
                 - X-WT-App-Body-SHA256
@@ -189,7 +189,7 @@ linters:
                 - modernc.org/sqlite.
                 - strconv.
                 - strings.
-                - wt.packages/
+                - github.com/heliodex/better-deploy/wt/packages/
                 - time.
                 - context.
                 - archive/tar.
