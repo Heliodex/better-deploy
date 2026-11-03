@@ -9,7 +9,7 @@ import (
 	"modernc.org/sqlite"
 )
 
-var errStorageAuthorizerUnsupported = errors.New("sqlite driver does not support an authorizer")
+var errStorageAuthoriserUnsupported = errors.New("sqlite driver does not support an authoriser")
 
 // safeStorageVTables are the virtual-table modules an app may create. Anything else could load a module that reaches outside the database file.
 var safeStorageVTables = map[string]bool{
@@ -32,7 +32,7 @@ var alwaysAllowedStoragePragmas = map[string]bool{
 	"data_version": true,
 }
 
-// safeReadStoragePragmas are the pragmas whose table-valued function form only reads. They are allowed only when the authorizer has just seen the matching pragma_ virtual-table read, so an actual PRAGMA statement stays denied.
+// safeReadStoragePragmas are the pragmas whose table-valued function form only reads. They are allowed only when the authoriser has just seen the matching pragma_ virtual-table read, so an actual PRAGMA statement stays denied.
 var safeReadStoragePragmas = map[string]bool{
 	"collation_list":    true,
 	"compile_options":   true,
@@ -83,7 +83,7 @@ var readOnlyStorageWriteActions = map[sqlite.AuthorizerActionCode]bool{
 	sqlite.AuthAnalyze:           true,
 }
 
-// storageInternalMutation reports whether an app statement writes or changes the schema of the reserved migration table. Reads stay visible to the authorizer, but the table is hidden from every app-facing listing.
+// storageInternalMutation reports whether an app statement writes or changes the schema of the reserved migration table. Reads stay visible to the authoriser, but the table is hidden from every app-facing listing.
 func storageInternalMutation(action sqlite.AuthorizerActionCode, arg1, arg2 string) bool {
 	switch action {
 	case sqlite.AuthCreateIndex, sqlite.AuthCreateTempIndex, sqlite.AuthDropIndex, sqlite.AuthDropTempIndex,
@@ -101,8 +101,8 @@ func storageInternalMutation(action sqlite.AuthorizerActionCode, arg1, arg2 stri
 	}
 }
 
-// storageAuthorizer is the per-connection policy. It denies actions that can reach outside the app database, and in read-only mode it denies every write and schema change.
-func storageAuthorizer(readOnly bool) sqlite.AuthorizerFn {
+// storageAuthoriser is the per-connection policy. It denies actions that can reach outside the app database, and in read-only mode it denies every write and schema change.
+func storageAuthoriser(readOnly bool) sqlite.AuthorizerFn {
 	// A table-valued pragma function such as pragma_table_info presents the same AuthPragma action as a PRAGMA statement. Track the table-function read that precedes it so reads keep working while actual PRAGMA statements stay denied.
 	inPragmaTableFunction := false
 
@@ -156,20 +156,20 @@ func storageAuthorizer(readOnly bool) sqlite.AuthorizerFn {
 	}
 }
 
-// registerStorageAuthorizer installs a policy on a raw driver connection. It fails closed when the driver cannot enforce one.
-func registerStorageAuthorizer(driverConn any, fn sqlite.AuthorizerFn) error {
+// registerStorageAuthoriser installs a policy on a raw driver connection. It fails closed when the driver cannot enforce one.
+func registerStorageAuthoriser(driverConn any, fn sqlite.AuthorizerFn) error {
 	registerer, ok := driverConn.(sqlite.AuthorizerRegisterer)
 	if !ok {
-		return errStorageAuthorizerUnsupported
+		return errStorageAuthoriserUnsupported
 	}
 
 	return registerer.RegisterAuthorizer(fn)
 }
 
-// installStorageAuthorizer registers a policy on one database/sql connection and returns the function that removes it.
-func installStorageAuthorizer(conn *sql.Conn, readOnly bool) (func() error, error) {
+// installStorageAuthoriser registers a policy on one database/sql connection and returns the function that removes it.
+func installStorageAuthoriser(conn *sql.Conn, readOnly bool) (func() error, error) {
 	err := conn.Raw(func(driverConn any) error {
-		return registerStorageAuthorizer(driverConn, storageAuthorizer(readOnly))
+		return registerStorageAuthoriser(driverConn, storageAuthoriser(readOnly))
 	})
 	if err != nil {
 		return nil, err
@@ -177,21 +177,21 @@ func installStorageAuthorizer(conn *sql.Conn, readOnly bool) (func() error, erro
 
 	return func() error {
 		return conn.Raw(func(driverConn any) error {
-			return registerStorageAuthorizer(driverConn, nil)
+			return registerStorageAuthoriser(driverConn, nil)
 		})
 	}, nil
 }
 
-// unregisterStorageAuthorizer removes any policy from the connection. It is used when a session outlives the install call.
-func unregisterStorageAuthorizer(conn *sql.Conn) error {
+// unregisterStorageAuthoriser removes any policy from the connection. It is used when a session outlives the install call.
+func unregisterStorageAuthoriser(conn *sql.Conn) error {
 	return conn.Raw(func(driverConn any) error {
-		return registerStorageAuthorizer(driverConn, nil)
+		return registerStorageAuthoriser(driverConn, nil)
 	})
 }
 
-// requireStorageAuthorizer installs the SQL authorizer on one connection and returns its uninstall function.
-func requireStorageAuthorizer(conn *sql.Conn, readOnly bool) (func() error, error) {
-	unregister, err := installStorageAuthorizer(conn, readOnly)
+// requireStorageAuthoriser installs the SQL authoriser on one connection and returns its uninstall function.
+func requireStorageAuthoriser(conn *sql.Conn, readOnly bool) (func() error, error) {
+	unregister, err := installStorageAuthoriser(conn, readOnly)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", errStorageUnavailable, err)
 	}

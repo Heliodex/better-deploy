@@ -110,7 +110,7 @@ func (s *storageServer) executeTransaction(ctx context.Context, app string, req 
 
 		defer func() { _ = tx.Rollback() }()
 
-		unregister, err := requireStorageAuthorizer(conn, false)
+		unregister, err := requireStorageAuthoriser(conn, false)
 		if err != nil {
 			return err
 		}

@@ -41,7 +41,7 @@ func (s *storageServer) dbFor(app string) (*sql.DB, error) {
 	return db, nil
 }
 
-// readDBFor opens a second pool in SQLite's query_only mode. /v1/query uses it so a bug in the authorizer still cannot write through the read path.
+// readDBFor opens a second pool in SQLite's query_only mode. /v1/query uses it so a bug in the authoriser still cannot write through the read path.
 func (s *storageServer) readDBFor(app string) (*sql.DB, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

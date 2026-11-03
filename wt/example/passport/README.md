@@ -2,7 +2,7 @@
 
 A small check-in wall behind a real OAuth 2.0 login. The app was scaffolded with `wt-deploy new --dir wt/example/passport` and keeps the generated SvelteKit static frontend, Go contract and wasm component layout.
 
-Signing in uses the authorization code flow with PKCE against the public [Duende IdentityServer demo](https://demo.duendesoftware.com). The demo client `interactive.public` accepts any redirect URI, so the app needs no registration step. On the demo login page use `alice` / `alice` or `bob` / `bob`.
+Signing in uses the authorisation code flow with PKCE against the public [Duende IdentityServer demo](https://demo.duendesoftware.com). The demo client `interactive.public` accepts any redirect URI, so the app needs no registration step. On the demo login page use `alice` / `alice` or `bob` / `bob`.
 
 ## What it demonstrates
 

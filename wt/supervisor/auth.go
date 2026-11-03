@@ -526,7 +526,7 @@ func (s *supervisor) requestIdentity(r *http.Request) (authIdentity, bool) {
 	return s.identityForToken(raw)
 }
 
-func (s *supervisor) authorized(r *http.Request) bool {
+func (s *supervisor) authorised(r *http.Request) bool {
 	_, ok := s.requestIdentity(r)
 	return ok
 }

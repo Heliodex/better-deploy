@@ -92,7 +92,7 @@ func storageErrorDetails(err error) (int, storageErrorResponse) {
 	if sqliteErr, ok := errors.AsType[*sqlite.Error](err); ok {
 		code := sqliteErr.Code()
 		if code == sqlite3.SQLITE_ERROR && strings.Contains(strings.ToLower(sqliteErr.Error()), "not authorized to use function") {
-			// SQLite refuses a disabled function such as load_extension before the authorizer runs, and reports SQLITE_ERROR.
+			// SQLite refuses a disabled function such as load_extension before the authoriser runs, and reports SQLITE_ERROR.
 			return http.StatusForbidden, storageErrorResponse{Error: errorMessage(err), Code: "denied", SQLiteCode: code}
 		}
 

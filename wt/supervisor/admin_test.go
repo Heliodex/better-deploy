@@ -231,20 +231,20 @@ func TestParseLogLineToleratesLegacyLines(t *testing.T) {
 	}
 }
 
-func TestAuthorizedAcceptsCookie(t *testing.T) {
+func TestAuthorisedAcceptsCookie(t *testing.T) {
 	s := testSupervisor()
 	req := httptest.NewRequest(http.MethodGet, "/apps", nil)
 	req.AddCookie(&http.Cookie{Name: "wt_token", Value: "secret"})
 
-	if !s.authorized(req) {
-		t.Error("cookie token should authorize")
+	if !s.authorised(req) {
+		t.Error("cookie token should authorise")
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/apps", nil)
 	req.AddCookie(&http.Cookie{Name: "wt_token", Value: "wrong"})
 
-	if s.authorized(req) {
-		t.Error("wrong cookie token should not authorize")
+	if s.authorised(req) {
+		t.Error("wrong cookie token should not authorise")
 	}
 }
 

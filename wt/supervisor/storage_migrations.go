@@ -120,7 +120,7 @@ func applyMigration(ctx context.Context, conn *sql.Conn, version int, statements
 		return false, nil
 	}
 
-	unregister, err := requireStorageAuthorizer(conn, false)
+	unregister, err := requireStorageAuthoriser(conn, false)
 	if err != nil {
 		return false, err
 	}
@@ -131,7 +131,7 @@ func applyMigration(ctx context.Context, conn *sql.Conn, version int, statements
 			return false, fmt.Errorf("statement %d: %w", i+1, err)
 		}
 	}
-	// The version bump and checksum are host bookkeeping, not app SQL, so they run without the app authorizer.
+	// The version bump and checksum are host bookkeeping, not app SQL, so they run without the app authoriser.
 	if err := unregister(); err != nil {
 		return false, err
 	}

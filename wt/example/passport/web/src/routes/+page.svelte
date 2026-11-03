@@ -139,7 +139,7 @@ async function signOut(): Promise<void> {
 
 <svelte:head>
 	<title>Passport · an OAuth 2.0 check-in desk</title>
-	<meta content="A tiny check-in wall behind a real OAuth 2.0 authorization code flow with PKCE." name="description">
+	<meta content="A tiny check-in wall behind a real OAuth 2.0 authorisation code flow with PKCE." name="description">
 </svelte:head>
 
 <div class="passport-page">
@@ -170,7 +170,7 @@ async function signOut(): Promise<void> {
 					<span class="cover-kicker">Demonstration travel document</span>
 					<span class="cover-title">Passport</span>
 					<span class="cover-rule"></span>
-					<span class="cover-sub">OAuth 2.0 · authorization code + PKCE</span>
+					<span class="cover-sub">OAuth 2.0 · authorisation code + PKCE</span>
 					<div class="cover-seal"><span>WT</span></div>
 					<span class="cover-serial">client · {session?.clientId ?? "interactive.public"}</span>
 				</div>
@@ -246,7 +246,7 @@ async function signOut(): Promise<void> {
 					</div>
 					<div>
 						<dt>Flow</dt>
-						<dd>Authorization code + PKCE</dd>
+						<dd>Authorisation code + PKCE</dd>
 					</div>
 					<div>
 						<dt>Scopes</dt>
@@ -300,7 +300,7 @@ async function signOut(): Promise<void> {
 					to vouch for you first.
 				</p>
 				<ul class="stamp-list">
-					<li><span>01</span> Authorize at the provider</li>
+					<li><span>01</span> Authorise at the provider</li>
 					<li><span>02</span> Return with a one-time code</li>
 					<li><span>03</span> Exchange it back-channel</li>
 					<li><span>04</span> Post with your session cookie</li>
@@ -324,7 +324,7 @@ async function signOut(): Promise<void> {
 					<p>
 						<code>/auth/login</code>
 						creates a random state, nonce and PKCE verifier. Only the SHA-256 challenge travels to the
-						authorization endpoint.
+						authorisation endpoint.
 					</p>
 				</div>
 			</li>

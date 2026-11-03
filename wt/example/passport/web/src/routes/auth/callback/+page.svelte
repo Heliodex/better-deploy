@@ -39,7 +39,7 @@ onMount((): void => {
 
 <div class="callback">
 	<div aria-hidden="true" class="seal">P</div>
-	<p class="eyebrow">Authorization callback</p>
+	<p class="eyebrow">Authorisation callback</p>
 	<h1>{status}</h1>
 	<p class="note">
 		The one-time code is being exchanged on the server. The browser is about to receive an HttpOnly session cookie

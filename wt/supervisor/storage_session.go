@@ -25,7 +25,7 @@ type storageSession struct {
 	tx         *sql.Tx
 	collector  *rowChangeCollector
 	hook       bool
-	authorizer bool
+	authoriser bool
 	writes     []storageSessionWrite
 
 	mu        sync.Mutex
@@ -216,9 +216,9 @@ func (s *storageServer) finishSession(ctx context.Context, session *storageSessi
 
 	var err error
 
-	if session.authorizer {
-		if clearErr := unregisterStorageAuthorizer(session.conn); clearErr != nil {
-			log.Printf("storage %s: clear session authorizer: %v", session.app, clearErr)
+	if session.authoriser {
+		if clearErr := unregisterStorageAuthoriser(session.conn); clearErr != nil {
+			log.Printf("storage %s: clear session authoriser: %v", session.app, clearErr)
 
 			commit = false
 			err = clearErr
@@ -325,7 +325,7 @@ func (s *storageServer) openSession(ctx context.Context, w http.ResponseWriter, 
 		return nil, false
 	}
 
-	if _, err := requireStorageAuthorizer(conn, false); err != nil {
+	if _, err := requireStorageAuthoriser(conn, false); err != nil {
 		_ = tx.Rollback()
 
 		if hook {
@@ -341,7 +341,7 @@ func (s *storageServer) openSession(ctx context.Context, w http.ResponseWriter, 
 
 	id, err := newSessionID()
 	if err != nil {
-		_ = unregisterStorageAuthorizer(conn)
+		_ = unregisterStorageAuthoriser(conn)
 		_ = tx.Rollback()
 
 		if hook {
@@ -362,7 +362,7 @@ func (s *storageServer) openSession(ctx context.Context, w http.ResponseWriter, 
 		tx:         tx,
 		collector:  collector,
 		hook:       hook,
-		authorizer: true,
+		authoriser: true,
 		expiresAt:  time.Now().Add(storageSessionLease),
 	}, true
 }

@@ -402,7 +402,7 @@ func (a *passportApp) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	session.Set(w, r, stateCookie, state, flowTTL)
-	//nolint:gosec // authorizeURL comes from the configured provider's discovery document, not user input.
+	//nolint:gosec // authoriseURL comes from the configured provider's discovery document, not user input.
 	http.Redirect(w, r, authoriseURL, http.StatusFound)
 }
 

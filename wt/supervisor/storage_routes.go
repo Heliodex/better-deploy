@@ -69,7 +69,7 @@ func (s *storageServer) exec(w http.ResponseWriter, r *http.Request, app string)
 	err = s.withWriteConn(ctx, app, func(conn *sql.Conn, changes *rowChangeCollector) error {
 		collector = changes
 
-		unregister, err := requireStorageAuthorizer(conn, false)
+		unregister, err := requireStorageAuthoriser(conn, false)
 		if err != nil {
 			return err
 		}
@@ -257,7 +257,7 @@ func (s *storageServer) query(w http.ResponseWriter, r *http.Request, app string
 	result := storageResult{Columns: []string{}, Rows: [][]any{}}
 
 	err = s.withReadConn(ctx, app, func(conn *sql.Conn) error {
-		unregister, err := requireStorageAuthorizer(conn, true)
+		unregister, err := requireStorageAuthoriser(conn, true)
 		if err != nil {
 			return err
 		}
@@ -314,7 +314,7 @@ func (s *storageServer) writeReturning(w http.ResponseWriter, r *http.Request, a
 	err = s.withWriteConn(ctx, app, func(conn *sql.Conn, changes *rowChangeCollector) error {
 		collector = changes
 
-		unregister, err := requireStorageAuthorizer(conn, false)
+		unregister, err := requireStorageAuthoriser(conn, false)
 		if err != nil {
 			return err
 		}

@@ -1043,8 +1043,8 @@ func TestStorageSQLiteErrorMapping(t *testing.T) {
 	}
 }
 
-func TestStorageAuthorizerPolicy(t *testing.T) {
-	write := storageAuthorizer(false)
+func TestStorageAuthoriserPolicy(t *testing.T) {
+	write := storageAuthoriser(false)
 	for _, action := range []sqlite.AuthorizerActionCode{
 		sqlite.AuthAttach, sqlite.AuthDetach, sqlite.AuthPragma, sqlite.AuthTransaction, sqlite.AuthSavepoint,
 	} {
@@ -1077,7 +1077,7 @@ func TestStorageAuthorizerPolicy(t *testing.T) {
 		}
 	}
 
-	read := storageAuthorizer(true)
+	read := storageAuthoriser(true)
 	for _, action := range []sqlite.AuthorizerActionCode{
 		sqlite.AuthInsert, sqlite.AuthUpdate, sqlite.AuthDelete,
 		sqlite.AuthCreateTable, sqlite.AuthCreateIndex, sqlite.AuthCreateTrigger, sqlite.AuthCreateView,
@@ -1115,8 +1115,8 @@ func TestStorageAuthorizerPolicy(t *testing.T) {
 	}
 }
 
-func TestStorageAuthorizerFailsClosed(t *testing.T) {
-	if err := registerStorageAuthorizer(struct{}{}, nil); !errors.Is(err, errStorageAuthorizerUnsupported) {
-		t.Fatalf("unsupported driver error = %v, want %v", err, errStorageAuthorizerUnsupported)
+func TestStorageAuthoriserFailsClosed(t *testing.T) {
+	if err := registerStorageAuthoriser(struct{}{}, nil); !errors.Is(err, errStorageAuthoriserUnsupported) {
+		t.Fatalf("unsupported driver error = %v, want %v", err, errStorageAuthoriserUnsupported)
 	}
 }
