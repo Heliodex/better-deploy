@@ -33,8 +33,6 @@ const (
 // Template files embedded into the binary. The template's web/node_modules and web/bun.lock are deliberately omitted so a new app starts without them. Keep this list in sync with testdata/template.
 //
 //go:embed all:testdata/template/app.json
-//go:embed all:testdata/template/biome.json
-//go:embed all:testdata/template/.oxlintrc.json
 //go:embed all:testdata/template/main.go
 //go:embed all:testdata/template/main_test.go
 //go:embed all:testdata/template/wasm.go
@@ -43,6 +41,8 @@ const (
 //go:embed all:testdata/template/web/tsconfig.json
 //go:embed all:testdata/template/web/vite.config.ts
 //go:embed all:testdata/template/web/.npmrc
+//go:embed all:testdata/template/web/biome.json
+//go:embed all:testdata/template/web/.oxlintrc.json
 //go:embed all:testdata/template/web/src
 //go:embed all:testdata/template/web/static
 var templateFS embed.FS

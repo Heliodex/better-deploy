@@ -201,8 +201,8 @@ func TestRunNew(t *testing.T) {
 
 	for _, name := range []string{
 		"app.json",
-		"biome.json",
-		".oxlintrc.json",
+		"web/biome.json",
+		"web/.oxlintrc.json",
 		"main.go",
 		"main_test.go",
 		"wasm.go",
