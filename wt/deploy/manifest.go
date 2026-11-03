@@ -24,6 +24,7 @@ type manifest struct {
 	DiskMB          int               `json:"disk_mb,omitempty"`
 	MaxConcurrent   int               `json:"max_concurrency,omitempty"`
 	RequestTimeout  string            `json:"request_timeout,omitempty"`
+	Contract        string            `json:"contract,omitempty"`
 	Network         string            `json:"network,omitempty"`
 	ServerPaths     []string          `json:"server_paths,omitempty"`
 	Schedule        []schedule        `json:"schedule,omitempty"`
@@ -99,6 +100,12 @@ func readManifest(dir string) (manifest, error) {
 
 	if !validName(m.Name) {
 		return m, fmt.Errorf("invalid app name %q", m.Name)
+	}
+
+	switch m.Contract {
+	case "", "none", "valibot":
+	default:
+		return m, fmt.Errorf("contract must be valibot or none, got %q", m.Contract)
 	}
 
 	if m.MemoryMB < 0 || m.DiskMB < 0 {

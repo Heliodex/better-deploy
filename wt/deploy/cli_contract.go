@@ -1,16 +1,11 @@
 package main
 
 import (
-	"context"
-	"errors"
 	"flag"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 )
 
-// runContract regenerates the app's JSON Schema and Go contract from web/src/lib/contract.ts.
+// runContract regenerates the app's JSON Schema and Go contract from the Valibot registries.
 func runContract(args []string) error {
 	flags := flag.NewFlagSet("contract", flag.ContinueOnError)
 
@@ -23,22 +18,13 @@ func runContract(args []string) error {
 		return fmt.Errorf("unexpected argument %q", flags.Arg(0))
 	}
 
-	generator := filepath.Join(*dir, "contract", "generate.go")
-	if _, err := os.Stat(generator); err != nil {
-		if os.IsNotExist(err) {
-			return errors.New("app has no contract generator; scaffold with --contract=valibot or use hand-written types")
-		}
-
+	m, err := readManifest(*dir)
+	if err != nil {
 		return err
 	}
 
-	cmd := exec.CommandContext(context.Background(), "go", "generate", "./contract/")
-	cmd.Dir = *dir
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("contract generation: %w", err)
+	if err := generateContract(*dir, webDirName(m), m.Name); err != nil {
+		return err
 	}
 
 	fmt.Println("contract: generated")

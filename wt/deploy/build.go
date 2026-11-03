@@ -307,6 +307,12 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 		componentStale = cfg.forceBuild || cache.ComponentHash != componentHash || !wasmExists
 	}
 
+	if componentStale && m.Contract == "valibot" {
+		if err := generateContract(cfg.dir, webDirName(m), m.Name); err != nil {
+			return status, err
+		}
+	}
+
 	staticStale := false
 	if staticRelevant {
 		staticStale = cfg.forceBuild || cache.StaticHash != staticHash || !staticExists
