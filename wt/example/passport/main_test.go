@@ -24,7 +24,7 @@ import (
 // testApp builds the app against an in-memory storage service and a test HTTP client.
 func testApp(t *testing.T) *passportApp {
 	t.Helper()
-	t.Setenv("OAUTH_BASE_URL", "https://passport.example")
+	t.Setenv("WT_PUBLIC_URL", "https://passport.example")
 	t.Setenv("OAUTH_ISSUER", "https://issuer.example")
 
 	server, err := storage.NewTestServer()
@@ -265,44 +265,6 @@ func jwksServer(t *testing.T, key *rsa.PublicKey, kid string) *httptest.Server {
 	t.Cleanup(server.Close)
 
 	return server
-}
-
-func TestBaseURLUsesBrowserOrigin(t *testing.T) {
-	t.Setenv("OAUTH_BASE_URL", "")
-
-	client := newOAuthClient(serverClient(t))
-
-	request := httptest.NewRequest(http.MethodPost, "http://internal/auth/login", nil)
-	request.Host = "passport.example"
-	request.Header.Set("Origin", "https://passport.example")
-
-	if got := client.baseURL(request); got != "https://passport.example" {
-		t.Errorf("origin base URL = %q", got)
-	}
-
-	request = httptest.NewRequest(http.MethodPost, "http://passport.localhost/auth/login", nil)
-	request.Host = "passport.localhost"
-	request.Header.Set("Origin", "http://127.0.0.1:5173")
-	request.Header.Set("Referer", "http://127.0.0.1:5173/")
-
-	if got := client.baseURL(request); got != "http://127.0.0.1:5173" {
-		t.Errorf("loopback base URL = %q", got)
-	}
-
-	request = httptest.NewRequest(http.MethodPost, "http://passport.localhost/auth/login", nil)
-	request.Host = "passport.localhost"
-	request.Header.Set("Origin", "https://evil.example")
-
-	if got := client.baseURL(request); got != "http://passport.localhost" {
-		t.Errorf("untrusted origin base URL = %q", got)
-	}
-}
-
-// serverClient is a plain client for helpers that do not make requests.
-func serverClient(t *testing.T) *http.Client {
-	t.Helper()
-
-	return &http.Client{Timeout: time.Second}
 }
 
 func TestVerifyIDToken(t *testing.T) {

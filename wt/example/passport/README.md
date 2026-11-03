@@ -60,9 +60,7 @@ All settings are read from the app environment at startup.
 | `OAUTH_CLIENT_SECRET` | empty | Optional secret for a confidential client. |
 | `OAUTH_SCOPES` | `openid profile email` | Requested scopes. |
 | `OAUTH_PROVIDER_NAME` | `Duende IdentityServer demo` | Label shown in the UI. |
-| `OAUTH_BASE_URL` | derived | Overrides the browser-facing origin used for redirect URIs. |
-
-The redirect URI is derived from the request. A same-origin request carries the browser's `Origin`, so the scheme and port stay correct behind an ingress that terminates TLS; a loopback `Referer` covers the Vite dev server, where `Host` is rewritten to `<app>.localhost`. Set `OAUTH_BASE_URL` if neither is reliable. The redirect URI must be `<base>/auth/callback/` exactly, including the trailing slash.
+The redirect URI comes from `app.PublicURL(r)`. It prefers `WT_PUBLIC_URL`, then a same-host `Origin` or `Referer` from the browser, and falls back to the scheme and host the supervisor passed in the request. This keeps the scheme and port correct behind an ingress that terminates TLS and under the Vite dev server, where `Host` is rewritten to `<app>.localhost`. Set `WT_PUBLIC_URL` when the browser cannot supply a usable origin. The redirect URI must be `<base>/auth/callback/` exactly, including the trailing slash.
 
 ## Local deployment
 

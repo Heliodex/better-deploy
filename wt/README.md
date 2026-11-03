@@ -477,6 +477,10 @@ Before the proxy runs, the supervisor answers `GET`/`HEAD` from the app's `stati
 
 A static file with a sibling `.br` or `.gz` sidecar is served precompressed when the request accepts that coding. The original must still exist, the supervisor sets `Content-Encoding` and the original file's `Content-Type`, and it adds `Vary: Accept-Encoding`; `.br` wins when both are available. Build pipelines can emit both sidecars without changing `app.json`. For proxied component responses the supervisor asks the app for identity and gzips `application/json` and `+json` responses itself when the client accepts gzip, removing `Content-Length` and adding `Vary: Accept-Encoding`; SSE, `no-transform` responses, already encoded bodies and known responses of 256 bytes or less are left alone.
 
+### Public origin
+
+`app.PublicURL(r)` returns the browser-facing origin for an app. It prefers `WT_PUBLIC_URL`, then a same-host `Origin` or `Referer` from the browser, and falls back to the scheme and host the supervisor passed in the request. This keeps TLS-terminating ingress and the Vite dev server, where `Host` is rewritten to `<app>.localhost`, from producing the wrong scheme or port. Use it for OAuth redirect URIs, absolute links and logout redirects instead of reading `Host` directly. Set `WT_PUBLIC_URL` in `app.json` or the runtime config when a browser-supplied origin is not available.
+
 ### Realtime
 
 WASI HTTP in this stack has no WebSocket upgrade path, and `wasmtime serve` does not provide one, so a component cannot hold a WebSocket session. Server-sent events work because they are ordinary streaming HTTP responses: the panel uses them for snapshots and log streams, and apps can return `text/event-stream` through the same proxy. Polling is the fallback for clients that cannot consume SSE. A host-side WebSocket bridge would have to translate frames into a WASI-friendly request or import and is not implemented; do not assume `Upgrade: websocket` is forwarded.

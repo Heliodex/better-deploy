@@ -414,7 +414,7 @@ func (a *passportApp) endSessionURL(r *http.Request, sess *session) string {
 		params.Set("id_token_hint", sess.idToken)
 	}
 
-	if base := a.oauth.baseURL(r); base != "" {
+	if base := app.PublicURL(r); base != "" {
 		params.Set("post_logout_redirect_uri", base+"/")
 	}
 
@@ -454,7 +454,7 @@ func (a *passportApp) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	redirectURI := a.oauth.baseURL(r) + "/auth/callback/"
+	redirectURI := app.PublicURL(r) + "/auth/callback/"
 
 	_, err = a.store.Batch(r.Context(),
 		storage.Statement{

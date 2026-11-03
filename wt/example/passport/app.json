@@ -5,7 +5,7 @@
 	"dev": {
 		"build": "cd web && bun install && cd .. && go generate ./contract/ && ../../packages/generate.sh && go tool componentize-go -d ../../packages/wit -w wt:app/app build",
 		"command": "bun run dev",
-		"proxy": ["/api", "/auth"],
+		"proxy": ["/api", "/auth/login"],
 		"watch": ["web/src/lib/contract.ts"]
 	},
 	"health": "/healthz",

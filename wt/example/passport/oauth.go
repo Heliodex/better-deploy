@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -26,8 +25,8 @@ const (
 
 // oauthConfig is the provider side of the login flow. The defaults point at the public Duende demo, which accepts any redirect URI for its interactive.public client.
 type oauthConfig struct {
-	issuer, providerName, clientID, clientSecret, baseURL string
-	scopes                                                []string
+	issuer, providerName, clientID, clientSecret string
+	scopes                                       []string
 }
 
 // providerMetadata is the subset of the discovery document the app uses.
@@ -146,7 +145,6 @@ func newOAuthClient(httpClient *http.Client) *oauthClient {
 
 	return &oauthClient{
 		cfg: oauthConfig{
-			baseURL:      strings.TrimRight(envDefault("OAUTH_BASE_URL", ""), "/"),
 			clientID:     envDefault("OAUTH_CLIENT_ID", "interactive.public"),
 			clientSecret: envDefault("OAUTH_CLIENT_SECRET", ""),
 			issuer:       strings.TrimRight(envDefault("OAUTH_ISSUER", "https://demo.duendesoftware.com"), "/"),
@@ -155,60 +153,6 @@ func newOAuthClient(httpClient *http.Client) *oauthClient {
 		},
 		httpClient: httpClient,
 	}
-}
-
-// hostname strips any port from a Host or authority.
-func hostname(host string) string {
-	if name, _, err := net.SplitHostPort(host); err == nil {
-		return name
-	}
-
-	return host
-}
-
-// loopbackHost reports whether a host is a local development name.
-func loopbackHost(host string) bool {
-	name := strings.Trim(strings.ToLower(hostname(host)), "[]")
-
-	return name == "localhost" || strings.HasSuffix(name, ".localhost") || name == "127.0.0.1" || name == "::1"
-}
-
-// baseURL is the browser-facing origin used as the OAuth redirect URI. In wt dev, Vite keeps the browser on 127.0.0.1 and rewrites Host to <app>.localhost, so a loopback Referer supplies the port the browser actually uses.
-func (o *oauthClient) baseURL(r *http.Request) string {
-	if o.cfg.baseURL != "" {
-		return o.cfg.baseURL
-	}
-
-	scheme := "http"
-	if r.TLS != nil || r.URL.Scheme == "https" || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
-		scheme = "https"
-	}
-
-	host := r.Host
-	if host == "" {
-		host = r.URL.Host
-	}
-
-	// A same-origin form POST or fetch carries the browser's real origin, including the scheme and port. Use it when the host matches, so the redirect URI is correct behind an ingress that terminates TLS.
-	if origin := r.Header.Get("Origin"); origin != "" {
-		if parsed, err := url.Parse(origin); err == nil && parsed.Host != "" && (parsed.Scheme == "http" || parsed.Scheme == "https") {
-			if strings.EqualFold(parsed.Host, host) || (loopbackHost(host) && loopbackHost(parsed.Host)) {
-				return parsed.Scheme + "://" + parsed.Host
-			}
-		}
-	}
-
-	if referer := r.Referer(); referer != "" {
-		if parsed, err := url.Parse(referer); err == nil && parsed.Host != "" && loopbackHost(host) && loopbackHost(parsed.Host) {
-			if parsed.Scheme != "" {
-				scheme = parsed.Scheme
-			}
-
-			host = parsed.Host
-		}
-	}
-
-	return scheme + "://" + host
 }
 
 // request runs one OAuth back-channel request with a short deadline.
