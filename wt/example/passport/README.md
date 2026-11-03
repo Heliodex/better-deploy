@@ -77,7 +77,7 @@ WT_TOKEN=dev ./wt-deploy deploy \
   --app-host passport.localhost
 ```
 
-Open `http://passport.localhost:8080/`. If the supervisor runs on another port, pass `--app-host passport.localhost:<port>` or set `OAUTH_BASE_URL` in `app.json`.
+Open `http://passport.localhost:8080/`. If the supervisor runs on another port, pass `--app-host passport.localhost:<port>` or set `WT_PUBLIC_URL` in `app.json`.
 
 ## Remote deployment
 
