@@ -189,7 +189,7 @@ func clientFlags(args []string, requireHost bool) (clientOptions, []string, erro
 	token := firstNonEmpty(values.token, os.Getenv("WT_TOKEN"), fileCfg.Token)
 
 	if requireHost && strings.TrimSpace(host) == "" {
-		return clientOptions{}, nil, errors.New("set --host, WT_DEPLOY_HOST or host in the config file")
+		return clientOptions{}, nil, errors.New("set --host, WT_DEPLOY_HOST, or host in the config file")
 	}
 
 	return clientOptions{host: host, token: token, jsonOut: values.jsonOut, timeout: values.timeout}, rest, nil
