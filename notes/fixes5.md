@@ -109,7 +109,7 @@ Concrete evidence from this build:
 
    Implemented in `8279dd7`. The cause was `wasmtime serve` multiplexing up to 16 concurrent requests onto one WASIp3 component instance by default; Go handlers that call outbound `wasi:http` are not safe under that reuse. The supervisor now passes `--max-instance-concurrent-reuse-count=1`, so an instance handles one request at a time and concurrency comes from separate instances. Reproduced before the fix with 100 requests at parallelism 20: guestbook returned 96 `500`s and pulse 80. After restarting the local supervisor, 200 concurrent `/api/messages`, 200 `/api/session` and 100 `/api/monitors` requests all returned `200`, with no new worker traps. `max_concurrency` remains the separate total-request cap. The README documents the flag and the failure mode.
 
-6. [ ] **[P1] Make a new app host routable without a manual ingress.**
+6. [x] **[P1] Make a new app host routable without a manual ingress.**
 
    **Current behaviour.** The supervisor supports exact hosts and single-label wildcard hosts such as `*.apps.example.com`. The remote deployment uses one exact-host ingress per app. Deploying passport succeeded, but the URL returned `404` until an Orchard ingress was created by hand. A new app therefore needs a deploy command plus a provider-side change before it is reachable.
 
@@ -121,6 +121,8 @@ Concrete evidence from this build:
    - Document the one-time wildcard setup as the normal path, not an advanced alias feature.
 
    **Done when.** Deploying a new app with the default remote host needs no provider-side change, and a missing route is a clear preflight error rather than a `404` after a successful deploy.
+
+   Implemented the fallback in `2066e36`. Orchard rejects a wildcard ingress host (`Host is invalid`), and the existing certificate is a single-label `*.k.hackclub.dev`, so a new two-label wildcard would also need DNS-01. The CLI now provides `wt-deploy route check <app>` and `wt-deploy doctor [app]`, and `wt-deploy deploy` probes a non-local app host before building. The probe follows the ingress behaviour: HAProxy answers `/healthz` itself, so the default path is `/`; the ingress's own `404 Not Found` is unreachable, while a supervisor response with `X-Request-ID` or an app-level error counts as routed. A missing route fails before the upload with the host, URL and `--skip-route-check` escape hatch. Verified on the remote deployment: an unrouted host failed before upload, the existing passport host passed, and `doctor` reported supervisor, runtime, target, compiler, readiness, DNS and HTTP status. A wildcard ingress, certificate and DNS record remains the provider-side one-time setup where the provider supports it.
 
 7. [ ] **[P2] Make runtime and target matching self-service.**
 
