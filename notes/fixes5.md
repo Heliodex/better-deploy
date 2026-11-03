@@ -27,7 +27,7 @@ Concrete evidence from this build:
 
 ## Priority ordered
 
-1. [ ] **[P0] Make HTML navigation policy explicit and support server routes.**
+1. [x] **[P0] Make HTML navigation policy explicit and support server routes.**
 
    **Current behaviour.** `serveStatic` answers every `GET`/`HEAD` from `static/` before the component. A matching file is served; otherwise any request that accepts `text/html` gets `static/index.html`. That is correct for a pure SPA, but it makes a server-side `/auth/login`, `/auth/callback`, `/logout` or future SSR route impossible to reach from a browser. Passport works around it with a form `POST` for login and a plain static callback file that calls `POST /api/auth/callback`. `staticFile` also rejects directories, so a prerendered `/auth/callback/index.html` is not served at `/auth/callback/`; the request falls back to the root `index.html` instead.
 
@@ -41,6 +41,8 @@ Concrete evidence from this build:
    - Update `example/passport` to use a normal SvelteKit callback page and `GET`-able login route once the policy exists, or keep the plain file as a documented fallback.
 
    **Done when.** A browser navigation to a declared server route reaches the component; a nested prerendered page is served from its directory index; an ordinary static SPA still falls back to `index.html`; no app needs a static shim for a callback.
+
+   Implemented in `537aec0`. `app.json` now accepts `server_paths`, a normalized list of absolute path prefixes. The supervisor still serves real static files first, resolves a trailing-slash directory to its `index.html`, and only skips the SPA fallback when the request matches one of those prefixes. The field is validated by `wt-deploy`, the supervisor config parser and the panel schema, exposed in `GET /apps/<name>/config`, accepted by `PATCH /apps/<name>/config` without a restart, preserved through static-only deploys, and documented in the README and OpenAPI. Tests cover prefix matching, invalid prefixes, a real file under a server prefix, the root prefix, directory indexes, precompressed assets and the config patch. `example/passport` now declares `"server_paths": ["/auth"]`, links to `GET /auth/login`, and uses a normal prerendered `/auth/callback/` page instead of a plain static shim. Verified locally: `/auth/login` returns the provider redirect, `/auth/callback/` serves the nested page, and the full browser login completes with the new supervisor.
 
 2. [ ] **[P0] Give apps a canonical public origin and make dev and production agree.**
 
@@ -165,7 +167,7 @@ Concrete evidence from this build:
 
 ## If I picked the next three
 
-1. [ ] **Make HTML navigation policy explicit and support server routes.** This is the biggest authoring cost and the reason passport needed a static callback shim.
+1. [x] **Make HTML navigation policy explicit and support server routes.** This is the biggest authoring cost and the reason passport needed a static callback shim. Implemented in `537aec0`.
 2. [ ] **Add a canonical public origin helper.** This removes duplicated, security-sensitive URL logic and makes the dev loop behave like production.
 3. [ ] **Add OAuth and session helpers.** Passport proves the shape and the tests already exist; packaging it is mostly extraction.
 
