@@ -17,6 +17,8 @@ The first request for a precompiled Go component is tens of milliseconds on a la
 
 - `packages/` – the shared Go module for the app SDK.
   - `packages/storage` – client for the supervisor's SQLite service.
+  - `packages/oauth` – authorization code flow with PKCE, discovery, JWKS verification, UserInfo and end-session.
+  - `packages/session` – opaque session tokens, hashed storage, cookie helpers and same-origin checks.
   - `packages/wasihttp` – the `net/http` adapter (adapted from spin-go-sdk).
   - `packages/binding` – generated bindings for `wt:app/app` (not tracked).
   - `packages/wit` – the `wt:app/app` world and WASI 0.3 WIT dependencies.
@@ -480,6 +482,10 @@ A static file with a sibling `.br` or `.gz` sidecar is served precompressed when
 ### Public origin
 
 `app.PublicURL(r)` returns the browser-facing origin for an app. It prefers `WT_PUBLIC_URL`, then a same-host `Origin` or `Referer` from the browser, and falls back to the scheme and host the supervisor passed in the request. This keeps TLS-terminating ingress and the Vite dev server, where `Host` is rewritten to `<app>.localhost`, from producing the wrong scheme or port. Use it for OAuth redirect URIs, absolute links and logout redirects instead of reading `Host` directly. Set `WT_PUBLIC_URL` in `app.json` or the runtime config when a browser-supplied origin is not available.
+
+### OAuth and sessions
+
+`packages/oauth` wraps discovery, PKCE, code exchange, RS256/JWKS verification, UserInfo and RP-initiated logout. `packages/session` wraps opaque token issuing and hashing, HttpOnly/SameSite cookies and same-origin checks. Both are small helpers rather than a framework: the app still owns its tables, claims and authorization rules. `example/passport` is the reference implementation.
 
 ### Realtime
 

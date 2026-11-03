@@ -322,7 +322,7 @@ func TestRunNew(t *testing.T) {
 }
 
 func TestEmbeddedSDKMatchesPackages(t *testing.T) {
-	roots := []string{"app", "storage", "wasihttp", "httpmeta", "wit"}
+	roots := []string{"app", "storage", "wasihttp", "httpmeta", "wit", "oauth", "session"}
 	for _, root := range roots {
 		source := filepath.Join("..", "packages", root)
 

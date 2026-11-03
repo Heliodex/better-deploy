@@ -20,9 +20,13 @@ func init() {
 	var migrate func(context.Context) error
 
 	if storeErr == nil {
-		application := newPassportApp(store, wasihttp.NewClient())
-		handler = application.handler()
-		migrate = application.migrate
+		application, err := newPassportApp(store, wasihttp.NewClient())
+		if err != nil {
+			storeErr = err
+		} else {
+			handler = application.handler()
+			migrate = application.migrate
+		}
 	}
 
 	wasihttp.Handle(app.ServeStorage(storeErr, migrate, handler).ServeHTTP)

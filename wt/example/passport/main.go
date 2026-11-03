@@ -2,17 +2,12 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +15,8 @@ import (
 
 	"wt.example/passport/contract"
 	"wt.packages/app"
+	"wt.packages/oauth"
+	"wt.packages/session"
 	"wt.packages/storage"
 )
 
@@ -39,31 +36,29 @@ const (
 
 // passportApp owns the store, OAuth client and routes so handler tests can build one without wasmtime.
 type passportApp struct {
-	store *storage.Client
-	mux   *http.ServeMux
-	oauth *oauthClient
+	store        *storage.Client
+	mux          *http.ServeMux
+	oauth        *oauth.Client
+	providerName string
+	sessions     session.Manager
 }
 
-// profile is the identity a successful OAuth login leaves in a session.
-type profile struct {
-	Sub, Name, Email, Username, Picture, Zoneinfo string
-}
-
-// session is one signed-in browser, loaded from the hashed cookie token on each request.
-type session struct {
-	profile   profile
+// userSession is one signed-in browser, loaded from the hashed cookie token on each request.
+type userSession struct {
+	identity  oauth.Identity
 	expiresAt time.Time
 	idToken   string
 }
 
-// sessionResponseEnv builds the public session response, with empty user fields when signed out.
-func (a *passportApp) sessionResponse(sess *session) contract.SessionResponse {
+// sessionResponse builds the public session response, with empty user fields when signed out.
+func (a *passportApp) sessionResponse(sess *userSession) contract.SessionResponse {
+	cfg := a.oauth.Config()
 	response := contract.SessionResponse{
 		Authenticated:  sess != nil,
-		ClientID:       a.oauth.cfg.clientID,
-		ProviderIssuer: a.oauth.cfg.issuer,
-		ProviderName:   a.oauth.cfg.providerName,
-		Scopes:         a.oauth.cfg.scopes,
+		ClientID:       cfg.ClientID,
+		ProviderIssuer: cfg.Issuer,
+		ProviderName:   a.providerName,
+		Scopes:         cfg.Scopes,
 	}
 
 	if sess == nil {
@@ -71,88 +66,19 @@ func (a *passportApp) sessionResponse(sess *session) contract.SessionResponse {
 	}
 
 	response.ExpiresAt = sess.expiresAt.UTC().Format(time.RFC3339)
-	response.UserEmail = sess.profile.Email
-	response.UserName = sess.profile.Name
-	response.UserPicture = sess.profile.Picture
-	response.UserSub = sess.profile.Sub
-	response.UserUsername = sess.profile.Username
-	response.UserZoneinfo = sess.profile.Zoneinfo
+	response.UserEmail = sess.identity.Email
+	response.UserName = sess.identity.Name
+	response.UserPicture = sess.identity.Picture
+	response.UserSub = sess.identity.Subject
+	response.UserUsername = sess.identity.Username
+	response.UserZoneinfo = sess.identity.Zoneinfo
 
 	return response
-}
-
-// hashToken keeps only a digest of a bearer token in the database.
-func hashToken(token string) string {
-	sum := sha256.Sum256([]byte(token))
-
-	return hex.EncodeToString(sum[:])
-}
-
-// newToken returns a URL-safe random token with n bytes of entropy.
-func newToken() (string, error) {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
-
-	return base64.RawURLEncoding.EncodeToString(buf), nil
-}
-
-// secureCookie reports whether the browser reached the app over HTTPS.
-func secureCookie(r *http.Request) bool {
-	if r.TLS != nil || r.URL.Scheme == "https" {
-		return true
-	}
-
-	return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
-}
-
-// setCookie writes one HttpOnly cookie scoped to the whole app.
-func setCookie(w http.ResponseWriter, r *http.Request, name, value string, ttl time.Duration) {
-	//nolint:gosec // Secure follows the request scheme; HttpOnly and SameSite are set.
-	http.SetCookie(w, &http.Cookie{
-		Name:     name,
-		Value:    value,
-		Path:     "/",
-		MaxAge:   int(ttl.Seconds()),
-		HttpOnly: true,
-		Secure:   secureCookie(r),
-		SameSite: http.SameSiteLaxMode,
-	})
-}
-
-// clearCookie expires a cookie the login flow set.
-func clearCookie(w http.ResponseWriter, r *http.Request, name string) {
-	//nolint:gosec // Secure follows the request scheme; HttpOnly and SameSite are set.
-	http.SetCookie(w, &http.Cookie{
-		Name:     name,
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
-		HttpOnly: true,
-		Secure:   secureCookie(r),
-		SameSite: http.SameSiteLaxMode,
-	})
 }
 
 // noStore keeps tokens and session state out of browser and intermediary caches.
 func noStore(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-store")
-}
-
-// sameOrigin rejects cross-site state-changing requests even when SameSite is relaxed by an old browser.
-func sameOrigin(r *http.Request) bool {
-	origin := r.Header.Get("Origin")
-	if origin == "" {
-		return true
-	}
-
-	parsed, err := url.Parse(origin)
-	if err != nil {
-		return false
-	}
-
-	return strings.EqualFold(parsed.Host, r.Host)
 }
 
 // redirect sends the browser to a path on this app.
@@ -166,21 +92,21 @@ func authFailed(w http.ResponseWriter, r *http.Request, reason string) {
 }
 
 // loadSession looks up the session cookie, returning nil for no session or an expired one.
-func (a *passportApp) loadSession(ctx context.Context, r *http.Request) (*session, error) {
-	cookie, err := r.Cookie(sessionCookie)
-	if err != nil || cookie.Value == "" {
+func (a *passportApp) loadSession(ctx context.Context, r *http.Request) (*userSession, error) {
+	token, ok := a.sessions.Token(r)
+	if !ok {
 		return nil, errNoSession
 	}
 
 	var (
-		sess      session
+		sess      userSession
 		expiresAt string
 	)
 
-	err = a.store.QueryRow(ctx, `select user_sub, user_name, user_email, user_username, user_picture, user_zoneinfo, id_token, expires_at
-		from sessions where id = ? and expires_at > ?`, hashToken(cookie.Value), time.Now().UTC().Format(app.TimestampFormat)).
-		Scan(&sess.profile.Sub, &sess.profile.Name, &sess.profile.Email, &sess.profile.Username,
-			&sess.profile.Picture, &sess.profile.Zoneinfo, &sess.idToken, &expiresAt)
+	err := a.store.QueryRow(ctx, `select user_sub, user_name, user_email, user_username, user_picture, user_zoneinfo, id_token, expires_at
+		from sessions where id = ? and expires_at > ?`, session.Hash(token), time.Now().UTC().Format(app.TimestampFormat)).
+		Scan(&sess.identity.Subject, &sess.identity.Name, &sess.identity.Email, &sess.identity.Username,
+			&sess.identity.Picture, &sess.identity.Zoneinfo, &sess.idToken, &expiresAt)
 	if errors.Is(err, storage.ErrNoRows) {
 		return nil, errNoSession
 	}
@@ -200,7 +126,7 @@ func (a *passportApp) loadSession(ctx context.Context, r *http.Request) (*sessio
 }
 
 // requireSession loads the session or writes a 401 and returns nil.
-func (a *passportApp) requireSession(w http.ResponseWriter, r *http.Request) *session {
+func (a *passportApp) requireSession(w http.ResponseWriter, r *http.Request) *userSession {
 	sess, err := a.loadSession(r.Context(), r)
 	if errors.Is(err, errNoSession) {
 		app.WriteErrorCode(w, http.StatusUnauthorized, "unauthorized", "sign in first")
@@ -232,7 +158,7 @@ func (a *passportApp) handleSession(w http.ResponseWriter, r *http.Request) {
 }
 
 // listCheckins returns the newest entries and marks the ones the current user wrote.
-func (a *passportApp) listCheckins(ctx context.Context, sess *session, limit int) ([]contract.Checkin, error) {
+func (a *passportApp) listCheckins(ctx context.Context, sess *userSession, limit int) ([]contract.Checkin, error) {
 	rows, err := a.store.Query(ctx, `select id, message, author_sub, author_name, author_picture, created_at
 		from checkins order by created_at desc, id desc limit ?`, limit)
 	if err != nil {
@@ -248,7 +174,7 @@ func (a *passportApp) listCheckins(ctx context.Context, sess *session, limit int
 			return nil, err
 		}
 
-		entry.Mine = sess != nil && entry.AuthorSub == sess.profile.Sub
+		entry.Mine = sess != nil && entry.AuthorSub == sess.identity.Subject
 		checkins = append(checkins, entry)
 	}
 
@@ -305,7 +231,7 @@ func validMessage(message string) string {
 }
 
 func (a *passportApp) handleCreateCheckin(w http.ResponseWriter, r *http.Request) {
-	if !sameOrigin(r) {
+	if !session.SameOrigin(r) {
 		app.WriteErrorCode(w, http.StatusForbidden, "forbidden", "cross-site request rejected")
 		return
 	}
@@ -327,9 +253,9 @@ func (a *passportApp) handleCreateCheckin(w http.ResponseWriter, r *http.Request
 	}
 
 	entry := contract.Checkin{
-		AuthorName:    displayName(sess.profile),
-		AuthorPicture: sess.profile.Picture,
-		AuthorSub:     sess.profile.Sub,
+		AuthorName:    sess.identity.Name,
+		AuthorPicture: sess.identity.Picture,
+		AuthorSub:     sess.identity.Subject,
 		CreatedAt:     time.Now().UTC().Format(app.TimestampFormat),
 		ID:            app.NewID(),
 		Message:       message,
@@ -346,7 +272,7 @@ func (a *passportApp) handleCreateCheckin(w http.ResponseWriter, r *http.Request
 }
 
 func (a *passportApp) handleDeleteCheckin(w http.ResponseWriter, r *http.Request) {
-	if !sameOrigin(r) {
+	if !session.SameOrigin(r) {
 		app.WriteErrorCode(w, http.StatusForbidden, "forbidden", "cross-site request rejected")
 		return
 	}
@@ -356,7 +282,7 @@ func (a *passportApp) handleDeleteCheckin(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	result, err := a.store.Exec(r.Context(), `delete from checkins where id = ? and author_sub = ?`, r.PathValue("id"), sess.profile.Sub)
+	result, err := a.store.Exec(r.Context(), `delete from checkins where id = ? and author_sub = ?`, r.PathValue("id"), sess.identity.Subject)
 	if err != nil {
 		app.WriteError(w, http.StatusInternalServerError, "could not delete the check-in")
 		return
@@ -373,88 +299,90 @@ func (a *passportApp) handleDeleteCheckin(w http.ResponseWriter, r *http.Request
 func (a *passportApp) handleLogout(w http.ResponseWriter, r *http.Request) {
 	noStore(w)
 
-	if !sameOrigin(r) {
+	if !session.SameOrigin(r) {
 		app.WriteErrorCode(w, http.StatusForbidden, "forbidden", "cross-site request rejected")
 		return
 	}
 
 	response := contract.LogoutResponse{}
+	token, hasToken := a.sessions.Token(r)
 
-	cookie, err := r.Cookie(sessionCookie)
-	if err == nil && cookie.Value != "" {
-		sess, loadErr := a.loadSession(r.Context(), r)
-		if loadErr != nil && !errors.Is(loadErr, errNoSession) {
+	var sess *userSession
+
+	if hasToken {
+		var err error
+
+		sess, err = a.loadSession(r.Context(), r)
+		if err != nil && !errors.Is(err, errNoSession) {
 			app.WriteError(w, http.StatusInternalServerError, "could not load the session")
 			return
 		}
 
-		if _, err := a.store.Exec(r.Context(), `delete from sessions where id = ?`, hashToken(cookie.Value)); err != nil {
+		if _, err := a.store.Exec(r.Context(), `delete from sessions where id = ?`, session.Hash(token)); err != nil {
 			app.WriteError(w, http.StatusInternalServerError, "could not sign out")
 			return
 		}
-
-		if !errors.Is(loadErr, errNoSession) {
-			response.EndSessionURL = a.endSessionURL(r, sess)
-		}
 	}
 
-	clearCookie(w, r, sessionCookie)
+	a.sessions.Clear(w, r)
+
+	if sess != nil {
+		response.EndSessionURL = a.endSessionURL(r, sess)
+	}
+
 	app.WriteJSON(w, http.StatusOK, response)
 }
 
-// endSessionURL builds the RP-initiated logout redirect from the discovery document already cached by login, or an empty string when there is none.
-func (a *passportApp) endSessionURL(r *http.Request, sess *session) string {
-	metadata, ok := a.oauth.cachedMetadata()
-	if !ok || metadata.EndSessionEndpoint == "" {
+// endSessionURL builds the RP-initiated logout redirect, or an empty string when the provider cannot be reached.
+func (a *passportApp) endSessionURL(r *http.Request, sess *userSession) string {
+	redirectURI := ""
+	if base := app.PublicURL(r); base != "" {
+		redirectURI = base + "/"
+	}
+
+	endSession, err := a.oauth.EndSessionURL(r.Context(), sess.idToken, redirectURI)
+	if err != nil {
+		log.Printf("oauth end session: %v", err)
 		return ""
 	}
 
-	params := url.Values{"client_id": {a.oauth.cfg.clientID}}
-	if sess != nil && sess.idToken != "" {
-		params.Set("id_token_hint", sess.idToken)
-	}
-
-	if base := app.PublicURL(r); base != "" {
-		params.Set("post_logout_redirect_uri", base+"/")
-	}
-
-	return metadata.EndSessionEndpoint + "?" + params.Encode()
+	return endSession
 }
 
 // handleLogin starts the authorization code flow with PKCE and a matching state cookie.
 func (a *passportApp) handleLogin(w http.ResponseWriter, r *http.Request) {
-	if !sameOrigin(r) {
+	if !session.SameOrigin(r) {
 		app.WriteErrorCode(w, http.StatusForbidden, "forbidden", "cross-site request rejected")
 		return
 	}
 
-	metadata, err := a.oauth.discover(r.Context())
-	if err != nil {
-		log.Printf("oauth discovery: %v", err)
-		authFailed(w, r, "provider")
-
-		return
-	}
-
-	state, err := newToken()
+	state, err := oauth.NewNonce()
 	if err != nil {
 		authFailed(w, r, "internal")
 		return
 	}
 
-	verifier, challenge, err := newPKCE()
+	verifier, challenge, err := oauth.NewPKCE()
 	if err != nil {
 		authFailed(w, r, "internal")
 		return
 	}
 
-	nonce, err := newToken()
+	nonce, err := oauth.NewNonce()
 	if err != nil {
 		authFailed(w, r, "internal")
 		return
 	}
 
 	redirectURI := app.PublicURL(r) + "/auth/callback/"
+
+	authorizeURL, err := a.oauth.AuthorizeURL(r.Context(), redirectURI, state, nonce, challenge)
+	if err != nil {
+		log.Printf("oauth discovery: %v", err)
+		authFailed(w, r, "provider")
+
+		return
+	}
 
 	_, err = a.store.Batch(r.Context(),
 		storage.Statement{
@@ -473,19 +401,9 @@ func (a *passportApp) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	setCookie(w, r, stateCookie, state, flowTTL)
-
-	params := url.Values{
-		"client_id":             {a.oauth.cfg.clientID},
-		"code_challenge":        {challenge},
-		"code_challenge_method": {"S256"},
-		"nonce":                 {nonce},
-		"redirect_uri":          {redirectURI},
-		"response_type":         {"code"},
-		"scope":                 {strings.Join(a.oauth.cfg.scopes, " ")},
-		"state":                 {state},
-	}
-	http.Redirect(w, r, metadata.AuthorizationEndpoint+"?"+params.Encode(), http.StatusFound)
+	session.Set(w, r, stateCookie, state, flowTTL)
+	//nolint:gosec // authorizeURL comes from the configured provider's discovery document, not user input.
+	http.Redirect(w, r, authorizeURL, http.StatusFound)
 }
 
 // callbackFlow is the stored half of one login attempt.
@@ -521,7 +439,7 @@ func (a *passportApp) takeFlow(ctx context.Context, state string) (callbackFlow,
 func (a *passportApp) handleCallback(w http.ResponseWriter, r *http.Request) {
 	noStore(w)
 
-	if !sameOrigin(r) {
+	if !session.SameOrigin(r) {
 		app.WriteErrorCode(w, http.StatusForbidden, "forbidden", "cross-site request rejected")
 		return
 	}
@@ -532,7 +450,7 @@ func (a *passportApp) handleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cookie, err := r.Cookie(stateCookie)
-	if err != nil || cookie.Value == "" || request.State == "" || cookie.Value != request.State {
+	if err != nil || cookie.Value == "" || request.State == "" || !session.Equal(cookie.Value, request.State) {
 		app.WriteErrorCode(w, http.StatusBadRequest, "state", "the login state did not match this browser")
 		return
 	}
@@ -550,15 +468,7 @@ func (a *passportApp) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	metadata, err := a.oauth.discover(r.Context())
-	if err != nil {
-		log.Printf("oauth discovery: %v", err)
-		app.WriteErrorCode(w, http.StatusBadGateway, "provider", "the identity provider could not be reached")
-
-		return
-	}
-
-	tokens, err := a.oauth.exchange(r.Context(), metadata, request.Code, flow)
+	tokens, err := a.oauth.Exchange(r.Context(), request.Code, flow.redirectURI, flow.verifier)
 	if err != nil {
 		log.Printf("oauth token exchange: %v", err)
 		app.WriteErrorCode(w, http.StatusBadGateway, "exchange", "the identity provider rejected the code exchange")
@@ -566,7 +476,7 @@ func (a *passportApp) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	claims, err := a.oauth.verifyIDToken(r.Context(), metadata, tokens.IDToken, flow.nonce)
+	identity, err := a.oauth.VerifyIDToken(r.Context(), tokens.IDToken, flow.nonce)
 	if err != nil {
 		log.Printf("verify id token: %v", err)
 		app.WriteErrorCode(w, http.StatusBadGateway, "token", "the identity token could not be verified")
@@ -574,19 +484,20 @@ func (a *passportApp) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if userinfo, err := a.oauth.userinfo(r.Context(), metadata, tokens.AccessToken); err == nil {
-		claims.merge(userinfo)
+	if userinfo, err := a.oauth.Userinfo(r.Context(), tokens.AccessToken); err == nil {
+		if err := identity.Merge(userinfo); err != nil {
+			log.Printf("oauth userinfo: %v", err)
+		}
 	} else {
 		log.Printf("oauth userinfo: %v", err)
 	}
 
-	user := claims.profile()
-	if user.Sub == "" {
+	if identity.Subject == "" {
 		app.WriteErrorCode(w, http.StatusBadGateway, "token", "the identity token has no subject")
 		return
 	}
 
-	token, err := newToken()
+	token, hash, err := session.Issue()
 	if err != nil {
 		app.WriteErrorCode(w, http.StatusInternalServerError, "internal", "could not create a session")
 		return
@@ -604,7 +515,7 @@ func (a *passportApp) handleCallback(w http.ResponseWriter, r *http.Request) {
 			SQL: `insert into sessions (id, user_sub, user_name, user_email, user_username, user_picture, user_zoneinfo,
 				access_token, refresh_token, id_token, created_at, expires_at)
 				values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			Args: []any{hashToken(token), user.Sub, user.Name, user.Email, user.Username, user.Picture, user.Zoneinfo,
+			Args: []any{hash, identity.Subject, identity.Name, identity.Email, identity.Username, identity.Picture, identity.Zoneinfo,
 				tokens.AccessToken, tokens.RefreshToken, tokens.IDToken,
 				now.Format(app.TimestampFormat), expiresAt.Format(app.TimestampFormat)},
 		},
@@ -616,21 +527,10 @@ func (a *passportApp) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	setCookie(w, r, sessionCookie, token, sessionTTL)
-	clearCookie(w, r, stateCookie)
+	a.sessions.Set(w, r, token)
+	session.Clear(w, r, stateCookie)
 
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// displayName falls back through the claims the provider may have sent.
-func displayName(user profile) string {
-	for _, value := range []string{user.Name, user.Username, user.Email, user.Sub} {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-
-	return "Guest"
 }
 
 // envDefault returns a trimmed environment value or a fallback.
@@ -685,9 +585,19 @@ func (a *passportApp) handler() http.Handler {
 }
 
 // newPassportApp builds the app around one store and one HTTP client.
-func newPassportApp(store *storage.Client, client *http.Client) *passportApp {
-	a := &passportApp{store: store, mux: http.NewServeMux()}
-	a.oauth = newOAuthClient(client)
+func newPassportApp(store *storage.Client, client *http.Client) (*passportApp, error) {
+	oauthClient, providerName, err := newOAuthClient(client)
+	if err != nil {
+		return nil, err
+	}
+
+	a := &passportApp{
+		store:        store,
+		mux:          http.NewServeMux(),
+		oauth:        oauthClient,
+		providerName: providerName,
+		sessions:     session.New(sessionCookie, sessionTTL),
+	}
 
 	a.mux.HandleFunc("GET /api/session", a.handleSession)
 	a.mux.HandleFunc("GET /api/checkins", a.handleListCheckins)
@@ -698,15 +608,7 @@ func newPassportApp(store *storage.Client, client *http.Client) *passportApp {
 	a.mux.HandleFunc("POST /auth/login", a.handleLogin)
 	a.mux.HandleFunc("POST /api/auth/callback", a.handleCallback)
 
-	return a
-}
-
-// scopesFromEnv keeps the requested scopes in a stable, deduplicated order.
-func scopesFromEnv() []string {
-	scopes := strings.Fields(envDefault("OAUTH_SCOPES", "openid profile email"))
-	slices.Sort(scopes)
-
-	return slices.Compact(scopes)
+	return a, nil
 }
 
 func main() {}

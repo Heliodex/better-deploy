@@ -3,29 +3,58 @@
 package main
 
 import (
-	"crypto"
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json/v2"
-	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
 
 	"wt.example/passport/contract"
 	"wt.packages/app"
+	"wt.packages/oauth"
+	"wt.packages/session"
 	"wt.packages/storage"
 )
 
-// testApp builds the app against an in-memory storage service and a test HTTP client.
+// testIssuer serves the discovery document a handler test needs for login and logout.
+func testIssuer(t *testing.T) string {
+	t.Helper()
+
+	var server *httptest.Server
+
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/.well-known/openid-configuration" {
+			http.NotFound(w, r)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+
+		document, err := json.Marshal(map[string]string{
+			"issuer":                 server.URL,
+			"authorization_endpoint": server.URL + "/authorize",
+			"token_endpoint":         server.URL + "/token",
+			"end_session_endpoint":   server.URL + "/endsession",
+		})
+		if err != nil {
+			t.Errorf("encode discovery: %v", err)
+			return
+		}
+
+		_, _ = w.Write(document)
+	}))
+	t.Cleanup(server.Close)
+
+	return server.URL
+}
+
+// testApp builds the app against an in-memory storage service and a local provider.
 func testApp(t *testing.T) *passportApp {
 	t.Helper()
 	t.Setenv("WT_PUBLIC_URL", "https://passport.example")
-	t.Setenv("OAUTH_ISSUER", "https://issuer.example")
+	t.Setenv("OAUTH_ISSUER", testIssuer(t))
 
 	server, err := storage.NewTestServer()
 	if err != nil {
@@ -34,7 +63,11 @@ func testApp(t *testing.T) *passportApp {
 
 	t.Cleanup(server.Close)
 
-	application := newPassportApp(server.NewClient(server.Client()), server.Client())
+	application, err := newPassportApp(server.NewClient(server.Client()), server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	if err := application.migrate(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -43,14 +76,14 @@ func testApp(t *testing.T) *passportApp {
 }
 
 // seedSession stores a session directly so a test can act as a signed-in user.
-func seedSession(t *testing.T, store *storage.Client, token string, user profile) {
+func seedSession(t *testing.T, store *storage.Client, token string, user oauth.Identity) {
 	t.Helper()
 
 	now := time.Now().UTC()
 
 	_, err := store.Exec(t.Context(), `insert into sessions (id, user_sub, user_name, user_email, user_username, user_picture, user_zoneinfo,
 		access_token, refresh_token, id_token, created_at, expires_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		hashToken(token), user.Sub, user.Name, user.Email, user.Username, user.Picture, user.Zoneinfo,
+		session.Hash(token), user.Subject, user.Name, user.Email, user.Username, user.Picture, user.Zoneinfo,
 		"access", "refresh", "id", now.Format(app.TimestampFormat), now.Add(sessionTTL).Format(app.TimestampFormat))
 	if err != nil {
 		t.Fatal(err)
@@ -100,8 +133,8 @@ func TestCheckinsRequireSession(t *testing.T) {
 func TestCheckinOwnership(t *testing.T) {
 	application := testApp(t)
 	handler := application.handler()
-	seedSession(t, application.store, "alice-token", profile{Sub: "alice", Name: "Alice"})
-	seedSession(t, application.store, "bob-token", profile{Sub: "bob", Name: "Bob"})
+	seedSession(t, application.store, "alice-token", oauth.Identity{Subject: "alice", Name: "Alice"})
+	seedSession(t, application.store, "bob-token", oauth.Identity{Subject: "bob", Name: "Bob"})
 
 	recorder := do(handler, http.MethodPost, "/api/checkins", `{"message":"  hello from alice  "}`, &http.Cookie{Name: sessionCookie, Value: "alice-token"})
 	if recorder.Code != http.StatusCreated {
@@ -145,7 +178,7 @@ func TestCheckinOwnership(t *testing.T) {
 func TestCheckinValidationAndOrigin(t *testing.T) {
 	application := testApp(t)
 	handler := application.handler()
-	seedSession(t, application.store, "alice-token", profile{Sub: "alice", Name: "Alice"})
+	seedSession(t, application.store, "alice-token", oauth.Identity{Subject: "alice", Name: "Alice"})
 	cookie := &http.Cookie{Name: sessionCookie, Value: "alice-token"}
 
 	recorder := do(handler, http.MethodPost, "/api/checkins", `{"message":"   "}`, cookie)
@@ -185,20 +218,20 @@ func TestCheckinValidationAndOrigin(t *testing.T) {
 func TestSessionResponseAndLogout(t *testing.T) {
 	application := testApp(t)
 	handler := application.handler()
-	seedSession(t, application.store, "alice-token", profile{Sub: "alice", Name: "Alice", Email: "alice@example.com"})
+	seedSession(t, application.store, "alice-token", oauth.Identity{Subject: "alice", Name: "Alice", Email: "alice@example.com"})
 
 	recorder := do(handler, http.MethodGet, "/api/session", "", &http.Cookie{Name: sessionCookie, Value: "alice-token"})
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("session = %d: %s", recorder.Code, recorder.Body.String())
 	}
 
-	var session contract.SessionResponse
-	if err := json.Unmarshal(recorder.Body.Bytes(), &session); err != nil {
+	var authSession contract.SessionResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &authSession); err != nil {
 		t.Fatal(err)
 	}
 
-	if !session.Authenticated || session.UserName != "Alice" || session.ClientID != "interactive.public" {
-		t.Errorf("session = %+v", session)
+	if !authSession.Authenticated || authSession.UserName != "Alice" || authSession.ClientID != "interactive.public" {
+		t.Errorf("session = %+v", authSession)
 	}
 
 	recorder = do(handler, http.MethodPost, "/api/logout", "", &http.Cookie{Name: sessionCookie, Value: "alice-token"})
@@ -206,117 +239,49 @@ func TestSessionResponseAndLogout(t *testing.T) {
 		t.Fatalf("logout = %d: %s", recorder.Code, recorder.Body.String())
 	}
 
-	recorder = do(handler, http.MethodGet, "/api/session", "", &http.Cookie{Name: sessionCookie, Value: "alice-token"})
-	if err := json.Unmarshal(recorder.Body.Bytes(), &session); err != nil {
+	var logout contract.LogoutResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &logout); err != nil {
 		t.Fatal(err)
 	}
 
-	if session.Authenticated {
+	endSession, err := url.Parse(logout.EndSessionURL)
+	if err != nil || endSession.Path != "/endsession" || endSession.Query().Get("id_token_hint") != "id" {
+		t.Errorf("end session URL = %q", logout.EndSessionURL)
+	}
+
+	recorder = do(handler, http.MethodGet, "/api/session", "", &http.Cookie{Name: sessionCookie, Value: "alice-token"})
+	if err := json.Unmarshal(recorder.Body.Bytes(), &authSession); err != nil {
+		t.Fatal(err)
+	}
+
+	if authSession.Authenticated {
 		t.Error("session survived logout")
 	}
 }
 
-// signedToken builds an RS256 ID token with the given claims.
-func signedToken(t *testing.T, key *rsa.PrivateKey, kid string, claims oauthClaims) string {
-	t.Helper()
+func TestLoginRedirectsWithPublicOrigin(t *testing.T) {
+	application := testApp(t)
+	handler := application.handler()
 
-	header, err := json.Marshal(map[string]string{"alg": "RS256", "kid": kid, "typ": "JWT"})
+	recorder := do(handler, http.MethodGet, "/auth/login", "")
+	if recorder.Code != http.StatusFound {
+		t.Fatalf("login = %d: %s", recorder.Code, recorder.Body.String())
+	}
+
+	location, err := url.Parse(recorder.Header().Get("Location"))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	payload, err := json.Marshal(claims)
-	if err != nil {
-		t.Fatal(err)
+	if location.Path != "/authorize" {
+		t.Errorf("login location = %s", location)
 	}
 
-	signingInput := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(payload)
-	digest := sha256.Sum256([]byte(signingInput))
-
-	signature, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, digest[:])
-	if err != nil {
-		t.Fatal(err)
+	if location.Query().Get("redirect_uri") != "https://passport.example/auth/callback/" {
+		t.Errorf("redirect_uri = %q", location.Query().Get("redirect_uri"))
 	}
 
-	return signingInput + "." + base64.RawURLEncoding.EncodeToString(signature)
-}
-
-// jwksServer serves a JWKS document for one test key.
-func jwksServer(t *testing.T, key *rsa.PublicKey, kid string) *httptest.Server {
-	t.Helper()
-
-	document, err := json.Marshal(map[string]any{
-		"keys": []map[string]string{{
-			"kty": "RSA",
-			"kid": kid,
-			"use": "sig",
-			"n":   base64.RawURLEncoding.EncodeToString(key.N.Bytes()),
-			"e":   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.E)).Bytes()),
-		}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(document)
-	}))
-	t.Cleanup(server.Close)
-
-	return server
-}
-
-func TestVerifyIDToken(t *testing.T) {
-	t.Setenv("OAUTH_ISSUER", "https://issuer.example")
-	t.Setenv("OAUTH_CLIENT_ID", "interactive.public")
-
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	server := jwksServer(t, &key.PublicKey, "test-key")
-	client := newOAuthClient(server.Client())
-
-	now := time.Now().Unix()
-	claims := oauthClaims{
-		Issuer:   "https://issuer.example",
-		Audience: "interactive.public",
-		Expires:  now + 300,
-		Issued:   now,
-		Nonce:    "nonce",
-		Sub:      "alice",
-		Name:     "Alice Example",
-		Email:    "alice@example.com",
-	}
-	token := signedToken(t, key, "test-key", claims)
-
-	verified, err := client.verifyIDToken(t.Context(), providerMetadata{JWKSUri: server.URL}, token, "nonce")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	user := verified.profile()
-	if user.Sub != "alice" || user.Name != "Alice Example" || user.Username != "alice" {
-		t.Errorf("profile = %+v", user)
-	}
-
-	if _, err := client.verifyIDToken(t.Context(), providerMetadata{JWKSUri: server.URL}, token, "other"); err == nil {
-		t.Error("wrong nonce was accepted")
-	}
-
-	expired := claims
-
-	expired.Expires = now - 300
-	if _, err := client.verifyIDToken(t.Context(), providerMetadata{JWKSUri: server.URL}, signedToken(t, key, "test-key", expired), "nonce"); err == nil {
-		t.Error("expired token was accepted")
-	}
-
-	wrongAudience := claims
-
-	wrongAudience.Audience = "someone-else"
-	if _, err := client.verifyIDToken(t.Context(), providerMetadata{JWKSUri: server.URL}, signedToken(t, key, "test-key", wrongAudience), "nonce"); err == nil {
-		t.Error("wrong audience was accepted")
+	if location.Query().Get("code_challenge_method") != "S256" || location.Query().Get("state") == "" || location.Query().Get("nonce") == "" {
+		t.Errorf("authorize query = %v", location.Query())
 	}
 }

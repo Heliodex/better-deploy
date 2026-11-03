@@ -9,6 +9,7 @@ Signing in uses the authorization code flow with PKCE against the public [Duende
 - `server_paths` keeps the supervisor's static fallback out of `/auth`, so a plain link to `GET /auth/login` reaches the Go component.
 - A prerendered nested SvelteKit page at `/auth/callback/` relays the one-time code to a JSON endpoint on the Go component. The supervisor serves its directory `index.html` for the trailing-slash URL.
 - The component exchanges the code back-channel with PKCE, verifies the ID token's RS256 signature against the provider's JWKS, and calls UserInfo with the access token.
+- The OAuth client and cookie/session helpers are shared packages (`wt/packages/oauth` and `wt/packages/session`); the app owns only its tables, handlers and UI.
 - Access, refresh and ID tokens stay in SQLite. The browser only receives an HttpOnly, SameSite session cookie whose value is stored as a SHA-256 hash.
 - Posting a check-in requires a valid session; removing one only works for its author.
 - `POST /api/logout` deletes the local session and returns a provider end-session URL for RP-initiated logout.
