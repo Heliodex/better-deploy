@@ -20,7 +20,7 @@ The first request for a precompiled Go component is tens of milliseconds on a la
   - `packages/oauth` – authorization code flow with PKCE, discovery, JWKS verification, UserInfo and end-session.
   - `packages/session` – opaque session tokens, hashed storage, cookie helpers and same-origin checks.
   - `packages/wasihttp` – the `net/http` adapter (adapted from spin-go-sdk).
-  - `packages/binding` – generated bindings for `wt:app/app` (not tracked).
+  - `packages/binding` – generated bindings for `wt:app/app` (tracked so the published module builds without running the generator).
   - `packages/wit` – the `wt:app/app` world and WASI 0.3 WIT dependencies.
   - `packages/generate.sh` – regenerates `packages/binding`.
 - `example/` – example apps only.
@@ -840,7 +840,7 @@ world app {
 }
 ```
 
-They are **not tracked**: `packages/generate.sh` regenerates them from `packages/wit` with `componentize-go bindings`. The example apps' `build` commands run that script first, so a fresh clone builds on its first deploy.
+They are **tracked** so apps can require the published `wt/packages` module without running a generator. `packages/generate.sh` regenerates them from `packages/wit` with `componentize-go bindings`; run it after a WIT or module change and commit the result, because CI verifies the tree is current. The example apps' `build` commands run that script first, so a fresh clone regenerates them while developing the SDK.
 
 The WIT comes from wasmtime v50's `crates/wasi-http/src/p3/wit` and the world file is ours. If you bump wasmtime, update the WIT and run the generator again; the export stub is written by the script.
 

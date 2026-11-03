@@ -3,7 +3,6 @@ example/*/main.cwasm
 example/*/artifact.json
 example/*/.wt-build.json
 example/*/web/node_modules/
-packages/binding/
 packages/tmp/
 apps/
 state/

@@ -61,7 +61,9 @@ jobs:
 
             - name: Generate WASI bindings
               working-directory: wt/packages
-              run: ./generate.sh
+              run: |
+                  ./generate.sh
+                  git diff --exit-code -- binding
 
             - name: Install example web dependencies
               run: |
@@ -137,7 +139,9 @@ jobs:
 
             - name: Generate WASI bindings
               working-directory: wt/packages
-              run: ./generate.sh
+              run: |
+                  ./generate.sh
+                  git diff --exit-code -- binding
 
             - name: Build embedded admin panel
               working-directory: wt/supervisor

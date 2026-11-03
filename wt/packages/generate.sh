@@ -1,5 +1,5 @@
 #!/bin/sh
-# Regenerate the WASI bindings for the wt:app/app world. The output under binding/ is not tracked; the example apps call this script before building.
+# Regenerate the WASI bindings for the wt:app/app world. The output under binding/ is tracked so apps can require the published module without running this script; run it after a WIT or module change.
 set -eu
 
 cd "$(dirname "$0")"
@@ -8,13 +8,13 @@ rm -rf binding tmp
 
 go tool componentize-go --ignore-toml-files -w wt:app/app -d wit \
 	bindings --format -o binding/imports \
-	--pkg-name wt.packages/binding/imports --include-versions
+	--pkg-name github.com/heliodex/better-deploy/wt/packages/binding/imports --include-versions
 rm -rf binding/imports/wit_exports
 
 go tool componentize-go --ignore-toml-files -w wt:app/app -d wit \
 	bindings --format -o tmp \
-	--export-pkg-name wt.packages/binding/exports \
-	--pkg-name wt.packages/binding/imports --include-versions
+	--export-pkg-name github.com/heliodex/better-deploy/wt/packages/binding/exports \
+	--pkg-name github.com/heliodex/better-deploy/wt/packages/binding/imports --include-versions
 mkdir -p binding/exports
 cp -r tmp/wit_exports binding/exports/
 rm -rf tmp
@@ -26,7 +26,7 @@ package export_wasi_http_0_3_0_handler
 
 import (
 	. "go.bytecodealliance.org/pkg/wit/types"
-	. "wt.packages/binding/imports/wasi_http_0_3_0_types"
+	. "github.com/heliodex/better-deploy/wt/packages/binding/imports/wasi_http_0_3_0_types"
 )
 
 // Exports is the hook the generated async export wrapper calls. A handler package sets Exports.Handle at init time.
