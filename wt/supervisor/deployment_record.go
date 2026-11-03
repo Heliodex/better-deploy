@@ -318,7 +318,7 @@ func writeDeploymentMeta(temp string, info deploymentInfo) error {
 	return nil
 }
 
-// recordAt materializes a successful bundle into an existing deployment id, keeping its log and queue timestamps.
+// recordAt materialises a successful bundle into an existing deployment id, keeping its log and queue timestamps.
 func (m *deploymentManager) recordAt(app, id string, previous deploymentInfo, source string) (deploymentInfo, error) {
 	if err := validDeploymentID(id); err != nil {
 		return deploymentInfo{}, err
