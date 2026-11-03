@@ -209,6 +209,8 @@ func TestRunNew(t *testing.T) {
 		".gitignore",
 		"web/package.json",
 		"web/src/lib/api.ts",
+		"web/src/lib/api-error.ts",
+		"web/src/lib/validation-error.ts",
 		"web/src/lib/contract.ts",
 		"web/src/routes/+page.svelte",
 		"web/src/routes/+layout.svelte",

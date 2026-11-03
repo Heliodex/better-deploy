@@ -1,31 +1,9 @@
 import { type BaseIssue, type GenericSchema, type InferOutput, safeParse } from "valibot"
+import { ApiError } from "./api-error"
 import { createNoteSchema, errorResponseSchema, noteSchema, notesResponseSchema } from "./contract"
+import { ValidationError } from "./validation-error"
 
 export type Note = InferOutput<typeof noteSchema>
-
-// ApiError carries the stable code and optional field from the standard error body.
-export class ApiError extends Error {
-	readonly code: string
-	readonly field: string
-
-	constructor(message: string, code = "", field = "") {
-		super(message)
-		this.name = "ApiError"
-		this.code = code
-		this.field = field
-	}
-}
-
-// ValidationError carries per-field messages so the form can show them next to the input that failed.
-export class ValidationError extends Error {
-	readonly fields: { [_: string]: string }
-
-	constructor(fields: { [_: string]: string }) {
-		super(Object.values(fields)[0] ?? "Please check the form.")
-		this.name = "ValidationError"
-		this.fields = fields
-	}
-}
 
 function toValidationError(issues: readonly BaseIssue<unknown>[]): ValidationError {
 	const fields: { [_: string]: string } = {}

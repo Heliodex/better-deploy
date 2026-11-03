@@ -1,7 +1,9 @@
 <script lang="ts">
 import { onMount } from "svelte"
-import { ApiError, createNote, fetchNotes, type Note, ValidationError } from "../lib/api"
+import { createNote, fetchNotes, type Note } from "../lib/api"
+import { ApiError } from "../lib/api-error"
 import { maxNote } from "../lib/contract"
+import { ValidationError } from "../lib/validation-error"
 
 let notes = $state<Note[]>([])
 let text = $state("")
