@@ -124,7 +124,7 @@ Concrete evidence from this build:
 
    Implemented the fallback in `2066e36`. Orchard rejects a wildcard ingress host (`Host is invalid`), and the existing certificate is a single-label `*.k.hackclub.dev`, so a new two-label wildcard would also need DNS-01. The CLI now provides `wt-deploy route check <app>` and `wt-deploy doctor [app]`, and `wt-deploy deploy` probes a non-local app host before building. The probe follows the ingress behaviour: HAProxy answers `/healthz` itself, so the default path is `/`; the ingress's own `404 Not Found` is unreachable, while a supervisor response with `X-Request-ID` or an app-level error counts as routed. A missing route fails before the upload with the host, URL and `--skip-route-check` escape hatch. Verified on the remote deployment: an unrouted host failed before upload, the existing passport host passed, and `doctor` reported supervisor, runtime, target, compiler, readiness, DNS and HTTP status. A wildcard ingress, certificate and DNS record remains the provider-side one-time setup where the provider supports it.
 
-7. [ ] **[P2] Make runtime and target matching self-service.**
+7. [x] **[P2] Make runtime and target matching self-service.**
 
    **Current behaviour.** `wt-deploy` reads the supervisor's reported wasmtime version and target, then compares that string with the local binary. A normal local wasmtime from the official release reports `wasmtime 50.0.0 (commit date)`, while the supervisor reports `wasmtime 50.0.0`. The deploy warns that the cwasm will not match even though the compiler binary is compatible. The runtime-only image has no compiler, so a real mismatch cannot be repaired on the server. A wrapper that rewrites only `wasmtime --version` was needed for the remote deploy.
 
@@ -138,7 +138,9 @@ Concrete evidence from this build:
 
    **Done when.** A plain release wasmtime needs no wrapper and no manual version check, and an incompatible cwasm is rejected before upload rather than after startup.
 
-8. [ ] **[P2] Make the contract pipeline optional and one command.**
+   Implemented in `1dcfa47`. The CLI and supervisor now compare the numeric release and target instead of the full version string, so `wasmtime 50.0.0 (commit)` matches `wasmtime 50.0.0` while a real release change still rebuilds. The artifact cache key uses the release and keeps the full string in `artifact.json` for diagnostics. `wt-deploy runtime` prints the supervisor and local versions, release match, target and compiler availability. Tests cover release parsing, metadata-only matches in preflight and artifact installation, and the runtime command. Verified against the local and remote supervisors: both printed `release: match` for the official local binary and the supervisor's short version. Pushing the supervisor change lets a runtime-only image reuse an official-release cwasm without a version wrapper.
+
+8. [x] **[P2] Make the contract pipeline optional and one command.**
 
    **Current behaviour.** The Valibot to JSON Schema to `go-jsonschema` pipeline is consistent and works, but it is a second build system. Adding one request type touches `web/src/lib/contract.ts`, the schema registry, generated schemas and generated Go. The scaffold makes it mandatory even for an app with one endpoint. Optional fields generate pointers and need extra care. The result is good for a shared API, but heavy for a small app.
 
@@ -151,6 +153,8 @@ Concrete evidence from this build:
    - Keep generated files untracked and keep the current standard error shape.
 
    **Done when.** A small app can skip the contract pipeline without fighting the scaffold, and a Go-first app can generate a typed client with one documented command.
+
+   Implemented in `f04d204`. `wt new --contract=none` scaffolds the same notes app with hand-written Go note types, a client-only Valibot file, no `contract/` generator and no `go generate` in `app.json` or `dev.watch`. `wt contract --dir DIR` runs the existing Valibot to JSON Schema to Go generator in one command. Tests cover the contractless scaffold, its parsed Go source, missing generator errors and the default scaffold. Verified by scaffolding a standalone contractless app outside the repo, running its Go test, Svelte check and static build, plus a full `wt-deploy build` that produced a bundle. The README documents both paths.
 
 9. [ ] **[P2] Add an effective-config inspection command.**
 
