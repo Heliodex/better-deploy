@@ -40,6 +40,9 @@ case "$1" in
   exit 0
   ;;
 compile)
+  if [ "$2" = "--help" ]; then
+    exit 0
+  fi
 ` + record + `  if [ "` + boolText(fail) + `" = "yes" ]; then
     echo "compile is not enabled in this build" >&2
     exit 1
@@ -216,6 +219,47 @@ func TestEnsureArtifactMatchesReleaseWithBuildMetadata(t *testing.T) {
 
 	if got := compileCount(t, counter); got != 0 {
 		t.Errorf("compile calls = %d, want 0 for the same release", got)
+	}
+}
+
+func TestEnsureArtifactUsesExistingCwasmWithoutCompiler(t *testing.T) {
+	dir := t.TempDir()
+	compiler := filepath.Join(dir, "wasmtime")
+
+	script := `#!/bin/sh
+case "$1" in
+--version)
+  echo "wasmtime-cli 51.0.0"
+  ;;
+compile)
+  exit 1
+  ;;
+esac
+`
+	if err := os.WriteFile(compiler, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	wasm := "wasm"
+	artifact := fmt.Sprintf(`{"wasmtime":"wasmtime-cli 51.0.0","target":"x86_64-test","epoch_interruption":true,"wasm_sha256":"%s","wasm_bytes":%d,"cpu":"baseline"}`, digestText(wasm), len(wasm))
+	bundle := writeBundleDir(t, wasm, "current", artifact)
+
+	epoch, err := artifactSupervisor(t, compiler).ensureArtifact(bundle, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !epoch {
+		t.Error("existing epoch cwasm was not kept")
+	}
+
+	cwasm, err := os.ReadFile(filepath.Join(bundle, "main.cwasm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(cwasm) != "current" {
+		t.Errorf("main.cwasm = %q, want the existing artifact", cwasm)
 	}
 }
 

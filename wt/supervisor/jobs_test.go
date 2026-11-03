@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -54,6 +55,29 @@ func waitJob(t *testing.T, store *jobStore, id, status string) appJob {
 	t.Fatalf("job %s did not reach %s: %+v", id, status, job)
 
 	return appJob{}
+}
+
+func TestPruneTerminalJobs(t *testing.T) {
+	jobs := make([]appJob, 0, jobTerminalRetention+3)
+
+	for index := range jobTerminalRetention + 2 {
+		jobs = append(jobs, appJob{ID: fmt.Sprintf("done-%d", index), Status: jobStatusSucceeded})
+	}
+
+	jobs = append(jobs, appJob{ID: "pending", Status: jobStatusPending})
+
+	pruned := pruneTerminalJobs(jobs)
+	if len(pruned) != jobTerminalRetention+1 {
+		t.Fatalf("pruned length = %d, want %d", len(pruned), jobTerminalRetention+1)
+	}
+
+	if pruned[len(pruned)-1].ID != "pending" {
+		t.Errorf("pending job was not retained: %+v", pruned[len(pruned)-1])
+	}
+
+	if pruned[0].ID != "done-2" {
+		t.Errorf("oldest retained job = %q, want done-2", pruned[0].ID)
+	}
 }
 
 func TestJobQueueRunsAndPersists(t *testing.T) {

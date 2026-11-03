@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -482,6 +483,28 @@ func (s *supervisor) ensureArtifact(dir string, requireEpoch bool) (bool, error)
 		}
 
 		return s.finishArtifact(dir, path, current, recorded.CompiledAt, recorded.Epoch)
+	}
+
+	if !s.canCompile() {
+		if _, statErr := os.Stat(cwasm); statErr != nil {
+			return false, errors.New("no compiler available and no main.cwasm to run")
+		}
+
+		if recordErr == nil && recorded.WasmSHA256 != "" && recorded.WasmSHA256 != current.WasmSHA256 {
+			return false, fmt.Errorf("main.cwasm is for wasm %s, not %s, and no compiler is available", recorded.WasmSHA256, current.WasmSHA256)
+		}
+
+		if requireEpoch && (recordErr != nil || !recorded.Epoch) {
+			log.Printf("app artifact %s: request_timeout needs epoch interruption, but no compiler is available", filepath.Base(dir))
+		} else {
+			log.Printf("app artifact %s: no compiler available; keeping existing main.cwasm", filepath.Base(dir))
+		}
+
+		if recordErr == nil {
+			return recorded.Epoch, nil
+		}
+
+		return false, nil
 	}
 
 	log.Printf("app artifact %s: compiling main.wasm for %s (%s)", filepath.Base(dir), current.Wasmtime, current.Target)

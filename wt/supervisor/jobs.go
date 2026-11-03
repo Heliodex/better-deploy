@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -35,11 +36,46 @@ const (
 	jobMaxBodyBytes       = 64 << 10
 	jobMaxKeyBytes        = 128
 	jobMaxJobs            = 1000
+	jobTerminalRetention  = 500
 	jobLease              = 2 * time.Minute
 	jobTimeout            = 2 * time.Minute
 	jobPollInterval       = 250 * time.Millisecond
 	jobIdleInterval       = 500 * time.Millisecond
 )
+
+// terminalJob reports whether a job has finished and can be pruned from the retained history.
+func terminalJob(status string) bool {
+	switch status {
+	case jobStatusSucceeded, jobStatusFailed, jobStatusDead, jobStatusCanceled:
+		return true
+	default:
+		return false
+	}
+}
+
+// pruneTerminalJobs keeps every active job and only the newest terminal jobs, so a steady producer cannot fill the queue with history.
+func pruneTerminalJobs(jobs []appJob) []appJob {
+	out := make([]appJob, 0, len(jobs))
+	remaining := jobTerminalRetention
+
+	for _, job := range slices.Backward(jobs) {
+		if terminalJob(job.Status) {
+			if remaining == 0 {
+				continue
+			}
+
+			remaining--
+		}
+
+		out = append(out, job)
+	}
+
+	for left, right := 0, len(out)-1; left < right; left, right = left+1, right-1 {
+		out[left], out[right] = out[right], out[left]
+	}
+
+	return out
+}
 
 // appJob is one durable unit of work for an app. Status is terminal for succeeded, dead and canceled.
 type appJob struct {
@@ -287,7 +323,7 @@ func (s *jobStore) load() error {
 		jobs = jobs[len(jobs)-jobMaxJobs:]
 	}
 
-	s.jobs = jobs
+	s.jobs = pruneTerminalJobs(jobs)
 
 	return s.saveLocked()
 }
@@ -411,7 +447,15 @@ func (s *jobStore) enqueue(req jobEnqueueRequest) (appJob, bool, error) {
 		}
 	}
 
+	before := len(s.jobs)
+	s.jobs = pruneTerminalJobs(s.jobs)
+	pruned := len(s.jobs) != before
+
 	if len(s.jobs) >= jobMaxJobs {
+		if pruned {
+			_ = s.saveLocked()
+		}
+
 		return appJob{}, false, fmt.Errorf("job queue is full (%d jobs)", jobMaxJobs)
 	}
 
