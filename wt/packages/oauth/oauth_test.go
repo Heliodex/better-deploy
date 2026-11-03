@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -23,6 +24,24 @@ type providerFixture struct {
 	clientSecret string
 	kid          string
 	tokenForm    url.Values
+
+	keyMu sync.RWMutex
+}
+
+// signingMaterial returns the current key pair under the rotation lock.
+func (f *providerFixture) signingMaterial() (*rsa.PrivateKey, string) {
+	f.keyMu.RLock()
+	defer f.keyMu.RUnlock()
+
+	return f.key, f.kid
+}
+
+// setSigningMaterial rotates the key pair used by the token and JWKS endpoints.
+func (f *providerFixture) setSigningMaterial(key *rsa.PrivateKey, kid string) {
+	f.keyMu.Lock()
+	defer f.keyMu.Unlock()
+
+	f.key, f.kid = key, kid
 }
 
 func newProviderFixture(t *testing.T) *providerFixture {
@@ -47,12 +66,13 @@ func newProviderFixture(t *testing.T) *providerFixture {
 				"jwks_uri":               fixture.server.URL + "/jwks",
 			})
 		case "/jwks":
+			currentKey, kid := fixture.signingMaterial()
 			writeTestJSON(t, w, map[string]any{
 				"keys": []map[string]string{{
 					"kty": "RSA",
-					"kid": fixture.kid,
-					"n":   base64.RawURLEncoding.EncodeToString(key.N.Bytes()),
-					"e":   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.PublicKey.E)).Bytes()),
+					"kid": kid,
+					"n":   base64.RawURLEncoding.EncodeToString(currentKey.N.Bytes()),
+					"e":   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(currentKey.E)).Bytes()),
 				}},
 			})
 		case "/token":
@@ -67,7 +87,8 @@ func newProviderFixture(t *testing.T) *providerFixture {
 				return
 			}
 
-			token := signedTestToken(t, key, fixture.kid, claims{
+			currentKey, kid := fixture.signingMaterial()
+			token := signedTestToken(t, currentKey, kid, claims{
 				Issuer:   fixture.server.URL,
 				Audience: fixture.clientID,
 				Expires:  time.Now().Add(time.Hour).Unix(),
@@ -285,6 +306,22 @@ func TestVerifyIDTokenAndUserinfo(t *testing.T) {
 		Subject:  "alice",
 	}), "nonce"); err == nil {
 		t.Error("token with a bad signature was accepted")
+	}
+
+	rotatedKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fixture.setSigningMaterial(rotatedKey, "rotated-key")
+
+	rotated, err := client.Exchange(t.Context(), "code", "https://app.example/auth/callback/", "verifier")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := client.VerifyIDToken(t.Context(), rotated.IDToken, "nonce"); err != nil {
+		t.Errorf("rotated signing key was not refreshed: %v", err)
 	}
 }
 
