@@ -90,11 +90,11 @@ const (
 )
 
 type deployConfig struct {
-	dir, app, host, token, wasmtime, target, appHost, out   string
-	buildComponentCommand                                   string
-	skipBuild, skipCompile, skipStatic, jsonOut, forceBuild bool
-	targetConfigured                                        bool
-	start                                                   time.Time
+	dir, app, host, token, wasmtime, target, appHost, out                   string
+	buildComponentCommand                                                   string
+	skipBuild, skipCompile, skipStatic, jsonOut, forceBuild, skipRouteCheck bool
+	targetConfigured                                                        bool
+	start                                                                   time.Time
 }
 
 // uploadProgress prints a coarse percentage while a bundle uploads, without buffering it a second time.
@@ -343,6 +343,7 @@ func resolveConfig(args []string) (*deployConfig, error) {
 	config := flags.String("config", configPath, "config file (default ~/.config/wt/config.json)")
 	jsonOut := flags.Bool("json", false, "print only the raw API response")
 	forceBuild := flags.Bool("force-build", false, "rebuild the component and static phases even when their inputs are unchanged")
+	skipRouteCheck := flags.Bool("skip-route-check", false, "do not verify that the app host is already routed")
 	skipBuild := flags.Bool("skip-build", false, "skip running app.json's build commands")
 
 	skipCompile := flags.Bool("skip-compile", false, "do not compile; include main.cwasm only if it already exists")
@@ -393,6 +394,7 @@ func resolveConfig(args []string) (*deployConfig, error) {
 		skipBuild:        *skipBuild,
 		skipCompile:      *skipCompile,
 		forceBuild:       *forceBuild,
+		skipRouteCheck:   *skipRouteCheck,
 		appHost:          *appHost,
 		jsonOut:          *jsonOut,
 		targetConfigured: targetConfigured,
@@ -964,6 +966,10 @@ func deploy(args []string) error {
 		return err
 	}
 
+	if err := checkDeployRoute(cfg, m); err != nil {
+		return err
+	}
+
 	if preflight.TargetFromServer {
 		fmt.Fprintf(os.Stderr, "target: %s (from supervisor)\n", cfg.target)
 	}
@@ -1015,6 +1021,7 @@ func resolveBundleConfig(args []string) (*deployConfig, error) {
 	skipCompile := flags.Bool("skip-compile", false, "do not compile; include main.cwasm only if it already exists")
 
 	forceBuild := flags.Bool("force-build", false, "rebuild the component and static phases even when their inputs are unchanged")
+
 	if err := flags.Parse(args); err != nil {
 		return nil, err
 	}
@@ -1098,6 +1105,10 @@ func main() {
 		err = runBlobs(args)
 	case "secrets":
 		err = runSecrets(args)
+	case "route":
+		err = runRoute(args)
+	case "doctor":
+		err = runDoctor(args)
 	case "rollback":
 		err = runRollback(args)
 	case "backup":
@@ -1115,6 +1126,8 @@ func main() {
 		fmt.Println("       wt jobs <app> <list|show|enqueue|cancel|retry> ...")
 		fmt.Println("       wt blobs <app> <list|delete|gc> ...")
 		fmt.Println("       wt secrets <app> <list|set|delete> ...")
+		fmt.Println("       wt route check <app> [--path /healthz]")
+		fmt.Println("       wt doctor [app] [--path /healthz]")
 		fmt.Println("       wt deploy [--dir DIR] [--host URL] [--token TOKEN] [--app-host HOST]")
 		fmt.Println("       wt rollback <app> <deployment-id> [--backup SNAPSHOT]")
 		fmt.Println("       wt backup <list|create|restore|download|import> <app> ...")

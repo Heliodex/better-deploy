@@ -498,6 +498,12 @@ A static file with a sibling `.br` or `.gz` sidecar is served precompressed when
 
 `packages/oauth` wraps discovery, PKCE, code exchange, RS256/JWKS verification, UserInfo and RP-initiated logout. `packages/session` wraps opaque token issuing and hashing, HttpOnly/SameSite cookies and same-origin checks. Both are small helpers rather than a framework: the app still owns its tables, claims and authorization rules. `example/passport` is the reference implementation.
 
+### Routes and ingress
+
+The supervisor routes by `Host`, so every app host needs a DNS record and an ingress before it can reach the app. A wildcard ingress, certificate and DNS record is the one-time setup that makes new hosts work without a provider-side change. Where the provider cannot create a wildcard host, use one exact ingress per app.
+
+`wt-deploy route check <app>` verifies the app's host resolution and makes an HTTP request through the ingress; it treats the ingress's own `404 Not Found` as unreachable and an app response, including an app-level 404, as routed. `wt-deploy doctor [app]` adds supervisor, runtime, target, compiler and readiness details. A deploy now runs the route check before building and fails with an actionable message when a non-local app host is not routable; pass `--skip-route-check` only when the route will be created separately. `/healthz` cannot be the probe path on this ingress because HAProxy answers it itself, so the check uses `/` by default and accepts `--path`.
+
 ### Realtime
 
 WASI HTTP in this stack has no WebSocket upgrade path, and `wasmtime serve` does not provide one, so a component cannot hold a WebSocket session. Server-sent events work because they are ordinary streaming HTTP responses: the panel uses them for snapshots and log streams, and apps can return `text/event-stream` through the same proxy. Polling is the fallback for clients that cannot consume SSE. A host-side WebSocket bridge would have to translate frames into a WASI-friendly request or import and is not implemented; do not assume `Upgrade: websocket` is forwarded.
