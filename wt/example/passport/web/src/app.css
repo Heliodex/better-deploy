@@ -1,0 +1,90 @@
+:root {
+	color-scheme: light;
+	--night: #14243c;
+	--night-soft: #243a59;
+	--paper: #f2ebdc;
+	--paper-deep: #e5dac4;
+	--card: #fbf7ee;
+	--ink: #232a30;
+	--muted: #6e6a5f;
+	--line: #d8cbb3;
+	--line-strong: #b8a785;
+	--accent: #8c2f39;
+	--accent-deep: #6d202a;
+	--accent-soft: #f2dedd;
+	--gold: #b07d33;
+	--teal: #2f6f63;
+	--teal-soft: #dfeeea;
+	--shadow: 0 20px 50px rgba(33, 36, 29, 0.09);
+	--radius: 14px;
+	--serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+	--mono: 'SFMono-Regular', 'Cascadia Mono', 'Liberation Mono', Menlo, monospace;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+html {
+	scroll-behavior: smooth;
+	scroll-padding-top: 28px;
+}
+
+body {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	margin: 0;
+	background:
+		radial-gradient(circle at 86% 4%, rgba(176, 125, 51, 0.14), transparent 30rem),
+		radial-gradient(circle at 4% 58%, rgba(47, 111, 99, 0.09), transparent 28rem),
+		repeating-linear-gradient(0deg, transparent 0 47px, rgba(120, 101, 70, 0.028) 47px 48px),
+		var(--paper);
+	color: var(--ink);
+	font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+	line-height: 1.55;
+}
+
+a {
+	color: var(--accent);
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
+	text-underline-offset: 3px;
+}
+
+button,
+input,
+textarea {
+	font: inherit;
+}
+
+button {
+	cursor: pointer;
+}
+
+h1,
+h2,
+h3,
+p,
+dl,
+dd,
+dt {
+	margin: 0;
+}
+
+h1,
+h2,
+h3 {
+	font-family: var(--serif);
+	font-weight: 500;
+	letter-spacing: -0.02em;
+	line-height: 1.08;
+}
+
+::selection {
+	background: var(--accent-soft);
+	color: var(--accent-deep);
+}

@@ -1,0 +1,16 @@
+{
+	"build_component": "cd web && bun install && cd .. && go generate ./contract/ && ../../packages/generate.sh && go tool componentize-go -d ../../packages/wit -w wt:app/app build",
+	"build_static": "cd web && bun install && bun run build && rm -rf ../static && cp -r build ../static",
+	"component_inputs": ["web/bun.lock", "web/package.json", "web/src/lib/contract.ts"],
+	"dev": {
+		"build": "cd web && bun install && cd .. && go generate ./contract/ && ../../packages/generate.sh && go tool componentize-go -d ../../packages/wit -w wt:app/app build",
+		"command": "bun run dev",
+		"proxy": ["/api", "/auth"],
+		"watch": ["web/src/lib/contract.ts"]
+	},
+	"health": "/healthz",
+	"host": "passport.localhost",
+	"memory_mb": 128,
+	"name": "passport",
+	"request_timeout": "30s"
+}

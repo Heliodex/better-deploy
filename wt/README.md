@@ -29,6 +29,7 @@ The first request for a precompiled Go component is tens of milliseconds on a la
   - `example/guestbook` – SvelteKit static frontend with a Go JSON API; the frontend is served from the bundle's `static/` directory, not embedded in the component.
   - `example/pulse` – SvelteKit uptime dashboard over a Go API that probes URLs on a supervisor schedule, keeps latency history in SQLite and streams each cycle over the event bus.
   - `example/blobbox` – signed-URL upload board backed by SQLite metadata and the supervisor blob store; demonstrates platform identity, `app.DeleteBlob`, the blob admin/GC endpoints and an app-to-app call to pulse.
+  - `example/passport` – check-in wall behind an OAuth 2.0 authorization code flow with PKCE against the Duende demo identity provider; verifies the ID token against the provider JWKS, calls UserInfo, keeps tokens server-side and uses a static callback page to relay the code to the Go component.
 - `supervisor/` – runs apps, proxies by `Host`, deploys bundles blue/green.
   - `supervisor/web` – SvelteKit admin panel, embedded into the supervisor binary (not tracked: `web/build`, `web/node_modules`, `web/.svelte-kit`).
 - `deploy/` – builds, precompiles and uploads an app.
@@ -206,6 +207,12 @@ if !ok {
 ```
 
 The browser signs in with `POST /v1/login`, reads `GET /v1/me` for the current user and CSRF token, and sends `X-CSRF-Token` on logout and password change. Static SvelteKit pages should fetch `GET /v1/me` after hydration and keep the user in client state; there is no server-side load. `example/blobbox` is a runnable reference: it sets `"identity": "platform"`, shows a login form and uses `app.UserFromRequest` to require a user for uploads and deletes.
+
+## OAuth sign-in
+
+`example/passport` owns its login instead of using the supervisor's platform identity. A same-origin form `POST /auth/login` stores a state, nonce and PKCE verifier in SQLite and redirects to the provider. The provider returns to a plain static `/auth/callback` page, which posts the code and state to `POST /api/auth/callback`; the Go component exchanges the code back-channel, verifies the ID token's RS256 signature against the provider's JWKS, calls UserInfo with the access token and sets an HttpOnly session cookie. Access, refresh and ID tokens stay in the app's SQLite database, and check-in writes require the session.
+
+The static callback is a constraint, not a preference: the supervisor answers an HTML navigation from `static/` before the component, and `staticFile` matches files rather than directory indexes, so a prerendered `auth/callback/index.html` is not reachable at `/auth/callback`. A plain `static/auth/callback` file is. Login and every other state-changing route use `POST`, which the static server never handles. Apps with server-rendered browser routes need the same split. `example/passport/README.md` covers the provider settings and both deploy commands.
 
 ## Observability
 
