@@ -171,6 +171,14 @@ Concrete evidence from this build:
 
    Implemented in `f9e2a76`. `wt-deploy inspect <app> [--dir DIR]` combines supervisor runtime and target, app status, readiness, digest, latest deployment, effective runtime config, env and secret key names, a route probe, and an optional comparison with a local `app.json`. `--json` returns the same report for tooling. The comparison covers host, health, memory, disk, max concurrency, request timeout, network, identity, server paths and env key names, while secret values remain unavailable. Tests cover the JSON-shaped config reader, local manifest differences and the command path. Verified against the local and remote supervisors: inspect reported passport's runtime, target, digest, deployment, config, route and the expected remote host difference from the local manifest.
 
+## Remote log follow-ups
+
+The remote deployment exposed two noisy errors after the fixes landed.
+
+- **Job queue full.** `example/ticker` enqueues every 10 seconds, and every finished job stayed in the per-app queue. After about 2.8 hours 1000 succeeded jobs filled the cap and new enqueues failed. Fixed in `a1f5710` by retaining every active job and only the newest 500 terminal jobs (`succeeded`, `failed`, `dead`, `canceled`), pruning on load and before the cap check and persisting the pruned queue. A steady producer can no longer turn history into a full queue.
+- **Wasm module failing to open.** The runtime-only image has no `compile` subcommand, but `ensureArtifact` attempted `wasmtime compile` whenever a cache or artifact match was missing. The runtime binary then treated `compile` as a module path and logged `failed to open wasm module "compile"` before falling back to the existing cwasm. Fixed in `a1f5710` by checking `canCompile` first: an existing valid cwasm is kept with an informational line, and the error is returned only when there is no usable artifact.
+- **PVC full.** The 1 Gi state volume filled during repeated deploys and job history, causing cache writes to fail and some apps to be missing after a rollout. Expanded `wt-demo-state` to 2 Gi and restarted; all nine apps returned. This is Orchard state, not a repository change.
+
 ## Not worth changing
 
 - **Do not split the supervisor.** One binary owning deploy, storage, blobs, events, identity and the panel is appropriate for this prototype. Splitting it would add network hops and authentication boundaries before they solve an observed problem.
