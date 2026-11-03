@@ -47,6 +47,8 @@ func appServeArgs(target string, cfg appConfig, epoch bool) []string {
 		"--allow-precompiled",
 		"--target", target,
 		"--addr", serveAddr,
+		// The Go WASIp3 component cannot safely run concurrent handlers that call wasi:http imports. Let wasmtime use separate instances for concurrent requests instead of multiplexing them into one instance.
+		"--max-instance-concurrent-reuse-count=1",
 	}
 	if cfg.Network != "none" {
 		args = append(args, "-S", "inherit-network")

@@ -538,6 +538,8 @@ Wasmtime's per-request execution limit is `-W timeout=<duration>`, implemented w
 Fuel (`-W fuel=N`) was the other candidate, but in `serve` it belongs to a store rather than a request. With instance reuse it is shared across requests and is not replenished, so a fixed budget would eventually kill a healthy app. Epoch timeouts reset per request and need no per-request supervisor bookkeeping.
 
 Old bundles without the epoch flag keep working but only get the proxy deadline. Setting `request_timeout` makes the supervisor try to rebuild them with epoch support when a compiler is configured; on the runtime-only image there is no compiler, so redeploy from a machine that has one. The e2e suite requests the hello example's `?spin=1` endpoint to verify that the guest is interrupted and the app stays up.
+`wasmtime serve` defaults to multiplexing up to 16 concurrent requests onto one WASIp3 component instance. The Go components in this stack cannot safely run concurrent handlers that call outbound `wasi:http` imports; under load that produced `worker failed: wasm trap: async-lifted export failed to produce a result` and intermittent `500`s in passport, pulse and guestbook. The supervisor passes `--max-instance-concurrent-reuse-count=1`, so one instance handles one request at a time and concurrency comes from separate instances. `max_concurrency` still caps total proxied requests per app.
+
 
 ## Scheduled work
 
