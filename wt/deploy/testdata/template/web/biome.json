@@ -29,8 +29,6 @@
 			"**/*.css",
 			"**/*.svelte",
 			"**/*.json",
-			"!.svelte-kit",
-			"!build",
 			"**/*.html",
 			"!**/node_modules",
 			"!**/.svelte-kit",
@@ -288,16 +286,6 @@
 						"noConfusingLabels": "off",
 						"noEvolvingTypes": "off",
 						"noImplicitAnyLet": "off"
-					}
-				}
-			}
-		},
-		{
-			"includes": ["scripts/**"],
-			"linter": {
-				"rules": {
-					"correctness": {
-						"noNodejsModules": "off"
 					}
 				}
 			}

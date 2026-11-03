@@ -40,7 +40,6 @@ const (
 //go:embed all:testdata/template/web/package.json
 //go:embed all:testdata/template/web/tsconfig.json
 //go:embed all:testdata/template/web/vite.config.ts
-//go:embed all:testdata/template/web/.npmrc
 //go:embed all:testdata/template/web/biome.json
 //go:embed all:testdata/template/web/.oxlintrc.json
 //go:embed all:testdata/template/web/src
