@@ -270,6 +270,22 @@ func TestVerifyIDTokenAndUserinfo(t *testing.T) {
 	}), "nonce"); err == nil {
 		t.Error("expired token was accepted")
 	}
+
+	otherKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := client.VerifyIDToken(t.Context(), signedTestToken(t, otherKey, fixture.kid, claims{
+		Issuer:   fixture.server.URL,
+		Audience: fixture.clientID,
+		Expires:  time.Now().Add(time.Hour).Unix(),
+		Issued:   time.Now().Unix(),
+		Nonce:    "nonce",
+		Subject:  "alice",
+	}), "nonce"); err == nil {
+		t.Error("token with a bad signature was accepted")
+	}
 }
 
 func TestEndSessionURL(t *testing.T) {
