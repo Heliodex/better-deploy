@@ -1,4 +1,4 @@
-// Package oauth implements the OAuth 2.0 authorization code flow with PKCE and OpenID Connect discovery, token verification and UserInfo.
+// Package oauth implements the OAuth 2.0 authorisation code flow with PKCE and OpenID Connect discovery, token verification and UserInfo.
 package oauth
 
 import (
@@ -38,7 +38,7 @@ type Config struct {
 // Provider is the subset of the discovery document the client uses.
 type Provider struct {
 	Issuer                string `json:"issuer"`
-	AuthorizationEndpoint string `json:"authorization_endpoint"`
+	AuthorisationEndpoint string `json:"authorisation_endpoint"`
 	TokenEndpoint         string `json:"token_endpoint"`
 	UserinfoEndpoint      string `json:"userinfo_endpoint"`
 	EndSessionEndpoint    string `json:"end_session_endpoint"`
@@ -355,7 +355,7 @@ func errorBody(resp *http.Response) error {
 // Discover fetches and caches the OpenID Connect discovery document.
 func (c *Client) Discover(ctx context.Context) (Provider, error) {
 	c.mu.Lock()
-	if c.provider.AuthorizationEndpoint != "" && time.Now().Before(c.providerExpiry) {
+	if c.provider.AuthorisationEndpoint != "" && time.Now().Before(c.providerExpiry) {
 		provider := c.provider
 		c.mu.Unlock()
 
@@ -381,7 +381,7 @@ func (c *Client) Discover(ctx context.Context) (Provider, error) {
 		return Provider{}, fmt.Errorf("discovery issuer %q does not match %q", provider.Issuer, c.cfg.Issuer)
 	}
 
-	if provider.AuthorizationEndpoint == "" || provider.TokenEndpoint == "" {
+	if provider.AuthorisationEndpoint == "" || provider.TokenEndpoint == "" {
 		return Provider{}, errors.New("discovery document is missing an authorization or token endpoint")
 	}
 
@@ -393,8 +393,8 @@ func (c *Client) Discover(ctx context.Context) (Provider, error) {
 	return provider, nil
 }
 
-// AuthorizeURL returns the authorization endpoint URL for a code flow with PKCE.
-func (c *Client) AuthorizeURL(ctx context.Context, redirectURI, state, nonce, codeChallenge string) (string, error) {
+// AuthoriseURL returns the authorization endpoint URL for a code flow with PKCE.
+func (c *Client) AuthoriseURL(ctx context.Context, redirectURI, state, nonce, codeChallenge string) (string, error) {
 	provider, err := c.Discover(ctx)
 	if err != nil {
 		return "", err
@@ -411,7 +411,7 @@ func (c *Client) AuthorizeURL(ctx context.Context, redirectURI, state, nonce, co
 		"state":                 {state},
 	}
 
-	return provider.AuthorizationEndpoint + "?" + params.Encode(), nil
+	return provider.AuthorisationEndpoint + "?" + params.Encode(), nil
 }
 
 // Exchange redeems an authorization code for tokens.

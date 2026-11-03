@@ -59,7 +59,7 @@ func newProviderFixture(t *testing.T) *providerFixture {
 		case "/.well-known/openid-configuration":
 			writeTestJSON(t, w, map[string]string{
 				"issuer":                 fixture.server.URL,
-				"authorization_endpoint": fixture.server.URL + "/authorize",
+				"authorisation_endpoint": fixture.server.URL + "/authorize",
 				"token_endpoint":         fixture.server.URL + "/token",
 				"userinfo_endpoint":      fixture.server.URL + "/userinfo",
 				"end_session_endpoint":   fixture.server.URL + "/endsession",
@@ -185,11 +185,11 @@ func TestDiscoverAndAuthorizeURL(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if provider.AuthorizationEndpoint != fixture.server.URL+"/authorize" || provider.JWKSUri != fixture.server.URL+"/jwks" {
+	if provider.AuthorisationEndpoint != fixture.server.URL+"/authorize" || provider.JWKSUri != fixture.server.URL+"/jwks" {
 		t.Errorf("provider = %+v", provider)
 	}
 
-	authorizeURL, err := client.AuthorizeURL(t.Context(), "https://app.example/auth/callback/", "state", "nonce", "challenge")
+	authorizeURL, err := client.AuthoriseURL(t.Context(), "https://app.example/auth/callback/", "state", "nonce", "challenge")
 	if err != nil {
 		t.Fatal(err)
 	}

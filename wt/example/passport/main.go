@@ -349,7 +349,7 @@ func (a *passportApp) endSessionURL(r *http.Request, sess *userSession) string {
 	return endSession
 }
 
-// handleLogin starts the authorization code flow with PKCE and a matching state cookie.
+// handleLogin starts the authorisation code flow with PKCE and a matching state cookie.
 func (a *passportApp) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if !session.SameOrigin(r) {
 		app.WriteErrorCode(w, http.StatusForbidden, "forbidden", "cross-site request rejected")
@@ -376,7 +376,7 @@ func (a *passportApp) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	redirectURI := app.PublicURL(r) + "/auth/callback/"
 
-	authorizeURL, err := a.oauth.AuthorizeURL(r.Context(), redirectURI, state, nonce, challenge)
+	authoriseURL, err := a.oauth.AuthoriseURL(r.Context(), redirectURI, state, nonce, challenge)
 	if err != nil {
 		log.Printf("oauth discovery: %v", err)
 		authFailed(w, r, "provider")
@@ -403,7 +403,7 @@ func (a *passportApp) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	session.Set(w, r, stateCookie, state, flowTTL)
 	//nolint:gosec // authorizeURL comes from the configured provider's discovery document, not user input.
-	http.Redirect(w, r, authorizeURL, http.StatusFound)
+	http.Redirect(w, r, authoriseURL, http.StatusFound)
 }
 
 // callbackFlow is the stored half of one login attempt.

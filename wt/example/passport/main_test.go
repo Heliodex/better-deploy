@@ -34,7 +34,7 @@ func testIssuer(t *testing.T) string {
 
 		document, err := json.Marshal(map[string]string{
 			"issuer":                 server.URL,
-			"authorization_endpoint": server.URL + "/authorize",
+			"authorisation_endpoint": server.URL + "/authorize",
 			"token_endpoint":         server.URL + "/token",
 			"end_session_endpoint":   server.URL + "/endsession",
 		})
