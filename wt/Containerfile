@@ -17,7 +17,7 @@ COPY wt/supervisor/ ./
 RUN go generate ./... && CGO_ENABLED=0 GOOS=linux GOARCH="${TARGETARCH}" \
     go build -trimpath -ldflags="-s -w" -o /out/wt-supervisor .
 
-# Build wasmtime without Cranelift/Winch: the serving side only deserializes the .cwasm files produced by wt-deploy.
+# Build wasmtime without Cranelift/Winch: the serving side only deserialises the .cwasm files produced by wt-deploy.
 # The musl build is fully static, so the final image can be scratch. The Rust stage runs for the target platform,
 # so arm64 builds use the arm64 toolchain and wasmtime target.
 FROM rust:1.97-slim AS wasmtime

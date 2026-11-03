@@ -245,7 +245,7 @@ interface types {
     /// list with the same name.
     ///
     /// The names and values are always returned in the original casing and in
-    /// the order in which they will be serialized for transport.
+    /// the order in which they will be serialised for transport.
     copy-all: func() -> list<tuple<field-name, field-value>>;
     /// Make a deep copy of the Fields. Equivalent in behavior to calling the
     /// `fields` constructor on the return value of `copy-all`. The resulting

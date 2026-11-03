@@ -27,7 +27,7 @@ func TestLockAppIsPerApp(t *testing.T) {
 	unlockA()
 }
 
-func TestLockAppSerializesSameApp(t *testing.T) {
+func TestLockAppSerialisesSameApp(t *testing.T) {
 	s := testSupervisor()
 	unlockFirst := s.lockApp("a")
 

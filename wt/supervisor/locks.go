@@ -25,7 +25,7 @@ func (l *appLocks) get(name string) *sync.Mutex {
 	return lock
 }
 
-// lockApp serializes deploy, config, lifecycle, backup and database operations for one app.
+// lockApp serialises deploy, config, lifecycle, backup and database operations for one app.
 func (s *supervisor) lockApp(name string) func() {
 	lock := s.deployLocks.get(name)
 	lock.Lock()
