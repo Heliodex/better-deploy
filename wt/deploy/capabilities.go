@@ -81,6 +81,32 @@ func fetchCapabilities(client clientOptions) (supervisorCapabilities, error) {
 	return caps, nil
 }
 
+// runtimeRelease extracts the release from a wasmtime version, ignoring build metadata such as the commit and build date.
+func runtimeRelease(version string) string {
+	for field := range strings.FieldsSeq(strings.TrimSpace(version)) {
+		candidate := strings.Trim(strings.TrimPrefix(field, "v"), "()")
+
+		if !strings.Contains(candidate, ".") || candidate == "" {
+			continue
+		}
+
+		release := true
+
+		for _, char := range candidate {
+			if (char < '0' || char > '9') && char != '.' {
+				release = false
+				break
+			}
+		}
+
+		if release {
+			return candidate
+		}
+	}
+
+	return strings.TrimSpace(version)
+}
+
 // preflightDeploy negotiates the runtime target before a build and reports whether the local cwasm will match.
 func preflightDeploy(cfg *deployConfig) (deployPreflight, error) {
 	caps, err := fetchCapabilities(clientOptions{host: cfg.host, token: cfg.token, timeout: 10 * time.Second})
@@ -101,7 +127,7 @@ func preflightDeploy(cfg *deployConfig) (deployPreflight, error) {
 	}
 
 	targetMatch := caps.WasmtimeTarget == "" || strings.TrimSpace(cfg.target) == strings.TrimSpace(caps.WasmtimeTarget)
-	versionMatch := caps.Wasmtime == "" || strings.TrimSpace(localVersion) == strings.TrimSpace(caps.Wasmtime)
+	versionMatch := caps.Wasmtime == "" || runtimeRelease(localVersion) == runtimeRelease(caps.Wasmtime)
 	pre.RuntimeKnown = caps.Wasmtime != "" && caps.WasmtimeTarget != ""
 
 	pre.RuntimeMatch = pre.RuntimeKnown && targetMatch && versionMatch

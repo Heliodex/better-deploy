@@ -113,13 +113,39 @@ func (s *supervisor) wasmtimeVersion() string {
 	return s.version
 }
 
-// artifactMatches reports whether a recorded artifact was built for the current runtime, target and wasm.
+// runtimeRelease extracts the release from a wasmtime version, ignoring build metadata such as the commit and build date.
+func runtimeRelease(version string) string {
+	for field := range strings.FieldsSeq(strings.TrimSpace(version)) {
+		candidate := strings.Trim(strings.TrimPrefix(field, "v"), "()")
+
+		if !strings.Contains(candidate, ".") || candidate == "" {
+			continue
+		}
+
+		release := true
+
+		for _, char := range candidate {
+			if (char < '0' || char > '9') && char != '.' {
+				release = false
+				break
+			}
+		}
+
+		if release {
+			return candidate
+		}
+	}
+
+	return strings.TrimSpace(version)
+}
+
+// artifactMatches reports whether a recorded artifact was built for the current runtime release, target and wasm.
 func artifactMatches(recorded, current artifactInfo) bool {
 	return recorded.Target == current.Target &&
 		recorded.CPU == current.CPU &&
 		recorded.Epoch == current.Epoch &&
 		recorded.WasmSHA256 == current.WasmSHA256 &&
-		recorded.Wasmtime == current.Wasmtime
+		runtimeRelease(recorded.Wasmtime) == runtimeRelease(current.Wasmtime)
 }
 
 func (s *supervisor) artifactCacheDir() string {
@@ -376,7 +402,7 @@ func (s *supervisor) artifactForWasm(dir, cwasm string, requireEpoch bool) (arti
 	}
 
 	current := artifactInfo{Wasmtime: s.wasmtimeVersion(), Target: s.cfg.wasmtimeTarget, CPU: artifactCPUFeatures, Epoch: true, WasmSHA256: digest, WasmBytes: size}
-	key := artifactKey{WasmSHA256: digest, Wasmtime: current.Wasmtime, Target: current.Target, CPU: current.CPU, Epoch: true}
+	key := artifactKey{WasmSHA256: digest, Wasmtime: runtimeRelease(current.Wasmtime), Target: current.Target, CPU: current.CPU, Epoch: true}
 
 	return current, key, true, nil
 }

@@ -504,6 +504,10 @@ The supervisor routes by `Host`, so every app host needs a DNS record and an ing
 
 `wt-deploy route check <app>` verifies the app's host resolution and makes an HTTP request through the ingress; it treats the ingress's own `404 Not Found` as unreachable and an app response, including an app-level 404, as routed. `wt-deploy doctor [app]` adds supervisor, runtime, target, compiler and readiness details. A deploy now runs the route check before building and fails with an actionable message when a non-local app host is not routable; pass `--skip-route-check` only when the route will be created separately. `/healthz` cannot be the probe path on this ingress because HAProxy answers it itself, so the check uses `/` by default and accepts `--path`.
 
+### Runtime matching
+
+A wasmtime release string may include build metadata, such as `wasmtime 50.0.0 (ebe5e8df1 2026-10-20)` locally and `wasmtime 50.0.0` on a runtime-only image. The CLI and supervisor compare the numeric release and target, so build metadata no longer makes a compatible `main.cwasm` look stale. `wt-deploy runtime` prints the supervisor and local versions, the release match, the target and whether the supervisor can compile. The cache key also uses the release, while `artifact.json` keeps the full version for diagnostics. A genuinely different release still triggers a rebuild or a preflight warning.
+
 ### Realtime
 
 WASI HTTP in this stack has no WebSocket upgrade path, and `wasmtime serve` does not provide one, so a component cannot hold a WebSocket session. Server-sent events work because they are ordinary streaming HTTP responses: the panel uses them for snapshots and log streams, and apps can return `text/event-stream` through the same proxy. Polling is the fallback for clients that cannot consume SSE. A host-side WebSocket bridge would have to translate frames into a WASI-friendly request or import and is not implemented; do not assume `Upgrade: websocket` is forwarded.

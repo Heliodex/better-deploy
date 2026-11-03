@@ -102,6 +102,64 @@ func TestPreflightDeployUsesServerTarget(t *testing.T) {
 	}
 }
 
+func TestRuntimeRelease(t *testing.T) {
+	cases := map[string]string{
+		"wasmtime 50.0.0":                        "50.0.0",
+		"wasmtime-cli 51.2.3":                    "51.2.3",
+		"wasmtime 50.0.0 (ebe5e8df1 2026-10-20)": "50.0.0",
+		"v50.0.0":                                "50.0.0",
+	}
+	for input, want := range cases {
+		if got := runtimeRelease(input); got != want {
+			t.Errorf("runtimeRelease(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestPreflightDeployIgnoresWasmtimeBuildMetadata(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "wasmtime")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho 'wasmtime 50.0.0 (ebe5e8df1 2026-10-20)'\n"), privateDirMode); err != nil {
+		t.Fatal(err)
+	}
+
+	server := capabilityTestServer(t, supervisorCapabilities{
+		Version:        "1.2.3",
+		Wasmtime:       "wasmtime 50.0.0",
+		WasmtimeTarget: testTarget,
+		Compiler:       true,
+	}, http.StatusOK)
+	defer server.Close()
+
+	cfg := &deployConfig{host: server.URL, wasmtime: bin, target: testTarget}
+
+	pre, err := preflightDeploy(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !pre.RuntimeMatch {
+		t.Errorf("preflight = %+v, build metadata should not break a release match", pre)
+	}
+}
+
+func TestRunRuntime(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "wasmtime")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho 'wasmtime 50.0.0 (ebe5e8df1 2026-10-20)'\n"), privateDirMode); err != nil {
+		t.Fatal(err)
+	}
+
+	server := capabilityTestServer(t, supervisorCapabilities{
+		Wasmtime:       "wasmtime 50.0.0",
+		WasmtimeTarget: testTarget,
+		Compiler:       true,
+	}, http.StatusOK)
+	defer server.Close()
+
+	if err := runRuntime([]string{testHostFlag, server.URL, "--wasmtime", bin}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPreflightDeployKeepsExplicitTarget(t *testing.T) {
 	bin := fakeWasmtime(t, t.TempDir())
 
