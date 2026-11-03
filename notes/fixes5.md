@@ -44,7 +44,7 @@ Concrete evidence from this build:
 
    Implemented in `537aec0`. `app.json` now accepts `server_paths`, a normalized list of absolute path prefixes. The supervisor still serves real static files first, resolves a trailing-slash directory to its `index.html`, and only skips the SPA fallback when the request matches one of those prefixes. The field is validated by `wt-deploy`, the supervisor config parser and the panel schema, exposed in `GET /apps/<name>/config`, accepted by `PATCH /apps/<name>/config` without a restart, preserved through static-only deploys, and documented in the README and OpenAPI. Tests cover prefix matching, invalid prefixes, a real file under a server prefix, the root prefix, directory indexes, precompressed assets and the config patch. `example/passport` now declares `"server_paths": ["/auth"]`, links to `GET /auth/login`, and uses a normal prerendered `/auth/callback/` page instead of a plain static shim. Verified locally: `/auth/login` returns the provider redirect, `/auth/callback/` serves the nested page, and the full browser login completes with the new supervisor.
 
-2. [ ] **[P0] Give apps a canonical public origin and make dev and production agree.**
+2. [x] **[P0] Give apps a canonical public origin and make dev and production agree.**
 
    **Current behaviour.** An app needs its own public URL for OAuth redirects, cookies, absolute links and post-logout redirects. The request has `URL.Scheme` and `Host`, but behind an ingress the scheme depends on `WT_TRUSTED_PROXIES` and whether the ingress preserves `Host`. In `wt dev`, Vite proxies to the supervisor with `Host: <app>.localhost` and drops the Vite port, so a redirect URI built from `Host` points at the wrong origin. Passport works around this with `Origin`, `Referer`, loopback host checks and a per-request helper. The supervisor sets `WT_APP_URL_<NAME>` for other registered apps, but there is no self URL helper or canonical `WT_PUBLIC_URL`.
 
@@ -58,7 +58,9 @@ Concrete evidence from this build:
 
    **Done when.** Passport no longer contains `Origin`/`Referer` fallbacks. OAuth redirects, session cookies and post-logout redirects use one documented helper and work identically in dev and behind the ingress.
 
-3. [ ] **[P1] Add small OAuth and session helpers instead of making every app rewrite them.**
+   Implemented in `6695eb5`. `app.PublicURL(r)` prefers `WT_PUBLIC_URL`, then a same-host `Origin` or `Referer`, then the trusted scheme and host from the request; loopback origins are accepted for the Vite dev server. Passport now uses it for the authorization redirect and post-logout redirect, and its old `baseURL`, `hostname` and `loopbackHost` helpers are gone. The SDK copy and README are updated. Tests cover plain HTTP, TLS, same-origin and spoofed origins, a loopback dev origin, a Referer, an environment override and an invalid override. The passport dev proxy now forwards only `/auth/login`, so the nested SvelteKit callback page stays on Vite. Verified with the full browser login locally.
+
+3. [x] **[P1] Add small OAuth and session helpers instead of making every app rewrite them.**
 
    **Current behaviour.** Passport implements discovery caching, PKCE, state and nonce generation, code exchange, optional client secret, RS256 signature verification against JWKS, issuer/audience/expiry/nonce checks, UserInfo, end-session, hashed session tokens, cookie flags and CSRF checks. The code is testable and works, but it is security-sensitive and every OAuth app will write a variation of it. There is no shared package for third-party login, opaque sessions or cookie handling.
 
@@ -71,6 +73,8 @@ Concrete evidence from this build:
    - Do not turn this into a framework or a user database. Apps should still own their tables, claims and authorization rules.
 
    **Done when.** A new scaffold can add OAuth with one config block and a few handlers; passport drops most custom crypto and cookie code; tests cover a wrong nonce, wrong audience, expired token, bad signature and a rotated signing key.
+
+   Implemented in `57c14ce`. `packages/oauth` provides discovery caching, PKCE and nonce generation, authorization URLs, code exchange with optional client secret, RS256 JWKS verification, UserInfo and RP-initiated logout. `packages/session` provides opaque token issuing and hashing, cookie set/clear helpers, constant-time comparison and same-origin checks with a loopback exception for the dev server. Passport keeps only its tables, handlers and UI; its 600-line OAuth client is replaced by a small config function. Tests cover discovery, authorization URLs, PKCE, exchange and form fields, token verification with wrong nonce, audience and expiry, signature verification, UserInfo and end-session. The embedded SDK and its sync test include both packages. Verified with the full browser login and check-in flow locally.
 
 4. [ ] **[P1] Expose secrets through `wt-deploy` and stop making `app.json` the convenient secret path.**
 
@@ -168,8 +172,8 @@ Concrete evidence from this build:
 ## If I picked the next three
 
 1. [x] **Make HTML navigation policy explicit and support server routes.** This is the biggest authoring cost and the reason passport needed a static callback shim. Implemented in `537aec0`.
-2. [ ] **Add a canonical public origin helper.** This removes duplicated, security-sensitive URL logic and makes the dev loop behave like production.
-3. [ ] **Add OAuth and session helpers.** Passport proves the shape and the tests already exist; packaging it is mostly extraction.
+2. [x] **Add a canonical public origin helper.** This removes duplicated, security-sensitive URL logic and makes the dev loop behave like production. Implemented in `6695eb5`.
+3. [x] **Add OAuth and session helpers.** Passport proves the shape and the tests already exist; packaging it is mostly extraction. Implemented in `57c14ce`.
 
 The concurrency investigation is a close fourth. It is not an app-authoring feature, but it is the only issue that produced `500`s in normal testing and it affected an existing example as well.
 
