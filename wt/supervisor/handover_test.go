@@ -1,7 +1,7 @@
 package main
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"net"
 	"net/http"
 	"os"
@@ -89,7 +89,7 @@ func supervisorAppPID(t *testing.T, base, token string) int {
 	}
 
 	var info appInfo
-	if err := json.NewDecoder(response.Body).Decode(&info); err != nil {
+	if err := json.UnmarshalRead(response.Body, &info); err != nil {
 		t.Fatal(err)
 	}
 

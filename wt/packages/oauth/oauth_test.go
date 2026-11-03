@@ -6,7 +6,7 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/v2"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -131,7 +131,7 @@ func writeTestJSON(t *testing.T, w http.ResponseWriter, value any) {
 
 	w.Header().Set("Content-Type", "application/json")
 
-	if err := json.NewEncoder(w).Encode(value); err != nil {
+	if err := json.MarshalWrite(w, value); err != nil {
 		t.Errorf("encode response: %v", err)
 	}
 }
