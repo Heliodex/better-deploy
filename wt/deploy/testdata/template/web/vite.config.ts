@@ -10,6 +10,9 @@ export default defineConfig({
 			adapter: adapter({
 				precompress: true,
 			}),
+			paths: {
+				relative: false,
+			},
 			compilerOptions: {
 				cssHash: ({ css, filename, hash }) => `s-${hash(filename ?? css)}`,
 				experimental: {
