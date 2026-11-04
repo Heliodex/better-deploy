@@ -243,7 +243,49 @@ func parseProcStatm(data []byte) (int64, error) {
 	return pages * int64(os.Getpagesize()), nil
 }
 
-// readProcessStats reads CPU ticks and resident memory for a process from procfs.
+// parseSmapsRollupPss returns proportional set size in bytes from /proc/<pid>/smaps_rollup.
+// PSS divides shared pages between the processes that map them, so it describes physical memory better than RSS when many wasmtime processes share the runtime.
+func parseSmapsRollupPss(data []byte) (int64, error) {
+	for line := range strings.SplitSeq(string(data), "\n") {
+		value, ok := strings.CutPrefix(line, "Pss:")
+		if !ok {
+			continue
+		}
+
+		fields := strings.Fields(value)
+		if len(fields) == 0 {
+			return 0, errors.New("short smaps rollup Pss line")
+		}
+
+		kilobytes, err := strconv.ParseInt(fields[0], 10, 64)
+		if err != nil {
+			return 0, err
+		}
+
+		return kilobytes << 10, nil
+	}
+
+	return 0, errors.New("smaps rollup has no Pss line")
+}
+
+// readProcessMemory prefers PSS and falls back to RSS when smaps_rollup is unavailable, which can happen with hidepid or an older kernel.
+func readProcessMemory(pid int) (int64, error) {
+	rollup, err := os.ReadFile(fmt.Sprintf("/proc/%d/smaps_rollup", pid))
+	if err == nil {
+		if memory, parseErr := parseSmapsRollupPss(rollup); parseErr == nil {
+			return memory, nil
+		}
+	}
+
+	statm, err := os.ReadFile(fmt.Sprintf("/proc/%d/statm", pid))
+	if err != nil {
+		return 0, err
+	}
+
+	return parseProcStatm(statm)
+}
+
+// readProcessStats reads CPU ticks and memory for a process from procfs. Memory is PSS when available, otherwise RSS.
 func readProcessStats(pid int) (uint64, int64, error) {
 	stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 	if err != nil {
@@ -255,12 +297,7 @@ func readProcessStats(pid int) (uint64, int64, error) {
 		return 0, 0, err
 	}
 
-	statm, err := os.ReadFile(fmt.Sprintf("/proc/%d/statm", pid))
-	if err != nil {
-		return 0, 0, err
-	}
-
-	memory, err := parseProcStatm(statm)
+	memory, err := readProcessMemory(pid)
 	if err != nil {
 		return 0, 0, err
 	}

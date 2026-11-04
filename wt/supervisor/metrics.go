@@ -323,7 +323,7 @@ func (m *metrics) renderStorageDurations(builder *strings.Builder) {
 // renderApps writes the per-app gauges outside the metrics lock.
 func (m *metrics) renderApps(builder *strings.Builder, s *supervisor) {
 	builder.WriteString("# HELP wt_app_cpu_percent CPU usage of one app process.\n# TYPE wt_app_cpu_percent gauge\n")
-	builder.WriteString("# HELP wt_app_memory_bytes Resident memory of one app process.\n# TYPE wt_app_memory_bytes gauge\n")
+	builder.WriteString("# HELP wt_app_memory_bytes Proportional set size of one app process, falling back to resident memory.\n# TYPE wt_app_memory_bytes gauge\n")
 	builder.WriteString("# HELP wt_app_ready Whether the app is ready for traffic.\n# TYPE wt_app_ready gauge\n")
 	builder.WriteString("# HELP wt_app_disk_bytes Measured /data and database bytes.\n# TYPE wt_app_disk_bytes gauge\n")
 

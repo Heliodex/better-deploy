@@ -71,6 +71,47 @@ func TestParseProcStatm(t *testing.T) {
 	}
 }
 
+func TestParseSmapsRollupPss(t *testing.T) {
+	rollup := []byte("55f0d4a00000-7ffc0a1b0000 ---p 00000000 00:00 0 [rollup]\nRss:   12000 kB\nPss:    4321 kB\nPss_Anon: 4000 kB\n")
+
+	memory, err := parseSmapsRollupPss(rollup)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if memory != 4321<<10 {
+		t.Errorf("memory = %d, want %d", memory, 4321<<10)
+	}
+}
+
+func TestParseSmapsRollupPssRejectsMalformed(t *testing.T) {
+	for _, data := range [][]byte{
+		nil,
+		[]byte("Rss: 12000 kB\n"),
+		[]byte("Pss:\n"),
+		[]byte("Pss: nope kB\n"),
+	} {
+		if _, err := parseSmapsRollupPss(data); err == nil {
+			t.Errorf("expected an error for %q", data)
+		}
+	}
+}
+
+func TestReadProcessMemoryReadsSelf(t *testing.T) {
+	if _, err := os.Stat("/proc/self/smaps_rollup"); err != nil {
+		t.Skip("procfs smaps_rollup is unavailable")
+	}
+
+	memory, err := readProcessMemory(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if memory <= 0 {
+		t.Errorf("memory = %d, want a positive PSS", memory)
+	}
+}
+
 func TestCPUPercent(t *testing.T) {
 	cases := []struct {
 		previous, current uint64
@@ -101,7 +142,7 @@ func TestSampleResourcesReadsSelf(t *testing.T) {
 
 	cpu, memory, _ := app.resourceStats()
 	if memory <= 0 {
-		t.Errorf("memory = %d, want a positive RSS", memory)
+		t.Errorf("memory = %d, want a positive PSS", memory)
 	}
 
 	if cpu < 0 {
