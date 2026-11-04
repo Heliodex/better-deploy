@@ -63,5 +63,5 @@ await mkdir(schemasDir, { recursive: true })
 
 for (const { file, json, title } of documents) {
 	await Bun.write(`${schemasDir}/${file}.json`, `${JSON.stringify(json, null, "\t")}\n`)
-	console.log(`wrote contract/schemas/${file}.json (${title})`)
+	if (!Bun.env.WT_CONTRACT_QUIET) console.log(`wrote contract/schemas/${file}.json (${title})`)
 }

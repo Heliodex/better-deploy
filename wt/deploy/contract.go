@@ -16,6 +16,11 @@ var contractScript string
 
 // generateContract converts the app's Valibot registries to JSON Schema and generated Go types.
 func generateContract(dir, web, appName string) error {
+	return generateContractTo(dir, web, appName, "", false)
+}
+
+// generateContractTo writes the generated files to outDir, or the app's contract directory when outDir is empty.
+func generateContractTo(dir, web, appName, outDir string, quiet bool) error {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return err
@@ -41,15 +46,24 @@ func generateContract(dir, web, appName string) error {
 		return err
 	}
 
-	if err := os.MkdirAll(filepath.Join(dir, "contract"), privateDirMode); err != nil {
+	if outDir == "" {
+		outDir = filepath.Join(dir, "contract")
+	} else {
+		outDir, err = filepath.Abs(outDir)
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := os.MkdirAll(outDir, privateDirMode); err != nil {
 		return err
 	}
 
-	if err := runContractSchemas(dir, webDir, appName); err != nil {
+	if err := runContractSchemas(webDir, appName, outDir, quiet); err != nil {
 		return err
 	}
 
-	return runGoJSONSchema(dir)
+	return runGoJSONSchema(outDir)
 }
 
 // ensureWebDependencies installs the frontend packages when node_modules is missing.
@@ -71,7 +85,7 @@ func ensureWebDependencies(webDir string) error {
 }
 
 // runContractSchemas runs the embedded converter from the web directory so its imports resolve.
-func runContractSchemas(dir, webDir, appName string) error {
+func runContractSchemas(webDir, appName, outDir string, quiet bool) error {
 	file, err := os.CreateTemp(webDir, ".wt-contract-*.ts")
 	if err != nil {
 		return err
@@ -94,10 +108,15 @@ func runContractSchemas(dir, webDir, appName string) error {
 	cmd := exec.CommandContext(context.Background(), "bun", filepath.Base(script))
 	cmd.Dir = webDir
 
-	cmd.Env = append(os.Environ(),
-		"WT_CONTRACT_OUT="+filepath.Join(dir, "contract", "schemas"),
+	env := append(os.Environ(),
+		"WT_CONTRACT_OUT="+filepath.Join(outDir, "schemas"),
 		"WT_APP_NAME="+appName,
 	)
+	if quiet {
+		env = append(env, "WT_CONTRACT_QUIET=1")
+	}
+
+	cmd.Env = env
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 
@@ -108,10 +127,8 @@ func runContractSchemas(dir, webDir, appName string) error {
 	return nil
 }
 
-// runGoJSONSchema turns the generated schema files into contract/contract.gen.go.
-func runGoJSONSchema(dir string) error {
-	contractDir := filepath.Join(dir, "contract")
-
+// runGoJSONSchema turns the generated schema files into contract.gen.go in contractDir.
+func runGoJSONSchema(contractDir string) error {
 	schemas, err := filepath.Glob(filepath.Join(contractDir, "schemas", "*.json"))
 	if err != nil {
 		return err

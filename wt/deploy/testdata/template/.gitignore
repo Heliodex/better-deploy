@@ -12,3 +12,4 @@ artefact.json
 
 .wt-build.json
 .wt-contract-*.ts
+.wt-contract-check-*/
