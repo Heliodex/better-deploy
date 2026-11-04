@@ -3,7 +3,7 @@ module github.com/heliodex/better-deploy/wt/packages/v2
 go 1.27.1
 
 require (
-	go.bytecodealliance.org/pkg v0.4.0
+	go.bytecodealliance.org/pkg v0.4.1
 	modernc.org/sqlite v1.61.0
 )
 

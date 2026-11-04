@@ -51,8 +51,8 @@ github.com/spf13/pflag v1.0.10/go.mod h1:McXfInJRrz4CZXVZOBLb0bTZqETkiAhM9Iw0y3A
 github.com/stretchr/testify v0.0.0-20161117074351-18a02ba4a312/go.mod h1:a8OnRcib4nhh0OaRAV+Yts87kKdq0PP7pXfy6kDkUVs=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
-go.bytecodealliance.org/pkg v0.4.0 h1:oB0kfk9XGmNAe+TBWOyy61ys3TuCOpF/YBB7PboS2YI=
-go.bytecodealliance.org/pkg v0.4.0/go.mod h1:3Y4rSI/nLUEb57ZMXbEWDbblC/GWfZPRMh/qdxJTmMM=
+go.bytecodealliance.org/pkg v0.4.1 h1:adtvExJ42Lg3s46Hs2REAW0PeVrdF6wj9VKK83OwNOQ=
+go.bytecodealliance.org/pkg v0.4.1/go.mod h1:3Y4rSI/nLUEb57ZMXbEWDbblC/GWfZPRMh/qdxJTmMM=
 go.yaml.in/yaml/v3 v3.0.4/go.mod h1:DhzuOOF2ATzADvBadXxruRBLzYTpT36CKvDb3+aBEFg=
 golang.org/x/mod v0.42.0 h1:ICeL3t2L30ljSPHHxDnR4fqVcBt/zR2zJAb9juavmQg=
 golang.org/x/mod v0.42.0/go.mod h1:u5fzIrRInkL8MaO1cbRkUHT64v303YIT5KEqpNr7jRs=

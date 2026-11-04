@@ -25,7 +25,7 @@ require (
 	github.com/sosodev/duration v1.4.0 // indirect
 	github.com/spf13/cobra v1.10.2 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
-	go.bytecodealliance.org/pkg v0.4.0 // indirect
+	go.bytecodealliance.org/pkg v0.4.1 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	modernc.org/libc v1.79.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
