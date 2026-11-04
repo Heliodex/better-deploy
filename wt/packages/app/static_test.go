@@ -7,6 +7,23 @@ import (
 	"testing/fstest"
 )
 
+func TestStaticPageNamesTheSupervisorPage(t *testing.T) {
+	rec := httptest.NewRecorder()
+	StaticPage(rec, "/login/")
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rec.Code)
+	}
+
+	if got := rec.Header().Get(StaticPageHeader); got != "/login/" {
+		t.Errorf("%s = %q, want /login/", StaticPageHeader, got)
+	}
+
+	if rec.Body.Len() != 0 {
+		t.Errorf("body = %q, want empty", rec.Body.String())
+	}
+}
+
 func TestStaticFilesCachesHashedAssets(t *testing.T) {
 	handler := StaticFiles(fstest.MapFS{
 		"_app/immutable/chunk.js": &fstest.MapFile{Data: []byte("js")},
