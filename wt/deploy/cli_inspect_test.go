@@ -12,7 +12,7 @@ import (
 
 func TestCompareManifest(t *testing.T) {
 	dir := t.TempDir()
-	manifest := `{"name":"demo","host":"old.example.com","memory_mb":128,"server_paths":["/auth"],"env":{"A":"one"}}`
+	manifest := `{"name":"demo","host":"old.example.com","memory_mb":128,"server_paths":["/auth"],"server_pages":["/"],"env":{"A":"one"}}`
 
 	if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(manifest), privateFileMode); err != nil {
 		t.Fatal(err)
@@ -22,6 +22,7 @@ func TestCompareManifest(t *testing.T) {
 		"host":             "new.example.com",
 		"memory_mb":        float64(256),
 		"server_paths":     []any{"/auth"},
+		"server_pages":     []any{"/login"},
 		"env_keys":         []any{"A", "B"},
 		"restart_required": false,
 	})
@@ -30,7 +31,7 @@ func TestCompareManifest(t *testing.T) {
 	}
 
 	joined := strings.Join(comparison.Differences, "\n")
-	for _, want := range []string{"host:", "memory_mb:", "env keys:"} {
+	for _, want := range []string{"host:", "memory_mb:", "server_pages:", "env keys:"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("differences missing %q:\n%s", want, joined)
 		}

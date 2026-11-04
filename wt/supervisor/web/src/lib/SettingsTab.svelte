@@ -50,6 +50,7 @@ let restartOnUnhealthy = $state(false)
 let network = $state<"inherit" | "none" | "storage">("inherit")
 let allowCallers = $state("")
 let serverPaths = $state("")
+let serverPages = $state("")
 let egress = $state("")
 let confirmDelete = $state(false)
 let purge = $state(false)
@@ -78,6 +79,7 @@ $effect(() => {
 	network = current.network
 	allowCallers = current.allow_callers.join(", ")
 	serverPaths = current.server_paths.join(", ")
+	serverPages = current.server_pages.join(", ")
 	egress = current.egress.map((rule) => `${rule.cidr}:${rule.port}`).join(", ")
 })
 
@@ -138,6 +140,7 @@ function save(event: SubmitEvent): void {
 		request_timeout: requestTimeout.trim(),
 		restart_on_unhealthy: restartOnUnhealthy,
 		server_paths: parsePaths(serverPaths),
+		server_pages: parsePaths(serverPages),
 		startup_timeout: startupTimeout.trim(),
 	})
 }
@@ -325,6 +328,15 @@ async function removeSecret(key: string): Promise<void> {
 					class="field"
 					placeholder="/auth, /api"
 					bind:value={serverPaths}
+				>
+			</label>
+			<label class="flex flex-col gap-1">
+				<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Server pages</span>
+				<input
+					aria-label="Component-selected page prefixes"
+					class="field"
+					placeholder="/, /login"
+					bind:value={serverPages}
 				>
 			</label>
 			<label class="flex flex-col gap-1">

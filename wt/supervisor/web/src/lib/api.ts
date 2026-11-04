@@ -407,6 +407,7 @@ const appConfigSchema = object({
 	restart_on_unhealthy: boolean(),
 	restart_required: optional(boolean()),
 	schedule: array(unknownSchema()),
+	server_pages: array(string()),
 	server_paths: array(string()),
 	startup_timeout: string(),
 })
@@ -428,6 +429,7 @@ export interface AppConfigPatch {
 	network?: "inherit" | "none" | "storage"
 	request_timeout?: string
 	restart_on_unhealthy?: boolean
+	server_pages?: string[]
 	server_paths?: string[]
 	startup_timeout?: string
 }

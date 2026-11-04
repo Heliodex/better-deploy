@@ -617,6 +617,37 @@ func TestReadManifestValidatesServerPaths(t *testing.T) {
 	}
 }
 
+func TestReadManifestValidatesServerPages(t *testing.T) {
+	dir := t.TempDir()
+	write := func(body string) {
+		t.Helper()
+
+		if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(body), privateFileMode); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write(`{"name":"demo","server_pages":["/","/home","/login"]}`)
+
+	if _, err := readManifest(dir); err != nil {
+		t.Errorf("valid server pages rejected: %v", err)
+	}
+
+	for name, body := range map[string]string{
+		"relative":  `{"name":"demo","server_pages":["home"]}`,
+		"empty":     `{"name":"demo","server_pages":[""]}`,
+		"query":     `{"name":"demo","server_pages":["/home?x=1"]}`,
+		"unclean":   `{"name":"demo","server_pages":["/a/../b"]}`,
+		"backslash": `{"name":"demo","server_pages":["/a\\b"]}`,
+	} {
+		write(body)
+
+		if _, err := readManifest(dir); err == nil {
+			t.Errorf("%s: expected an error", name)
+		}
+	}
+}
+
 func TestWorkspaceAppDirs(t *testing.T) {
 	root := t.TempDir()
 	for _, name := range []string{"alpha", "beta", "not-an-app"} {

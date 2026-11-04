@@ -141,7 +141,7 @@ func compareManifest(dir, name string, config map[string]any) *manifestCompariso
 
 	comparison := &manifestComparison{Path: path}
 
-	for _, key := range []string{"host", "health", "memory_mb", "disk_mb", "max_concurrency", "request_timeout", "network", "identity", "server_paths"} {
+	for _, key := range []string{"host", "health", "memory_mb", "disk_mb", "max_concurrency", "request_timeout", "network", "identity", "server_paths", "server_pages"} {
 		localValue, ok := local[key]
 		if !ok {
 			continue

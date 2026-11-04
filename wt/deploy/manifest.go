@@ -27,6 +27,7 @@ type manifest struct {
 	Contract        string            `json:"contract,omitempty"`
 	Network         string            `json:"network,omitempty"`
 	ServerPaths     []string          `json:"server_paths,omitempty"`
+	ServerPages     []string          `json:"server_pages,omitempty"`
 	Schedule        []schedule        `json:"schedule,omitempty"`
 	Dev             *appDevConfig     `json:"dev,omitempty"`
 }
@@ -124,7 +125,11 @@ func readManifest(dir string) (manifest, error) {
 		}
 	}
 
-	if err := validateServerPaths(m.ServerPaths); err != nil {
+	if err := validateServerPaths("server_paths", m.ServerPaths); err != nil {
+		return m, err
+	}
+
+	if err := validateServerPaths("server_pages", m.ServerPages); err != nil {
 		return m, err
 	}
 
@@ -148,29 +153,29 @@ func readManifest(dir string) (manifest, error) {
 	return m, nil
 }
 
-// validateServerPaths checks the runtime-owned prefixes where static HTML fallback must not intercept a navigation.
-func validateServerPaths(paths []string) error {
+// validateServerPaths checks a field of absolute path prefixes, such as runtime-owned server paths or component-selected pages.
+func validateServerPaths(field string, paths []string) error {
 	if len(paths) > maxServerPaths {
-		return fmt.Errorf("server_paths must contain at most %d prefixes", maxServerPaths)
+		return fmt.Errorf("%s must contain at most %d prefixes", field, maxServerPaths)
 	}
 
 	for _, raw := range paths {
 		value := strings.TrimSpace(raw)
 		if value == "" {
-			return errors.New("server_paths must not contain an empty prefix")
+			return fmt.Errorf("%s must not contain an empty prefix", field)
 		}
 
 		if !strings.HasPrefix(value, "/") {
-			return fmt.Errorf("server_paths: %q must start with /", value)
+			return fmt.Errorf("%s: %q must start with /", field, value)
 		}
 
 		if strings.ContainsAny(value, "?#\\\x00\t\r\n") {
-			return fmt.Errorf("server_paths: %q contains a query, fragment, backslash or whitespace", value)
+			return fmt.Errorf("%s: %q contains a query, fragment, backslash or whitespace", field, value)
 		}
 
 		clean := path.Clean(value)
 		if clean != value && clean != strings.TrimSuffix(value, "/") {
-			return fmt.Errorf("server_paths: %q must be a clean absolute path", value)
+			return fmt.Errorf("%s: %q must be a clean absolute path", field, value)
 		}
 	}
 
