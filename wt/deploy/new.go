@@ -26,8 +26,8 @@ const (
 
 // The SDK module is published from wt/packages. Go module tags must be full semantic versions, so 1 and v1 are not recognized.
 const (
-	sdkModulePath    = "github.com/heliodex/better-deploy/wt/packages"
-	sdkModuleVersion = "v1.0.0"
+	sdkModulePath    = "github.com/heliodex/better-deploy/wt/packages/v2"
+	sdkModuleVersion = "v2.0.0"
 )
 
 // Template files embedded into the binary. The template's web/node_modules and web/bun.lock are deliberately omitted so a new app starts without them. Keep this list in sync with testdata/template.

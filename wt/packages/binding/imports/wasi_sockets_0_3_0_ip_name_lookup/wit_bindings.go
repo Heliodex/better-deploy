@@ -12,7 +12,7 @@
 package wasi_sockets_0_3_0_ip_name_lookup
 
 import (
-	"github.com/heliodex/better-deploy/wt/packages/binding/imports/wasi_sockets_0_3_0_types"
+	"github.com/heliodex/better-deploy/wt/packages/v2/binding/imports/wasi_sockets_0_3_0_types"
 	witAsync "go.bytecodealliance.org/pkg/wit/async"
 	witRuntime "go.bytecodealliance.org/pkg/wit/runtime"
 	witTypes "go.bytecodealliance.org/pkg/wit/types"

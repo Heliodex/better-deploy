@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"wt.example/passport/contract"
-	"github.com/heliodex/better-deploy/wt/packages/app"
-	"github.com/heliodex/better-deploy/wt/packages/oauth"
-	"github.com/heliodex/better-deploy/wt/packages/session"
-	"github.com/heliodex/better-deploy/wt/packages/storage"
+	"github.com/heliodex/better-deploy/wt/packages/v2/app"
+	"github.com/heliodex/better-deploy/wt/packages/v2/oauth"
+	"github.com/heliodex/better-deploy/wt/packages/v2/session"
+	"github.com/heliodex/better-deploy/wt/packages/v2/storage"
 )
 
 // testIssuer serves the discovery document a handler test needs for login and logout.

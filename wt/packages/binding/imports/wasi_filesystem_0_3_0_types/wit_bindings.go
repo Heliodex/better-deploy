@@ -12,7 +12,7 @@
 package wasi_filesystem_0_3_0_types
 
 import (
-	"github.com/heliodex/better-deploy/wt/packages/binding/imports/wasi_clocks_0_3_0_system_clock"
+	"github.com/heliodex/better-deploy/wt/packages/v2/binding/imports/wasi_clocks_0_3_0_system_clock"
 	witAsync "go.bytecodealliance.org/pkg/wit/async"
 	witRuntime "go.bytecodealliance.org/pkg/wit/runtime"
 	witTypes "go.bytecodealliance.org/pkg/wit/types"

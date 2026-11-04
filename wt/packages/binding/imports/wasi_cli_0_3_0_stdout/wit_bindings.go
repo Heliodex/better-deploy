@@ -12,7 +12,7 @@
 package wasi_cli_0_3_0_stdout
 
 import (
-	"github.com/heliodex/better-deploy/wt/packages/binding/imports/wasi_cli_0_3_0_types"
+	"github.com/heliodex/better-deploy/wt/packages/v2/binding/imports/wasi_cli_0_3_0_types"
 	witTypes "go.bytecodealliance.org/pkg/wit/types"
 	"runtime"
 	"unsafe"

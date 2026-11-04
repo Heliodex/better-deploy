@@ -27,7 +27,7 @@ func writeExampleLayout(t *testing.T, root string) {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(filepath.Join(root, "packages", "go.mod"), []byte("module github.com/heliodex/better-deploy/wt/packages\n"), privateFileMode); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "packages", "go.mod"), []byte("module github.com/heliodex/better-deploy/wt/packages/v2\n"), privateFileMode); err != nil {
 		t.Fatal(err)
 	}
 }

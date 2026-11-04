@@ -1,4 +1,4 @@
-module github.com/heliodex/better-deploy/wt/packages
+module github.com/heliodex/better-deploy/wt/packages/v2
 
 go 1.27.1
 

@@ -6,9 +6,9 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/heliodex/better-deploy/wt/packages/app"
-	"github.com/heliodex/better-deploy/wt/packages/storage"
-	wasihttp "github.com/heliodex/better-deploy/wt/packages/wasihttp"
+	"github.com/heliodex/better-deploy/wt/packages/v2/app"
+	"github.com/heliodex/better-deploy/wt/packages/v2/storage"
+	wasihttp "github.com/heliodex/better-deploy/wt/packages/v2/wasihttp"
 )
 
 // clientForBlob is the wasi:http client used for the storage-loopback blob delete.

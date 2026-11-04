@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/heliodex/better-deploy/wt/packages/storage"
+	"github.com/heliodex/better-deploy/wt/packages/v2/storage"
 )
 
 func quoteIdentifier(name string) string {

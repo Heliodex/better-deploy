@@ -12,7 +12,7 @@
 package wasi_filesystem_0_3_0_preopens
 
 import (
-	"github.com/heliodex/better-deploy/wt/packages/binding/imports/wasi_filesystem_0_3_0_types"
+	"github.com/heliodex/better-deploy/wt/packages/v2/binding/imports/wasi_filesystem_0_3_0_types"
 	witRuntime "go.bytecodealliance.org/pkg/wit/runtime"
 	witTypes "go.bytecodealliance.org/pkg/wit/types"
 	"runtime"

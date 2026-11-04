@@ -12,8 +12,8 @@
 package wit_exports
 
 import (
-	"github.com/heliodex/better-deploy/wt/packages/binding/exports/export_wasi_http_0_3_0_handler"
-	"github.com/heliodex/better-deploy/wt/packages/binding/imports/wasi_http_0_3_0_types"
+	"github.com/heliodex/better-deploy/wt/packages/v2/binding/exports/export_wasi_http_0_3_0_handler"
+	"github.com/heliodex/better-deploy/wt/packages/v2/binding/imports/wasi_http_0_3_0_types"
 	witAsync "go.bytecodealliance.org/pkg/wit/async"
 	witRuntime "go.bytecodealliance.org/pkg/wit/runtime"
 	witTypes "go.bytecodealliance.org/pkg/wit/types"

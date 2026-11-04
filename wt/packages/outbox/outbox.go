@@ -17,8 +17,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/heliodex/better-deploy/wt/packages/sign"
-	"github.com/heliodex/better-deploy/wt/packages/storage"
+	"github.com/heliodex/better-deploy/wt/packages/v2/sign"
+	"github.com/heliodex/better-deploy/wt/packages/v2/storage"
 )
 
 const (

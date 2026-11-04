@@ -12,7 +12,7 @@
 package wasi_http_0_3_0_handler
 
 import (
-	"github.com/heliodex/better-deploy/wt/packages/binding/imports/wasi_http_0_3_0_types"
+	"github.com/heliodex/better-deploy/wt/packages/v2/binding/imports/wasi_http_0_3_0_types"
 )
 
 type Request = wasi_http_0_3_0_types.Request

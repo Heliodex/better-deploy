@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"__CONTRACT_IMPORT__"
-	"github.com/heliodex/better-deploy/wt/packages/storage"
+	"github.com/heliodex/better-deploy/wt/packages/v2/storage"
 )
 
 func TestNotesHandler(t *testing.T) {

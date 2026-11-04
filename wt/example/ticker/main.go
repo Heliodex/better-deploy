@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/heliodex/better-deploy/wt/packages/app"
-	wasihttp "github.com/heliodex/better-deploy/wt/packages/wasihttp"
+	"github.com/heliodex/better-deploy/wt/packages/v2/app"
+	wasihttp "github.com/heliodex/better-deploy/wt/packages/v2/wasihttp"
 )
 
 // beatLevels rotates so the panel demonstrates every severity. It is derived from the clock rather than a counter because each request may get a fresh component instance.

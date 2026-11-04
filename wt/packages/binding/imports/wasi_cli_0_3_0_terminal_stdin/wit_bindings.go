@@ -12,7 +12,7 @@
 package wasi_cli_0_3_0_terminal_stdin
 
 import (
-	"github.com/heliodex/better-deploy/wt/packages/binding/imports/wasi_cli_0_3_0_terminal_input"
+	"github.com/heliodex/better-deploy/wt/packages/v2/binding/imports/wasi_cli_0_3_0_terminal_input"
 	witRuntime "go.bytecodealliance.org/pkg/wit/runtime"
 	witTypes "go.bytecodealliance.org/pkg/wit/types"
 	"runtime"
