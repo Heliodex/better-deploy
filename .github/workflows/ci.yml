@@ -175,7 +175,7 @@ jobs:
 
             - name: Test shared packages
               working-directory: wt/packages
-              run: go test -race -count=1 -covermode=atomic -coverprofile=coverage.out ./app/... ./storage/... ./httpmeta/...
+              run: go test -race -count=1 -covermode=atomic -coverprofile=coverage.out ./app/... ./storage/... ./httpmeta/... ./sign/... ./outbox/...
 
             - name: Summarize Go coverage
               if: always()

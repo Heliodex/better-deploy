@@ -19,6 +19,8 @@ The first request for a precompiled Go component is tens of milliseconds on a la
   - `packages/storage` – client for the supervisor's SQLite service.
   - `packages/oauth` – authorisation code flow with PKCE, discovery, JWKS verification, UserInfo and end-session.
   - `packages/session` – opaque session tokens, hashed storage, cookie helpers and same-origin checks.
+  - `packages/sign` – HMAC-SHA256 webhook signatures with timestamp windows.
+  - `packages/outbox` – durable signed HTTP deliveries with retries, leases and a storage-backed table.
   - `packages/wasihttp` – the `net/http` adapter (adapted from spin-go-sdk).
   - `packages/binding` – generated bindings for `wt:app/app` (tracked so the published module builds without running the generator).
   - `packages/wit` – the `wt:app/app` world and WASI 0.3 WIT dependencies.
@@ -634,6 +636,28 @@ The C API tarball is a shared library for embedding, not a server, and still con
 On Orchard, create a GitHub-built deployment from this repository with `dockerfilePath: wt/Containerfile`, `buildFromRoot: true`, port `8080`, and a `WT_TOKEN` environment variable. Mount a PVC at `/var/lib/wt` so apps and the storage databases survive a pod roll. Point one ingress at port `8080` for the supervisor host and, if you use wildcard app hosts, add a wildcard DNS name and certificate such as `*.apps.example.com` to the same ingress. Then deploy with `--host https://<ingress-host> --app-host <ingress-host>`, or add `host: "*.apps.example.com"`/`hosts` aliases in `app.json` so a new app does not need a new ingress. The supervisor routes by `Host`, so `/apps/...` (the deploy API) and `/` (the app) share the same ingress host; exact app hosts still need their own ingress unless a wildcard covers them.
 
 The deployment can run on a small CPU request because it never compiles: in the demo deployment two apps start from `.cwasm` files rebuilt on a laptop, and the notes database survives a pod roll on the PVC.
+
+### Webhook outbox
+
+`packages/outbox` stores signed HTTP deliveries in SQLite so a decision can enqueue its notification in the same transaction and a schedule or job can send it later. Include `Schema()` in the app's migration, use `PrepareTransaction`/`Prepare` inside an existing transaction, or `Enqueue` for a standalone insert. `DeliverDue` reaps expired leases, claims due rows, signs each payload through `packages/sign`, retries 5xx/timeouts/408/429 with a backoff ladder and fails permanent 4xx responses. The default `HTTPSender` sends `X-Webhook-Timestamp`, `X-Webhook-Delivery-Id` and `X-Webhook-Signature`; set the header fields on `HTTPSender` for another scheme such as Ari's `X-Ari-*`.
+
+```go
+box := outbox.Outbox{
+	Signer: sign.Signer{Secret: []byte(outboundSecret)},
+}
+
+_, statement, err := box.PrepareTransaction(outbox.Message{
+	Event:     "review.approved",
+	DedupeKey: "review:" + reviewID,
+	Payload:   payload,
+	URL:       outboundURL,
+})
+// append statement to the decision transaction, then commit
+
+summary, err := box.DeliverDue(ctx, store, 20)
+```
+
+`DeliverDue` is safe to call from `app.json` `schedule` or a durable job. A retryable failure stays `pending`; a permanent failure or exhausted attempt limit becomes `failed`; `List` returns the stored status, attempt count, last HTTP status and last error for an admin view.
 
 ## Storage
 
