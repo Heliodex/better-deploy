@@ -221,10 +221,10 @@ func normaliseAllowCallers(names []string) ([]string, error) {
 	return out, nil
 }
 
-// normaliseServerPaths validates the path prefixes where static HTML fallback must not intercept a browser navigation. Real static files still win.
-func normaliseServerPaths(paths []string) ([]string, error) {
+// normalisePathPrefixes validates a sorted, de-duplicated list of absolute path prefixes.
+func normalisePathPrefixes(field string, paths []string) ([]string, error) {
 	if len(paths) > maxServerPaths {
-		return nil, fmt.Errorf("server_paths must contain at most %d prefixes", maxServerPaths)
+		return nil, fmt.Errorf("%s must contain at most %d prefixes", field, maxServerPaths)
 	}
 
 	out := make([]string, 0, len(paths))
@@ -233,20 +233,20 @@ func normaliseServerPaths(paths []string) ([]string, error) {
 	for _, raw := range paths {
 		value := strings.TrimSpace(raw)
 		if value == "" {
-			return nil, errors.New("server_paths must not contain an empty prefix")
+			return nil, fmt.Errorf("%s must not contain an empty prefix", field)
 		}
 
 		if !strings.HasPrefix(value, "/") {
-			return nil, fmt.Errorf("server_paths: %q must start with /", value)
+			return nil, fmt.Errorf("%s: %q must start with /", field, value)
 		}
 
 		if strings.ContainsAny(value, "?#\\\x00\t\r\n") {
-			return nil, fmt.Errorf("server_paths: %q contains a query, fragment, backslash or whitespace", value)
+			return nil, fmt.Errorf("%s: %q contains a query, fragment, backslash or whitespace", field, value)
 		}
 
 		clean := path.Clean(value)
 		if clean != value && clean != strings.TrimSuffix(value, "/") {
-			return nil, fmt.Errorf("server_paths: %q must be a clean absolute path", value)
+			return nil, fmt.Errorf("%s: %q must be a clean absolute path", field, value)
 		}
 
 		if _, ok := seen[clean]; ok {
@@ -260,6 +260,16 @@ func normaliseServerPaths(paths []string) ([]string, error) {
 	slices.Sort(out)
 
 	return out, nil
+}
+
+// normaliseServerPaths validates the path prefixes where static HTML fallback must not intercept a browser navigation. Real static files still win.
+func normaliseServerPaths(paths []string) ([]string, error) {
+	return normalisePathPrefixes("server_paths", paths)
+}
+
+// normaliseServerPages validates the path prefixes where a page navigation reaches the component before a matching static file, so the component can choose the page or redirect.
+func normaliseServerPages(paths []string) ([]string, error) {
+	return normalisePathPrefixes("server_pages", paths)
 }
 
 // normaliseDependsOn validates the apps this app waits for before its host routes traffic. Forward references are allowed because a dependency may be deployed later.
@@ -535,6 +545,13 @@ func validateAppSettings(cfg *appConfig) error {
 	}
 
 	cfg.ServerPaths = serverPaths
+
+	serverPages, err := normaliseServerPages(cfg.ServerPages)
+	if err != nil {
+		return err
+	}
+
+	cfg.ServerPages = serverPages
 
 	if cfg.Env == nil {
 		cfg.Env = map[string]string{}

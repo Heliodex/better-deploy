@@ -80,6 +80,7 @@ type appConfig struct {
 	JobConcurrency     int               `json:"job_concurrency,omitempty"`
 	AllowCallers       []string          `json:"allow_callers,omitempty"`
 	ServerPaths        []string          `json:"server_paths,omitempty"`
+	ServerPages        []string          `json:"server_pages,omitempty"`
 	Egress             []egressRule      `json:"egress,omitempty"`
 	Schedule           []scheduleConfig  `json:"schedule,omitempty"`
 	Dev                *appDevConfig     `json:"dev,omitempty"`

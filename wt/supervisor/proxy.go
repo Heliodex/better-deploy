@@ -46,9 +46,15 @@ func newRequestID() string {
 func (s *supervisor) newProxy(a *app) *httputil.ReverseProxy {
 	target := &url.URL{Scheme: "http", Host: fmt.Sprintf("127.0.0.1:%d", a.port)}
 	proxy := &httputil.ReverseProxy{
-		// JSON responses are compressed by the supervisor, so the transport asks the app for identity and every response is a normal Go body.
+		// A server-selected page can be filled from the static directory before the supervisor compresses the remaining JSON responses.
 		ModifyResponse: func(res *http.Response) error {
+			served, err := a.serveStaticPageResponse(res)
+			if err != nil || served {
+				return err
+			}
+
 			accept, _ := res.Request.Context().Value(acceptEncodingKey{}).(string)
+
 			return compressJSONResponse(res, accept)
 		},
 		// A hung app must not hold client connections forever: header and dial deadlines bound the wait before the response starts.
@@ -73,6 +79,7 @@ func (s *supervisor) newProxy(a *app) *httputil.ReverseProxy {
 			r.Out.Header.Set("X-Forwarded-Host", info.Authority)
 			r.Out.Header.Set("X-Forwarded-Proto", info.Proto)
 			r.Out.Header.Del("Forwarded")
+			r.Out.Header.Del(staticPageHeader)
 			r.Out.Host = info.Authority
 			r.Out = r.Out.WithContext(context.WithValue(r.Out.Context(), acceptEncodingKey{}, r.In.Header.Get("Accept-Encoding")))
 			r.Out.Header.Set("Accept-Encoding", "identity")
@@ -300,6 +307,11 @@ func (s *supervisor) serveApp(w http.ResponseWriter, r *http.Request, a *app) {
 	}
 
 	static, ready := a.servingState()
+
+	// A server-selected page navigation reaches the component first so it can check the session, then name the static page to send or redirect.
+	if static && a.serverPageNavigation(r) {
+		r = r.WithContext(context.WithValue(r.Context(), staticPageRequestKey{}, true))
+	}
 
 	// Static files come from the bundle and do not consume the app's concurrency slots, but a stopped app does not serve them.
 	if static && a.serveStatic(wrapped, r) {

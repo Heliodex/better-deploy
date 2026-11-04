@@ -14,7 +14,7 @@ import (
 func TestAppConfigGetAndPatch(t *testing.T) {
 	dir := t.TempDir()
 
-	original := `{"name":"demo","host":"demo.localhost","health":"/","env":{"A":"1","SECRET":"x"},"build":"make app","memory_mb":128}`
+	original := `{"name":"demo","host":"demo.localhost","health":"/","env":{"A":"1","SECRET":"x"},"build":"make app","memory_mb":128,"server_pages":["/"]}`
 	if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(original), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -47,11 +47,11 @@ func TestAppConfigGetAndPatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got.Host != "demo.localhost" || got.MemoryMB != 128 || len(got.EnvKeys) != 2 {
+	if got.Host != "demo.localhost" || got.MemoryMB != 128 || len(got.EnvKeys) != 2 || len(got.ServerPages) != 1 || got.ServerPages[0] != "/" {
 		t.Errorf("GET config = %+v", got)
 	}
 
-	patch := `{"host":"new.localhost","health":"/ready","env":{"A":"2","SECRET":null,"NEW":"3"},"memory_mb":256,"disk_mb":512,"schedule":[]}`
+	patch := `{"host":"new.localhost","health":"/ready","env":{"A":"2","SECRET":null,"NEW":"3"},"memory_mb":256,"disk_mb":512,"schedule":[],"server_pages":["/","/login"]}`
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(patch))
 	req.Header.Set("Authorization", "Bearer secret")
@@ -65,7 +65,7 @@ func TestAppConfigGetAndPatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got.Host != "new.localhost" || got.Health != "/ready" || got.MemoryMB != 256 || got.DiskMB != 512 || !got.RestartRequired {
+	if got.Host != "new.localhost" || got.Health != "/ready" || got.MemoryMB != 256 || got.DiskMB != 512 || !got.RestartRequired || len(got.ServerPages) != 2 {
 		t.Errorf("PATCH config = %+v", got)
 	}
 
@@ -94,7 +94,7 @@ func TestAppConfigGetAndPatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if saved.Host != "new.localhost" || saved.Health != "/ready" || saved.MemoryMB != 256 || saved.DiskMB != 512 || saved.Build != "make app" {
+	if saved.Host != "new.localhost" || saved.Health != "/ready" || saved.MemoryMB != 256 || saved.DiskMB != 512 || saved.Build != "make app" || len(saved.ServerPages) != 2 {
 		t.Errorf("saved config = %+v", saved)
 	}
 }
@@ -169,6 +169,34 @@ func TestNormaliseServerPaths(t *testing.T) {
 	} {
 		if _, err := normaliseAppConfig(appConfig{ServerPaths: paths}, "demo", "localhost", tenantTrusted); err == nil {
 			t.Errorf("accepted invalid server paths %v", paths)
+		}
+	}
+}
+
+func TestNormaliseServerPages(t *testing.T) {
+	cfg, err := normaliseAppConfig(appConfig{
+		Name:        "demo",
+		Host:        "demo.localhost",
+		Health:      "/",
+		Env:         map[string]string{},
+		ServerPages: []string{"/login/", "/", "/login", "/home"},
+	}, "demo", "localhost", tenantTrusted)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(cfg.ServerPages) != 3 || cfg.ServerPages[0] != "/" || cfg.ServerPages[1] != "/home" || cfg.ServerPages[2] != "/login" {
+		t.Errorf("server pages = %v", cfg.ServerPages)
+	}
+
+	for _, paths := range [][]string{
+		{"login"},
+		{"/login?x=1"},
+		{"/a/../b"},
+		{""},
+	} {
+		if _, err := normaliseAppConfig(appConfig{ServerPages: paths}, "demo", "localhost", tenantTrusted); err == nil {
+			t.Errorf("accepted invalid server pages %v", paths)
 		}
 	}
 }
