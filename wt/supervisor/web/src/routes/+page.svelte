@@ -1166,7 +1166,7 @@ onMount((): (() => void) => {
 							onstart={startSelected}
 							onstop={stopSelected}
 							saving={configSaving}
-							status={detail?.status ?? "stopped"}
+							status={detail?.idle ? "idle" : detail?.status ?? "stopped"}
 						/>
 					{:else if tab === "backups"}
 						<BackupsTab

@@ -77,14 +77,17 @@ let {
 								aria-hidden="true"
 								class={[
 									"size-1.5 shrink-0",
-									app.status === "running"
-										? "bg-primary-500"
-										: app.status === "unhealthy"
-											? "bg-red-500"
-											: app.status === "restarting"
-												? "bg-amber-500"
-												: "border border-neutral-500",
+									app.idle
+										? "bg-sky-500"
+										: app.status === "running"
+											? "bg-primary-500"
+											: app.status === "unhealthy"
+												? "bg-red-500"
+												: app.status === "restarting"
+													? "bg-amber-500"
+													: "border border-neutral-500",
 								]}
+								title={app.idle ? "idle" : app.status}
 							></span>
 							<span class="flex-1 truncate">{app.name}</span>
 							<span class="text-xs text-neutral-500 tabular-nums">{uptime(app.startedAt, now)}</span>

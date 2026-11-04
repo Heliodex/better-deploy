@@ -207,7 +207,7 @@ async function removeSecret(key: string): Promise<void> {
 			<button class="btn" disabled={loading} onclick={onreload} type="button">
 				{loading ? "Reloading…" : "Reload config"}
 			</button>
-			{#if status === "stopped"}
+			{#if status === "stopped" || status === "idle"}
 				<button class="btn btn-primary" disabled={busy} onclick={onstart} type="button">
 					{busy ? "Starting…" : "Start"}
 				</button>
