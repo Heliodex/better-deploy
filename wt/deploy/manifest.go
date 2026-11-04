@@ -24,6 +24,7 @@ type manifest struct {
 	DiskMB          int               `json:"disk_mb,omitempty"`
 	MaxConcurrent   int               `json:"max_concurrency,omitempty"`
 	RequestTimeout  string            `json:"request_timeout,omitempty"`
+	IdleTimeout     string            `json:"idle_timeout,omitempty"`
 	Contract        string            `json:"contract,omitempty"`
 	Network         string            `json:"network,omitempty"`
 	ServerPaths     []string          `json:"server_paths,omitempty"`
@@ -113,6 +114,10 @@ func readManifest(dir string) (manifest, error) {
 		return m, errors.New("memory_mb and disk_mb must be 0 or more")
 	}
 
+	if err := validateIdleTimeout(m.IdleTimeout); err != nil {
+		return m, err
+	}
+
 	for i, value := range m.ComponentInputs {
 		if !validInputPath(value) {
 			return m, fmt.Errorf("component_inputs[%d]: %q must be a relative file or directory", i, value)
@@ -151,6 +156,22 @@ func readManifest(dir string) (manifest, error) {
 	}
 
 	return m, nil
+}
+
+// validateIdleTimeout checks the optional scale-to-zero delay before the supervisor sees the bundle.
+func validateIdleTimeout(value string) error {
+	value = strings.TrimSpace(value)
+	switch {
+	case value == "", value == "0", strings.EqualFold(value, "none"), strings.EqualFold(value, "off"):
+		return nil
+	}
+
+	timeout, err := time.ParseDuration(value)
+	if err != nil || timeout < 10*time.Second || timeout > 24*time.Hour {
+		return fmt.Errorf("idle_timeout %q must be a duration between 10s and 24h, or 0/none/off to disable", value)
+	}
+
+	return nil
 }
 
 // validateServerPaths checks a field of absolute path prefixes, such as runtime-owned server paths or component-selected pages.

@@ -73,6 +73,7 @@ type appConfig struct {
 	HealthInterval     string            `json:"health_interval,omitempty"`
 	HealthFailures     int               `json:"health_failures,omitempty"`
 	RestartOnUnhealthy bool              `json:"restart_on_unhealthy,omitempty"`
+	IdleTimeout        string            `json:"idle_timeout,omitempty"`
 	Network            string            `json:"network,omitempty"`
 	Identity           string            `json:"identity,omitempty"`
 	Maintenance        bool              `json:"maintenance,omitempty"`
@@ -88,6 +89,7 @@ type appConfig struct {
 	requestTimeout time.Duration
 	startupTimeout time.Duration
 	healthInterval time.Duration
+	idleTimeout    time.Duration
 }
 
 // appDevConfig is the optional SvelteKit dev loop configuration carried in app.json.
@@ -137,6 +139,7 @@ type app struct {
 	accessLines       atomic.Uint64
 
 	mu               sync.Mutex
+	startMu          sync.Mutex
 	scheduleCancel   context.CancelFunc
 	cmd              *exec.Cmd
 	isolation        *isolationPlan
@@ -145,6 +148,9 @@ type app struct {
 	starting         bool
 	draining         bool
 	unhealthyRestart bool
+	idleStopped      bool
+	inflight         int
+	lastRequest      time.Time
 
 	slots          chan struct{}
 	wasmEpoch      bool
@@ -250,6 +256,7 @@ func (s *supervisor) info(a *app) appInfo {
 	info.CurrentDigest = a.digest
 	info.Ready = a.ready
 	info.Maintenance = a.cfg.Maintenance
+	info.Idle = a.idleStopped
 
 	info.UID = a.uid
 	if a.cmd != nil && a.cmd.Process != nil && !a.exited {
@@ -329,6 +336,7 @@ type appInfo struct {
 	HistoryBytes   int64     `json:"historyBytes"`
 	OverQuota      bool      `json:"overQuota,omitempty"`
 	Maintenance    bool      `json:"maintenance,omitempty"`
+	Idle           bool      `json:"idle,omitempty"`
 	SampledAt      time.Time `json:"sampledAt"`
 	LastHealthy    time.Time `json:"lastHealthy"`
 	LastError      string    `json:"lastError,omitempty"`

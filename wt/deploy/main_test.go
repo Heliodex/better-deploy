@@ -648,6 +648,42 @@ func TestReadManifestValidatesServerPages(t *testing.T) {
 	}
 }
 
+func TestReadManifestValidatesIdleTimeout(t *testing.T) {
+	dir := t.TempDir()
+	write := func(body string) {
+		t.Helper()
+
+		if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(body), privateFileMode); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, body := range []string{
+		`{"name":"demo","idle_timeout":"10s"}`,
+		`{"name":"demo","idle_timeout":"15m"}`,
+		`{"name":"demo","idle_timeout":"none"}`,
+		`{"name":"demo"}`,
+	} {
+		write(body)
+
+		if _, err := readManifest(dir); err != nil {
+			t.Errorf("valid idle_timeout rejected for %s: %v", body, err)
+		}
+	}
+
+	for name, body := range map[string]string{
+		"too fast":   `{"name":"demo","idle_timeout":"9s"}`,
+		"too slow":   `{"name":"demo","idle_timeout":"25h"}`,
+		"not a time": `{"name":"demo","idle_timeout":"soon"}`,
+	} {
+		write(body)
+
+		if _, err := readManifest(dir); err == nil {
+			t.Errorf("%s: expected an error", name)
+		}
+	}
+}
+
 func TestWorkspaceAppDirs(t *testing.T) {
 	root := t.TempDir()
 	for _, name := range []string{"alpha", "beta", "not-an-app"} {

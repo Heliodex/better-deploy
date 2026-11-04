@@ -105,6 +105,7 @@ func (s *supervisor) waitReadyUntil(a *app, done <-chan struct{}, deadline time.
 }
 
 // beginRequest tracks a proxied request unless the app is already draining, so new requests cannot extend a drain.
+// It also records activity for idle scale-to-zero.
 func (a *app) beginRequest() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -114,8 +115,21 @@ func (a *app) beginRequest() bool {
 	}
 
 	a.requests.Add(1)
+	a.inflight++
+	a.lastRequest = time.Now().UTC()
 
 	return true
+}
+
+// endRequest releases one proxied request and its idle-activity count.
+func (a *app) endRequest() {
+	a.mu.Lock()
+	if a.inflight > 0 {
+		a.inflight--
+	}
+	a.mu.Unlock()
+
+	a.requests.Done()
 }
 
 // markDraining stops new proxied requests from entering the app before its in-flight requests are drained.

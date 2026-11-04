@@ -51,7 +51,7 @@ func TestAppConfigGetAndPatch(t *testing.T) {
 		t.Errorf("GET config = %+v", got)
 	}
 
-	patch := `{"host":"new.localhost","health":"/ready","env":{"A":"2","SECRET":null,"NEW":"3"},"memory_mb":256,"disk_mb":512,"schedule":[],"server_pages":["/","/login"]}`
+	patch := `{"host":"new.localhost","health":"/ready","env":{"A":"2","SECRET":null,"NEW":"3"},"memory_mb":256,"disk_mb":512,"idle_timeout":"15m","schedule":[],"server_pages":["/","/login"]}`
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(patch))
 	req.Header.Set("Authorization", "Bearer secret")
@@ -69,12 +69,20 @@ func TestAppConfigGetAndPatch(t *testing.T) {
 		t.Errorf("PATCH config = %+v", got)
 	}
 
+	if got.IdleTimeout != "15m" {
+		t.Errorf("idle_timeout = %q, want 15m", got.IdleTimeout)
+	}
+
 	a.mu.Lock()
 	live := a.cfg
 	a.mu.Unlock()
 
 	if live.Host != "new.localhost" || live.Health != "/ready" || live.MemoryMB != 256 || live.DiskMB != 512 {
 		t.Errorf("live config = %+v", live)
+	}
+
+	if live.idleTimeout != 15*time.Minute {
+		t.Errorf("live idle timeout = %s, want 15m", live.idleTimeout)
 	}
 
 	if live.Env["A"] != "2" || live.Env["NEW"] != "3" {
@@ -96,6 +104,101 @@ func TestAppConfigGetAndPatch(t *testing.T) {
 
 	if saved.Host != "new.localhost" || saved.Health != "/ready" || saved.MemoryMB != 256 || saved.DiskMB != 512 || saved.Build != "make app" || len(saved.ServerPages) != 2 {
 		t.Errorf("saved config = %+v", saved)
+	}
+
+	if saved.IdleTimeout != "15m" || saved.idleTimeout != 15*time.Minute {
+		t.Errorf("saved idle timeout = %q (%s), want 15m", saved.IdleTimeout, saved.idleTimeout)
+	}
+}
+
+func TestAppConfigIdleTimeoutNeedsNoRestart(t *testing.T) {
+	dir := t.TempDir()
+	cfg := appConfig{Name: "demo", Host: "demo.localhost", Health: "/healthz", Env: map[string]string{}}
+
+	cfg, err := normaliseAppConfig(cfg, "demo", "localhost", tenantTrusted)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := persistAppConfig(dir, cfg, tenantTrusted); err != nil {
+		t.Fatal(err)
+	}
+
+	s := testSupervisor()
+	a := &app{name: "demo", dir: dir, cfg: cfg}
+	s.apps["demo"] = a
+	s.hosts[cfg.Host] = a
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(`{"idle_timeout":"5m"}`))
+	req.Header.Set("Authorization", "Bearer secret")
+	s.handleAppConfig(rec, req, "demo")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PATCH config status = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var got appConfigResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+
+	if got.IdleTimeout != "5m" || got.RestartRequired {
+		t.Errorf("PATCH config = %+v; want 5m without a restart", got)
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(`{"idle_timeout":"none"}`))
+	req.Header.Set("Authorization", "Bearer secret")
+	s.handleAppConfig(rec, req, "demo")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PATCH config status = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+
+	if got.IdleTimeout != "" || got.RestartRequired {
+		t.Errorf("PATCH config = %+v; want disabled without a restart", got)
+	}
+
+	a.mu.Lock()
+	live := a.cfg.idleTimeout
+	a.mu.Unlock()
+
+	if live != 0 {
+		t.Errorf("live idle timeout = %s, want 0", live)
+	}
+}
+
+func TestAppConfigRejectsIdleTimeoutWithSchedule(t *testing.T) {
+	dir := t.TempDir()
+	cfg := appConfig{Name: "demo", Host: "demo.localhost", Health: "/healthz", Env: map[string]string{}}
+
+	cfg, err := normaliseAppConfig(cfg, "demo", "localhost", tenantTrusted)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := persistAppConfig(dir, cfg, tenantTrusted); err != nil {
+		t.Fatal(err)
+	}
+
+	s := testSupervisor()
+	a := &app{name: "demo", dir: dir, cfg: cfg}
+	s.apps["demo"] = a
+	s.hosts[cfg.Host] = a
+
+	patch := `{"idle_timeout":"5m","schedule":[{"path":"/tick","every":"1m"}]}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(patch))
+	req.Header.Set("Authorization", "Bearer secret")
+	s.handleAppConfig(rec, req, "demo")
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400: %s", rec.Code, rec.Body.String())
 	}
 }
 

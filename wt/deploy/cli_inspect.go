@@ -141,10 +141,16 @@ func compareManifest(dir, name string, config map[string]any) *manifestCompariso
 
 	comparison := &manifestComparison{Path: path}
 
-	for _, key := range []string{"host", "health", "memory_mb", "disk_mb", "max_concurrency", "request_timeout", "network", "identity", "server_paths", "server_pages"} {
+	for _, key := range []string{"host", "health", "memory_mb", "disk_mb", "max_concurrency", "request_timeout", "idle_timeout", "network", "identity", "server_paths", "server_pages"} {
 		localValue, ok := local[key]
 		if !ok {
 			continue
+		}
+
+		if key == "idle_timeout" {
+			if sameIdleTimeout(localValue, config[key]) {
+				continue
+			}
 		}
 
 		if got, want := valueText(localValue), valueText(config[key]); got != want {
@@ -172,6 +178,27 @@ func compareManifest(dir, name string, config map[string]any) *manifestCompariso
 	}
 
 	return comparison
+}
+
+// sameIdleTimeout compares two idle_timeout values by duration, so "15m" and "900s" match and disabled spellings agree.
+func sameIdleTimeout(local, runtime any) bool {
+	left, leftOK := idleTimeoutValue(valueText(local))
+	right, rightOK := idleTimeoutValue(valueText(runtime))
+
+	return leftOK && rightOK && left == right
+}
+
+// idleTimeoutValue parses a manifest or runtime idle_timeout, reporting false for an invalid duration.
+func idleTimeoutValue(value string) (time.Duration, bool) {
+	value = strings.TrimSpace(value)
+	switch {
+	case value == "", value == "0", strings.EqualFold(value, "none"), strings.EqualFold(value, "off"):
+		return 0, true
+	}
+
+	timeout, err := time.ParseDuration(value)
+
+	return timeout, err == nil
 }
 
 // printInspect prints the effective app view.
@@ -211,7 +238,7 @@ func printInspect(report inspectReport) {
 
 	configKeys := []string{
 		"health", "memory_mb", "disk_mb", "max_concurrency", "job_concurrency",
-		"request_timeout", "startup_timeout", "network", "identity", "maintenance",
+		"request_timeout", "startup_timeout", "idle_timeout", "network", "identity", "maintenance",
 		"allow_callers", "depends_on", "server_paths", "egress", "schedule", "restart_required",
 	}
 

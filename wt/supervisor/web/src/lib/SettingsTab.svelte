@@ -45,6 +45,7 @@ let jobConcurrency = $state(1)
 let requestTimeout = $state("")
 let startupTimeout = $state("15s")
 let healthInterval = $state("10s")
+let idleTimeout = $state("")
 let healthFailures = $state(2)
 let restartOnUnhealthy = $state(false)
 let network = $state<"inherit" | "none" | "storage">("inherit")
@@ -74,6 +75,7 @@ $effect(() => {
 	requestTimeout = current.request_timeout
 	startupTimeout = current.startup_timeout
 	healthInterval = current.health_interval
+	idleTimeout = current.idle_timeout
 	healthFailures = current.health_failures
 	restartOnUnhealthy = current.restart_on_unhealthy
 	network = current.network
@@ -133,6 +135,7 @@ function save(event: SubmitEvent): void {
 		health_interval: healthInterval.trim(),
 		host: host.trim(),
 		hosts: parseHosts(hosts),
+		idle_timeout: idleTimeout.trim(),
 		job_concurrency: jobConcurrency,
 		max_concurrency: maxConcurrent,
 		memory_mb: memoryMB,
@@ -293,6 +296,15 @@ async function removeSecret(key: string): Promise<void> {
 			<label class="flex flex-col gap-1">
 				<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Health interval</span>
 				<input aria-label="Health interval" class="field" bind:value={healthInterval}>
+			</label>
+			<label class="flex flex-col gap-1">
+				<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Idle timeout</span>
+				<input
+					aria-label="Idle timeout"
+					class="field"
+					placeholder="none (for example 10m); stops the process until the next request"
+					bind:value={idleTimeout}
+				>
 			</label>
 			<label class="flex flex-col gap-1">
 				<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Health failures</span>

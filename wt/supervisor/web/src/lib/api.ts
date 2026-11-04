@@ -26,6 +26,7 @@ const appInfoSchema = object({
 	diskLimitBytes: optional(pipe(number(), minValue(0))),
 	historyBytes: pipe(number(), minValue(0)),
 	host: pipe(string(), minLength(1)),
+	idle: optional(boolean()),
 	lastError: optional(string()),
 	lastHealthy: optional(string()),
 	memoryBytes: pipe(number(), minValue(0)),
@@ -397,6 +398,7 @@ const appConfigSchema = object({
 	health_failures: pipe(number(), minValue(1)),
 	health_interval: string(),
 	host: pipe(string(), minLength(1)),
+	idle_timeout: string(),
 	job_concurrency: pipe(number(), minValue(1)),
 	hosts: array(string()),
 	max_concurrency: pipe(number(), minValue(0)),
@@ -423,6 +425,7 @@ export interface AppConfigPatch {
 	health_interval?: string
 	host?: string
 	hosts?: string[]
+	idle_timeout?: string
 	job_concurrency?: number
 	max_concurrency?: number
 	memory_mb?: number

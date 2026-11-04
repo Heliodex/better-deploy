@@ -77,7 +77,7 @@ func (a *app) recordHistory() {
 	a.stats.appendHistory(a.stats.sampledAt, a.stats.cpuPercent, a.stats.memoryBytes)
 }
 
-// resourceStats returns the last CPU percentage (of one core), resident memory in bytes, and when it was sampled.
+// resourceStats returns the last CPU percentage (of one core), memory in bytes (PSS when available), and when it was sampled.
 func (a *app) resourceStats() (float64, int64, time.Time) {
 	a.stats.mu.Lock()
 	defer a.stats.mu.Unlock()

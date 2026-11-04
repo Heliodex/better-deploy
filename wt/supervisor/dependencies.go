@@ -90,6 +90,13 @@ func (s *supervisor) appDependencyReady(name string, depth int) bool {
 		return false
 	}
 
+	if _, ready := a.servingState(); !ready && a.idleState() {
+		// A dependency that scaled to zero is started as part of serving the dependent's request.
+		if err := s.wakeIdleApp(a); err != nil {
+			return false
+		}
+	}
+
 	if _, ready := a.servingState(); !ready {
 		return false
 	}

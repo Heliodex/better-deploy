@@ -22,6 +22,9 @@ const (
 	minStartupTimeout     = time.Second
 	maxStartupTimeout     = 10 * time.Minute
 
+	minIdleTimeout = 10 * time.Second
+	maxIdleTimeout = 24 * time.Hour
+
 	tenantTrusted   = "trusted"
 	tenantUntrusted = "untrusted"
 
@@ -432,6 +435,23 @@ func parseHealthFailures(value int) (int, error) {
 	return value, nil
 }
 
+// parseIdleTimeout validates how long an app may go without client traffic before its process stops.
+// An empty value, "0", "none" or "off" disables scale-to-zero.
+func parseIdleTimeout(value string) (time.Duration, error) {
+	value = strings.TrimSpace(value)
+	switch {
+	case value == "", value == "0", strings.EqualFold(value, "none"), strings.EqualFold(value, "off"):
+		return 0, nil
+	}
+
+	timeout, err := time.ParseDuration(value)
+	if err != nil || timeout < minIdleTimeout || timeout > maxIdleTimeout {
+		return 0, fmt.Errorf("idle_timeout %q must be a duration between %s and %s, or 0/none/off to disable", value, minIdleTimeout, maxIdleTimeout)
+	}
+
+	return timeout, nil
+}
+
 func (cfg appConfig) startupLimit() time.Duration {
 	if cfg.startupTimeout > 0 {
 		return cfg.startupTimeout
@@ -683,11 +703,27 @@ func applyAppTimeouts(cfg *appConfig) error {
 
 	cfg.HealthFailures = failures
 
+	idle, err := parseIdleTimeout(cfg.IdleTimeout)
+	if err != nil {
+		return err
+	}
+
+	cfg.idleTimeout = idle
+	if idle == 0 {
+		cfg.IdleTimeout = ""
+	} else {
+		cfg.IdleTimeout = strings.TrimSpace(cfg.IdleTimeout)
+	}
+
 	return nil
 }
 
 // validateAppSchedule checks each scheduled call's path and interval.
 func validateAppSchedule(cfg *appConfig) error {
+	if cfg.idleTimeout > 0 && len(cfg.Schedule) > 0 {
+		return errors.New("idle_timeout cannot be used with schedule, because a stopped app cannot fire its timed calls")
+	}
+
 	for i := range cfg.Schedule {
 		entry := &cfg.Schedule[i]
 		if !strings.HasPrefix(entry.Path, "/") {

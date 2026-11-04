@@ -196,6 +196,7 @@ func (s *supervisor) startMonitors(ctx context.Context) {
 	go s.storage.monitorTemp(ctx)
 	go s.monitorResources(resourceSampleInterval)
 	go s.monitorHealth()
+	go s.monitorIdle()
 	go s.monitorDiskBudget()
 
 	if s.cfg.untrusted() {

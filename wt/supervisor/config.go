@@ -33,6 +33,7 @@ type appConfigPatch struct {
 	HealthInterval     *string            `json:"health_interval"`
 	HealthFailures     *int               `json:"health_failures"`
 	RestartOnUnhealthy *bool              `json:"restart_on_unhealthy"`
+	IdleTimeout        *string            `json:"idle_timeout"`
 	Network            *string            `json:"network"`
 	Identity           *string            `json:"identity"`
 	Maintenance        *bool              `json:"maintenance"`
@@ -64,6 +65,7 @@ type appConfigResponse struct {
 	HealthInterval     string           `json:"health_interval"`
 	HealthFailures     int              `json:"health_failures"`
 	RestartOnUnhealthy bool             `json:"restart_on_unhealthy"`
+	IdleTimeout        string           `json:"idle_timeout"`
 	Network            string           `json:"network"`
 	Identity           string           `json:"identity"`
 	Maintenance        bool             `json:"maintenance"`
@@ -152,6 +154,7 @@ func configResponse(cfg appConfig) appConfigResponse {
 		HealthInterval:     cfg.HealthInterval,
 		HealthFailures:     cfg.HealthFailures,
 		RestartOnUnhealthy: cfg.RestartOnUnhealthy,
+		IdleTimeout:        cfg.IdleTimeout,
 		Network:            cfg.Network,
 		Identity:           cfg.Identity,
 		Maintenance:        cfg.Maintenance,
@@ -210,6 +213,7 @@ func applyConfigPatch(cfg appConfig, patch appConfigPatch) appConfig {
 	applyValue(&cfg.HealthInterval, patch.HealthInterval)
 	applyValue(&cfg.HealthFailures, patch.HealthFailures)
 	applyValue(&cfg.RestartOnUnhealthy, patch.RestartOnUnhealthy)
+	applyValue(&cfg.IdleTimeout, patch.IdleTimeout)
 	applyValue(&cfg.Network, patch.Network)
 	applyValue(&cfg.Identity, patch.Identity)
 	applyValue(&cfg.Maintenance, patch.Maintenance)

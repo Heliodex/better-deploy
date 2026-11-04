@@ -40,6 +40,8 @@ func handleJobsCollection(w http.ResponseWriter, r *http.Request, store *jobStor
 		status := http.StatusOK
 		if created {
 			status = http.StatusCreated
+
+			store.wakeIdle()
 		}
 
 		writeJSON(w, status, job)

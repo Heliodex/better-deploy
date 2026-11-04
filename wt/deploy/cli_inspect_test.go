@@ -12,7 +12,7 @@ import (
 
 func TestCompareManifest(t *testing.T) {
 	dir := t.TempDir()
-	manifest := `{"name":"demo","host":"old.example.com","memory_mb":128,"server_paths":["/auth"],"server_pages":["/"],"env":{"A":"one"}}`
+	manifest := `{"name":"demo","host":"old.example.com","memory_mb":128,"idle_timeout":"15m","server_paths":["/auth"],"server_pages":["/"],"env":{"A":"one"}}`
 
 	if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(manifest), privateFileMode); err != nil {
 		t.Fatal(err)
@@ -21,6 +21,7 @@ func TestCompareManifest(t *testing.T) {
 	comparison := compareManifest(dir, "demo", map[string]any{
 		"host":             "new.example.com",
 		"memory_mb":        float64(256),
+		"idle_timeout":     "900s",
 		"server_paths":     []any{"/auth"},
 		"server_pages":     []any{"/login"},
 		"env_keys":         []any{"A", "B"},
@@ -35,6 +36,10 @@ func TestCompareManifest(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Errorf("differences missing %q:\n%s", want, joined)
 		}
+	}
+
+	if strings.Contains(joined, "idle_timeout:") {
+		t.Errorf("equivalent idle_timeout values were reported as different:\n%s", joined)
 	}
 }
 

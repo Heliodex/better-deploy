@@ -43,13 +43,25 @@ func (s *supervisor) handleStop(w http.ResponseWriter, r *http.Request, name str
 		return
 	}
 
+	a.mu.Lock()
+	a.idleStopped = false
+	a.mu.Unlock()
+
 	s.drainAndStop(a, "stop")
 	writeJSON(w, http.StatusOK, s.info(a))
 }
 
 // startStopped launches an app from its existing main.cwasm and starts its schedule.
 func (s *supervisor) startStopped(a *app) error {
+	a.startMu.Lock()
+	defer a.startMu.Unlock()
+
 	a.mu.Lock()
+	if a.cmd != nil && !a.exited && !a.retired {
+		a.mu.Unlock()
+		return nil
+	}
+
 	dir := a.dir
 	requireEpoch := a.cfg.requestTimeout > 0
 	a.mu.Unlock()
@@ -65,6 +77,8 @@ func (s *supervisor) startStopped(a *app) error {
 	a.mu.Lock()
 	a.retired = false
 	a.draining = false
+	a.idleStopped = false
+	a.lastRequest = time.Now().UTC()
 	a.delay = time.Second
 	a.wasmEpoch = epoch
 	a.digest = sourceDigest(dir)

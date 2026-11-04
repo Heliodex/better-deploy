@@ -1489,6 +1489,8 @@ components:
         host:
           type: string
           minLength: 1
+        idle:
+          type: boolean
         lastError:
           type: string
         lastHealthy:
@@ -1733,6 +1735,8 @@ components:
         host:
           type: string
           minLength: 1
+        idle_timeout:
+          type: string
         job_concurrency:
           type: number
           minimum: 1
@@ -1783,6 +1787,7 @@ components:
         - health_failures
         - health_interval
         - host
+        - idle_timeout
         - job_concurrency
         - hosts
         - max_concurrency
@@ -2157,6 +2162,8 @@ components:
               host:
                 type: string
                 minLength: 1
+              idle:
+                type: boolean
               lastError:
                 type: string
               lastHealthy:

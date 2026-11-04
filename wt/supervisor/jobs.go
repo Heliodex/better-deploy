@@ -222,6 +222,16 @@ func (m *jobManager) store(app string) *jobStore {
 	return m.stores[app]
 }
 
+// busy reports whether the app is running a job right now, so the idle monitor does not stop its process mid-job.
+func (m *jobManager) busy(app string) bool {
+	store := m.store(app)
+	if store == nil {
+		return false
+	}
+
+	return store.busy()
+}
+
 // jobStore is the durable queue and worker loop for one app.
 type jobStore struct {
 	manager *jobManager
@@ -647,8 +657,44 @@ func (s *jobStore) appReady() bool {
 	}
 
 	_, ready := a.servingState()
+	if !ready && a.idleState() && s.hasDueWork() {
+		// A job that is due starts an app that scaled to zero.
+		s.manager.s.wakeIdleAppAsync(a)
+	}
 
 	return ready
+}
+
+// busy reports whether a worker is running a job right now.
+func (s *jobStore) busy() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.running > 0
+}
+
+// hasDueWork reports whether a pending job is due now.
+func (s *jobStore) hasDueWork() bool {
+	now := time.Now().UTC()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for index := range s.jobs {
+		if s.jobs[index].Status == jobStatusPending && !s.jobs[index].RunAt.After(now) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// wakeIdle starts an idle-stopped app so its due jobs can run.
+func (s *jobStore) wakeIdle() {
+	a := s.manager.s.lookup(s.app)
+	if a != nil && a.idleState() {
+		s.manager.s.wakeIdleAppAsync(a)
+	}
 }
 
 // dispatch claims due jobs up to the concurrency limit and starts one goroutine per job.

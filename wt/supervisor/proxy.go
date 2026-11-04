@@ -290,12 +290,6 @@ func (s *supervisor) serveApp(w http.ResponseWriter, r *http.Request, a *app) {
 	requestID := s.startAccess(w, r)
 
 	started := time.Now()
-	if !a.beginRequest() {
-		s.writeUnavailable(w, r, a, started, requestID, "app is restarting")
-		return
-	}
-
-	defer a.requests.Done()
 
 	wrapped := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 
@@ -307,6 +301,30 @@ func (s *supervisor) serveApp(w http.ResponseWriter, r *http.Request, a *app) {
 	}
 
 	static, ready := a.servingState()
+
+	// An idle-stopped app still serves its static bundle without starting a process. Component traffic wakes it first.
+	if !static && a.idleState() {
+		if a.serveStatic(wrapped, r) {
+			s.logAccess(a, r, started, requestID, wrapped.status)
+			return
+		}
+
+		if err := s.wakeIdleApp(a); err != nil {
+			log.Printf("app %s: wake after idle: %v", a.name, err)
+			s.writeUnavailable(w, r, a, started, requestID, "app did not start: "+err.Error())
+
+			return
+		}
+
+		static, ready = a.servingState()
+	}
+
+	if !a.beginRequest() {
+		s.writeUnavailable(w, r, a, started, requestID, "app is restarting")
+		return
+	}
+
+	defer a.endRequest()
 
 	// A server-selected page navigation reaches the component first so it can check the session, then name the static page to send or redirect.
 	if static && a.serverPageNavigation(r) {
