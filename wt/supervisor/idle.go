@@ -1,4 +1,4 @@
-// Idle scale-to-zero: apps with an idle_timeout stop their process after client traffic stops and start again on the next request.
+// Idle scale-to-zero: apps sleep after an idle timeout, default ten minutes, and start again on the next request.
 
 package main
 

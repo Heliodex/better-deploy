@@ -158,6 +158,9 @@ func readManifest(dir string) (manifest, error) {
 	return m, nil
 }
 
+// defaultIdleTimeout mirrors the supervisor's scale-to-zero default for an omitted idle_timeout.
+const defaultIdleTimeout = 10 * time.Minute
+
 // validateIdleTimeout checks the optional scale-to-zero delay before the supervisor sees the bundle.
 func validateIdleTimeout(value string) error {
 	value = strings.TrimSpace(value)

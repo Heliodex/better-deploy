@@ -302,7 +302,7 @@ async function removeSecret(key: string): Promise<void> {
 				<input
 					aria-label="Idle timeout"
 					class="field"
-					placeholder="none (for example 10m); stops the process until the next request"
+					placeholder="default 10m; 0/none/off keeps it running"
 					bind:value={idleTimeout}
 				>
 			</label>

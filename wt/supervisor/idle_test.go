@@ -11,7 +11,12 @@ import (
 )
 
 func TestParseIdleTimeout(t *testing.T) {
-	for _, value := range []string{"", "0", "none", "off", "OFF"} {
+	timeout, err := parseIdleTimeout("")
+	if err != nil || timeout != defaultIdleTimeout {
+		t.Errorf("parseIdleTimeout(%q) = %s, %v; want %s, nil", "", timeout, err, defaultIdleTimeout)
+	}
+
+	for _, value := range []string{"0", "none", "off", "OFF"} {
 		timeout, err := parseIdleTimeout(value)
 		if err != nil || timeout != 0 {
 			t.Errorf("parseIdleTimeout(%q) = %s, %v; want 0, nil", value, timeout, err)
@@ -145,6 +150,98 @@ func TestServeAppWakesIdleApp(t *testing.T) {
 
 	if a.idleState() {
 		t.Error("app stayed marked idle after a request")
+	}
+}
+
+func TestLoadAppsStartsAsleepByDefault(t *testing.T) {
+	s := newLifecycleSupervisor(t)
+
+	dir := filepath.Join(s.cfg.appsDir, "demo")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "main.cwasm"), []byte("cwasm"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(`{"name":"demo","host":"demo.localhost"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.loadApps(); err != nil {
+		t.Fatal(err)
+	}
+
+	a := s.lookup("demo")
+	if a == nil {
+		t.Fatal("app was not loaded")
+	}
+
+	t.Cleanup(func() { s.stop(a) })
+
+	a.mu.Lock()
+	running, idle, ready, proxy, timeout := a.cmd != nil, a.idleStopped, a.ready, a.proxy, a.cfg.idleTimeout
+	a.mu.Unlock()
+
+	if running || !idle || ready || proxy != nil {
+		t.Errorf("loaded app running=%v idle=%v ready=%v proxy=%v; want asleep", running, idle, ready, proxy != nil)
+	}
+
+	if timeout != defaultIdleTimeout {
+		t.Errorf("idle timeout = %s, want the %s default", timeout, defaultIdleTimeout)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "http://demo.localhost/", nil)
+	s.serveApp(rec, req, a)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204 after waking: %s", rec.Code, rec.Body.String())
+	}
+
+	a.mu.Lock()
+	idle, running = a.idleStopped, a.cmd != nil
+	a.mu.Unlock()
+
+	if idle || !running {
+		t.Errorf("after the first request idle=%v running=%v; want awake", idle, running)
+	}
+}
+
+func TestLoadAppsStartsWithExplicitOptOut(t *testing.T) {
+	s := newLifecycleSupervisor(t)
+
+	dir := filepath.Join(s.cfg.appsDir, "demo")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "main.cwasm"), []byte("cwasm"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(`{"name":"demo","host":"demo.localhost","idle_timeout":"none"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.loadApps(); err != nil {
+		t.Fatal(err)
+	}
+
+	a := s.lookup("demo")
+	if a == nil {
+		t.Fatal("app was not loaded")
+	}
+
+	t.Cleanup(func() { s.stop(a) })
+
+	a.mu.Lock()
+	running, idle, timeout := a.cmd != nil, a.idleStopped, a.cfg.idleTimeout
+	a.mu.Unlock()
+
+	if !running || idle || timeout != 0 {
+		t.Errorf("opt-out app running=%v idle=%v timeout=%s; want running and not idle", running, idle, timeout)
 	}
 }
 

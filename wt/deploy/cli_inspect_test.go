@@ -43,6 +43,28 @@ func TestCompareManifest(t *testing.T) {
 	}
 }
 
+func TestSameIdleTimeout(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		local, runtime    any
+		scheduled, expect bool
+	}{
+		{"omitted matches the default", "", "", false, true},
+		{"explicit default matches omitted", "10m", "", false, true},
+		{"equivalent spellings", "15m", "900s", false, true},
+		{"opt-out spellings", "off", "none", false, true},
+		{"default differs from opt-out", "", "none", false, false},
+		{"scheduled omitted matches opt-out", "", "none", true, true},
+		{"scheduled omitted matches omitted", "", "", true, true},
+		{"scheduled rejects an explicit timeout", "15m", "", true, false},
+		{"invalid duration", "soon", "", false, false},
+	} {
+		if got := sameIdleTimeout(tc.local, tc.runtime, tc.scheduled); got != tc.expect {
+			t.Errorf("%s: sameIdleTimeout(%v, %v, %v) = %v; want %v", tc.name, tc.local, tc.runtime, tc.scheduled, got, tc.expect)
+		}
+	}
+}
+
 func TestRunInspect(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

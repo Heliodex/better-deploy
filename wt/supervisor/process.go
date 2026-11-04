@@ -306,8 +306,8 @@ func (s *supervisor) restart(a *app) {
 	}
 }
 
-// spawn creates an app from a bundle and starts its process and schedule.
-func (s *supervisor) spawn(name, dir string, cfg appConfig) (*app, error) {
+// createApp creates an app from a bundle and optionally leaves it asleep until its first request.
+func (s *supervisor) createApp(name, dir string, cfg appConfig, asleep bool) (*app, error) {
 	if err := os.MkdirAll(filepath.Join(s.cfg.stateDir, name), 0o755); err != nil {
 		return nil, fmt.Errorf("state dir: %w", err)
 	}
@@ -342,6 +342,13 @@ func (s *supervisor) spawn(name, dir string, cfg appConfig) (*app, error) {
 	}
 	s.loadResourceHistory(a)
 
+	// A boot-asleep app is created without a process or proxy. The first request or due job wakes it through startStopped.
+	if asleep {
+		a.idleStopped = true
+
+		return a, nil
+	}
+
 	if err := s.launch(a, cwasm); err != nil {
 		s.stop(a)
 		return nil, err
@@ -350,6 +357,11 @@ func (s *supervisor) spawn(name, dir string, cfg appConfig) (*app, error) {
 	s.startSchedule(a)
 
 	return a, nil
+}
+
+// spawn creates an app from a bundle and starts its process and schedule.
+func (s *supervisor) spawn(name, dir string, cfg appConfig) (*app, error) {
+	return s.createApp(name, dir, cfg, false)
 }
 
 // finishExit resets the app after its process exits and schedules a restart unless it is retired or shutting down.
@@ -505,7 +517,7 @@ func (s *supervisor) adoptApp(name, dir string, cfg appConfig, info runnerAppInf
 	return a, nil
 }
 
-// loadApps reads the apps directory, adopts runner processes and starts the rest.
+// loadApps reads the apps directory, adopts runner processes and creates the rest, asleep when they have an idle timeout.
 func (s *supervisor) loadApps() error {
 	entries, err := os.ReadDir(s.cfg.appsDir)
 	if os.IsNotExist(err) {
@@ -569,7 +581,7 @@ func (s *supervisor) loadApps() error {
 			continue
 		}
 
-		a, err := s.spawn(name, dir, cfg)
+		a, err := s.createApp(name, dir, cfg, cfg.idleTimeout > 0)
 		if err != nil {
 			log.Printf("app %s: %v (skipped)", name, err)
 			continue

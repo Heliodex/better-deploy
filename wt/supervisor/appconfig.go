@@ -22,8 +22,10 @@ const (
 	minStartupTimeout     = time.Second
 	maxStartupTimeout     = 10 * time.Minute
 
-	minIdleTimeout = 10 * time.Second
-	maxIdleTimeout = 24 * time.Hour
+	// defaultIdleTimeout is how long an app may go without component traffic before it sleeps. Empty idle_timeout means this; 0/none/off disable it.
+	defaultIdleTimeout = 10 * time.Minute
+	minIdleTimeout     = 10 * time.Second
+	maxIdleTimeout     = 24 * time.Hour
 
 	tenantTrusted   = "trusted"
 	tenantUntrusted = "untrusted"
@@ -435,12 +437,14 @@ func parseHealthFailures(value int) (int, error) {
 	return value, nil
 }
 
-// parseIdleTimeout validates how long an app may go without client traffic before its process stops.
-// An empty value, "0", "none" or "off" disables scale-to-zero.
+// parseIdleTimeout validates how long an app may go without component traffic before its process stops.
+// Empty means the default scale-to-zero delay; "0", "none" or "off" disable it.
 func parseIdleTimeout(value string) (time.Duration, error) {
 	value = strings.TrimSpace(value)
 	switch {
-	case value == "", value == "0", strings.EqualFold(value, "none"), strings.EqualFold(value, "off"):
+	case value == "":
+		return defaultIdleTimeout, nil
+	case value == "0", strings.EqualFold(value, "none"), strings.EqualFold(value, "off"):
 		return 0, nil
 	}
 
@@ -709,10 +713,18 @@ func applyAppTimeouts(cfg *appConfig) error {
 	}
 
 	cfg.idleTimeout = idle
-	if idle == 0 {
+
+	value := strings.TrimSpace(cfg.IdleTimeout)
+	switch {
+	case len(cfg.Schedule) > 0 && value == "":
+		// A scheduled app cannot sleep. Keep the field empty rather than storing an opt-out, so removing the schedule restores the default.
+		cfg.idleTimeout = 0
 		cfg.IdleTimeout = ""
-	} else {
-		cfg.IdleTimeout = strings.TrimSpace(cfg.IdleTimeout)
+	case idle == 0:
+		// Store explicit opt-outs in one canonical spelling.
+		cfg.IdleTimeout = "none"
+	default:
+		cfg.IdleTimeout = value
 	}
 
 	return nil

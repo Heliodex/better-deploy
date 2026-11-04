@@ -160,16 +160,16 @@ func TestAppConfigIdleTimeoutNeedsNoRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got.IdleTimeout != "" || got.RestartRequired {
+	if got.IdleTimeout != "none" || got.RestartRequired {
 		t.Errorf("PATCH config = %+v; want disabled without a restart", got)
 	}
 
 	a.mu.Lock()
-	live := a.cfg.idleTimeout
+	live, stored := a.cfg.idleTimeout, a.cfg.IdleTimeout
 	a.mu.Unlock()
 
-	if live != 0 {
-		t.Errorf("live idle timeout = %s, want 0", live)
+	if live != 0 || stored != "none" {
+		t.Errorf("live idle timeout = %s (%q), want 0 (none)", live, stored)
 	}
 }
 
@@ -199,6 +199,55 @@ func TestAppConfigRejectsIdleTimeoutWithSchedule(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestNormaliseIdleTimeoutDefaults(t *testing.T) {
+	newConfig := func(idle string, schedule bool) appConfig {
+		cfg := appConfig{Name: "demo", Host: "demo.localhost", Health: "/healthz", Env: map[string]string{}, IdleTimeout: idle}
+		if schedule {
+			cfg.Schedule = []scheduleConfig{{Path: "/tick", Every: "1m"}}
+		}
+
+		return cfg
+	}
+
+	cfg, err := normaliseAppConfig(newConfig("", false), "demo", "localhost", tenantTrusted)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.IdleTimeout != "" || cfg.idleTimeout != defaultIdleTimeout {
+		t.Errorf("omitted idle_timeout = %q (%s); want empty (%s) so the default applies", cfg.IdleTimeout, cfg.idleTimeout, defaultIdleTimeout)
+	}
+
+	cfg, err = normaliseAppConfig(newConfig("15m", false), "demo", "localhost", tenantTrusted)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.IdleTimeout != "15m" || cfg.idleTimeout != 15*time.Minute {
+		t.Errorf("explicit idle_timeout = %q (%s); want 15m", cfg.IdleTimeout, cfg.idleTimeout)
+	}
+
+	for _, value := range []string{"0", "none", "off", "OFF"} {
+		cfg, err := normaliseAppConfig(newConfig(value, false), "demo", "localhost", tenantTrusted)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if cfg.IdleTimeout != "none" || cfg.idleTimeout != 0 {
+			t.Errorf("idle_timeout %q normalised to %q (%s); want none (0)", value, cfg.IdleTimeout, cfg.idleTimeout)
+		}
+	}
+
+	cfg, err = normaliseAppConfig(newConfig("", true), "demo", "localhost", tenantTrusted)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.IdleTimeout != "" || cfg.idleTimeout != 0 {
+		t.Errorf("scheduled app idle_timeout = %q (%s); want empty (0) so removing the schedule restores the default", cfg.IdleTimeout, cfg.idleTimeout)
 	}
 }
 

@@ -141,6 +141,11 @@ func compareManifest(dir, name string, config map[string]any) *manifestCompariso
 
 	comparison := &manifestComparison{Path: path}
 
+	scheduled := false
+	if entries, ok := config["schedule"].([]any); ok {
+		scheduled = len(entries) > 0
+	}
+
 	for _, key := range []string{"host", "health", "memory_mb", "disk_mb", "max_concurrency", "request_timeout", "idle_timeout", "network", "identity", "server_paths", "server_pages"} {
 		localValue, ok := local[key]
 		if !ok {
@@ -148,7 +153,7 @@ func compareManifest(dir, name string, config map[string]any) *manifestCompariso
 		}
 
 		if key == "idle_timeout" {
-			if sameIdleTimeout(localValue, config[key]) {
+			if sameIdleTimeout(localValue, config[key], scheduled) {
 				continue
 			}
 		}
@@ -181,18 +186,26 @@ func compareManifest(dir, name string, config map[string]any) *manifestCompariso
 }
 
 // sameIdleTimeout compares two idle_timeout values by duration, so "15m" and "900s" match and disabled spellings agree.
-func sameIdleTimeout(local, runtime any) bool {
-	left, leftOK := idleTimeoutValue(valueText(local))
-	right, rightOK := idleTimeoutValue(valueText(runtime))
+// An empty value means the supervisor default, except for a scheduled app, which never sleeps.
+func sameIdleTimeout(local, runtime any, scheduled bool) bool {
+	fallback := defaultIdleTimeout
+	if scheduled {
+		fallback = 0
+	}
+
+	left, leftOK := idleTimeoutValue(valueText(local), fallback)
+	right, rightOK := idleTimeoutValue(valueText(runtime), fallback)
 
 	return leftOK && rightOK && left == right
 }
 
-// idleTimeoutValue parses a manifest or runtime idle_timeout, reporting false for an invalid duration.
-func idleTimeoutValue(value string) (time.Duration, bool) {
+// idleTimeoutValue parses a manifest or runtime idle_timeout, using fallback for an empty value and reporting false for an invalid duration.
+func idleTimeoutValue(value string, fallback time.Duration) (time.Duration, bool) {
 	value = strings.TrimSpace(value)
 	switch {
-	case value == "", value == "0", strings.EqualFold(value, "none"), strings.EqualFold(value, "off"):
+	case value == "":
+		return fallback, true
+	case value == "0", strings.EqualFold(value, "none"), strings.EqualFold(value, "off"):
 		return 0, true
 	}
 
