@@ -99,6 +99,27 @@ func writeArtifact(dir string, info artifactInfo) error {
 	return os.WriteFile(filepath.Join(dir, artifactName), append(data, '\n'), 0o644)
 }
 
+// correctArtifactEpoch records the epoch instrumentation a retained cwasm actually needs after wasmtime rejected the opposite setting.
+// Bundles from an older deploy can lack artefact.json or carry a stale epoch flag, and a runtime-only image cannot rebuild them.
+func (s *supervisor) correctArtifactEpoch(a *app, epoch bool) {
+	a.mu.Lock()
+	a.wasmEpoch = epoch
+	dir := a.dir
+	a.mu.Unlock()
+
+	info, err := readArtifact(dir)
+	if err != nil {
+		info = artifactInfo{}
+	}
+
+	info.Epoch = epoch
+	if err := writeArtifact(dir, info); err != nil {
+		log.Printf("app artifact %s: record epoch interruption %t: %v", filepath.Base(dir), epoch, err)
+	}
+
+	log.Printf("app artifact %s: using epoch interruption %t reported by wasmtime", filepath.Base(dir), epoch)
+}
+
 // wasmtimeVersion reports the configured runtime's version, cached because it only changes with the binary.
 func (s *supervisor) wasmtimeVersion() string {
 	s.versionOnce.Do(func() {

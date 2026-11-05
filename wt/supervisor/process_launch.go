@@ -18,6 +18,9 @@ import (
 // epochIdleTimeout stands in for "no request timeout". Epoch interruption always needs a deadline, and wasmtime applies the deadline immediately when none is set.
 const epochIdleTimeout = 24 * time.Hour
 
+// errEpochMismatch reports a cwasm whose epoch instrumentation disagrees with the recorded artifact or the launch flags.
+var errEpochMismatch = errors.New("cwasm epoch setting does not match the host")
+
 // launchSession carries the resolved inputs shared by the runner and direct launch paths.
 type launchSession struct {
 	id         string
@@ -66,6 +69,19 @@ func appServeArgs(target string, cfg appConfig, epoch bool) []string {
 	}
 
 	return args
+}
+
+// epochMismatch reads the epoch instrumentation wasmtime says a cwasm needs from its startup output.
+func epochMismatch(output string) (bool, bool) {
+	if strings.Contains(output, "compiled with epoch interruption but it is not enabled for the host") {
+		return true, true
+	}
+
+	if strings.Contains(output, "compiled without epoch interruption but it is enabled for the host") {
+		return false, true
+	}
+
+	return false, false
 }
 
 // appEnv builds the --env pairs and the process environment, resolving secret references first.
@@ -187,8 +203,20 @@ func (s *supervisor) appArgs(a *app, source string) (args []string, env []string
 	return s.appArgsFor(a, source, false)
 }
 
-// launch starts one app, either through the runner or as a direct child, and returns once it is ready or failed.
+// launch starts one app, retrying once with the epoch setting wasmtime reports when a retained cwasm was compiled with the opposite one.
 func (s *supervisor) launch(a *app, source string) error {
+	err := s.launchOnce(a, source)
+	if !errors.Is(err, errEpochMismatch) {
+		return err
+	}
+	// The failed attempt already scheduled its own restart; the corrected retry replaces it.
+	s.cancelRestart(a)
+
+	return s.launchOnce(a, source)
+}
+
+// launchOnce starts one app, either through the runner or as a direct child, and returns once it is ready or failed.
+func (s *supervisor) launchOnce(a *app, source string) error {
 	a.mu.Lock()
 	a.starting = true
 	a.port = 0
@@ -363,6 +391,12 @@ func (s *supervisor) launchRunner(a *app, l *launchSession) error {
 // awaitAppReady waits for the port, applies egress rules, runs migrations and activates the app.
 func (s *supervisor) awaitAppReady(a *app, l *launchSession, done <-chan struct{}, finder *portFinder, recent *logRing) error {
 	if err := s.waitForPort(a, finder, done, l.deadline); err != nil {
+		if epoch, ok := epochMismatch(recent.String()); ok {
+			s.correctArtifactEpoch(a, epoch)
+
+			return fmt.Errorf("%w: %w", errEpochMismatch, err)
+		}
+
 		return withLaunchLog(l.source, recent, err)
 	}
 

@@ -126,6 +126,27 @@ func compileCount(t *testing.T, counter string) int {
 	return len(data)
 }
 
+func TestCorrectArtifactEpoch(t *testing.T) {
+	dir := writeBundleDir(t, "wasm", "cwasm", "")
+	s := artifactSupervisor(t, "wasmtime")
+
+	a := &app{dir: dir}
+	s.correctArtifactEpoch(a, true)
+
+	if !a.wasmEpoch {
+		t.Error("app did not record the corrected epoch setting")
+	}
+
+	info, err := readArtifact(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !info.Epoch || info.WasmSHA256 != digestText("wasm") {
+		t.Errorf("artifact = %+v, want epoch support and the wasm digest", info)
+	}
+}
+
 func TestEnsureArtifactRebuildsStaleArtifact(t *testing.T) {
 	compiler := writeCompiler(t, "wasmtime-cli 51.0.0", "rebuilt", false)
 	dir := writeBundleDir(t, "wasm", "old", `{"wasmtime":"wasmtime-cli 50.0.0","target":"x86_64-test"}`)
