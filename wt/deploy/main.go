@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 )
@@ -206,16 +207,7 @@ func main() {
 		command, args = "help", args[1:]
 	}
 
-	helpRequested := false
-
-	if command != "help" {
-		for _, arg := range args {
-			if isHelpFlag(arg) {
-				helpRequested = true
-				break
-			}
-		}
-	}
+	helpRequested := command != "help" && slices.ContainsFunc(args, isHelpFlag)
 
 	var err error
 

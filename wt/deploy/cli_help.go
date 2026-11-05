@@ -5,6 +5,9 @@ import (
 	"io"
 )
 
+// helpPathValue is the placeholder used for file and path flag arguments.
+const helpPathValue = "PATH"
+
 // helpFlag is one flag line in a command's help.
 type helpFlag struct {
 	name, value, description string
@@ -79,10 +82,10 @@ var helpCommands = []helpCommand{
 				summary: "create a job",
 				usage:   []string{"wt jobs <app> enqueue [flags]"},
 				flags: []helpFlag{
-					{"--path", "PATH", "target path, for example /jobs/email (required)"},
+					{"--path", helpPathValue, "target path, for example /jobs/email (required)"},
 					{"--method", "METHOD", "HTTP method (default POST)"},
 					{"--body", "JSON", "request body"},
-					{"--file", "PATH", "read the request body from a file"},
+					{"--file", helpPathValue, "read the request body from a file"},
 					{"--header", "KEY: VALUE", "request header; repeatable"},
 					{"--run-at", "TIME", "RFC3339 time to run the job"},
 					{"--max-attempts", "N", "maximum attempts (1-20)"},
@@ -158,7 +161,7 @@ var helpCommands = []helpCommand{
 				usage:   []string{"wt secrets <app> set <KEY> [flags]"},
 				details: []string{"The value is read from stdin unless --file is given. One trailing newline is trimmed and the value is capped at 64 KiB."},
 				flags: []helpFlag{
-					{"--file", "PATH", "read the value from a file instead of stdin"},
+					{"--file", helpPathValue, "read the value from a file instead of stdin"},
 				},
 				examples: []string{"printf 'client-secret' | wt secrets passport set OAUTH_CLIENT_SECRET"},
 			},
@@ -175,7 +178,7 @@ var helpCommands = []helpCommand{
 		summary: "check that an app host is routed",
 		usage:   []string{"wt route check <app> [flags]"},
 		flags: []helpFlag{
-			{"--path", "PATH", "path to request (default /healthz)"},
+			{"--path", helpPathValue, "path to request (default /healthz)"},
 			{"--timeout", "DURATION", "probe timeout (default 8s)"},
 		},
 		examples: []string{"wt route check passport"},
@@ -186,7 +189,7 @@ var helpCommands = []helpCommand{
 		summary: "report the supervisor runtime and optionally one app's route",
 		usage:   []string{"wt doctor [app] [flags]"},
 		flags: []helpFlag{
-			{"--path", "PATH", "path to request (default /healthz)"},
+			{"--path", helpPathValue, "path to request (default /healthz)"},
 			{"--timeout", "DURATION", "probe timeout (default 8s)"},
 		},
 		examples: []string{
@@ -200,7 +203,7 @@ var helpCommands = []helpCommand{
 		summary: "compare the local and supervisor wasmtime releases",
 		usage:   []string{"wt runtime [flags]"},
 		flags: []helpFlag{
-			{"--wasmtime", "PATH", "local wasmtime binary (default wasmtime)"},
+			{"--wasmtime", helpPathValue, "local wasmtime binary (default wasmtime)"},
 		},
 		examples: []string{"wt runtime"},
 		client:   true,
@@ -226,10 +229,10 @@ var helpCommands = []helpCommand{
 			{"--app", "NAME", "app name (default app.json name or directory name)"},
 			{"--host", "URL", "supervisor URL, for example http://127.0.0.1:8080"},
 			{"--token", "TOKEN", "deploy bearer token"},
-			{"--wasmtime", "PATH", "wasmtime binary (default wasmtime)"},
+			{"--wasmtime", helpPathValue, "wasmtime binary (default wasmtime)"},
 			{"--target", "TRIPLE", "wasmtime compile target (default supervisor target)"},
 			{"--app-host", "HOST", "override the app host in the uploaded app.json"},
-			{"--config", "PATH", "config file (default ~/.config/wt/config.json)"},
+			{"--config", helpPathValue, "config file (default ~/.config/wt/config.json)"},
 			{"--json", "", "print only the raw API response"},
 			{"--force-build", "", "rebuild the component and static phases"},
 			{"--skip-build", "", "skip running app.json's build commands"},
@@ -310,7 +313,7 @@ var helpCommands = []helpCommand{
 				usage:   []string{"wt config set <app> [flags]"},
 				flags: []helpFlag{
 					{"--data", "JSON", "inline JSON patch"},
-					{"--file", "PATH", "read the JSON patch from a file"},
+					{"--file", helpPathValue, "read the JSON patch from a file"},
 					{"--if-match", "ETAG", "only apply when the ETag still matches"},
 				},
 				examples: []string{`wt config set notes --data '{"memory_mb":256}' --if-match '"etag"'`},
@@ -334,7 +337,7 @@ var helpCommands = []helpCommand{
 		details: []string{"Runs the component and static phases, precompiles the component when wasmtime is available and writes the tarball. This is the local build path for the pinned Containerfile."},
 		flags: []helpFlag{
 			{"--dir", "DIR", `app directory containing app.json (default ".")`},
-			{"--wasmtime", "PATH", "wasmtime binary (default wasmtime)"},
+			{"--wasmtime", helpPathValue, "wasmtime binary (default wasmtime)"},
 			{"--target", "TRIPLE", "wasmtime compile target (default x86_64-unknown-linux-musl)"},
 			{"--out", "FILE", "output file (default <name>.tar.gz)"},
 			{"--force-build", "", "rebuild the component and static phases"},
@@ -353,9 +356,9 @@ var helpCommands = []helpCommand{
 			{"--workspace", "DIR", "serve every child app together"},
 			{"--port", "N", "loopback port for the dev supervisor (default 8080)"},
 			{"--admin-port", "N", "separate admin port (default app port + 1)"},
-			{"--wasmtime", "PATH", "wasmtime binary (default wasmtime)"},
+			{"--wasmtime", helpPathValue, "wasmtime binary (default wasmtime)"},
 			{"--target", "TRIPLE", "wasmtime compile target (default match the local wasmtime)"},
-			{"--supervisor", "PATH", "supervisor binary (default PATH, then build from ../../supervisor)"},
+			{"--supervisor", helpPathValue, "supervisor binary (default PATH, then build from ../../supervisor)"},
 			{"--app-host", "HOST", "override the app host (default <app>.localhost)"},
 			{"--skip-build", "", "skip running app.json's build commands"},
 			{"--skip-compile", "", "reuse an existing main.cwasm"},
@@ -372,9 +375,9 @@ var helpCommands = []helpCommand{
 		summary: "scaffold a new app",
 		usage:   []string{"wt new [flags]"},
 		flags: []helpFlag{
-			{"--dir", "PATH", `directory to scaffold the app in (default ".")`},
-			{"--module", "PATH", "Go module path for a standalone app (default app name)"},
-			{"--sdk", "PATH", "replace the published Go SDK with a local wt/packages checkout"},
+			{"--dir", helpPathValue, `directory to scaffold the app in (default ".")`},
+			{"--module", helpPathValue, "Go module path for a standalone app (default app name)"},
+			{"--sdk", helpPathValue, "replace the published Go SDK with a local wt/packages checkout"},
 			{"--contract", "valibot|none", "contract pipeline (default valibot)"},
 		},
 		examples: []string{
@@ -422,7 +425,7 @@ var helpCommands = []helpCommand{
 var globalHelpFlags = []helpFlag{
 	{"--host", "URL", "supervisor URL (default WT_DEPLOY_HOST or the config file)"},
 	{"--token", "TOKEN", "bearer token (default WT_TOKEN or the config file)"},
-	{"--config", "PATH", "config file (default ~/.config/wt/config.json)"},
+	{"--config", helpPathValue, "config file (default ~/.config/wt/config.json)"},
 	{"--json", "", "print the raw API response"},
 	{"--timeout", "DURATION", "request timeout (default 30s)"},
 }
@@ -456,6 +459,7 @@ func findHelpSub(cmd *helpCommand, name string) *helpCommand {
 // helpTarget turns command arguments into a help lookup path. If a help flag is present, the tokens before it are searched for a subcommand so wt jobs enqueue --help shows enqueue's help.
 func helpTarget(command string, args []string) []string {
 	target := []string{command}
+
 	topic := findHelpCommand(command)
 	if topic == nil || len(topic.subs) == 0 {
 		return target
@@ -529,6 +533,7 @@ func printCommandHelp(w io.Writer, command *helpCommand, title string, client bo
 	fmt.Fprintf(w, "wt %s - %s\n\n", title, command.summary)
 
 	fmt.Fprintln(w, "usage:")
+
 	for _, line := range command.usage {
 		fmt.Fprintf(w, "  %s\n", line)
 	}
