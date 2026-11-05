@@ -178,6 +178,8 @@ The remote deployment exposed two noisy errors after the fixes landed.
 - **Job queue full.** `example/ticker` enqueues every 10 seconds, and every finished job stayed in the per-app queue. After about 2.8 hours 1000 succeeded jobs filled the cap and new enqueues failed. Fixed in `a1f5710` by retaining every active job and only the newest 500 terminal jobs (`succeeded`, `failed`, `dead`, `canceled`), pruning on load and before the cap check and persisting the pruned queue. A steady producer can no longer turn history into a full queue.
 - **Wasm module failing to open.** The runtime-only image has no `compile` subcommand, but `ensureArtifact` attempted `wasmtime compile` whenever a cache or artifact match was missing. The runtime binary then treated `compile` as a module path and logged `failed to open wasm module "compile"` before falling back to the existing cwasm. Fixed in `a1f5710` by checking `canCompile` first: an existing valid cwasm is kept with an informational line, and the error is returned only when there is no usable artifact.
 - **PVC full.** The 1 Gi state volume filled during repeated deploys and job history, causing cache writes to fail and some apps to be missing after a rollout. Expanded `wt-demo-state` to 2 Gi and restarted; all nine apps returned. This is Orchard state, not a repository change.
+- **Hello restarting every thirty seconds.** The bundle retained a cwasm compiled with epoch interruption but lost its `artefact.json`, because a reused component build skipped `runCompile`. The runtime-only supervisor could not rebuild it, kept launching without `-W epoch-interruption=y` and wasmtime rejected the module. Fixed in `bace515` by revalidating the artifact when a component is reused and recompiling when the wasm, target, runtime release or epoch metadata no longer matches.
+- **Cwasm epoch metadata wrong.** A retained cwasm can need epoch interruption while its artifact says otherwise, or the artifact is missing from an older bundle, and a runtime-only image cannot compile a replacement. Fixed in `5e9c593` by reading wasmtime's own "compiled with epoch interruption" error, recording the real setting in `artefact.json`, and retrying the launch once. The first repair logs one wasmtime error; later restarts are clean.
 
 ## Not worth changing
 
@@ -187,6 +189,7 @@ The remote deployment exposed two noisy errors after the fixes landed.
 - **The wasm artifact and one wasmtime per app are the point.** Containerising or embedding the runtime would remove the isolation and caching properties the project is built around.
 - **Do not build a full auth framework.** A small OAuth client and session helper are enough. Apps should keep ownership of users, tables and authorization rules.
 - **Do not hide migrations.** Explicit migration functions and checksums are worth the ceremony.
+- **Leave the hyper `IncompleteMessage` line alone.** It appears when a client disconnects halfway through a request body; the proxy logs `context canceled` and wasmtime reports the truncated message. It is nine lines a day of expected disconnect noise, not an app failure.
 - **Keep the contract pipeline, but make it optional.** It is the right choice for a shared API, not a requirement for a two-endpoint app.
 
 ## If I picked the next three
