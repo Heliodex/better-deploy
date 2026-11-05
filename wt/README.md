@@ -67,7 +67,7 @@ The `wt-deploy` binary also acts as the operator CLI. Every command accepts `--h
 }
 ```
 
-Running `wt-deploy` with no command prints the current directory, the local `app.json` name and host, whether a host is configured and where the config file is expected, then points at `wt-deploy help`. It does not attempt a deploy, so a fresh directory can be scaffolded with `wt-deploy new` before any supervisor host exists. Deploy explicitly with `wt-deploy deploy`.
+Running `wt-deploy` with no command prints the current directory, the local `app.json` name and host, whether a host is configured and where the config file is expected, then points at `wt-deploy help`. It does not attempt a deploy, so a fresh directory can be scaffolded with `wt-deploy new` before any supervisor host exists. Deploy explicitly with `wt-deploy deploy`. `wt-deploy help <command>` describes one command's usage, flags and examples, including subcommands such as `wt-deploy help jobs enqueue`; `<command> --help` and `<command> -h` do the same.
 
 ```sh
 wt-deploy apps
