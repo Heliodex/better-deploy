@@ -173,8 +173,9 @@ Concrete evidence from this build:
 
 ## Remote log follow-ups
 
-The remote deployment exposed two noisy errors after the fixes landed.
+The remote deployment exposed several noisy errors after the fixes landed.
 
+- **`cannot leave component instance` traps.** Apps built against `go.bytecodealliance.org/pkg v0.4.0` let the Go collector call host imports (`poll_oneoff`, clock reads) from inside `cabi_realloc`, which the component model forbids. That produced `worker failed: ... wasm trap: cannot leave component instance` on outbound `wasi:http` responses and dropped one request each time. pkg v0.4.1 defers GC while inside `cabi_realloc` by pinning the M. The SDK on `main` already required v0.4.1, but the published `v2.0.0` module still pulled v0.4.0, so `ire` (deployed as `review`) kept trapping after a rebuild. Tag `v2.0.1` and rebuild the app; the supervisor itself needs no change.
 - **Job queue full.** `example/ticker` enqueues every 10 seconds, and every finished job stayed in the per-app queue. After about 2.8 hours 1000 succeeded jobs filled the cap and new enqueues failed. Fixed in `a1f5710` by retaining every active job and only the newest 500 terminal jobs (`succeeded`, `failed`, `dead`, `canceled`), pruning on load and before the cap check and persisting the pruned queue. A steady producer can no longer turn history into a full queue.
 - **Wasm module failing to open.** The runtime-only image has no `compile` subcommand, but `ensureArtifact` attempted `wasmtime compile` whenever a cache or artifact match was missing. The runtime binary then treated `compile` as a module path and logged `failed to open wasm module "compile"` before falling back to the existing cwasm. Fixed in `a1f5710` by checking `canCompile` first: an existing valid cwasm is kept with an informational line, and the error is returned only when there is no usable artifact.
 - **PVC full.** The 1 Gi state volume filled during repeated deploys and job history, causing cache writes to fail and some apps to be missing after a rollout. Expanded `wt-demo-state` to 2 Gi and restarted; all nine apps returned. This is Orchard state, not a repository change.
