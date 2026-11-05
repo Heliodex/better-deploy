@@ -173,6 +173,23 @@ func runBundle(args []string) error {
 	return nil
 }
 
+// isHelpFlag reports whether arg asks for help.
+func isHelpFlag(arg string) bool {
+	return arg == "-h" || arg == "--help"
+}
+
+// withoutHelpFlags drops help flags from a help command's topic arguments.
+func withoutHelpFlags(args []string) []string {
+	topic := make([]string, 0, len(args))
+	for _, arg := range args {
+		if !isHelpFlag(arg) {
+			topic = append(topic, arg)
+		}
+	}
+
+	return topic
+}
+
 func main() {
 	command := "deploy"
 
@@ -182,86 +199,83 @@ func main() {
 		return
 	}
 
-	if !strings.HasPrefix(args[0], "-") {
+	hasCommand := !strings.HasPrefix(args[0], "-")
+	if hasCommand {
 		command, args = args[0], args[1:]
+	} else if isHelpFlag(args[0]) {
+		command, args = "help", args[1:]
 	}
 
-	for _, arg := range args {
-		if arg == "-h" || arg == "--help" {
-			command = "help"
-			break
+	helpRequested := false
+
+	if command != "help" {
+		for _, arg := range args {
+			if isHelpFlag(arg) {
+				helpRequested = true
+				break
+			}
 		}
 	}
 
 	var err error
 
-	switch command {
-	case "deploy":
-		err = deploy(args)
-	case "bundle", "build":
-		err = runBundle(args)
-	case "dev":
-		err = runDev(args)
-	case "new":
-		err = runNew(args)
-	case "contract":
-		err = runContract(args)
-	case "apps":
-		err = runApps(args)
-	case "logs":
-		err = runLogs(args)
-	case "jobs":
-		err = runJobs(args)
-	case "blobs":
-		err = runBlobs(args)
-	case "secrets":
-		err = runSecrets(args)
-	case "route":
-		err = runRoute(args)
-	case "doctor":
-		err = runDoctor(args)
-	case "runtime":
-		err = runRuntime(args)
-	case "inspect":
-		err = runInspect(args)
-	case "rollback":
-		err = runRollback(args)
-	case "backup":
-		err = runBackup(args)
-	case "config":
-		err = runConfig(args)
-	case "open":
-		err = runOpen(args)
-	case "completion":
-		err = runCompletion(args)
-	case "help", "-h", "--help":
-		fmt.Println("usage: wt <command> [flags]")
-		fmt.Println("       wt                        show the local app, host and config path")
-		fmt.Println("       wt apps [--host URL] [--token TOKEN] [--json]")
-		fmt.Println("       wt logs <app> [--tail N] [--level LEVEL] [--source app|supervisor] [--q TEXT] [--follow]")
-		fmt.Println("       wt jobs <app> <list|show|enqueue|cancel|retry> ...")
-		fmt.Println("       wt blobs <app> <list|delete|gc> ...")
-		fmt.Println("       wt secrets <app> <list|set|delete> ...")
-		fmt.Println("       wt route check <app> [--path /healthz]")
-		fmt.Println("       wt doctor [app] [--path /healthz]")
-		fmt.Println("       wt runtime [--wasmtime PATH]")
-		fmt.Println("       wt inspect <app> [--dir DIR]")
-		fmt.Println("       wt deploy [--dir DIR] [--host URL] [--token TOKEN] [--app-host HOST]")
-		fmt.Println("       wt rollback <app> <deployment-id> [--backup SNAPSHOT]")
-		fmt.Println("       wt backup <list|create|restore|download|import> <app> ...")
-		fmt.Println("       wt config <show|set> <app> ...")
-		fmt.Println("       wt open <app>")
-		fmt.Println("       wt build --dir DIR --out app.tar.gz")
-		fmt.Println("       wt dev [--dir DIR] [--port 8080] [--watch=false]")
-		fmt.Println("       wt new --dir PATH [--sdk PATH] [--module MODULE] [--contract valibot|none]")
-		fmt.Println("       wt contract [--dir DIR] [--check]")
-		fmt.Println("       wt completion <bash|zsh|fish>")
+	switch {
+	case command == "help" || command == "-h" || command == "--help":
+		err = writeHelp(os.Stdout, withoutHelpFlags(args))
+	case helpRequested:
+		err = writeHelp(os.Stdout, helpTarget(command, args))
 	default:
-		err = fmt.Errorf("unknown command %q", command)
+		err = runCommand(command, args)
 	}
 
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "wt-deploy:", err)
 		os.Exit(1)
+	}
+}
+
+// runCommand dispatches one top-level command.
+func runCommand(command string, args []string) error {
+	switch command {
+	case "deploy":
+		return deploy(args)
+	case "bundle", "build":
+		return runBundle(args)
+	case "dev":
+		return runDev(args)
+	case "new":
+		return runNew(args)
+	case "contract":
+		return runContract(args)
+	case "apps":
+		return runApps(args)
+	case "logs":
+		return runLogs(args)
+	case "jobs":
+		return runJobs(args)
+	case "blobs":
+		return runBlobs(args)
+	case "secrets":
+		return runSecrets(args)
+	case "route":
+		return runRoute(args)
+	case "doctor":
+		return runDoctor(args)
+	case "runtime":
+		return runRuntime(args)
+	case "inspect":
+		return runInspect(args)
+	case "rollback":
+		return runRollback(args)
+	case "backup":
+		return runBackup(args)
+	case "config":
+		return runConfig(args)
+	case "open":
+		return runOpen(args)
+	case "completion":
+		return runCompletion(args)
+	default:
+		return fmt.Errorf("unknown command %q", command)
 	}
 }
