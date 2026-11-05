@@ -103,6 +103,8 @@ let minLevel = $state<LogLevel>("trace")
 let resourceHistory = $state<ResourceSample[]>([])
 let overviewHistories = $state<{ [_: string]: ResourceSample[] }>({})
 let overviewPending = $state<{ [_: string]: boolean }>({})
+/** Apps whose full history has been requested, so a live sample arriving first cannot stop the fetch. */
+let overviewLoaded = $state<{ [_: string]: boolean }>({})
 let backupSettings = $state<BackupSettings>({ enabled: true, every: "24h", keep: 7 })
 let backupList = $state<BackupInfo[]>([])
 let backupCurrent = $state("")
@@ -178,12 +180,15 @@ async function loadResourceHistory(key: string, name: string): Promise<void> {
 }
 
 async function loadOverviewHistory(key: string, name: string): Promise<void> {
-	if (overviewPending[name]) return
+	if (overviewPending[name] || overviewLoaded[name]) return
 	overviewPending[name] = true
+	overviewLoaded[name] = true
 	try {
 		const samples = await fetchResourceHistory(key, name)
 		overviewHistories[name] = mergeHistory(overviewHistories[name] ?? [], samples)
 	} catch (err) {
+		// Let the next refresh retry a history that failed to load.
+		delete overviewLoaded[name]
 		if (selected === null) error = err instanceof Error ? err.message : "Could not load resource history."
 	} finally {
 		delete overviewPending[name]
@@ -192,12 +197,13 @@ async function loadOverviewHistory(key: string, name: string): Promise<void> {
 
 /** Fetch five-minute histories for every app missing one, so the overview stacks have depth on first paint. */
 function ensureOverviewHistories(key: string): void {
-	for (const app of apps)
-		if ((overviewHistories[app.name] ?? []).length === 0) void loadOverviewHistory(key, app.name)
+	for (const app of apps) if (!overviewLoaded[app.name]) void loadOverviewHistory(key, app.name)
 
 	// Drop histories for apps that no longer exist, so their colours free up.
 	for (const name of Object.keys(overviewHistories))
 		if (!apps.some(app => app.name === name)) delete overviewHistories[name]
+	for (const name of Object.keys(overviewLoaded))
+		if (!apps.some(app => app.name === name)) delete overviewLoaded[name]
 }
 
 function readSelection(): string | null {
@@ -765,6 +771,8 @@ function connect(key: string): void {
 
 			for (const name of Object.keys(overviewHistories))
 				if (!updated.some(app => app.name === name)) delete overviewHistories[name]
+			for (const name of Object.keys(overviewLoaded))
+				if (!updated.some(app => app.name === name)) delete overviewLoaded[name]
 
 			if (selected) {
 				const current = updated.find(app => app.name === selected)
