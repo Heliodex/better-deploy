@@ -23,56 +23,71 @@ let { format, label, series, span, unit, value }: Props = $props()
 const width = 100
 const height = 40
 const padding = 2
+/** Thirty minutes at the supervisor's one-second sampling interval. */
+const MAX_POINTS = 1800
 
 let ordered = $derived([...series].toSorted((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)))
 let colors = $derived(new Map(ordered.map((entry, index) => [entry.name, palette[index % palette.length]])))
 
 /** Per-series samples inside the selected timespan, cut from the newest sample across all apps. */
 let visible = $derived.by(() => {
+	const sorted = ordered.map(entry => ({
+		name: entry.name,
+		samples: entry.samples.toSorted((a, b) => Date.parse(a.at) - Date.parse(b.at)),
+	}))
+
 	let lastAt = Number.NaN
-	for (const entry of ordered) {
+	for (const entry of sorted) {
 		const last = entry.samples.at(-1)
 		if (!last) continue
 		const at = Date.parse(last.at)
 		if (!Number.isNaN(at) && (Number.isNaN(lastAt) || at > lastAt)) lastAt = at
 	}
-	if (Number.isNaN(lastAt)) return ordered
+	if (Number.isNaN(lastAt)) return sorted
 	const cutoff = lastAt - span * 1000
-	return ordered.map(entry => ({
+	return sorted.map(entry => ({
 		name: entry.name,
 		samples: entry.samples.filter(sample => Date.parse(sample.at) >= cutoff),
 	}))
 })
 
 let timeline = $derived.by(() => {
-	const times = new Set<string>()
+	const times = new Set<number>()
 	for (const entry of visible)
-		for (const sample of entry.samples) if (!Number.isNaN(Date.parse(sample.at))) times.add(sample.at)
-
-	// Thirty minutes at the supervisor's one-second sampling interval.
-	return [...times].toSorted((a, b) => Date.parse(a) - Date.parse(b)).slice(-1800)
-})
-
-let byTime = $derived.by(() => {
-	const maps = new Map<string, Map<string, number>>()
-	for (const entry of visible) {
-		const perSample = new Map<string, number>()
-		for (const sample of entry.samples) perSample.set(sample.at, value(sample))
-		maps.set(entry.name, perSample)
-	}
-	return maps
+		for (const sample of entry.samples) {
+			const at = Date.parse(sample.at)
+			if (!Number.isNaN(at)) times.add(at)
+		}
+	const sorted = [...times].toSorted((a, b) => a - b)
+	// Apps are sampled at slightly different times, so the union can hold several points per second.
+	// Thin it evenly to keep the whole span rather than truncating it to the newest points.
+	if (sorted.length <= MAX_POINTS) return sorted
+	const stride = (sorted.length - 1) / (MAX_POINTS - 1)
+	return Array.from({ length: MAX_POINTS }, (_, index) => sorted[Math.round(index * stride)] ?? 0)
 })
 
 let stacked = $derived.by(() => {
 	if (ordered.length === 0 || timeline.length === 0) return []
-	const firstAt = Date.parse(timeline[0] ?? "")
-	const lastAt = Date.parse(timeline.at(-1) ?? "")
+	const firstAt = timeline[0] ?? 0
+	const lastAt = timeline.at(-1) ?? 0
 	const range = Math.max(lastAt - firstAt, 1)
-	return timeline.map(at => {
-		const timestamp = Date.parse(at)
+	const cursors = visible.map(() => 0)
+	const lastValues = visible.map(() => 0)
+	// Each series only owns its own sample times, so at a timestamp from another app it has no point.
+	// Carry its last value forward instead of dropping it to zero, which would sawtooth the stack.
+	return timeline.map(timestamp => {
 		const x = ((timestamp - firstAt) / range) * (width - padding * 2) + padding
-		const values = visible.map(entry => byTime.get(entry.name)?.get(at) ?? 0)
-		return { at, values, x }
+		for (const [index, entry] of visible.entries()) {
+			let cursor = cursors[index] ?? 0
+			while (cursor < entry.samples.length) {
+				const sample = entry.samples[cursor]
+				if (!sample || Date.parse(sample.at) > timestamp) break
+				lastValues[index] = value(sample)
+				cursor += 1
+			}
+			cursors[index] = cursor
+		}
+		return { values: [...lastValues], x }
 	})
 })
 
@@ -113,8 +128,8 @@ let layers = $derived(
 let spanLabel = $derived.by(() => {
 	const first = timeline.at(0)
 	const last = timeline.at(-1)
-	if (!first || !last) return ""
-	const seconds = Math.round((Date.parse(last) - Date.parse(first)) / 1000)
+	if (first === undefined || last === undefined) return ""
+	const seconds = Math.round((last - first) / 1000)
 	if (seconds <= 0) return "now"
 	if (seconds < 60) return `${seconds}s`
 	return `${Math.round(seconds / 60)} min`
