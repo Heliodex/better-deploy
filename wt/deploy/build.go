@@ -193,10 +193,69 @@ func runCompile(cfg *deployConfig) error {
 	return writeArtifact(cfg, true)
 }
 
+// artifactUsable reports whether main.cwasm and artefact.json match main.wasm, the compile target and epoch instrumentation.
+// A reused component still needs this metadata, or a runtime-only supervisor cannot tell whether to enable epoch interruption.
+func artifactUsable(cfg *deployConfig) bool {
+	digest, err := fileDigest(filepath.Join(cfg.dir, "main.wasm"))
+	if err != nil {
+		return false
+	}
+
+	if !cfg.skipCompile {
+		if _, err := os.Stat(filepath.Join(cfg.dir, "main.cwasm")); err != nil {
+			return false
+		}
+	}
+
+	info, err := readArtifactFile(cfg.dir)
+	if err != nil {
+		return false
+	}
+
+	if info.WasmSHA256 != digest || info.Target != cfg.target || (!cfg.skipCompile && !info.Epoch) {
+		return false
+	}
+
+	if info.Wasmtime != "" {
+		version, err := wasmtimeVersion(cfg.wasmtime)
+		if err == nil && runtimeRelease(info.Wasmtime) != runtimeRelease(version) {
+			return false
+		}
+	}
+
+	return true
+}
+
 // buildStatus reports which phases ran, which were reused and the resulting component digest.
 type buildStatus struct {
-	ComponentBuilt, ComponentReused, StaticBuilt, StaticReused, StaticSkipped, BuildSkipped bool
-	WasmDigest                                                                              string
+	ComponentBuilt, ComponentReused, ComponentRecompiled, StaticBuilt, StaticReused, StaticSkipped, BuildSkipped bool
+	WasmDigest                                                                                                   string
+}
+
+// reuseOrRecompile keeps a built component when its cwasm and metadata match, and otherwise refreshes them.
+func (status *buildStatus) reuseOrRecompile(cfg *deployConfig) error {
+	if artifactUsable(cfg) {
+		status.ComponentReused = true
+
+		return nil
+	}
+
+	if err := runCompile(cfg); err != nil {
+		return err
+	}
+
+	status.ComponentRecompiled = true
+
+	return nil
+}
+
+// generateStaleContract regenerates the Valibot contract only when the component inputs changed.
+func generateStaleContract(cfg *deployConfig, m manifest, stale bool) error {
+	if !stale || m.Contract != "valibot" {
+		return nil
+	}
+
+	return generateContract(cfg.dir, webDirName(m), m.Name)
 }
 
 // checkStaticSvelteKit rejects server-only SvelteKit files: the production artifact is adapter-static output.
@@ -307,10 +366,8 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 		componentStale = cfg.forceBuild || cache.ComponentHash != componentHash || !wasmExists
 	}
 
-	if componentStale && m.Contract == "valibot" {
-		if err := generateContract(cfg.dir, webDirName(m), m.Name); err != nil {
-			return status, err
-		}
+	if err := generateStaleContract(cfg, m, componentStale); err != nil {
+		return status, err
 	}
 
 	staticStale := false
@@ -342,7 +399,9 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 
 		writeBuildCache(cfg.dir, cache)
 	case hasComponentBuild, wasmExists:
-		status.ComponentReused = true
+		if err := status.reuseOrRecompile(cfg); err != nil {
+			return status, err
+		}
 	}
 
 	switch {
@@ -387,6 +446,8 @@ func printBuildStatus(status buildStatus) {
 	switch {
 	case status.ComponentBuilt:
 		fmt.Fprintln(os.Stderr, "component: built")
+	case status.ComponentRecompiled:
+		fmt.Fprintln(os.Stderr, "component: recompiled")
 	case status.ComponentReused:
 		fmt.Fprintln(os.Stderr, "component: reused")
 	}

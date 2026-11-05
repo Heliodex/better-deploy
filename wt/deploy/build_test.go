@@ -41,6 +41,89 @@ func fakeWasmtime(t *testing.T, dir string) string {
 	return path
 }
 
+// fakeCompiler writes a fixed cwasm for compile calls, so a reuse path can prove it recompiled.
+func fakeCompiler(t *testing.T, output string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "wasmtime")
+
+	script := `#!/bin/sh
+case "$1" in
+--version)
+  echo "wasmtime 50.0.0"
+  ;;
+compile)
+  out=""
+  while [ "$#" -gt 0 ]; do
+    if [ "$1" = "-o" ]; then
+      out="$2"
+      shift
+    fi
+    shift
+  done
+  printf '%s' '` + output + `' > "$out"
+  ;;
+esac
+`
+	if err := os.WriteFile(path, []byte(script), privateDirMode); err != nil {
+		t.Fatal(err)
+	}
+
+	return path
+}
+
+func TestPrepareBuildsRecompilesWithoutArtifact(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "main.wasm"), "wasm")
+	writeTestFile(t, filepath.Join(dir, "main.cwasm"), "stale")
+
+	cfg := &deployConfig{dir: dir, wasmtime: fakeCompiler(t, "compiled"), target: testTarget}
+
+	status, err := prepareBuilds(cfg, manifest{Name: testAppName})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !status.ComponentRecompiled || status.ComponentReused {
+		t.Errorf("prepareBuilds() = %+v, want a recompiled component", status)
+	}
+
+	if got := readTestFile(t, filepath.Join(dir, "main.cwasm")); got != "compiled" {
+		t.Errorf("main.cwasm = %q, want the compiler output", got)
+	}
+
+	info, err := readArtifactFile(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if info.WasmSHA256 != digestOf("wasm") || info.Target != testTarget || !info.Epoch {
+		t.Errorf("artifact = %+v, want the wasm digest, target and epoch support", info)
+	}
+}
+
+func TestPrepareBuildsReusesMatchingArtifact(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "main.wasm"), "wasm")
+	writeTestFile(t, filepath.Join(dir, "main.cwasm"), "cwasm")
+	writeTestFile(t, filepath.Join(dir, artifactName), `{"wasmtime":"wasmtime 50.0.0","target":"`+testTarget+`","epoch_interruption":true,"wasm_sha256":"`+digestOf("wasm")+`"}`)
+
+	cfg := &deployConfig{dir: dir, wasmtime: fakeCompiler(t, "compiled"), target: testTarget}
+
+	status, err := prepareBuilds(cfg, manifest{Name: testAppName})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !status.ComponentReused || status.ComponentRecompiled {
+		t.Errorf("prepareBuilds() = %+v, want the component reused", status)
+	}
+
+	if got := readTestFile(t, filepath.Join(dir, "main.cwasm")); got != "cwasm" {
+		t.Errorf("main.cwasm = %q, want the existing artifact", got)
+	}
+}
+
 func TestComponentInputHashTracksSDKAndNotFrontend(t *testing.T) {
 	root := t.TempDir()
 	app := filepath.Join(root, "app")
