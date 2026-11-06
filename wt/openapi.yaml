@@ -1721,10 +1721,6 @@ components:
           type: array
           items:
             type: string
-        secret_keys:
-          type: array
-          items:
-            type: string
         health:
           type: string
           minLength: 1
@@ -1736,15 +1732,15 @@ components:
         host:
           type: string
           minLength: 1
+        hosts:
+          type: array
+          items:
+            type: string
         idle_timeout:
           type: string
         job_concurrency:
           type: number
           minimum: 1
-        hosts:
-          type: array
-          items:
-            type: string
         max_concurrency:
           type: number
           minimum: 0
@@ -1769,6 +1765,10 @@ components:
         schedule:
           type: array
           items: {}
+        secret_keys:
+          type: array
+          items:
+            type: string
         server_pages:
           type: array
           items:
@@ -1788,9 +1788,9 @@ components:
         - health_failures
         - health_interval
         - host
+        - hosts
         - idle_timeout
         - job_concurrency
-        - hosts
         - max_concurrency
         - memory_mb
         - name
@@ -1918,13 +1918,6 @@ components:
       properties:
         database:
           type: boolean
-        tables:
-          type: array
-          items:
-            type: string
-        version:
-          type: number
-          minimum: 0
         stats:
           type: array
           items:
@@ -1943,6 +1936,13 @@ components:
               - bytes
               - name
               - rows
+        tables:
+          type: array
+          items:
+            type: string
+        version:
+          type: number
+          minimum: 0
       required:
         - database
         - tables

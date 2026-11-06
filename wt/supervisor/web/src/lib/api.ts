@@ -379,10 +379,14 @@ const deleteAppSchema = object({
 	purged: boolean(),
 })
 
-export const deleteApp = (token: string, name: string, purge: boolean): Promise<boolean> =>
-	request(`${routes.app(name)}${purge ? "?purge=1" : ""}`, { method: "DELETE", token }, deleteAppSchema).then(
-		result => result.purged,
+export async function deleteApp(token: string, name: string, purge: boolean): Promise<boolean> {
+	const result = await request(
+		`${routes.app(name)}${purge ? "?purge=1" : ""}`,
+		{ method: "DELETE", token },
+		deleteAppSchema,
 	)
+	return result.purged
+}
 
 const egressRuleSchema = object({
 	cidr: pipe(string(), minLength(1), description("IPv4 or IPv6 CIDR for an untrusted-mode egress rule.")),
@@ -453,18 +457,24 @@ const secretMutationSchema = object({
 	restart_required: boolean(),
 })
 
-export const fetchSecretKeys = (token: string, name: string): Promise<string[]> =>
-	request(routes.appSecrets(name), { token }, secretKeysSchema).then(result => result.keys)
+export async function fetchSecretKeys(token: string, name: string): Promise<string[]> {
+	const result = await request(routes.appSecrets(name), { token }, secretKeysSchema)
+	return result.keys
+}
 
-export const setAppSecret = (token: string, name: string, key: string, value: string): Promise<boolean> =>
-	request(routes.appSecret(name, key), { json: { value }, method: "PUT", token }, secretMutationSchema).then(
-		result => result.restart_required,
+export async function setAppSecret(token: string, name: string, key: string, value: string): Promise<boolean> {
+	const result = await request(
+		routes.appSecret(name, key),
+		{ json: { value }, method: "PUT", token },
+		secretMutationSchema,
 	)
+	return result.restart_required
+}
 
-export const deleteAppSecret = (token: string, name: string, key: string): Promise<boolean> =>
-	request(routes.appSecret(name, key), { method: "DELETE", token }, secretMutationSchema).then(
-		result => result.restart_required,
-	)
+export async function deleteAppSecret(token: string, name: string, key: string): Promise<boolean> {
+	const result = await request(routes.appSecret(name, key), { method: "DELETE", token }, secretMutationSchema)
+	return result.restart_required
+}
 
 export async function deployBundle(token: string, name: string, file: File): Promise<AppInfo> {
 	const body = new FormData()
@@ -472,6 +482,8 @@ export async function deployBundle(token: string, name: string, file: File): Pro
 	const path = routes.appDeployments(name)
 	let run = await request(path, { body, method: "POST", token }, deploymentRunSchema)
 	while (run.status === "queued" || run.status === "running") {
+		// A timer-backed promise is the only way to pause between deployment status polls in the browser.
+		// oxlint-disable-next-line promise/avoid-new
 		await new Promise(resolve => setTimeout(resolve, 500))
 		run = await request(`${path}/${encodeURIComponent(run.id)}`, { token }, deploymentRunSchema)
 	}

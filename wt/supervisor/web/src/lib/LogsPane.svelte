@@ -139,6 +139,7 @@ function rowKey(event: KeyboardEvent, entry: LogEntry): void {
 					{#each visible as entry, index (start + index)}
 						{const timeParts = logTimeParts(entry.time)}
 						{const access = entry.source === "supervisor" ? parseAccessLine(entry.message) : null}
+						<!-- biome-ignore lint/a11y/useSemanticElements: An expandable log line must stay a table row; a button cannot contain table cells. -->
 						<tr
 							aria-label={`${entry.level} ${entry.message}`}
 							class={[

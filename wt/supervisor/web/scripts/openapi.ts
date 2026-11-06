@@ -1,6 +1,5 @@
 /// <reference types="bun" />
 
-import process from "node:process"
 import { toJsonSchema } from "@valibot/to-json-schema"
 import { pipe, title } from "valibot"
 import { responseContracts } from "../src/lib/api"
@@ -10,13 +9,15 @@ import { responseContracts } from "../src/lib/api"
 const path = `${import.meta.dir}/../../../openapi.yaml`
 const check = Bun.argv.includes("--check")
 
+const isRecord = (value: unknown): value is { [_: string]: unknown } => typeof value === "object" && value !== null
+
 const raw = await Bun.file(path).text()
-const document = Bun.YAML.parse(raw) as { [_: string]: unknown }
-if (typeof document !== "object" || document === null) throw new Error("openapi.yaml is not an object")
-const components = document.components as { [_: string]: unknown } | undefined
-if (typeof components !== "object" || components === null) throw new Error("openapi.yaml has no components")
-const schemas = components.schemas as { [_: string]: unknown } | undefined
-if (typeof schemas !== "object" || schemas === null) throw new Error("openapi.yaml has no component schemas")
+const document = Bun.YAML.parse(raw)
+if (!isRecord(document)) throw new Error("openapi.yaml is not an object")
+const { components } = document
+if (!isRecord(components)) throw new Error("openapi.yaml has no components")
+const { schemas } = components
+if (!isRecord(schemas)) throw new Error("openapi.yaml has no component schemas")
 
 for (const [name, schema] of Object.entries(responseContracts)) {
 	const json = toJsonSchema(pipe(schema, title(name)))
@@ -26,10 +27,8 @@ for (const [name, schema] of Object.entries(responseContracts)) {
 
 const output = `${Bun.YAML.stringify(document, null, 2)}\n`
 if (check) {
-	if (output !== raw) {
-		console.error("openapi.yaml is stale; run bun run contract")
-		process.exit(1)
-	}
+	if (output !== raw) throw new Error("openapi.yaml is stale; run bun run contract")
+
 	console.log("openapi.yaml matches the panel schemas")
 } else {
 	await Bun.write(path, output)

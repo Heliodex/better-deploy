@@ -1018,7 +1018,13 @@ onMount((): (() => void) => {
 	if (saved) {
 		token = saved
 		selected = name
-		void setToken(saved).finally(() => connect(saved))
+		void (async (): Promise<void> => {
+			try {
+				await setToken(saved)
+			} finally {
+				connect(saved)
+			}
+		})()
 		void refresh(saved)
 		if (name) {
 			void loadResourceHistory(saved, name)

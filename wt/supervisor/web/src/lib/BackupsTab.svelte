@@ -84,7 +84,7 @@ async function importFile(event: Event): Promise<void> {
 			<label class="btn cursor-pointer">
 				{importing ? "Importing…" : "Import snapshot"}
 				<input
-					accept=".gz,application/gzip"
+					accept=".gz, application/gzip"
 					aria-label="Import snapshot"
 					class="sr-only"
 					disabled={importing}
@@ -168,7 +168,7 @@ async function importFile(event: Event): Promise<void> {
 					<div>
 						<dt class="text-neutral-500">Database</dt>
 						<dd class="tabular-nums">
-							{selectedInfo.size ? formatSize(selectedInfo.size) : "–"}
+							{selectedInfo.size > 0 ? formatSize(selectedInfo.size) : "–"}
 						</dd>
 					</div>
 					<div>

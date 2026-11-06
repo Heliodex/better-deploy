@@ -58,7 +58,7 @@ async function rollback(id: string): Promise<void> {
 	{:else}
 		<ul class="flex flex-col">
 			{#each deployments as deployment (deployment.id)}
-				{@const failed = deployment.status === "failed"}
+				{const failed = deployment.status === "failed"}
 				<li class="flex flex-col gap-1 border-t border-line-soft py-2 first:border-t-0 first:pt-0">
 					<div class="flex flex-wrap items-center gap-3 text-xs">
 						<time class="text-neutral-300" datetime={deployment.deployedAt}>

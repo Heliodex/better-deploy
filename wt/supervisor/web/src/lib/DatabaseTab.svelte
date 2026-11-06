@@ -107,7 +107,7 @@ async function importFile(event: Event): Promise<void> {
 			<label class="btn cursor-pointer">
 				{importing ? "Importing…" : "Import"}
 				<input
-					accept=".db,application/vnd.sqlite3"
+					accept=".db, application/vnd.sqlite3"
 					aria-label="Import database"
 					class="sr-only"
 					disabled={importing}
