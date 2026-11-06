@@ -264,6 +264,7 @@ func diffCompatKeywords(schema, path string, oldMap, newMap map[string]any) []co
 	for keyword := range oldMap {
 		seen[keyword] = true
 	}
+
 	for keyword := range newMap {
 		seen[keyword] = true
 	}
@@ -463,40 +464,86 @@ func gitWorkTree(dir string) bool {
 	return cmd.Run() == nil
 }
 
-// loadCompatBaseline reads one ref's schema documents from git.
-func loadCompatBaseline(dir, ref string) (map[string]map[string]any, error) {
-	schemasDir := filepath.Join("contract", "schemas") + "/"
+// compatRepoPath returns the app directory relative to the repository root, with a trailing slash.
+func compatRepoPath(dir string) (string, error) {
+	cmd := exec.CommandContext(context.Background(), "git", "-C", dir, "rev-parse", "--show-prefix")
 
-	listCmd := exec.CommandContext(context.Background(), "git", "-C", dir, "ls-tree", "--name-only", ref, "--", schemasDir)
-
-	listOut, err := listCmd.Output()
+	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("read %s from git: %w", ref, err)
+		return "", fmt.Errorf("read repo prefix: %w", err)
 	}
 
-	docs := map[string]map[string]any{}
+	return strings.TrimSpace(string(out)), nil
+}
 
-	for line := range strings.SplitSeq(strings.TrimSpace(string(listOut)), "\n") {
-		if line == "" {
-			continue
-		}
-
-		showCmd := exec.CommandContext(context.Background(), "git", "-C", dir, "show", ref+":"+line)
-
-		data, err := showCmd.Output()
-		if err != nil {
-			return nil, fmt.Errorf("read %s from git: %w", line, err)
-		}
-
-		var doc map[string]any
-		if err := json.Unmarshal(data, &doc); err != nil {
-			return nil, fmt.Errorf("parse %s: %w", line, err)
-		}
-
-		docs[filepath.Base(line)] = doc
+// compatSourceAtRef reads the tracked contract module at one ref, and reports false when the app had none.
+func compatSourceAtRef(dir, ref, web string) (string, bool, error) {
+	verify := exec.CommandContext(context.Background(), "git", "-C", dir, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	if err := verify.Run(); err != nil {
+		return "", false, fmt.Errorf("unknown git ref %s", ref)
 	}
 
-	return docs, nil
+	prefix, err := compatRepoPath(dir)
+	if err != nil {
+		return "", false, err
+	}
+
+	path := prefix + filepath.ToSlash(filepath.Join(web, "src", "lib", "contract.ts"))
+
+	exists := exec.CommandContext(context.Background(), "git", "-C", dir, "cat-file", "-e", ref+":"+path)
+	if err := exists.Run(); err != nil {
+		return "", false, nil
+	}
+
+	show := exec.CommandContext(context.Background(), "git", "-C", dir, "show", ref+":"+path)
+
+	data, err := show.Output()
+	if err != nil {
+		return "", false, fmt.Errorf("read %s at %s: %w", path, ref, err)
+	}
+
+	return string(data), true, nil
+}
+
+// generateCompatBaseline derives the schema documents at one ref from the tracked contract module,
+// so the check works even though generated schemas are ignored by git.
+func generateCompatBaseline(dir, web, appName, ref string) (map[string]map[string]any, error) {
+	source, ok, err := compatSourceAtRef(dir, ref, web)
+	if err != nil || !ok {
+		return map[string]map[string]any{}, err
+	}
+
+	file, err := os.CreateTemp(filepath.Join(dir, web, "src", "lib"), ".wt-baseline-*.ts")
+	if err != nil {
+		return nil, err
+	}
+
+	sourcePath := file.Name()
+
+	defer os.Remove(sourcePath)
+
+	if _, err := file.WriteString(source); err != nil {
+		file.Close()
+
+		return nil, err
+	}
+
+	if err := file.Close(); err != nil {
+		return nil, err
+	}
+
+	outDir, err := os.MkdirTemp(dir, ".wt-compat-baseline-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(outDir)
+
+	module := "./src/lib/" + strings.TrimSuffix(filepath.Base(sourcePath), ".ts")
+	if err := runContractSchemas(filepath.Join(dir, web), appName, outDir, module, true); err != nil {
+		return nil, err
+	}
+
+	return loadCompatDocs(outDir)
 }
 
 // runCompat regenerates the contract and reports breaking schema changes against a git ref.
@@ -527,7 +574,7 @@ func runCompat(dir, web, appName, ref string) error {
 		return err
 	}
 
-	baseline, err := loadCompatBaseline(abs, ref)
+	baseline, err := generateCompatBaseline(abs, web, appName, ref)
 	if err != nil {
 		return err
 	}

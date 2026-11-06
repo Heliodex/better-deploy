@@ -1,13 +1,20 @@
 /// <reference types="bun" />
 import { mkdir, rm } from "node:fs/promises"
 import { type JsonSchema, toJsonSchema } from "@valibot/to-json-schema"
-import { requestSchemas, responseSchemas } from "./src/lib/contract"
 
-// Every schema in the request and response registries becomes one JSON file. Filenames come from their v.title(), and the CLI supplies the output directory and app name so this script never changes.
+// Every schema in the request and response registries becomes one JSON file. Filenames come from their v.title(), and the CLI supplies the output directory and app name so this script never changes. WT_CONTRACT_SOURCE points at the tracked contract module so compat can also read the source at an older git ref.
+type Schema = Parameters<typeof toJsonSchema>[0]
+
 const schemasDir = Bun.env.WT_CONTRACT_OUT
 const appName = Bun.env.WT_APP_NAME
 if (!schemasDir) throw new Error("WT_CONTRACT_OUT is not set")
 if (!appName) throw new Error("WT_APP_NAME is not set")
+
+const contract: { requestSchemas: Schema[]; responseSchemas: Schema[] } = await import(
+	Bun.env.WT_CONTRACT_SOURCE ?? "./src/lib/contract"
+)
+
+const { requestSchemas, responseSchemas } = contract
 
 const isRecord = (value: unknown): value is { [_: string]: unknown } =>
 	typeof value === "object" && value !== null && !Array.isArray(value)

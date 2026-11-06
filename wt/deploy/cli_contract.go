@@ -12,7 +12,7 @@ func runContract(args []string) error {
 	dir := flags.String("dir", ".", "app directory containing app.json")
 
 	check := flags.Bool("check", false, "verify the generated files without writing them")
-	compat := flags.Bool("compat", false, "report breaking schema changes against a git ref without writing them")
+	compat := flags.Bool("compat", false, "report breaking schema changes against the contract source at a git ref without writing them")
 	compatRef := flags.String("compat-ref", "HEAD", "git ref the compat check compares against")
 
 	if err := flags.Parse(args); err != nil {

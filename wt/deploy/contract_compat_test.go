@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -299,20 +300,9 @@ func TestCompatUnknownKeywordFails(t *testing.T) {
 	}
 }
 
-func TestLoadCompatBaselineListsSchemaFiles(t *testing.T) {
-	dir := t.TempDir()
-	schemas := []string{"a.json", "b.json"}
-
-	if err := os.MkdirAll(dir+"/contract/schemas", 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	for _, name := range schemas {
-		body := `{"type":"object","properties":{},"title":"` + name + `"}`
-		if err := os.WriteFile(dir+"/contract/schemas/"+name, []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
+// gitCommitAll initializes dir as a repository and commits everything in it.
+func gitCommitAll(t *testing.T, dir string) {
+	t.Helper()
 
 	git := func(args ...string) {
 		t.Helper()
@@ -325,20 +315,63 @@ func TestLoadCompatBaselineListsSchemaFiles(t *testing.T) {
 
 	git("init", "-q")
 	git("add", ".")
-	git("commit", "-qm", "schemas")
+	git("commit", "--allow-empty", "-qm", "fixtures")
+}
 
-	docs, err := loadCompatBaseline(dir, "HEAD")
+func TestCompatSourceAtRefReadsSubdirApp(t *testing.T) {
+	root := t.TempDir()
+	app := filepath.Join(root, "apps", "note")
+	lib := filepath.Join(app, "web", "src", "lib")
+
+	if err := os.MkdirAll(lib, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(lib, "contract.ts"), []byte("export const note = 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	gitCommitAll(t, root)
+
+	source, ok, err := compatSourceAtRef(app, "HEAD", "web")
+	if err != nil || !ok {
+		t.Fatalf("compatSourceAtRef() = %q, %v, %v", source, ok, err)
+	}
+
+	if !strings.Contains(source, "export const note = 1") {
+		t.Errorf("source = %q", source)
+	}
+}
+
+func TestCompatSourceAtRefMissingApp(t *testing.T) {
+	root := t.TempDir()
+	app := filepath.Join(root, "apps", "note")
+
+	if err := os.MkdirAll(app, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(root, "README"), []byte("no app yet\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	gitCommitAll(t, root)
+
+	_, ok, err := compatSourceAtRef(app, "HEAD", "web")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if len(docs) != len(schemas) {
-		t.Fatalf("docs = %d, want %d", len(docs), len(schemas))
+	if ok {
+		t.Error("missing contract source should report no baseline")
 	}
+}
 
-	for _, name := range schemas {
-		if _, ok := docs[name]; !ok {
-			t.Errorf("missing %s in %v", name, docs)
-		}
+func TestCompatSourceAtRefUnknownRef(t *testing.T) {
+	root := t.TempDir()
+	gitCommitAll(t, root)
+
+	if _, _, err := compatSourceAtRef(root, "missing", "web"); err == nil {
+		t.Error("unknown ref should fail")
 	}
 }

@@ -234,3 +234,12 @@ func TestCheckFixturesFlagsStaleOutput(t *testing.T) {
 		t.Error("fixtures output without a registry should fail")
 	}
 }
+
+func TestStageRegistryOutputsSkipsWithoutRegistry(t *testing.T) {
+	dir := t.TempDir()
+
+	registry := filepath.Join(dir, "contract", "endpoints.ts")
+	if err := stageRegistryOutputs(registry, filepath.Join(dir, "web"), dir, true); err != nil {
+		t.Errorf("no registry should skip: %v", err)
+	}
+}

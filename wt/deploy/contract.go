@@ -66,7 +66,7 @@ func generateContractTo(dir, web, appName, outDir string, quiet bool) error {
 		return err
 	}
 
-	if err := runContractSchemas(webDir, appName, outDir, quiet); err != nil {
+	if err := runContractSchemas(webDir, appName, outDir, "", quiet); err != nil {
 		return err
 	}
 
@@ -79,16 +79,7 @@ func generateContractTo(dir, web, appName, outDir string, quiet bool) error {
 	registry := filepath.Join(dir, "contract", "endpoints.ts")
 
 	if outDir != filepath.Join(dir, "contract") {
-		// Check mode: emit beside the real client so Biome resolves the same config and dependencies, then move the results over for comparison.
-		if err := stageCheckOutput(webDir, outDir, "api.gen.ts", func(staged string) error {
-			return generateClient(registry, webDir, staged, quiet)
-		}); err != nil {
-			return err
-		}
-
-		return stageCheckOutput(webDir, outDir, "fixtures.gen.ts", func(staged string) error {
-			return generateFixtures(registry, webDir, staged, quiet)
-		})
+		return stageRegistryOutputs(registry, webDir, outDir, quiet)
 	}
 
 	if err := generateClient(registry, webDir, clientOut, quiet); err != nil {
@@ -96,6 +87,29 @@ func generateContractTo(dir, web, appName, outDir string, quiet bool) error {
 	}
 
 	return generateFixtures(registry, webDir, fixturesOut, quiet)
+}
+
+// stageRegistryOutputs generates the registry-driven files beside the real client and moves them
+// into outDir for comparison. It does nothing when the app keeps no endpoint registry.
+func stageRegistryOutputs(registry, webDir, outDir string, quiet bool) error {
+	_, err := os.Stat(registry)
+	if os.IsNotExist(err) {
+		return nil
+	}
+
+	if err != nil {
+		return err
+	}
+
+	if err := stageCheckOutput(webDir, outDir, "api.gen.ts", func(staged string) error {
+		return generateClient(registry, webDir, staged, quiet)
+	}); err != nil {
+		return err
+	}
+
+	return stageCheckOutput(webDir, outDir, "fixtures.gen.ts", func(staged string) error {
+		return generateFixtures(registry, webDir, staged, quiet)
+	})
 }
 
 // stageCheckOutput generates a file beside the checked-in sources and moves it into the comparison directory.
@@ -235,11 +249,16 @@ func ensureWebDependencies(webDir string) error {
 }
 
 // runContractSchemas runs the embedded converter from the web directory so its imports resolve.
-func runContractSchemas(webDir, appName, outDir string, quiet bool) error {
+// An empty source uses the app's own ./src/lib/contract module.
+func runContractSchemas(webDir, appName, outDir, source string, quiet bool) error {
 	env := []string{
 		"WT_CONTRACT_OUT=" + filepath.Join(outDir, "schemas"),
 		"WT_APP_NAME=" + appName,
 	}
+	if source != "" {
+		env = append(env, "WT_CONTRACT_SOURCE="+source)
+	}
+
 	if quiet {
 		env = append(env, "WT_CONTRACT_QUIET=1")
 	}
@@ -274,6 +293,7 @@ func runBunScript(webDir, pattern, script string, env ...string) error {
 
 	cmd := exec.CommandContext(context.Background(), "bun", filepath.Base(scriptPath))
 	cmd.Dir = webDir
+
 	cmd.Env = append(os.Environ(), env...)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
