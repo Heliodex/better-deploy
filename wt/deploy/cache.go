@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -172,6 +173,12 @@ func walkFiles(root string, skipDir func(string, os.DirEntry) bool, include func
 	return files, err
 }
 
+// goToolchainSources holds every file extension the Go tool treats as package sources, so assembly, cgo and SWIG inputs cannot fall outside a cache key.
+var goToolchainSources = []string{
+	".c", ".cc", ".cpp", ".cxx", ".F", ".f", ".f90", ".f95", ".go", ".h", ".hpp", ".m",
+	".s", ".S", ".swig", ".swigcxx", ".syso", ".wit",
+}
+
 // isComponentSource keeps the files that can change a compiled Go component. Generated Go and tests are handled through their sources.
 func isComponentSource(_ string, entry os.DirEntry) bool {
 	name := entry.Name()
@@ -184,12 +191,7 @@ func isComponentSource(_ string, entry os.DirEntry) bool {
 		return true
 	}
 
-	switch filepath.Ext(name) {
-	case ".go", ".wit":
-		return true
-	}
-
-	return false
+	return slices.Contains(goToolchainSources, filepath.Ext(name))
 }
 
 // isModuleSource keeps the build files of a replaced local module, excluding tests and generated Go.
@@ -204,12 +206,11 @@ func isModuleSource(_ string, entry os.DirEntry) bool {
 		return true
 	}
 
-	switch filepath.Ext(name) {
-	case ".go", ".s", ".wit", ".sh":
+	if filepath.Ext(name) == ".sh" {
 		return true
 	}
 
-	return false
+	return slices.Contains(goToolchainSources, filepath.Ext(name))
 }
 
 // goModuleRoot finds the nearest go.mod above dir, so a monorepo app hashes the module and its replace targets, not just its own folder.
@@ -518,26 +519,36 @@ func inputHash(dir, command, seed string, files []string) (string, error) {
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
-// componentInputHash keys the component phase on Go, WIT, the replaced SDK and the component command, never the frontend.
-func componentInputHash(dir string, m manifest, command string) (string, error) {
+// componentInputHash keys the component phase on Go sources, the replaced SDK and the component command, never the frontend.
+func componentInputHash(dir string, m manifest, command string) (string, int, error) {
 	files, err := collectComponentInputFiles(dir, m)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 
 	seed := "component\x00" + strings.Join(m.ComponentInputs, "\x00")
 
-	return inputHash(dir, command, seed, files)
+	hash, err := inputHash(dir, command, seed, files)
+	if err != nil {
+		return "", 0, err
+	}
+
+	return hash, len(files), nil
 }
 
 // staticInputHash keys the static phase on the frontend source, lockfile, config and the static command.
-func staticInputHash(dir string, m manifest, command string) (string, error) {
+func staticInputHash(dir string, m manifest, command string) (string, int, error) {
 	files, err := collectStaticInputFiles(dir, m)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 
 	seed := "static\x00" + webDirName(m) + "\x00" + strings.Join(m.StaticInputs, "\x00")
 
-	return inputHash(dir, command, seed, files)
+	hash, err := inputHash(dir, command, seed, files)
+	if err != nil {
+		return "", 0, err
+	}
+
+	return hash, len(files), nil
 }

@@ -133,14 +133,14 @@ func TestComponentInputHashTracksSDKAndNotFrontend(t *testing.T) {
 	writeTestFile(t, filepath.Join(root, "packages", "go.mod"), "module github.com/heliodex/better-deploy/wt/packages/v2\n\ngo 1.27.1\n")
 	writeTestFile(t, filepath.Join(root, "packages", "app", "app.go"), "package app")
 
-	first, err := componentInputHash(app, manifest{}, "build")
+	first, _, err := componentInputHash(app, manifest{}, "build")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	writeTestFile(t, filepath.Join(app, "web", "src", "+page.svelte"), "<h1>two</h1>")
 
-	afterFrontend, err := componentInputHash(app, manifest{}, "build")
+	afterFrontend, _, err := componentInputHash(app, manifest{}, "build")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestComponentInputHashTracksSDKAndNotFrontend(t *testing.T) {
 
 	writeTestFile(t, filepath.Join(root, "packages", "app", "app.go"), "package app // changed")
 
-	afterSDK, err := componentInputHash(app, manifest{}, "build")
+	afterSDK, _, err := componentInputHash(app, manifest{}, "build")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestComponentInputHashTracksSDKAndNotFrontend(t *testing.T) {
 
 	writeTestFile(t, filepath.Join(app, "main.go"), "package main // changed")
 
-	afterApp, err := componentInputHash(app, manifest{}, "build")
+	afterApp, _, err := componentInputHash(app, manifest{}, "build")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,14 +182,14 @@ func TestComponentInputHashFindsParentModule(t *testing.T) {
 	writeTestFile(t, filepath.Join(module, "other", "main.go"), "package main")
 	writeTestFile(t, filepath.Join(root, "packages", "app", "app.go"), "package app")
 
-	first, err := componentInputHash(app, manifest{}, "build")
+	first, _, err := componentInputHash(app, manifest{}, "build")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	writeTestFile(t, filepath.Join(module, "other", "main.go"), "package main // sibling")
 
-	afterSibling, err := componentInputHash(app, manifest{}, "build")
+	afterSibling, _, err := componentInputHash(app, manifest{}, "build")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestComponentInputHashFindsParentModule(t *testing.T) {
 
 	writeTestFile(t, filepath.Join(root, "packages", "app", "app.go"), "package app // changed")
 
-	afterSDK, err := componentInputHash(app, manifest{}, "build")
+	afterSDK, _, err := componentInputHash(app, manifest{}, "build")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func TestComponentInputHashFindsParentModule(t *testing.T) {
 
 	writeTestFile(t, filepath.Join(module, "go.mod"), "module example\n\ngo 1.27.1\n\nreplace github.com/heliodex/better-deploy/wt/packages/v2 => ../packages\n// changed\n")
 
-	afterModule, err := componentInputHash(app, manifest{}, "build")
+	afterModule, _, err := componentInputHash(app, manifest{}, "build")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,14 +229,14 @@ func TestStaticInputHashTracksFrontendAndNotGo(t *testing.T) {
 
 	m := manifest{BuildStatic: "build-static"}
 
-	first, err := staticInputHash(dir, m, m.BuildStatic)
+	first, _, err := staticInputHash(dir, m, m.BuildStatic)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	writeTestFile(t, filepath.Join(dir, "main.go"), "package main // changed")
 
-	afterGo, err := staticInputHash(dir, m, m.BuildStatic)
+	afterGo, _, err := staticInputHash(dir, m, m.BuildStatic)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +247,7 @@ func TestStaticInputHashTracksFrontendAndNotGo(t *testing.T) {
 
 	writeTestFile(t, filepath.Join(dir, "web", "src", "+page.svelte"), "<h1>two</h1>")
 
-	afterFrontend, err := staticInputHash(dir, m, m.BuildStatic)
+	afterFrontend, _, err := staticInputHash(dir, m, m.BuildStatic)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -374,14 +374,14 @@ func TestComponentInputHashIncludesExplicitInputs(t *testing.T) {
 
 	m := manifest{ComponentInputs: []string{"web/src/lib/contract.ts"}}
 
-	first, err := componentInputHash(dir, m, "build")
+	first, _, err := componentInputHash(dir, m, "build")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	writeTestFile(t, filepath.Join(dir, "web", "src", "lib", "contract.ts"), "export const value = 2")
 
-	after, err := componentInputHash(dir, m, "build")
+	after, _, err := componentInputHash(dir, m, "build")
 	if err != nil {
 		t.Fatal(err)
 	}

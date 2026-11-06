@@ -229,7 +229,28 @@ func artifactUsable(cfg *deployConfig) bool {
 // buildStatus reports which phases ran, which were reused and the resulting component digest.
 type buildStatus struct {
 	ComponentBuilt, ComponentReused, ComponentRecompiled, StaticBuilt, StaticReused, StaticSkipped, BuildSkipped bool
+	ComponentHash, StaticHash                                                                                    string
+	ComponentFiles, StaticFiles                                                                                  int
 	WasmDigest                                                                                                   string
+}
+
+// buildDetail renders the auditable cache evidence for one phase: the short input hash and the file count behind it.
+func buildDetail(hash string, files int) string {
+	if hash == "" {
+		return ""
+	}
+
+	short := hash
+	if len(short) > shortHashLength {
+		short = short[:shortHashLength]
+	}
+
+	unit := "files"
+	if files == 1 {
+		unit = "file"
+	}
+
+	return fmt.Sprintf(" (%s, %d %s)", short, files, unit)
 }
 
 // reuseOrRecompile keeps a built component when its cwasm and metadata match, and otherwise refreshes them.
@@ -344,18 +365,19 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 	cache, _ := readBuildCache(cfg.dir)
 
 	var (
-		componentHash, staticHash string
-		err                       error
+		componentHash, staticHash   string
+		componentFiles, staticFiles int
+		err                         error
 	)
 	if hasComponentBuild {
-		componentHash, err = componentInputHash(cfg.dir, m, componentCmd)
+		componentHash, componentFiles, err = componentInputHash(cfg.dir, m, componentCmd)
 		if err != nil {
 			return status, err
 		}
 	}
 
 	if staticRelevant {
-		staticHash, err = staticInputHash(cfg.dir, m, staticCmd)
+		staticHash, staticFiles, err = staticInputHash(cfg.dir, m, staticCmd)
 		if err != nil {
 			return status, err
 		}
@@ -391,14 +413,17 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 			cache.WasmDigest = digest
 		}
 
-		if hash, err := componentInputHash(cfg.dir, m, componentCmd); err == nil {
+		if hash, files, err := componentInputHash(cfg.dir, m, componentCmd); err == nil {
 			cache.ComponentHash = hash
+			status.ComponentHash, status.ComponentFiles = hash, files
 		} else {
 			cache.ComponentHash = componentHash
+			status.ComponentHash, status.ComponentFiles = componentHash, componentFiles
 		}
 
 		writeBuildCache(cfg.dir, cache)
 	case hasComponentBuild, wasmExists:
+		status.ComponentHash, status.ComponentFiles = componentHash, componentFiles
 		if err := status.reuseOrRecompile(cfg); err != nil {
 			return status, err
 		}
@@ -412,10 +437,12 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 
 		status.StaticBuilt = true
 
-		if hash, err := staticInputHash(cfg.dir, m, staticCmd); err == nil {
+		if hash, files, err := staticInputHash(cfg.dir, m, staticCmd); err == nil {
 			cache.StaticHash = hash
+			status.StaticHash, status.StaticFiles = hash, files
 		} else {
 			cache.StaticHash = staticHash
+			status.StaticHash, status.StaticFiles = staticHash, staticFiles
 		}
 
 		writeBuildCache(cfg.dir, cache)
@@ -445,18 +472,18 @@ func printBuildStatus(status buildStatus) {
 
 	switch {
 	case status.ComponentBuilt:
-		fmt.Fprintln(os.Stderr, "component: built")
+		fmt.Fprintln(os.Stderr, "component: built"+buildDetail(status.ComponentHash, status.ComponentFiles))
 	case status.ComponentRecompiled:
-		fmt.Fprintln(os.Stderr, "component: recompiled")
+		fmt.Fprintln(os.Stderr, "component: recompiled"+buildDetail(status.ComponentHash, status.ComponentFiles))
 	case status.ComponentReused:
-		fmt.Fprintln(os.Stderr, "component: reused")
+		fmt.Fprintln(os.Stderr, "component: reused"+buildDetail(status.ComponentHash, status.ComponentFiles))
 	}
 
 	switch {
 	case status.StaticBuilt:
-		fmt.Fprintln(os.Stderr, "static: built")
+		fmt.Fprintln(os.Stderr, "static: built"+buildDetail(status.StaticHash, status.StaticFiles))
 	case status.StaticReused:
-		fmt.Fprintln(os.Stderr, "static: reused")
+		fmt.Fprintln(os.Stderr, "static: reused"+buildDetail(status.StaticHash, status.StaticFiles))
 	case status.StaticSkipped:
 		fmt.Fprintln(os.Stderr, "static: skipped")
 	default:

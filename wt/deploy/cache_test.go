@@ -28,14 +28,14 @@ func TestComponentInputHashIgnoresStaticAndOutputs(t *testing.T) {
 	write("static/index.html", "first")
 	write("main.wasm", "wasm")
 
-	first, err := componentInputHash(dir, manifest{}, "build")
+	first, _, err := componentInputHash(dir, manifest{}, "build")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	write("static/index.html", "second")
 
-	afterStatic, err := componentInputHash(dir, manifest{}, "build")
+	afterStatic, _, err := componentInputHash(dir, manifest{}, "build")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,13 +46,65 @@ func TestComponentInputHashIgnoresStaticAndOutputs(t *testing.T) {
 
 	write("main.go", "package main // changed")
 
-	afterGo, err := componentInputHash(dir, manifest{}, "build")
+	afterGo, _, err := componentInputHash(dir, manifest{}, "build")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	if afterGo == first {
 		t.Error("Go change did not alter the component hash")
+	}
+}
+
+func TestComponentInputHashCoversToolchainSources(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string) {
+		t.Helper()
+
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), privateDirMode); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := os.WriteFile(path, []byte(body), privateFileMode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("main.go", "package main")
+
+	first, count, err := componentInputHash(dir, manifest{}, "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if count != 1 {
+		t.Errorf("file count = %d, want the one Go file", count)
+	}
+
+	write("asm.s", "TEXT ·x(SB),$0")
+
+	afterAsm, asmCount, err := componentInputHash(dir, manifest{}, "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if afterAsm == first {
+		t.Error("assembly change did not alter the component hash")
+	}
+
+	if asmCount != 2 {
+		t.Errorf("file count = %d, want the Go and assembly files", asmCount)
+	}
+
+	write("bridge.c", "int x;")
+
+	afterC, _, err := componentInputHash(dir, manifest{}, "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if afterC == afterAsm {
+		t.Error("cgo change did not alter the component hash")
 	}
 }
 
