@@ -356,6 +356,15 @@ func deploy(args []string) error {
 		m.Host = cfg.appHost
 	}
 
+	if len(cfg.envVars) > 0 {
+		vars, err := parseDeployEnv(cfg.envVars)
+		if err != nil {
+			return err
+		}
+
+		applyDeployEnv(&m, vars)
+	}
+
 	preflight, err := preflightDeploy(cfg)
 	if err != nil {
 		return err
@@ -399,5 +408,13 @@ func deploy(args []string) error {
 		return err
 	}
 
-	return upload(cfg, m, data)
+	if err := upload(cfg, m, data); err != nil {
+		return err
+	}
+
+	if !cfg.verify {
+		return nil
+	}
+
+	return verifyDeployment(cfg, m)
 }

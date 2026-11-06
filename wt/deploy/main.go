@@ -17,6 +17,10 @@ type deployConfig struct {
 	skipBuild, skipCompile, skipStatic, jsonOut, forceBuild, skipRouteCheck bool
 	overlayEnv                                                              bool
 	targetConfigured                                                        bool
+	verify                                                                  bool
+	verifyPath                                                              string
+	verifyTimeout                                                           time.Duration
+	envVars                                                                 []string
 	start                                                                   time.Time
 }
 
@@ -53,6 +57,10 @@ func resolveConfig(args []string) (*deployConfig, error) {
 	forceBuild := flags.Bool("force-build", false, "rebuild the component and static phases even when their inputs are unchanged")
 	skipRouteCheck := flags.Bool("skip-route-check", false, "do not verify that the app host is already routed")
 	skipBuild := flags.Bool("skip-build", false, "skip running app.json's build commands")
+	verify := flags.Bool("verify", false, "probe the public app host until the fresh deployment serves")
+	verifyPath := flags.String("verify-path", defaultRoutePath, "public path to probe for --verify")
+	verifyTimeout := flags.Duration("verify-timeout", verifyDefaultTimeout, "how long --verify waits for the app to serve")
+	envVars := deployEnvFlag(flags)
 
 	skipCompile := flags.Bool("skip-compile", false, "do not compile; include main.cwasm only if it already exists")
 	if err := flags.Parse(args); err != nil {
@@ -106,6 +114,10 @@ func resolveConfig(args []string) (*deployConfig, error) {
 		appHost:          *appHost,
 		jsonOut:          *jsonOut,
 		targetConfigured: targetConfigured,
+		verify:           *verify,
+		verifyPath:       *verifyPath,
+		verifyTimeout:    *verifyTimeout,
+		envVars:          *envVars,
 	}, nil
 }
 
