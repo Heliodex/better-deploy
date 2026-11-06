@@ -2,6 +2,7 @@ import { routes } from "./routes.gen"
 import {
 	array,
 	boolean,
+	description,
 	type GenericSchema,
 	type InferOutput,
 	integer,
@@ -384,7 +385,7 @@ export const deleteApp = (token: string, name: string, purge: boolean): Promise<
 	).then(result => result.purged)
 
 const egressRuleSchema = object({
-	cidr: pipe(string(), minLength(1)),
+	cidr: pipe(string(), minLength(1), description("IPv4 or IPv6 CIDR for an untrusted-mode egress rule.")),
 	port: pipe(number(), integer(), minValue(1)),
 })
 

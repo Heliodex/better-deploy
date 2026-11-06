@@ -103,7 +103,7 @@ type appDevConfig struct {
 	Port    int      `json:"port,omitempty"`
 }
 
-// egressRule allows one IPv4 CIDR and TCP port for an untrusted app. The app's uid still reaches only these destinations plus storage and the internal fetch listener.
+// egressRule allows one IPv4 or IPv6 CIDR and TCP port for an untrusted app. The app's uid still reaches only these destinations plus storage and the internal fetch listener.
 type egressRule struct {
 	CIDR string `json:"cidr"`
 	Port int    `json:"port"`

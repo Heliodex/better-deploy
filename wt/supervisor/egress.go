@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -102,6 +103,21 @@ func (m *egressManager) setInternal(ip string, port int) {
 	m.internalIP, m.internalPort = ip, port
 }
 
+// splitEgress separates configured rules by address family so each reaches the matching iptables chain.
+func splitEgress(rules []egressRule) (v4, v6 []egressRule) {
+	for _, rule := range rules {
+		prefix, err := netip.ParsePrefix(rule.CIDR)
+		if err == nil && !prefix.Addr().Is4() {
+			v6 = append(v6, rule)
+			continue
+		}
+
+		v4 = append(v4, rule)
+	}
+
+	return v4, v6
+}
+
 // rulesFor is the complete allow-then-reject IPv4 rule set for one app. The reply rule is owner-scoped too.
 func (m *egressManager) rulesFor(uid, appPort int, extra ...egressRule) [][]string {
 	rules := [][]string{
@@ -121,11 +137,14 @@ func (m *egressManager) rulesFor(uid, appPort int, extra ...egressRule) [][]stri
 	)
 }
 
-// rules6For rejects every IPv6 packet from the app uid. Storage is IPv4 loopback only.
-func (m *egressManager) rules6For(uid int) [][]string {
-	return [][]string{
-		{"-m", "owner", "--uid-owner", strconv.Itoa(uid), "-j", "REJECT"},
+// rules6For allows configured IPv6 egress and rejects every other IPv6 packet from the app uid. Storage and the internal fetch listener are IPv4 loopback only.
+func (m *egressManager) rules6For(uid int, extra ...egressRule) [][]string {
+	rules := make([][]string, 0, len(extra)+1)
+	for _, rule := range extra {
+		rules = append(rules, []string{"-m", "owner", "--uid-owner", strconv.Itoa(uid), "-d", rule.CIDR, "-p", "tcp", "--dport", strconv.Itoa(rule.Port), "-j", "ACCEPT"})
 	}
+
+	return append(rules, []string{"-m", "owner", "--uid-owner", strconv.Itoa(uid), "-j", "REJECT"})
 }
 
 // deleteRules deletes rules in order, returning the first failure after trying the rest.
@@ -175,6 +194,12 @@ func (m *egressManager) add(app string, uid, appPort int, extra ...egressRule) e
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	extra4, extra6 := splitEgress(extra)
+
+	if len(extra6) > 0 && !m.ipv6 {
+		return fmt.Errorf("add IPv6 egress rules for %s: IPv6 egress is disabled with WT_IPV6_EGRESS=off", app)
+	}
+
 	if err := ensureChain(m.run4, egressChain, &m.chainReady); err != nil {
 		return err
 	}
@@ -199,18 +224,18 @@ func (m *egressManager) add(app string, uid, appPort int, extra ...egressRule) e
 		delete(m.rules, app)
 	}
 
-	appended4, err := appendRules(m.run4, egressChain, m.rulesFor(uid, appPort, extra...))
+	appended4, err := appendRules(m.run4, egressChain, m.rulesFor(uid, appPort, extra4...))
 	if err != nil {
-		return fmt.Errorf("add IPv4 egress rule for %s: %w", app, err)
+		return fmt.Errorf("add IPv4 egress rules for %s: %w", app, err)
 	}
 
 	installed := egressAppRules{v4: appended4}
 
 	if m.ipv6 {
-		appended6, err := appendRules(m.run6, egressChain6, m.rules6For(uid))
+		appended6, err := appendRules(m.run6, egressChain6, m.rules6For(uid, extra6...))
 		if err != nil {
 			_ = deleteRules(m.run4, egressChain, appended4)
-			return fmt.Errorf("add IPv6 egress rule for %s: %w", app, err)
+			return fmt.Errorf("add IPv6 egress rules for %s: %w", app, err)
 		}
 
 		installed.v6 = appended6

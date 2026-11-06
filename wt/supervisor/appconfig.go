@@ -313,7 +313,7 @@ func normaliseDependsOn(names []string, self string) ([]string, error) {
 	return out, nil
 }
 
-// normaliseEgress validates an explicit untrusted-mode outbound allowlist. CIDR rules are IPv4 only because the IPv6 chain remains deny-all.
+// normaliseEgress validates an explicit untrusted-mode outbound allowlist. IPv4 and IPv6 CIDRs are kept and applied to their own iptables chain.
 func normaliseEgress(rules []egressRule) ([]egressRule, error) {
 	if len(rules) > maxEgressRules {
 		return nil, fmt.Errorf("egress must contain at most %d rules", maxEgressRules)
@@ -324,8 +324,8 @@ func normaliseEgress(rules []egressRule) ([]egressRule, error) {
 
 	for _, rule := range rules {
 		_, network, err := net.ParseCIDR(strings.TrimSpace(rule.CIDR))
-		if err != nil || network.IP.To4() == nil {
-			return nil, fmt.Errorf("egress %q: use an IPv4 CIDR such as 203.0.113.0/24", rule.CIDR)
+		if err != nil {
+			return nil, fmt.Errorf("egress %q: use an IPv4 or IPv6 CIDR such as 203.0.113.0/24 or 2001:db8::/32", rule.CIDR)
 		}
 
 		if rule.Port < 1 || rule.Port > 65535 {

@@ -223,3 +223,58 @@ func TestEgressAllowsInternalFetchAndConfiguredCIDR(t *testing.T) {
 		t.Errorf("configured egress rules do not precede the reject: %v", commands)
 	}
 }
+
+func TestEgressAllowsConfiguredIPv6CIDR(t *testing.T) {
+	runner := &fakeRunner{}
+	manager := newEgressManager("iptables", "ip6tables", "127.0.0.1", 9999, runner.run)
+
+	if err := manager.add("demo", 20001, 8081,
+		egressRule{CIDR: "203.0.113.0/24", Port: 443},
+		egressRule{CIDR: "2001:db8::/32", Port: 8443},
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	commands := runner.joined()
+	for _, want := range []string{
+		"-w -A WT-EGRESS -m owner --uid-owner 20001 -d 203.0.113.0/24 -p tcp --dport 443 -j ACCEPT",
+		"-w -A WT-EGRESS6 -m owner --uid-owner 20001 -d 2001:db8::/32 -p tcp --dport 8443 -j ACCEPT",
+		"-w -A WT-EGRESS6 -m owner --uid-owner 20001 -j REJECT",
+	} {
+		if !containsCommand(commands, want) {
+			t.Errorf("missing %q in %v", want, commands)
+		}
+	}
+
+	if containsCommand(commands, "-w -A WT-EGRESS -m owner --uid-owner 20001 -d 2001:db8::/32 -p tcp --dport 8443 -j ACCEPT") {
+		t.Errorf("IPv6 rule was installed in the IPv4 chain: %v", commands)
+	}
+
+	if slices.Index(commands, "-w -A WT-EGRESS6 -m owner --uid-owner 20001 -d 2001:db8::/32 -p tcp --dport 8443 -j ACCEPT") > slices.Index(commands, "-w -A WT-EGRESS6 -m owner --uid-owner 20001 -j REJECT") {
+		t.Errorf("IPv6 egress allow does not precede the reject: %v", commands)
+	}
+
+	runner.commands = nil
+
+	if err := manager.remove("demo"); err != nil {
+		t.Fatal(err)
+	}
+
+	if !containsCommand(runner.joined(), "-w -D WT-EGRESS6 -m owner --uid-owner 20001 -d 2001:db8::/32 -p tcp --dport 8443 -j ACCEPT") {
+		t.Errorf("IPv6 egress rule was not removed: %v", runner.joined())
+	}
+}
+
+func TestEgressRejectsIPv6RulesWhenIPv6IsDisabled(t *testing.T) {
+	runner := &fakeRunner{}
+	manager := newEgressManager("iptables", "ip6tables", "127.0.0.1", 9999, runner.run)
+
+	manager.ipv6 = false
+	if err := manager.add("demo", 20001, 8081, egressRule{CIDR: "2001:db8::/32", Port: 443}); err == nil {
+		t.Fatal("expected an error when an IPv6 rule is configured with IPv6 egress disabled")
+	}
+
+	if len(runner.commands) != 0 {
+		t.Errorf("rules were installed despite the reject: %v", runner.joined())
+	}
+}

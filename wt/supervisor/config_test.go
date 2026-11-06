@@ -431,10 +431,26 @@ func TestAppConfigPatchesCallersAndEgress(t *testing.T) {
 		t.Errorf("egress patch response = %+v", got)
 	}
 
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(`{"egress":[{"cidr":"2001:db8::1/32","port":443}]}`))
+	req.Header.Set("Authorization", "Bearer secret")
+	s.handleAppConfig(rec, req, "demo")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("IPv6 egress patch = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(got.Egress) != 1 || got.Egress[0].CIDR != "2001:db8::/32" || got.Egress[0].Port != 443 || !got.RestartRequired {
+		t.Errorf("IPv6 egress patch response = %+v", got)
+	}
+
 	for _, body := range []string{
 		`{"allow_callers":["bad/name"]}`,
 		`{"egress":[{"cidr":"not-a-cidr","port":443}]}`,
-		`{"egress":[{"cidr":"2001:db8::/32","port":443}]}`,
 		`{"egress":[{"cidr":"203.0.113.0/24","port":0}]}`,
 	} {
 		rec = httptest.NewRecorder()

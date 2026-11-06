@@ -377,7 +377,7 @@ async function removeSecret(key: string): Promise<void> {
 				<p class="text-xs text-neutral-500">
 					Env values stay hidden. Memory, concurrency, timeout, network and egress changes need a restart;
 					host, host aliases, health settings, allowed callers and server paths apply immediately. Egress
-					entries are IPv4 CIDR:port pairs for explicit outbound access in untrusted mode. Use wildcard
+					entries are IPv4 or IPv6 CIDR:port pairs for explicit outbound access in untrusted mode. Use wildcard
 					aliases such as *.apps.example.com with a matching certificate.
 				</p>
 			</div>

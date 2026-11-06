@@ -1710,6 +1710,7 @@ components:
               cidr:
                 type: string
                 minLength: 1
+                description: IPv4 or IPv6 CIDR for an untrusted-mode egress rule.
               port:
                 type: integer
                 minimum: 1
