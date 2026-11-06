@@ -124,12 +124,12 @@ func stageCheckOutput(webDir, outDir, name string, generate func(staged string) 
 
 // generateClient emits the typed fetch client when the app keeps an endpoint registry, and skips silently without one.
 func generateClient(registry, webDir, outPath string, quiet bool) error {
-	return generateScript(registry, runClientEmitter, webDir, outPath, quiet)
+	return generateScript(registry, clientEmitter, webDir, outPath, quiet)
 }
 
 // generateFixtures emits the fake factories when the app keeps an endpoint registry, and skips silently without one.
 func generateFixtures(registry, webDir, outPath string, quiet bool) error {
-	return generateScript(registry, runFixturesEmitter, webDir, outPath, quiet)
+	return generateScript(registry, fixturesEmitter, webDir, outPath, quiet)
 }
 
 // generateRegistryOutputs regenerates the fetch client and fake fixtures when the app keeps an endpoint registry.
@@ -144,62 +144,40 @@ func generateRegistryOutputs(dir, webDir string) error {
 }
 
 // generateScript runs one embedded generator unless the app keeps no endpoint registry.
-func generateScript(registry string, run func(webDir, outPath string, quiet bool) error, webDir, outPath string, quiet bool) error {
+func generateScript(registry string, emitter contractEmitter, webDir, outPath string, quiet bool) error {
 	if _, err := os.Stat(registry); os.IsNotExist(err) {
 		return nil
 	}
 
-	return run(webDir, outPath, quiet)
+	return emitter.run(webDir, outPath, quiet)
 }
 
-// runEmitter runs one embedded generator script from the web directory so its imports resolve.
-func runEmitter(webDir, name, pattern, script, outEnv, outPath, quietEnv string, quiet bool) error {
-	file, err := os.CreateTemp(webDir, pattern)
-	if err != nil {
-		return err
-	}
+// contractEmitter describes one embedded generator script and the environment it reads.
+type contractEmitter struct {
+	name     string
+	pattern  string
+	script   string
+	outEnv   string
+	quietEnv string
+}
 
-	scriptPath := file.Name()
+var (
+	clientEmitter   = contractEmitter{name: "client", pattern: ".wt-client-*.ts", script: clientScript, outEnv: "WT_CLIENT_OUT", quietEnv: "WT_CLIENT_QUIET"}
+	fixturesEmitter = contractEmitter{name: "fixtures", pattern: ".wt-fixtures-*.ts", script: fixturesScript, outEnv: "WT_FIXTURES_OUT", quietEnv: "WT_FIXTURES_QUIET"}
+)
 
-	defer os.Remove(scriptPath)
-
-	if _, err := file.WriteString(script); err != nil {
-		file.Close()
-
-		return err
-	}
-
-	if err := file.Close(); err != nil {
-		return err
-	}
-
-	cmd := exec.CommandContext(context.Background(), "bun", filepath.Base(scriptPath))
-	cmd.Dir = webDir
-
-	env := append(os.Environ(), outEnv+"="+outPath)
+// run executes one embedded generator from the web directory so its imports resolve.
+func (e contractEmitter) run(webDir, outPath string, quiet bool) error {
+	env := []string{e.outEnv + "=" + outPath}
 	if quiet {
-		env = append(env, quietEnv+"=1")
+		env = append(env, e.quietEnv+"=1")
 	}
 
-	cmd.Env = env
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("contract %s: %w", name, err)
+	if err := runBunScript(webDir, e.pattern, e.script, env...); err != nil {
+		return fmt.Errorf("contract %s: %w", e.name, err)
 	}
 
 	return formatGeneratedClient(webDir, outPath, quiet)
-}
-
-// runFixturesEmitter runs the embedded fixtures generator from the web directory so its imports resolve.
-func runFixturesEmitter(webDir, outPath string, quiet bool) error {
-	return runEmitter(webDir, "fixtures", ".wt-fixtures-*.ts", fixturesScript, "WT_FIXTURES_OUT", outPath, "WT_FIXTURES_QUIET", quiet)
-}
-
-// runClientEmitter runs the embedded client generator from the web directory so its imports resolve.
-func runClientEmitter(webDir, outPath string, quiet bool) error {
-	return runEmitter(webDir, "client", ".wt-client-*.ts", clientScript, "WT_CLIENT_OUT", outPath, "WT_CLIENT_QUIET", quiet)
 }
 
 // formatGeneratedClient runs the project's Biome over the emitted client so the checked-in file always matches `bun lint`. Without a Biome config the raw emitter output stands, which stays deterministic for --check either way.
@@ -258,16 +236,33 @@ func ensureWebDependencies(webDir string) error {
 
 // runContractSchemas runs the embedded converter from the web directory so its imports resolve.
 func runContractSchemas(webDir, appName, outDir string, quiet bool) error {
-	file, err := os.CreateTemp(webDir, ".wt-contract-*.ts")
+	env := []string{
+		"WT_CONTRACT_OUT=" + filepath.Join(outDir, "schemas"),
+		"WT_APP_NAME=" + appName,
+	}
+	if quiet {
+		env = append(env, "WT_CONTRACT_QUIET=1")
+	}
+
+	if err := runBunScript(webDir, ".wt-contract-*.ts", contractScript, env...); err != nil {
+		return fmt.Errorf("contract schemas: %w", err)
+	}
+
+	return nil
+}
+
+// runBunScript writes one embedded script beside the web sources, runs it with Bun, and removes it.
+func runBunScript(webDir, pattern, script string, env ...string) error {
+	file, err := os.CreateTemp(webDir, pattern)
 	if err != nil {
 		return err
 	}
 
-	script := file.Name()
+	scriptPath := file.Name()
 
-	defer os.Remove(script)
+	defer os.Remove(scriptPath)
 
-	if _, err := file.WriteString(contractScript); err != nil {
+	if _, err := file.WriteString(script); err != nil {
 		file.Close()
 
 		return err
@@ -277,26 +272,13 @@ func runContractSchemas(webDir, appName, outDir string, quiet bool) error {
 		return err
 	}
 
-	cmd := exec.CommandContext(context.Background(), "bun", filepath.Base(script))
+	cmd := exec.CommandContext(context.Background(), "bun", filepath.Base(scriptPath))
 	cmd.Dir = webDir
-
-	env := append(os.Environ(),
-		"WT_CONTRACT_OUT="+filepath.Join(outDir, "schemas"),
-		"WT_APP_NAME="+appName,
-	)
-	if quiet {
-		env = append(env, "WT_CONTRACT_QUIET=1")
-	}
-
-	cmd.Env = env
+	cmd.Env = append(os.Environ(), env...)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("contract schemas: %w", err)
-	}
-
-	return nil
+	return cmd.Run()
 }
 
 // runGoJSONSchema turns the generated schema files into contract.gen.go in contractDir.
