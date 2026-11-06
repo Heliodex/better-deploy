@@ -168,11 +168,7 @@ func generateScript(registry string, emitter contractEmitter, webDir, outPath st
 
 // contractEmitter describes one embedded generator script and the environment it reads.
 type contractEmitter struct {
-	name     string
-	pattern  string
-	script   string
-	outEnv   string
-	quietEnv string
+	name, pattern, script, outEnv, quietEnv string
 }
 
 var (
