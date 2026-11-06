@@ -134,3 +134,66 @@ func TestRunContractCheckSkipsWithoutContract(t *testing.T) {
 		t.Fatalf("runContract --check = %v", err)
 	}
 }
+
+func TestCheckClientSkipsWithoutRegistry(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := checkClient(dir, "web", dir); err != nil {
+		t.Errorf("no registry and no client should pass: %v", err)
+	}
+}
+
+func TestCheckClientFlagsStaleOutput(t *testing.T) {
+	dir := t.TempDir()
+	lib := filepath.Join(dir, "web", "src", "lib")
+
+	if err := os.MkdirAll(lib, privateDirMode); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(lib, "api.gen.ts"), []byte("// stale"), privateFileMode); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := checkClient(dir, "web", dir); err == nil {
+		t.Error("client output without a registry should fail")
+	}
+}
+
+func TestCheckClientComparesGeneratedOutput(t *testing.T) {
+	dir := t.TempDir()
+	generated := t.TempDir()
+	lib := filepath.Join(dir, "web", "src", "lib")
+
+	if err := os.MkdirAll(lib, privateDirMode); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.MkdirAll(filepath.Join(dir, "contract"), privateDirMode); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "contract", "endpoints.ts"), []byte("export const endpoints = []"), privateFileMode); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(generated, "api.gen.ts"), []byte("// fresh"), privateFileMode); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(lib, "api.gen.ts"), []byte("// stale"), privateFileMode); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := checkClient(dir, "web", generated); err == nil {
+		t.Error("differing client output should fail")
+	}
+
+	if err := os.WriteFile(filepath.Join(lib, "api.gen.ts"), []byte("// fresh"), privateFileMode); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := checkClient(dir, "web", generated); err != nil {
+		t.Errorf("matching client output should pass: %v", err)
+	}
+}

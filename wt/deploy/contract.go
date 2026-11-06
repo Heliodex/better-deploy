@@ -14,6 +14,9 @@ import (
 //go:embed testdata/contract/contract.ts
 var contractScript string
 
+//go:embed testdata/contract/client.ts
+var clientScript string
+
 // generateContract converts the app's Valibot registries to JSON Schema and generated Go types.
 func generateContract(dir, web, appName string) error {
 	return generateContractTo(dir, web, appName, "", false)
@@ -63,7 +66,65 @@ func generateContractTo(dir, web, appName, outDir string, quiet bool) error {
 		return err
 	}
 
-	return runGoJSONSchema(outDir)
+	if err := runGoJSONSchema(outDir); err != nil {
+		return err
+	}
+
+	clientOut := filepath.Join(webDir, "src", "lib", "api.gen.ts")
+	if outDir != filepath.Join(dir, "contract") {
+		clientOut = filepath.Join(outDir, "api.gen.ts")
+	}
+
+	return generateClient(filepath.Join(dir, "contract", "endpoints.ts"), webDir, clientOut, quiet)
+}
+
+// generateClient emits the typed fetch client when the app keeps an endpoint registry, and skips silently without one.
+func generateClient(registry, webDir, outPath string, quiet bool) error {
+	if _, err := os.Stat(registry); os.IsNotExist(err) {
+		return nil
+	}
+
+	return runClientEmitter(webDir, outPath, quiet)
+}
+
+// runClientEmitter runs the embedded client generator from the web directory so its imports resolve.
+func runClientEmitter(webDir, outPath string, quiet bool) error {
+	file, err := os.CreateTemp(webDir, ".wt-client-*.ts")
+	if err != nil {
+		return err
+	}
+
+	script := file.Name()
+
+	defer os.Remove(script)
+
+	if _, err := file.WriteString(clientScript); err != nil {
+		file.Close()
+
+		return err
+	}
+
+	if err := file.Close(); err != nil {
+		return err
+	}
+
+	cmd := exec.CommandContext(context.Background(), "bun", filepath.Base(script))
+	cmd.Dir = webDir
+
+	env := append(os.Environ(), "WT_CLIENT_OUT="+outPath)
+	if quiet {
+		env = append(env, "WT_CLIENT_QUIET=1")
+	}
+
+	cmd.Env = env
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("contract client: %w", err)
+	}
+
+	return nil
 }
 
 // ensureWebDependencies installs the frontend packages when node_modules is missing.

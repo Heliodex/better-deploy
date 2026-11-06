@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -26,7 +27,35 @@ func checkContract(dir, web, appName string) error {
 		return err
 	}
 
-	return compareContractTrees(generated, filepath.Join(abs, "contract"))
+	if err := compareContractTrees(generated, filepath.Join(abs, "contract")); err != nil {
+		return err
+	}
+
+	return checkClient(abs, web, generated)
+}
+
+// checkClient compares the generated fetch client with the checked-in one when the app keeps an endpoint registry.
+func checkClient(dir, web, generatedDir string) error {
+	_, registryErr := os.Stat(filepath.Join(dir, "contract", "endpoints.ts"))
+	current := filepath.Join(dir, web, "src", "lib", "api.gen.ts")
+
+	if os.IsNotExist(registryErr) {
+		if _, err := os.Stat(current); err == nil {
+			return errors.New("contract: src/lib/api.gen.ts is stale (no endpoint registry)")
+		}
+
+		return nil
+	}
+
+	if registryErr != nil {
+		return registryErr
+	}
+
+	return compareContractFile(
+		filepath.Join(generatedDir, "api.gen.ts"),
+		current,
+		"src/lib/api.gen.ts",
+	)
 }
 
 // compareContractTrees reports every generated file that is missing, stale or different in currentDir.
