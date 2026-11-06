@@ -18,9 +18,6 @@ var contractScript string
 //go:embed testdata/contract/client.ts
 var clientScript string
 
-//go:embed testdata/contract/fixtures.ts
-var fixturesScript string
-
 // generateContract converts the app's Valibot registries to JSON Schema and generated Go types.
 func generateContract(dir, web, appName string) error {
 	return generateContractTo(dir, web, appName, "", false)
@@ -75,44 +72,29 @@ func generateContractTo(dir, web, appName, outDir string, quiet bool) error {
 	}
 
 	clientOut := filepath.Join(webDir, "src", "lib", "api.gen.ts")
-	fixturesOut := filepath.Join(webDir, "src", "lib", "fixtures.gen.ts")
 	registry := filepath.Join(dir, "contract", "endpoints.ts")
 
 	if outDir != filepath.Join(dir, "contract") {
-		return stageRegistryOutputs(registry, webDir, outDir, quiet)
+		// Check mode: emit beside the real client so Biome resolves the same config and dependencies, then move the result over for comparison.
+		return stageClientOutput(registry, webDir, outDir, quiet)
 	}
 
-	if err := generateClient(registry, webDir, clientOut, quiet); err != nil {
-		return err
-	}
-
-	return generateFixtures(registry, webDir, fixturesOut, quiet)
+	return generateClient(registry, webDir, clientOut, quiet)
 }
 
-// stageRegistryOutputs generates the registry-driven files beside the real client and moves them
-// into outDir for comparison. It does nothing when the app keeps no endpoint registry.
-func stageRegistryOutputs(registry, webDir, outDir string, quiet bool) error {
-	_, err := os.Stat(registry)
-	if os.IsNotExist(err) {
+// stageClientOutput generates the fetch client beside the real sources and moves it into outDir for comparison.
+func stageClientOutput(registry, webDir, outDir string, quiet bool) error {
+	if _, err := os.Stat(registry); os.IsNotExist(err) {
 		return nil
 	}
 
-	if err != nil {
-		return err
-	}
-
-	if err := stageCheckOutput(webDir, outDir, "api.gen.ts", func(staged string) error {
+	return stageCheckOutput(webDir, outDir, "api.gen.ts", func(staged string) error {
 		return generateClient(registry, webDir, staged, quiet)
-	}); err != nil {
-		return err
-	}
-
-	return stageCheckOutput(webDir, outDir, "fixtures.gen.ts", func(staged string) error {
-		return generateFixtures(registry, webDir, staged, quiet)
 	})
 }
 
 // stageCheckOutput generates a file beside the checked-in sources and moves it into the comparison directory.
+// A generator that skips its output leaves nothing to compare.
 func stageCheckOutput(webDir, outDir, name string, generate func(staged string) error) error {
 	staged, err := os.CreateTemp(filepath.Join(webDir, "src", "lib"), ".wt-check-*.gen.ts")
 	if err != nil {
@@ -128,6 +110,15 @@ func stageCheckOutput(webDir, outDir, name string, generate func(staged string) 
 		return err
 	}
 
+	_, statErr := os.Stat(stagedPath)
+	if os.IsNotExist(statErr) {
+		return nil
+	}
+
+	if statErr != nil {
+		return statErr
+	}
+
 	if err := os.Rename(stagedPath, filepath.Join(outDir, name)); err != nil {
 		os.Remove(stagedPath)
 		return err
@@ -138,53 +129,29 @@ func stageCheckOutput(webDir, outDir, name string, generate func(staged string) 
 
 // generateClient emits the typed fetch client when the app keeps an endpoint registry, and skips silently without one.
 func generateClient(registry, webDir, outPath string, quiet bool) error {
-	return generateScript(registry, clientEmitter, webDir, outPath, quiet)
-}
-
-// generateFixtures emits the fake factories when the app keeps an endpoint registry, and skips silently without one.
-func generateFixtures(registry, webDir, outPath string, quiet bool) error {
-	return generateScript(registry, fixturesEmitter, webDir, outPath, quiet)
-}
-
-// generateRegistryOutputs regenerates the fetch client and fake fixtures when the app keeps an endpoint registry.
-func generateRegistryOutputs(dir, webDir string) error {
-	registry := filepath.Join(dir, "contract", "endpoints.ts")
-
-	if err := generateClient(registry, webDir, filepath.Join(webDir, "src", "lib", "api.gen.ts"), false); err != nil {
-		return err
-	}
-
-	return generateFixtures(registry, webDir, filepath.Join(webDir, "src", "lib", "fixtures.gen.ts"), false)
-}
-
-// generateScript runs one embedded generator unless the app keeps no endpoint registry.
-func generateScript(registry string, emitter contractEmitter, webDir, outPath string, quiet bool) error {
 	if _, err := os.Stat(registry); os.IsNotExist(err) {
 		return nil
 	}
 
-	return emitter.run(webDir, outPath, quiet)
+	return runClientEmitter(webDir, outPath, quiet)
 }
 
-// contractEmitter describes one embedded generator script and the environment it reads.
-type contractEmitter struct {
-	name, pattern, script, outEnv, quietEnv string
+// generateRegistryOutputs regenerates the fetch client when the app keeps an endpoint registry.
+func generateRegistryOutputs(dir, webDir string) error {
+	registry := filepath.Join(dir, "contract", "endpoints.ts")
+
+	return generateClient(registry, webDir, filepath.Join(webDir, "src", "lib", "api.gen.ts"), false)
 }
 
-var (
-	clientEmitter   = contractEmitter{name: "client", pattern: ".wt-client-*.ts", script: clientScript, outEnv: "WT_CLIENT_OUT", quietEnv: "WT_CLIENT_QUIET"}
-	fixturesEmitter = contractEmitter{name: "fixtures", pattern: ".wt-fixtures-*.ts", script: fixturesScript, outEnv: "WT_FIXTURES_OUT", quietEnv: "WT_FIXTURES_QUIET"}
-)
-
-// run executes one embedded generator from the web directory so its imports resolve.
-func (e contractEmitter) run(webDir, outPath string, quiet bool) error {
-	env := []string{e.outEnv + "=" + outPath}
+// runClientEmitter runs the embedded client generator from the web directory so its imports resolve.
+func runClientEmitter(webDir, outPath string, quiet bool) error {
+	env := []string{"WT_CLIENT_OUT=" + outPath}
 	if quiet {
-		env = append(env, e.quietEnv+"=1")
+		env = append(env, "WT_CLIENT_QUIET=1")
 	}
 
-	if err := runBunScript(webDir, e.pattern, e.script, env...); err != nil {
-		return fmt.Errorf("contract %s: %w", e.name, err)
+	if err := runBunScript(webDir, ".wt-client-*.ts", clientScript, env...); err != nil {
+		return fmt.Errorf("contract client: %w", err)
 	}
 
 	return formatGeneratedClient(webDir, outPath, quiet)

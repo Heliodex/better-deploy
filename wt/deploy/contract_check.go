@@ -31,21 +31,12 @@ func checkContract(dir, web, appName string) error {
 		return err
 	}
 
-	if err := checkClient(abs, web, generated); err != nil {
-		return err
-	}
-
-	return checkFixtures(abs, web, generated)
+	return checkClient(abs, web, generated)
 }
 
 // checkClient compares the generated fetch client with the checked-in one when the app keeps an endpoint registry.
 func checkClient(dir, web, generatedDir string) error {
 	return checkGeneratedFile(dir, web, generatedDir, "api.gen.ts")
-}
-
-// checkFixtures compares the generated fake factories with the checked-in ones when the app keeps an endpoint registry.
-func checkFixtures(dir, web, generatedDir string) error {
-	return checkGeneratedFile(dir, web, generatedDir, "fixtures.gen.ts")
 }
 
 // checkGeneratedFile compares one generated web file with its checked-in copy.
