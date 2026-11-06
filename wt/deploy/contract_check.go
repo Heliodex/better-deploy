@@ -31,17 +31,31 @@ func checkContract(dir, web, appName string) error {
 		return err
 	}
 
-	return checkClient(abs, web, generated)
+	if err := checkClient(abs, web, generated); err != nil {
+		return err
+	}
+
+	return checkFixtures(abs, web, generated)
 }
 
 // checkClient compares the generated fetch client with the checked-in one when the app keeps an endpoint registry.
 func checkClient(dir, web, generatedDir string) error {
+	return checkGeneratedFile(dir, web, generatedDir, "api.gen.ts")
+}
+
+// checkFixtures compares the generated fake factories with the checked-in ones when the app keeps an endpoint registry.
+func checkFixtures(dir, web, generatedDir string) error {
+	return checkGeneratedFile(dir, web, generatedDir, "fixtures.gen.ts")
+}
+
+// checkGeneratedFile compares one generated web file with its checked-in copy.
+func checkGeneratedFile(dir, web, generatedDir, name string) error {
 	_, registryErr := os.Stat(filepath.Join(dir, "contract", "endpoints.ts"))
-	current := filepath.Join(dir, web, "src", "lib", "api.gen.ts")
+	current := filepath.Join(dir, web, "src", "lib", name)
 
 	if os.IsNotExist(registryErr) {
 		if _, err := os.Stat(current); err == nil {
-			return errors.New("contract: src/lib/api.gen.ts is stale (no endpoint registry)")
+			return errors.New("contract: src/lib/" + name + " is stale (no endpoint registry)")
 		}
 
 		return nil
@@ -52,9 +66,9 @@ func checkClient(dir, web, generatedDir string) error {
 	}
 
 	return compareContractFile(
-		filepath.Join(generatedDir, "api.gen.ts"),
+		filepath.Join(generatedDir, name),
 		current,
-		"src/lib/api.gen.ts",
+		"src/lib/"+name,
 	)
 }
 

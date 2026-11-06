@@ -5,11 +5,11 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 //go:embed testdata/contract/contract.ts
@@ -17,6 +17,9 @@ var contractScript string
 
 //go:embed testdata/contract/client.ts
 var clientScript string
+
+//go:embed testdata/contract/fixtures.ts
+var fixturesScript string
 
 // generateContract converts the app's Valibot registries to JSON Schema and generated Go types.
 func generateContract(dir, web, appName string) error {
@@ -72,54 +75,95 @@ func generateContractTo(dir, web, appName, outDir string, quiet bool) error {
 	}
 
 	clientOut := filepath.Join(webDir, "src", "lib", "api.gen.ts")
+	fixturesOut := filepath.Join(webDir, "src", "lib", "fixtures.gen.ts")
+	registry := filepath.Join(dir, "contract", "endpoints.ts")
+
 	if outDir != filepath.Join(dir, "contract") {
-		// Check mode: emit beside the real client so Biome resolves the same config and dependencies, then move the result over for comparison.
-		staged, err := os.CreateTemp(filepath.Join(webDir, "src", "lib"), ".wt-client-check-*.gen.ts")
-		if err != nil {
+		// Check mode: emit beside the real client so Biome resolves the same config and dependencies, then move the results over for comparison.
+		if err := stageCheckOutput(webDir, outDir, "api.gen.ts", func(staged string) error {
+			return generateClient(registry, webDir, staged, quiet)
+		}); err != nil {
 			return err
 		}
 
-		stagedPath := staged.Name()
-		staged.Close()
-		os.Remove(stagedPath)
-
-		if err := generateClient(filepath.Join(dir, "contract", "endpoints.ts"), webDir, stagedPath, quiet); err != nil {
-			os.Remove(stagedPath)
-			return err
-		}
-
-		if err := os.Rename(stagedPath, filepath.Join(outDir, "api.gen.ts")); err != nil {
-			os.Remove(stagedPath)
-			return err
-		}
-
-		return nil
+		return stageCheckOutput(webDir, outDir, "fixtures.gen.ts", func(staged string) error {
+			return generateFixtures(registry, webDir, staged, quiet)
+		})
 	}
 
-	return generateClient(filepath.Join(dir, "contract", "endpoints.ts"), webDir, clientOut, quiet)
-}
-
-// generateClient emits the typed fetch client when the app keeps an endpoint registry, and skips silently without one.
-func generateClient(registry, webDir, outPath string, quiet bool) error {
-	if _, err := os.Stat(registry); os.IsNotExist(err) {
-		return nil
+	if err := generateClient(registry, webDir, clientOut, quiet); err != nil {
+		return err
 	}
 
-	return runClientEmitter(webDir, outPath, quiet)
+	return generateFixtures(registry, webDir, fixturesOut, quiet)
 }
 
-// runClientEmitter runs the embedded client generator from the web directory so its imports resolve.
-func runClientEmitter(webDir, outPath string, quiet bool) error {
-	file, err := os.CreateTemp(webDir, ".wt-client-*.ts")
+// stageCheckOutput generates a file beside the checked-in sources and moves it into the comparison directory.
+func stageCheckOutput(webDir, outDir, name string, generate func(staged string) error) error {
+	staged, err := os.CreateTemp(filepath.Join(webDir, "src", "lib"), ".wt-check-*.gen.ts")
 	if err != nil {
 		return err
 	}
 
-	script := file.Name()
+	stagedPath := staged.Name()
+	staged.Close()
+	os.Remove(stagedPath)
 
-	defer os.Remove(script)
+	if err := generate(stagedPath); err != nil {
+		os.Remove(stagedPath)
+		return err
+	}
 
-	if _, err := file.WriteString(clientScript); err != nil {
+	if err := os.Rename(stagedPath, filepath.Join(outDir, name)); err != nil {
+		os.Remove(stagedPath)
+		return err
+	}
+
+	return nil
+}
+
+// generateClient emits the typed fetch client when the app keeps an endpoint registry, and skips silently without one.
+func generateClient(registry, webDir, outPath string, quiet bool) error {
+	return generateScript(registry, runClientEmitter, webDir, outPath, quiet)
+}
+
+// generateFixtures emits the fake factories when the app keeps an endpoint registry, and skips silently without one.
+func generateFixtures(registry, webDir, outPath string, quiet bool) error {
+	return generateScript(registry, runFixturesEmitter, webDir, outPath, quiet)
+}
+
+// generateRegistryOutputs regenerates the fetch client and fake fixtures when the app keeps an endpoint registry.
+func generateRegistryOutputs(dir, webDir string) error {
+	registry := filepath.Join(dir, "contract", "endpoints.ts")
+
+	if err := generateClient(registry, webDir, filepath.Join(webDir, "src", "lib", "api.gen.ts"), false); err != nil {
+		return err
+	}
+
+	return generateFixtures(registry, webDir, filepath.Join(webDir, "src", "lib", "fixtures.gen.ts"), false)
+}
+
+// generateScript runs one embedded generator unless the app keeps no endpoint registry.
+func generateScript(registry string, run func(webDir, outPath string, quiet bool) error, webDir, outPath string, quiet bool) error {
+	if _, err := os.Stat(registry); os.IsNotExist(err) {
+		return nil
+	}
+
+	return run(webDir, outPath, quiet)
+}
+
+// runEmitter runs one embedded generator script from the web directory so its imports resolve.
+func runEmitter(webDir, name, pattern, script, outEnv, outPath, quietEnv string, quiet bool) error {
+	file, err := os.CreateTemp(webDir, pattern)
+	if err != nil {
+		return err
+	}
+
+	scriptPath := file.Name()
+
+	defer os.Remove(scriptPath)
+
+	if _, err := file.WriteString(script); err != nil {
 		file.Close()
 
 		return err
@@ -129,12 +173,12 @@ func runClientEmitter(webDir, outPath string, quiet bool) error {
 		return err
 	}
 
-	cmd := exec.CommandContext(context.Background(), "bun", filepath.Base(script))
+	cmd := exec.CommandContext(context.Background(), "bun", filepath.Base(scriptPath))
 	cmd.Dir = webDir
 
-	env := append(os.Environ(), "WT_CLIENT_OUT="+outPath)
+	env := append(os.Environ(), outEnv+"="+outPath)
 	if quiet {
-		env = append(env, "WT_CLIENT_QUIET=1")
+		env = append(env, quietEnv+"=1")
 	}
 
 	cmd.Env = env
@@ -142,10 +186,20 @@ func runClientEmitter(webDir, outPath string, quiet bool) error {
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("contract client: %w", err)
+		return fmt.Errorf("contract %s: %w", name, err)
 	}
 
 	return formatGeneratedClient(webDir, outPath, quiet)
+}
+
+// runFixturesEmitter runs the embedded fixtures generator from the web directory so its imports resolve.
+func runFixturesEmitter(webDir, outPath string, quiet bool) error {
+	return runEmitter(webDir, "fixtures", ".wt-fixtures-*.ts", fixturesScript, "WT_FIXTURES_OUT", outPath, "WT_FIXTURES_QUIET", quiet)
+}
+
+// runClientEmitter runs the embedded client generator from the web directory so its imports resolve.
+func runClientEmitter(webDir, outPath string, quiet bool) error {
+	return runEmitter(webDir, "client", ".wt-client-*.ts", clientScript, "WT_CLIENT_OUT", outPath, "WT_CLIENT_QUIET", quiet)
 }
 
 // formatGeneratedClient runs the project's Biome over the emitted client so the checked-in file always matches `bun lint`. Without a Biome config the raw emitter output stands, which stays deterministic for --check either way.
@@ -161,16 +215,24 @@ func formatGeneratedClient(webDir, outPath string, quiet bool) error {
 	cmd := exec.CommandContext(context.Background(), "bunx", "biome", "check", "--fix", "--config-path="+config, outPath)
 	cmd.Dir = webDir
 
-	if quiet {
-		cmd.Stdout = io.Discard
-	} else {
-		cmd.Stdout = os.Stderr
-	}
+	var output strings.Builder
 
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = &output
+	cmd.Stderr = &output
 
 	if err := cmd.Run(); err != nil {
+		// A project that exempts generated files from Biome (like the scaffold does) has nothing to format.
+		if strings.Contains(output.String(), "No files were processed") {
+			return nil
+		}
+
+		fmt.Fprint(os.Stderr, output.String())
+
 		return fmt.Errorf("contract client format: %w", err)
+	}
+
+	if !quiet {
+		fmt.Fprint(os.Stderr, output.String())
 	}
 
 	return nil

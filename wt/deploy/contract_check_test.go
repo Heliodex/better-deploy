@@ -160,40 +160,77 @@ func TestCheckClientFlagsStaleOutput(t *testing.T) {
 	}
 }
 
-func TestCheckClientComparesGeneratedOutput(t *testing.T) {
+func TestCheckGeneratedComparesOutput(t *testing.T) {
+	checks := []struct {
+		check func(dir, web, generated string) error
+		name  string
+	}{
+		{checkClient, "api.gen.ts"},
+		{checkFixtures, "fixtures.gen.ts"},
+	}
+
+	for _, check := range checks {
+		t.Run(check.name, func(t *testing.T) {
+			dir := t.TempDir()
+			generated := t.TempDir()
+			lib := filepath.Join(dir, "web", "src", "lib")
+
+			if err := os.MkdirAll(lib, privateDirMode); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := os.MkdirAll(filepath.Join(dir, "contract"), privateDirMode); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := os.WriteFile(filepath.Join(dir, "contract", "endpoints.ts"), []byte("export const endpoints = []"), privateFileMode); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := os.WriteFile(filepath.Join(generated, check.name), []byte("// fresh"), privateFileMode); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := os.WriteFile(filepath.Join(lib, check.name), []byte("// stale"), privateFileMode); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := check.check(dir, "web", generated); err == nil {
+				t.Errorf("differing %s should fail", check.name)
+			}
+
+			if err := os.WriteFile(filepath.Join(lib, check.name), []byte("// fresh"), privateFileMode); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := check.check(dir, "web", generated); err != nil {
+				t.Errorf("matching %s should pass: %v", check.name, err)
+			}
+		})
+	}
+}
+
+func TestCheckFixturesSkipsWithoutRegistry(t *testing.T) {
 	dir := t.TempDir()
-	generated := t.TempDir()
+
+	if err := checkFixtures(dir, "web", dir); err != nil {
+		t.Errorf("no registry and no fixtures should pass: %v", err)
+	}
+}
+
+func TestCheckFixturesFlagsStaleOutput(t *testing.T) {
+	dir := t.TempDir()
 	lib := filepath.Join(dir, "web", "src", "lib")
 
 	if err := os.MkdirAll(lib, privateDirMode); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := os.MkdirAll(filepath.Join(dir, "contract"), privateDirMode); err != nil {
+	if err := os.WriteFile(filepath.Join(lib, "fixtures.gen.ts"), []byte("// stale"), privateFileMode); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(filepath.Join(dir, "contract", "endpoints.ts"), []byte("export const endpoints = []"), privateFileMode); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := os.WriteFile(filepath.Join(generated, "api.gen.ts"), []byte("// fresh"), privateFileMode); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := os.WriteFile(filepath.Join(lib, "api.gen.ts"), []byte("// stale"), privateFileMode); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := checkClient(dir, "web", generated); err == nil {
-		t.Error("differing client output should fail")
-	}
-
-	if err := os.WriteFile(filepath.Join(lib, "api.gen.ts"), []byte("// fresh"), privateFileMode); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := checkClient(dir, "web", generated); err != nil {
-		t.Errorf("matching client output should pass: %v", err)
+	if err := checkFixtures(dir, "web", dir); err == nil {
+		t.Error("fixtures output without a registry should fail")
 	}
 }

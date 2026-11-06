@@ -392,9 +392,9 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 		return status, err
 	}
 
-	// The client follows the endpoint registry, not the component hash: a registry-only change must still regenerate.
+	// The registry outputs follow the endpoint registry, not the component hash: a registry-only change must still regenerate.
 	webDir := filepath.Join(cfg.dir, webDirName(m))
-	if err := generateClient(filepath.Join(cfg.dir, "contract", "endpoints.ts"), webDir, filepath.Join(webDir, "src", "lib", "api.gen.ts"), false); err != nil {
+	if err := generateRegistryOutputs(cfg.dir, webDir); err != nil {
 		return status, err
 	}
 
