@@ -12,6 +12,9 @@ func runContract(args []string) error {
 	dir := flags.String("dir", ".", "app directory containing app.json")
 
 	check := flags.Bool("check", false, "verify the generated files without writing them")
+	compat := flags.Bool("compat", false, "report breaking schema changes against a git ref without writing them")
+	compatRef := flags.String("compat-ref", "HEAD", "git ref the compat check compares against")
+
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -25,7 +28,7 @@ func runContract(args []string) error {
 		return err
 	}
 
-	if *check && m.Contract != "valibot" {
+	if (*check || *compat) && m.Contract != "valibot" {
 		fmt.Println("contract: no generated contract")
 		return nil
 	}
@@ -36,7 +39,13 @@ func runContract(args []string) error {
 		}
 
 		fmt.Println("contract: up to date")
+	}
 
+	if *compat {
+		return runCompat(*dir, webDirName(m), m.Name, *compatRef)
+	}
+
+	if *check {
 		return nil
 	}
 

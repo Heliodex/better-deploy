@@ -396,10 +396,13 @@ var helpCommands = []helpCommand{
 		flags: []helpFlag{
 			{"--dir", "DIR", `app directory containing app.json (default ".")`},
 			{"--check", "", "verify the generated files without writing them"},
+			{"--compat", "", "report breaking schema changes against a git ref without writing them"},
+			{"--compat-ref", "REF", "git ref the compat check compares against (default HEAD)"},
 		},
 		examples: []string{
 			"wt contract --dir ./passport",
 			"wt contract --dir ./passport --check",
+			"wt contract --dir ./passport --compat --compat-ref main",
 		},
 	},
 	{
