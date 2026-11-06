@@ -11,17 +11,26 @@ if (!outPath) throw new Error("WT_CLIENT_OUT is not set")
 
 type Param = {
 	default?: string
-	in: "path" | "query" | "body"
+	in: "path" | "query" | "body" | "init"
 	map?: { [_: string]: string }
 	name: string
 	optional?: boolean
 	type: string
+	// value fills the slot with a verbatim expression instead of a function argument: the
+	// program const in paths, or a constant like '"50"' in queries. The expression must
+	// evaluate to a string.
 	value?: string
 	when?: string
+	// wire renames a query param on the wire: searchProjects(query) sends ?q=.
+	wire?: string
+	// wrap assembles a single scalar body param into an object: login(email) sends { email }.
+	wrap?: boolean
 }
 
 type Endpoint = {
 	doc?: string
+	// keepalive rides on the request init: true sends it always, a string names the argument.
+	keepalive?: boolean | string
 	method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
 	name: string
 	params?: Param[]
@@ -29,7 +38,15 @@ type Endpoint = {
 	response: "void" | { schema: unknown; select?: string[] }
 }
 
-const reserved = new Set(["fetch", "parseJSON", "requestVoid", "program", "InferOutput", "Response"])
+const reserved = new Set(["fetch", "parseJSON", "requestVoid", "program", "InferOutput", "Response", "response", "parsed"])
+
+// localName picks a generated local that no param shadows.
+function localName(params: Param[], ...candidates: string[]): string {
+	const taken = new Set(params.map(param => param.name))
+	const found = candidates.find(name => !taken.has(name))
+	if (!found) throw new Error(`param names leave no room for generated locals (${candidates.join(", ")})`)
+	return found
+}
 
 function fail(endpoint: string, message: string): never {
 	throw new Error(`endpoint ${endpoint}: ${message}`)
@@ -45,7 +62,9 @@ function isParam(value: unknown): value is Param {
 
 // schemaName resolves a referenced schema to its contract export, so typos fail here instead of emitting a broken import.
 const schemaNames = new Map<unknown, string>()
+const schemaExports = new Set<string>()
 for (const [name, value] of Object.entries(contract)) {
+	schemaExports.add(name)
 	if (typeof value === "object" && value !== null && !schemaNames.has(value)) schemaNames.set(value, name)
 }
 
@@ -66,12 +85,20 @@ function checkEndpoint(raw: unknown): asserts raw is Endpoint {
 	if (reserved.has(endpoint)) fail(endpoint, "name collides with the client runtime")
 	if (!["GET", "POST", "PUT", "PATCH", "DELETE"].includes(raw.method as string)) fail(endpoint, "method must be GET, POST, PUT, PATCH or DELETE")
 	if (typeof raw.path !== "string" || !raw.path.startsWith("/")) fail(endpoint, "path must start with /")
+	if (
+		raw.keepalive !== undefined &&
+		typeof raw.keepalive !== "boolean" &&
+		typeof raw.keepalive !== "string"
+	)
+		fail(endpoint, "keepalive is true or a param name")
+	if (raw.keepalive !== undefined && raw.method === "GET") fail(endpoint, "keepalive needs a non-GET request")
 
 	const params: Param[] = Array.isArray(raw.params) ? raw.params : []
 	if (!Array.isArray(raw.params) && raw.params !== undefined) fail(endpoint, "params must be an array")
 	for (const param of params) {
 		if (!isParam(param) || !identifier.test(param.name)) fail(endpoint, "every param needs a name, in and type")
-		if (!["path", "query", "body"].includes(param.in)) fail(endpoint, `param ${param.name} is not path, query or body`)
+		if (!["path", "query", "body", "init"].includes(param.in))
+			fail(endpoint, `param ${param.name} is not path, query, body or init`)
 	}
 	if (raw.method === "GET" && params.some(param => param.in === "body")) fail(endpoint, "GET endpoints cannot send a body")
 
@@ -84,12 +111,20 @@ function checkEndpoint(raw: unknown): asserts raw is Endpoint {
 	}
 
 	const query = new Set(params.filter(param => param.in === "query").map(param => param.name))
+	const bodyParams = params.filter(param => param.in === "body")
 	for (const param of params) {
 		if (param.when !== undefined && !query.has(param.when)) fail(endpoint, `when target ${param.when} is not a query param`)
 		if (param.in === "body" && (param.optional || param.when !== undefined || param.map !== undefined))
 			fail(endpoint, `body param ${param.name} takes no optional, when or map`)
+		if (param.in === "query" && param.value !== undefined && (param.optional || param.when !== undefined || param.map !== undefined))
+			fail(endpoint, `constant query param ${param.name} takes no optional, when or map`)
+		if (param.wrap === true && (param.in !== "body" || bodyParams.length !== 1))
+			fail(endpoint, "wrap is only for a single body param")
+		if (param.wire !== undefined && (param.in !== "query" || param.wire === ""))
+			fail(endpoint, `wire name for ${param.name} is only for query params`)
 	}
-	if (params.filter(param => param.in === "body").length > 1) fail(endpoint, "at most one body param")
+	if (typeof raw.keepalive === "string" && !params.some(param => param.name === raw.keepalive && param.value === undefined))
+		fail(endpoint, `keepalive param ${raw.keepalive} is not a function argument`)
 
 	const byName = new Map(params.filter(param => param.in === "query").map(param => [param.name, param]))
 	for (const param of params) {
@@ -110,6 +145,12 @@ function checkEndpoint(raw: unknown): asserts raw is Endpoint {
 		const select = (raw.response as { select?: unknown }).select
 		if (select !== undefined && (!Array.isArray(select) || select.some(key => typeof key !== "string" || key === "")))
 			fail(endpoint, "select is an array of field names")
+	}
+
+	for (const param of params.filter(item => item.in === "body")) {
+		for (const match of param.type.matchAll(/typeof ([A-Za-z_$][A-Za-z0-9_$]*)/g)) {
+			if (!schemaExports.has(match[1])) fail(endpoint, `body type references unknown schema ${match[1]}`)
+		}
 	}
 }
 
@@ -147,6 +188,8 @@ function isStringType(type: string): boolean {
 }
 
 function encodeValue(param: Param, value: string): string {
+	// A value-bound slot fills from its verbatim expression, which must evaluate to a string.
+	if (param.value !== undefined) return param.value
 	if (!param.map) return isStringType(param.type) ? value : `String(${value})`
 	const entries = Object.keys(param.map)
 		.sort()
@@ -155,11 +198,11 @@ function encodeValue(param: Param, value: string): string {
 	return `({ ${entries} } as Record<string, string>)[String(${value})]`
 }
 
-function queryBlock(params: Param[]): string[] {
+function queryBlock(varName: string, params: Param[]): string[] {
 	const query = params.filter(param => param.in === "query")
 	if (query.length === 0) return []
 
-	const lines = ["\tconst query = new URLSearchParams()"]
+	const lines = [`\tconst ${varName} = new URLSearchParams()`]
 	const byName = new Map(query.map(param => [param.name, param]))
 	const blocks = new Map<string | null, string[]>([[null, []]])
 
@@ -173,7 +216,7 @@ function queryBlock(params: Param[]): string[] {
 	}
 
 	function setLine(param: Param, indent: string): string {
-		return `${indent}query.set(${JSON.stringify(param.name)}, ${encodeValue(param, param.name)})`
+		return `${indent}${varName}.set(${JSON.stringify(param.wire ?? param.name)}, ${encodeValue(param, param.name)})`
 	}
 
 	for (const param of query) {
@@ -224,15 +267,24 @@ function returnType(schema: string, select: string[] | undefined): string {
 }
 
 const schemaImports = new Set<string>()
+const schemaTypeImports = new Set<string>()
 let usesParse = false
 let usesVoid = false
 let usesProgram = false
 const bodies: string[] = []
 
+// typeSchemas collects the schemas a verbatim type string references, so they import as types.
+function typeSchemas(type: string): string[] {
+	const found: string[] = []
+	for (const match of type.matchAll(/typeof ([A-Za-z_$][A-Za-z0-9_$]*)/g)) {
+		if (schemaExports.has(match[1]) && !found.includes(match[1])) found.push(match[1])
+	}
+	return found
+}
+
 for (const raw of endpoints as Endpoint[]) {
 	const params = raw.params ?? []
 	const queryParams = params.filter(param => param.in === "query")
-	const bodyParam = params.find(param => param.in === "body")
 	const isVoid = raw.response === "void"
 	let schema = ""
 	let select: string[] | undefined
@@ -242,24 +294,40 @@ for (const raw of endpoints as Endpoint[]) {
 		select = (raw.response as { select?: string[] }).select
 		usesParse = true
 	} else usesVoid = true
+	for (const param of params.filter(item => item.in === "body")) {
+		for (const name of typeSchemas(param.type)) schemaTypeImports.add(name)
+	}
 	if (params.some(param => param.value === "program")) usesProgram = true
 
 	const args = argList(params)
-	const lines = [...queryBlock(params)]
+	const queryVar = localName(params, "query", "searchParams", "requestQuery")
+	const urlVar = localName(params, "url", "requestUrl")
+	const lines = [...queryBlock(queryVar, params)]
 	const literal = urlLiteral(raw.path, params)
-	const target = queryParams.length > 0 ? "url" : literal
+	const target = queryParams.length > 0 ? urlVar : literal
 	if (queryParams.length > 0) {
-		lines.push(`\tlet url = ${literal}`, "\tif (query.size > 0) url += `?${query}`")
+		lines.push(`\tlet ${urlVar} = ${literal}`, `\tif (${queryVar}.size > 0) ${urlVar} += \`?\${${queryVar}}\``)
 	}
+
+	// keepalive rides the init after the body: a literal sends it always, a name binds the argument.
+	const keepalive =
+		raw.keepalive === true ? ["keepalive: true"] : typeof raw.keepalive === "string" ? ["keepalive"] : []
+	const fields = params.filter(param => param.in === "body")
+	const payload =
+		fields.length === 0
+			? []
+			: [
+					`body: JSON.stringify(${fields.length > 1 || fields[0].wrap ? `{ ${fields.map(item => item.name).join(", ")} }` : fields[0].name})`,
+				]
+	const init = [...payload, ...(fields.length > 0 ? ['headers: { "content-type": "application/json" }'] : []), ...keepalive, `method: ${JSON.stringify(raw.method)}`]
+
 	let call: string
 	if (raw.method === "GET") call = `const response = await fetch(${target})`
-	else if (!bodyParam)
-		call = `const response = await fetch(${target}, {\n\t\tmethod: ${JSON.stringify(raw.method)},\n\t})`
-	else
-		call = `const response = await fetch(${target}, {\n\t\tbody: JSON.stringify(${bodyParam.name}),\n\t\theaders: { "content-type": "application/json" },\n\t\tmethod: ${JSON.stringify(raw.method)},\n\t})`
+	else if (isVoid)
+		call = `await requestVoid(${target}, {\n\t\t${[...keepalive, `method: ${JSON.stringify(raw.method)}`].join(",\n\t\t")},\n\t})`
+	else call = `const response = await fetch(${target}, {\n\t\t${init.join(",\n\t\t")},\n\t})`
 	lines.push(`\t${call}`)
-	if (isVoid) lines.push("\tawait requestVoid(response)")
-	else {
+	if (!isVoid) {
 		lines.push(`\tconst parsed = await parseJSON(response, ${schema})`)
 		lines.push(select?.length ? `\treturn ${["parsed", ...select].join(".")}` : "\treturn parsed")
 	}
@@ -273,11 +341,13 @@ for (const raw of endpoints as Endpoint[]) {
 const runtime = ["parseJSON", "program", "requestVoid"].filter(name =>
 	(name === "program" && usesProgram) || (name === "parseJSON" && usesParse) || (name === "requestVoid" && usesVoid),
 )
+const typeOnly = [...schemaTypeImports].filter(name => !schemaImports.has(name)).sort()
+const contractImports = [...[...schemaImports].sort().map(name => name), ...typeOnly.map(name => `type ${name}`)]
 const header = [
 	"// Code generated by wt contract from contract/endpoints.ts. DO NOT EDIT.",
 	...(usesParse ? ["import type { InferOutput } from \"valibot\""] : []),
-	...(runtime.length > 0 ? [`import { ${runtime.join(", ")} } from "./api"`] : []),
-	...(schemaImports.size > 0 ? [`import { ${[...schemaImports].sort().join(", ")} } from "./contract"`] : []),
+	...(runtime.length > 0 ? [`import { ${runtime.join(", ")} } from "./api-runtime"`] : []),
+	...(contractImports.length > 0 ? [`import { ${contractImports.join(", ")} } from "./contract"`] : []),
 ].join("\n")
 
 await Bun.write(Bun.env.WT_CLIENT_OUT, `${header}\n\n${bodies.join("\n\n")}\n`)

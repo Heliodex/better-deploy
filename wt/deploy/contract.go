@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -72,7 +73,27 @@ func generateContractTo(dir, web, appName, outDir string, quiet bool) error {
 
 	clientOut := filepath.Join(webDir, "src", "lib", "api.gen.ts")
 	if outDir != filepath.Join(dir, "contract") {
-		clientOut = filepath.Join(outDir, "api.gen.ts")
+		// Check mode: emit beside the real client so Biome resolves the same config and dependencies, then move the result over for comparison.
+		staged, err := os.CreateTemp(filepath.Join(webDir, "src", "lib"), ".wt-client-check-*.gen.ts")
+		if err != nil {
+			return err
+		}
+
+		stagedPath := staged.Name()
+		staged.Close()
+		os.Remove(stagedPath)
+
+		if err := generateClient(filepath.Join(dir, "contract", "endpoints.ts"), webDir, stagedPath, quiet); err != nil {
+			os.Remove(stagedPath)
+			return err
+		}
+
+		if err := os.Rename(stagedPath, filepath.Join(outDir, "api.gen.ts")); err != nil {
+			os.Remove(stagedPath)
+			return err
+		}
+
+		return nil
 	}
 
 	return generateClient(filepath.Join(dir, "contract", "endpoints.ts"), webDir, clientOut, quiet)
@@ -122,6 +143,34 @@ func runClientEmitter(webDir, outPath string, quiet bool) error {
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("contract client: %w", err)
+	}
+
+	return formatGeneratedClient(webDir, outPath, quiet)
+}
+
+// formatGeneratedClient runs the project's Biome over the emitted client so the checked-in file always matches `bun lint`. Without a Biome config the raw emitter output stands, which stays deterministic for --check either way.
+func formatGeneratedClient(webDir, outPath string, quiet bool) error {
+	config := filepath.Join(webDir, "biome.json")
+	if _, err := os.Stat(config); err != nil {
+		config = filepath.Join(webDir, "biome.jsonc")
+		if _, err := os.Stat(config); err != nil {
+			return nil
+		}
+	}
+
+	cmd := exec.CommandContext(context.Background(), "bunx", "biome", "check", "--fix", "--config-path="+config, outPath)
+	cmd.Dir = webDir
+
+	if quiet {
+		cmd.Stdout = io.Discard
+	} else {
+		cmd.Stdout = os.Stderr
+	}
+
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("contract client format: %w", err)
 	}
 
 	return nil
