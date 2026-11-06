@@ -90,7 +90,7 @@ async function importFile(event: Event): Promise<void> {
 					disabled={importing}
 					onchange={(event): void => void importFile(event)}
 					type="file"
-				/>
+				>
 			</label>
 		</div>
 	</div>

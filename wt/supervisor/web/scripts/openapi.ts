@@ -1,4 +1,6 @@
 /// <reference types="bun" />
+
+import process from "node:process"
 import { toJsonSchema } from "@valibot/to-json-schema"
 import { pipe, title } from "valibot"
 import { responseContracts } from "../src/lib/api"

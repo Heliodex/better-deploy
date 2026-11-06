@@ -1,4 +1,3 @@
-import { routes } from "./routes.gen"
 import {
 	array,
 	boolean,
@@ -19,6 +18,7 @@ import {
 	union,
 	unknown as unknownSchema,
 } from "valibot"
+import { routes } from "./routes.gen"
 
 const appInfoSchema = object({
 	cpuPercent: pipe(number(), minValue(0)),
@@ -112,7 +112,9 @@ async function parseJSON<T>(response: Response, schema: GenericSchema<T>): Promi
 	if (!parsed.success) {
 		const preview = JSON.stringify(data)?.slice(0, 300) ?? "no body"
 		const contentType = response.headers.get("content-type") ?? "unknown content type"
-		throw new Error(`The supervisor returned an unexpected response shape (${response.status} ${contentType}: ${preview}).`)
+		throw new Error(
+			`The supervisor returned an unexpected response shape (${response.status} ${contentType}: ${preview}).`,
+		)
 	}
 
 	return parsed.output
@@ -134,10 +136,10 @@ async function request<T>(path: string, options: RequestOptions, schema: Generic
 	})
 	try {
 		return await parseJSON(response, schema)
-	} catch (error) {
-		if (error instanceof Error && error.message.startsWith("The supervisor returned an unexpected response shape"))
-			throw new Error(`${error.message} [${path}]`)
-		throw error
+	} catch (err) {
+		if (err instanceof Error && err.message.startsWith("The supervisor returned an unexpected response shape"))
+			throw new Error(`${err.message} [${path}]`, { cause: err })
+		throw err
 	}
 }
 
@@ -262,9 +264,9 @@ export type DatabaseTableStat = InferOutput<typeof databaseTableStatSchema>
 
 const databaseOverviewSchema = object({
 	database: boolean(),
+	stats: optional(array(databaseTableStatSchema)),
 	tables: array(string()),
 	version: pipe(number(), minValue(0)),
-	stats: optional(array(databaseTableStatSchema)),
 })
 
 export type DatabaseOverview = InferOutput<typeof databaseOverviewSchema>
@@ -378,11 +380,9 @@ const deleteAppSchema = object({
 })
 
 export const deleteApp = (token: string, name: string, purge: boolean): Promise<boolean> =>
-	request(
-		`${routes.app(name)}${purge ? "?purge=1" : ""}`,
-		{ method: "DELETE", token },
-		deleteAppSchema,
-	).then(result => result.purged)
+	request(`${routes.app(name)}${purge ? "?purge=1" : ""}`, { method: "DELETE", token }, deleteAppSchema).then(
+		result => result.purged,
+	)
 
 const egressRuleSchema = object({
 	cidr: pipe(string(), minLength(1), description("IPv4 or IPv6 CIDR for an untrusted-mode egress rule.")),
@@ -394,14 +394,13 @@ const appConfigSchema = object({
 	disk_mb: pipe(number(), minValue(0)),
 	egress: array(egressRuleSchema),
 	env_keys: array(string()),
-	secret_keys: optional(array(string())),
 	health: pipe(string(), minLength(1)),
 	health_failures: pipe(number(), minValue(1)),
 	health_interval: string(),
 	host: pipe(string(), minLength(1)),
+	hosts: array(string()),
 	idle_timeout: string(),
 	job_concurrency: pipe(number(), minValue(1)),
-	hosts: array(string()),
 	max_concurrency: pipe(number(), minValue(0)),
 	memory_mb: pipe(number(), minValue(0)),
 	name: pipe(string(), minLength(1)),
@@ -410,6 +409,7 @@ const appConfigSchema = object({
 	restart_on_unhealthy: boolean(),
 	restart_required: optional(boolean()),
 	schedule: array(unknownSchema()),
+	secret_keys: optional(array(string())),
 	server_pages: array(string()),
 	server_paths: array(string()),
 	startup_timeout: string(),
@@ -457,18 +457,14 @@ export const fetchSecretKeys = (token: string, name: string): Promise<string[]> 
 	request(routes.appSecrets(name), { token }, secretKeysSchema).then(result => result.keys)
 
 export const setAppSecret = (token: string, name: string, key: string, value: string): Promise<boolean> =>
-	request(
-		routes.appSecret(name, key),
-		{ json: { value }, method: "PUT", token },
-		secretMutationSchema,
-	).then(result => result.restart_required)
+	request(routes.appSecret(name, key), { json: { value }, method: "PUT", token }, secretMutationSchema).then(
+		result => result.restart_required,
+	)
 
 export const deleteAppSecret = (token: string, name: string, key: string): Promise<boolean> =>
-	request(
-		routes.appSecret(name, key),
-		{ method: "DELETE", token },
-		secretMutationSchema,
-	).then(result => result.restart_required)
+	request(routes.appSecret(name, key), { method: "DELETE", token }, secretMutationSchema).then(
+		result => result.restart_required,
+	)
 
 export async function deployBundle(token: string, name: string, file: File): Promise<AppInfo> {
 	const body = new FormData()
@@ -490,11 +486,7 @@ export const createBackup = (token: string, name: string): Promise<BackupsResult
 	request(routes.appBackup(name), { method: "POST", token }, backupsResponseSchema)
 
 export const saveBackupSettings = (token: string, name: string, settings: BackupSettings): Promise<BackupsResult> =>
-	request(
-		routes.appBackup(name, "config"),
-		{ json: settings, method: "PUT", token },
-		backupsResponseSchema,
-	)
+	request(routes.appBackup(name, "config"), { json: settings, method: "PUT", token }, backupsResponseSchema)
 
 export const restoreBackup = (token: string, name: string, backup: string): Promise<BackupsResult> =>
 	request(
@@ -506,22 +498,14 @@ export const restoreBackup = (token: string, name: string, backup: string): Prom
 export const importBackup = (token: string, name: string, file: File): Promise<BackupsResult> => {
 	const body = new FormData()
 	body.append("snapshot", file)
-	return request(
-		routes.appBackup(name, "import"),
-		{ body, method: "POST", token },
-		backupsResponseSchema,
-	)
+	return request(routes.appBackup(name, "import"), { body, method: "POST", token }, backupsResponseSchema)
 }
 
 export const fetchDeployments = (token: string, name: string): Promise<DeploymentInfo[]> =>
 	request(routes.appDeployments(name), { token }, deploymentsSchema)
 
 export const rollbackDeployment = (token: string, name: string, id: string): Promise<AppInfo> =>
-	request(
-		routes.appRollback(name, id),
-		{ method: "POST", token },
-		appInfoSchema,
-	)
+	request(routes.appRollback(name, id), { method: "POST", token }, appInfoSchema)
 
 export const fetchDatabase = (token: string, name: string, stats = false): Promise<DatabaseOverview> =>
 	request(`${routes.appDatabase(name)}${stats ? "?stats=1" : ""}`, { token }, databaseOverviewSchema)
@@ -529,11 +513,9 @@ export const fetchDatabase = (token: string, name: string, stats = false): Promi
 export const importDatabase = (token: string, name: string, file: File): Promise<boolean> => {
 	const body = new FormData()
 	body.append("database", file)
-	return request(
-		routes.appDatabasePath(name, "import"),
-		{ body, method: "POST", token },
-		databaseImportSchema,
-	).then(result => result.imported)
+	return request(routes.appDatabasePath(name, "import"), { body, method: "POST", token }, databaseImportSchema).then(
+		result => result.imported,
+	)
 }
 
 export const maintainDatabase = (token: string, name: string, op: string): Promise<DatabaseMaintenance> =>
@@ -556,11 +538,7 @@ export function fetchDatabaseRows(
 
 export function fetchChanges(token: string, name: string, limit = 200): Promise<StorageChangesResult> {
 	const query = new URLSearchParams({ limit: `${limit}` })
-	return request(
-		`${routes.appDatabasePath(name, "changes")}?${query}`,
-		{ token },
-		storageChangesResponseSchema,
-	)
+	return request(`${routes.appDatabasePath(name, "changes")}?${query}`, { token }, storageChangesResponseSchema)
 }
 
 // responseContracts is the source of truth for the OpenAPI component schemas.

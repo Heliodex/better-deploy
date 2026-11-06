@@ -16,8 +16,8 @@ import {
 	deleteApp,
 	deleteAppSecret,
 	deployBundle,
-	fetchAppConfig,
 	fetchApp,
+	fetchAppConfig,
 	fetchApps,
 	fetchBackups,
 	fetchChanges,
@@ -25,21 +25,21 @@ import {
 	fetchDatabaseRows,
 	fetchDeployments,
 	fetchResourceHistory,
-	importBackup,
-	importDatabase,
 	forgetToken,
 	getToken,
+	importBackup,
+	importDatabase,
 	type LogEntry,
 	type LogLevel,
-	type ResourceSample,
 	maintainDatabase,
+	type ResourceSample,
 	restartApp,
 	restoreBackup,
 	rollbackDeployment,
-	saveAppConfig,
-	setAppSecret,
 	type StorageChange,
+	saveAppConfig,
 	saveBackupSettings,
+	setAppSecret,
 	setToken,
 	startApp,
 	stopApp,
@@ -518,8 +518,7 @@ function resetDatabase(): void {
 function openTab(next: Tab): void {
 	tab = next
 	if (next === "database" && token && selected && databaseLoadedFor !== selected) void loadDatabase(token, selected)
-	if (next === "settings" && token && selected && configLoadedFor !== selected)
-		void loadConfig(token, selected)
+	if (next === "settings" && token && selected && configLoadedFor !== selected) void loadConfig(token, selected)
 	if (next === "deployments" && token && selected && deploymentsLoadedFor !== selected)
 		void loadDeployments(token, selected)
 }
@@ -1174,7 +1173,7 @@ onMount((): (() => void) => {
 							onstart={startSelected}
 							onstop={stopSelected}
 							saving={configSaving}
-							status={detail?.idle ? "idle" : detail?.status ?? "stopped"}
+							status={detail?.idle ? "idle" : (detail?.status ?? "stopped")}
 						/>
 					{:else if tab === "backups"}
 						<BackupsTab

@@ -82,15 +82,15 @@ $effect(() => {
 	allowCallers = current.allow_callers.join(", ")
 	serverPaths = current.server_paths.join(", ")
 	serverPages = current.server_pages.join(", ")
-	egress = current.egress.map((rule) => `${rule.cidr}:${rule.port}`).join(", ")
+	egress = current.egress.map(rule => `${rule.cidr}:${rule.port}`).join(", ")
 })
 
 const parseNames = (value: string): string[] => [
 	...new Set(
 		value
 			.split(/[\s,]+/)
-			.map((entry) => entry.trim().toLowerCase())
-			.filter((entry) => entry.length > 0),
+			.map(entry => entry.trim().toLowerCase())
+			.filter(entry => entry.length > 0),
 	),
 ]
 
@@ -110,8 +110,8 @@ const parsePaths = (value: string): string[] => [
 	...new Set(
 		value
 			.split(/[\s,]+/)
-			.map((entry) => entry.trim())
-			.filter((entry) => entry.length > 0),
+			.map(entry => entry.trim())
+			.filter(entry => entry.length > 0),
 	),
 ]
 
@@ -119,8 +119,8 @@ const parseHosts = (value: string): string[] => [
 	...new Set(
 		value
 			.split(/[\s,]+/)
-			.map((entry) => entry.trim())
-			.filter((entry) => entry.length > 0),
+			.map(entry => entry.trim())
+			.filter(entry => entry.length > 0),
 	),
 ]
 
@@ -142,8 +142,8 @@ function save(event: SubmitEvent): void {
 		network,
 		request_timeout: requestTimeout.trim(),
 		restart_on_unhealthy: restartOnUnhealthy,
-		server_paths: parsePaths(serverPaths),
 		server_pages: parsePaths(serverPages),
+		server_paths: parsePaths(serverPaths),
 		startup_timeout: startupTimeout.trim(),
 	})
 }
@@ -253,11 +253,11 @@ async function removeSecret(key: string): Promise<void> {
 			</label>
 			<label class="flex flex-col gap-1">
 				<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Memory limit (MB)</span>
-				<input aria-label="Memory limit in MB" class="field" min="0" bind:value={memoryMB} type="number">
+				<input aria-label="Memory limit in MB" class="field" min="0" type="number" bind:value={memoryMB}>
 			</label>
 			<label class="flex flex-col gap-1">
 				<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Disk quota (MB)</span>
-				<input aria-label="Disk quota in MB" class="field" min="0" bind:value={diskMB} type="number">
+				<input aria-label="Disk quota in MB" class="field" min="0" type="number" bind:value={diskMB}>
 			</label>
 			<label class="flex flex-col gap-1">
 				<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Max concurrent requests</span>
@@ -265,8 +265,8 @@ async function removeSecret(key: string): Promise<void> {
 					aria-label="Maximum concurrent requests"
 					class="field"
 					min="0"
-					bind:value={maxConcurrent}
 					type="number"
+					bind:value={maxConcurrent}
 				>
 			</label>
 			<label class="flex flex-col gap-1">
@@ -353,12 +353,7 @@ async function removeSecret(key: string): Promise<void> {
 			</label>
 			<label class="flex flex-col gap-1">
 				<span class="text-[10px] tracking-wide text-neutral-500 uppercase">Egress allowlist</span>
-				<input
-					aria-label="Egress allowlist"
-					class="field"
-					placeholder="203.0.113.0/24:443"
-					bind:value={egress}
-				>
+				<input aria-label="Egress allowlist" class="field" placeholder="203.0.113.0/24:443" bind:value={egress}>
 			</label>
 			<label class="flex items-center gap-2 self-end pb-1 text-sm text-neutral-300">
 				<input class="accent-primary-500" type="checkbox" bind:checked={restartOnUnhealthy}>
@@ -377,8 +372,8 @@ async function removeSecret(key: string): Promise<void> {
 				<p class="text-xs text-neutral-500">
 					Env values stay hidden. Memory, concurrency, timeout, network and egress changes need a restart;
 					host, host aliases, health settings, allowed callers and server paths apply immediately. Egress
-					entries are IPv4 or IPv6 CIDR:port pairs for explicit outbound access in untrusted mode. Use wildcard
-					aliases such as *.apps.example.com with a matching certificate.
+					entries are IPv4 or IPv6 CIDR:port pairs for explicit outbound access in untrusted mode. Use
+					wildcard aliases such as *.apps.example.com with a matching certificate.
 				</p>
 			</div>
 		</form>
@@ -386,8 +381,8 @@ async function removeSecret(key: string): Promise<void> {
 		<section class="mt-4 flex max-w-3xl flex-col gap-2 border-t border-line pt-4">
 			<h4 class="text-xs font-semibold tracking-wide text-neutral-400 uppercase">Secrets</h4>
 			<p class="text-xs text-neutral-500">
-				Stored separately from app.json and never shown again. Reference one as secret://KEY in an env
-				value; a restart applies it.
+				Stored separately from app.json and never shown again. Reference one as secret://KEY in an env value; a
+				restart applies it.
 			</p>
 			{#if secretError}
 				<p class="border border-red-500/80 bg-red-500/10 px-2 py-1 text-sm text-red-400" role="alert">
@@ -440,7 +435,7 @@ async function removeSecret(key: string): Promise<void> {
 				Removes the code and stops the process. State is kept unless purge is checked.
 			</p>
 			<label class="flex items-center gap-2 text-sm text-neutral-300">
-				<input class="accent-red-500" bind:checked={purge} type="checkbox">
+				<input class="accent-red-500" type="checkbox" bind:checked={purge}>
 				Also remove the database, backups, logs, deployment history and /data
 			</label>
 			<button class={confirmDelete ? "btn btn-danger" : "btn"} disabled={busy} onclick={remove} type="button">

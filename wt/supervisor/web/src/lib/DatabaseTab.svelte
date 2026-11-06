@@ -17,9 +17,9 @@ interface Props {
 	name: string
 	offset: number
 	onchangelimit(event: Event): void
-	onpage(direction: -1 | 1): void
 	onimport(file: File): Promise<void>
 	onmaintenance(op: string): Promise<void>
+	onpage(direction: -1 | 1): void
 	onreload(): void
 	onselecttable(event: Event): void
 	rows: DatabaseRows | null
@@ -58,7 +58,7 @@ let {
 }: Props = $props()
 
 let maintenanceOp = $state("optimize")
-const selectedStats = $derived(stats.find((entry) => entry.name === table) ?? null)
+const selectedStats = $derived(stats.find(entry => entry.name === table) ?? null)
 
 async function importFile(event: Event): Promise<void> {
 	const input = event.currentTarget as HTMLInputElement
@@ -88,13 +88,7 @@ async function importFile(event: Event): Promise<void> {
 		</div>
 		<div class="flex flex-wrap items-center gap-2">
 			{#if exists}
-				<a
-					class="btn"
-					download={`${name}.db`}
-					href={routes.appDatabasePath(name, "export")}
-				>
-					Export
-				</a>
+				<a class="btn" download={`${name}.db`} href={routes.appDatabasePath(name, "export")}> Export </a>
 				<select aria-label="Maintenance operation" class="field" bind:value={maintenanceOp}>
 					<option value="optimize">Optimize</option>
 					<option value="vacuum">Vacuum</option>
@@ -119,7 +113,7 @@ async function importFile(event: Event): Promise<void> {
 					disabled={importing}
 					onchange={(event): void => void importFile(event)}
 					type="file"
-				/>
+				>
 			</label>
 			<button class="btn" disabled={loading} onclick={onreload} type="button">
 				{loading ? "Refreshing…" : "Refresh"}

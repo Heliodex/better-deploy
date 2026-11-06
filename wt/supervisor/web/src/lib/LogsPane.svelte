@@ -217,7 +217,9 @@ Click to expand`}
 		{#if selected}
 			<div class="shrink-0 border-t border-line-soft bg-neutral-900/60 px-3 py-2 text-xs">
 				<div class="flex flex-wrap items-center gap-2">
-					<time class="text-neutral-500 tabular-nums" datetime={selected.time}>{formatTime(selected.time)}</time>
+					<time class="text-neutral-500 tabular-nums" datetime={selected.time}
+						>{formatTime(selected.time)}</time
+					>
 					<span class="border border-neutral-700 px-1 text-[10px] tracking-wide text-neutral-400 uppercase">
 						{selected.source === "supervisor" ? "proxy" : "app"}
 					</span>
@@ -227,7 +229,9 @@ Click to expand`}
 					<span class="flex-1"></span>
 					<button class="btn" onclick={(): null => (selected = null)} type="button">Close</button>
 				</div>
-				<pre class="mt-1 max-h-32 overflow-auto whitespace-pre-wrap wrap-break-word text-neutral-200">{selected.message}</pre>
+				<pre
+					class="mt-1 max-h-32 overflow-auto whitespace-pre-wrap wrap-break-word text-neutral-200"
+				>{selected.message}</pre>
 			</div>
 		{/if}
 	{/if}
