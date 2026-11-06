@@ -158,6 +158,32 @@ func TestCompatEnumAndPatternFail(t *testing.T) {
 	}
 }
 
+func TestCompatCompositionKeywordChangeFails(t *testing.T) {
+	body := `{"type":"object","properties":{"v":{"anyOf":[{"type":"string"},{"type":"integer"}]}}}`
+
+	if breaks := diffCompatSchemas(t, "t.json", body, body); len(breaks) != 0 {
+		t.Errorf("unchanged composition breaks = %v", breaks)
+	}
+
+	changed := `{"type":"object","properties":{"v":{"anyOf":[{"type":"string"},{"type":"boolean"}]}}}`
+
+	breaks := diffCompatSchemas(t, "t.json", body, changed)
+	if len(breaks) != 1 || !strings.Contains(breaks[0].Rule, "anyOf") {
+		t.Errorf("changed composition breaks = %v", breaks)
+	}
+}
+
+func TestCompatConstraintRuleNamesKeyword(t *testing.T) {
+	oldBody := `{"type":"string","minLength":1}`
+	newBody := `{"type":"string","minLength":3}`
+
+	breaks := diffCompatSchemas(t, "t.json", oldBody, newBody)
+
+	if len(breaks) != 1 || breaks[0].Rule != "keyword minLength changed" {
+		t.Errorf("breaks = %v", breaks)
+	}
+}
+
 func TestCompatRequiredFlipsFail(t *testing.T) {
 	oldBody := `{"type":"object","properties":{"a":{"type":"string"}},"required":["a"]}`
 	newBody := `{"type":"object","properties":{"a":{"type":"string"}}}`

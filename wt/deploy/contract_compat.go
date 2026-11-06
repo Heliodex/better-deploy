@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,174 +34,42 @@ func (b compatBreak) String() string {
 	return fmt.Sprintf("breaking: %s: %s (%s)", where, b.Rule, b.Detail)
 }
 
-// compatConstraintKeywords are JSON Schema keywords that constrain values. Any change to one
-// breaks whichever side lags: tightening breaks new clients against old servers, loosening
-// breaks old clients against new servers.
-var compatConstraintKeywords = []string{
-	"minLength", "maxLength", "minimum", "maximum",
-	"exclusiveMinimum", "exclusiveMaximum", "minItems", "maxItems",
-	"minProperties", "maxProperties", "multipleOf", "uniqueItems",
-	"pattern", "format", "const", "enum", "additionalProperties",
+// compatIgnored lists keywords that never affect validation.
+var compatIgnored = map[string]bool{
+	"$schema": true, "$id": true, "title": true, "description": true,
+	"$comment": true, "default": true, "examples": true,
+	"readOnly": true, "writeOnly": true, "deprecated": true,
 }
 
-// compatMetadataKeywords never affect validation and are ignored by the comparison.
-var compatMetadataKeywords = []string{
-	"title", "$id", "$schema", "$comment", "description", "default",
-	"examples", "readOnly", "writeOnly", "deprecated",
+// compatWalked lists keywords the differ models itself. Every other keyword is compared as a value,
+// so an unfamiliar validation keyword still reports a change instead of passing silently.
+var compatWalked = map[string]bool{
+	"type": true, "properties": true, "required": true, "items": true,
 }
 
-// compatDocs compares baseline and regenerated schema documents file by file.
-func compatDocs(baseline, current map[string]map[string]any) []compatBreak {
-	names := make([]string, 0, len(baseline)+len(current))
-	seen := map[string]bool{}
+// compatDetailMax caps rendered JSON values in reports.
+const compatDetailMax = 120
 
-	for name := range baseline {
-		seen[name] = true
-		names = append(names, name)
+// renderCompatJSON renders one JSON value compactly for reports.
+func renderCompatJSON(value any) string {
+	if value == nil {
+		return "absent"
 	}
 
-	for name := range current {
-		if !seen[name] {
-			names = append(names, name)
-		}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return "?"
 	}
 
-	slices.Sort(names)
-
-	resolver := &compatResolver{baseline: baseline, current: current}
-
-	var breaks []compatBreak
-
-	for _, name := range names {
-		oldDoc, oldOK := baseline[name]
-		newDoc, newOK := current[name]
-
-		switch {
-		case !oldOK:
-			continue
-		case !newOK:
-			breaks = append(breaks, compatBreak{Schema: name, Rule: "schema removed", Detail: "old clients still expect it"})
-		default:
-			breaks = append(breaks, diffCompatValue(name, "", oldDoc, newDoc, "baseline", "current", resolver)...)
-		}
+	if len(data) > compatDetailMax {
+		return string(data[:compatDetailMax-3]) + "..."
 	}
 
-	return breaks
+	return string(data)
 }
 
-// compatResolver resolves sibling-file $refs on either side of the comparison.
-type compatResolver struct {
-	baseline map[string]map[string]any
-	current  map[string]map[string]any
-	stack    []string
-}
-
-func (r *compatResolver) resolve(side, ref string) (map[string]any, error) {
-	file, _, _ := strings.Cut(ref, "#")
-
-	key := side + "\x00" + ref
-	if slices.Contains(r.stack, key) {
-		return nil, fmt.Errorf("reference cycle at %s", ref)
-	}
-
-	var docs map[string]map[string]any
-
-	if side == "baseline" {
-		docs = r.baseline
-	} else {
-		docs = r.current
-	}
-
-	doc, ok := docs[file]
-	if !ok {
-		return nil, fmt.Errorf("unresolvable reference %s", ref)
-	}
-
-	node := doc
-
-	if _, fragment, ok := strings.Cut(ref, "#"); ok {
-		walked, err := walkCompatPointer(node, fragment)
-		if err != nil {
-			return nil, err
-		}
-
-		mapped, ok := walked.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("reference %s does not point at a schema", ref)
-		}
-
-		node = mapped
-	}
-
-	r.stack = append(r.stack, key)
-	defer func() { r.stack = r.stack[:len(r.stack)-1] }()
-
-	return node, nil
-}
-
-// walkCompatPointer follows a JSON pointer fragment like /properties/counts.
-func walkCompatPointer(node any, fragment string) (any, error) {
-	current := node
-
-	for part := range strings.SplitSeq(strings.TrimPrefix(fragment, "/"), "/") {
-		part = strings.ReplaceAll(strings.ReplaceAll(part, "~1", "/"), "~0", "~")
-
-		mapped, ok := current.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("reference fragment %s does not resolve", fragment)
-		}
-
-		current, ok = mapped[part]
-		if !ok {
-			return nil, fmt.Errorf("reference fragment %s does not resolve", fragment)
-		}
-	}
-
-	return current, nil
-}
-
-// compatRefOf returns the $ref target when the node is a reference.
-func compatRefOf(node any) (string, bool) {
-	mapped, ok := node.(map[string]any)
-	if !ok {
-		return "", false
-	}
-
-	ref, ok := mapped["$ref"].(string)
-
-	return ref, ok
-}
-
-// diffCompatValue compares two schema nodes and reports every breaking change.
-func diffCompatValue(schema, path string, oldNode, newNode any, oldSide, newSide string, resolver *compatResolver) []compatBreak {
-	oldNode, newNode, refBreaks, resolved := resolveCompatRefs(schema, path, oldNode, newNode, oldSide, newSide, resolver)
-	if !resolved {
-		return refBreaks
-	}
-
-	oldMap, oldIsMap := oldNode.(map[string]any)
-	newMap, newIsMap := newNode.(map[string]any)
-
-	if !oldIsMap || !newIsMap {
-		if reflect.DeepEqual(oldNode, newNode) {
-			return nil
-		}
-
-		return []compatBreak{{Schema: schema, Path: path, Rule: "shape changed", Detail: renderCompatJSON(oldNode) + " → " + renderCompatJSON(newNode)}}
-	}
-
-	return slices.Concat(
-		diffCompatType(schema, path, oldMap["type"], newMap["type"]),
-		diffCompatObject(schema, path, oldMap, newMap, oldSide, newSide, resolver),
-		diffCompatRequired(schema, path, oldMap, newMap),
-		diffCompatConstraints(schema, path, oldMap, newMap),
-		diffCompatComposed(schema, path, oldMap, newMap, oldSide, newSide, resolver),
-		diffCompatUnknown(schema, path, oldMap, newMap),
-	)
-}
-
-// compatTypeSet normalizes a type keyword to a set of type names.
-func compatTypeSet(value any) map[string]bool {
+// compatTypeNames normalizes a type keyword to a set of type names.
+func compatTypeNames(value any) map[string]bool {
 	set := map[string]bool{}
 
 	switch typed := value.(type) {
@@ -219,42 +88,29 @@ func compatTypeSet(value any) map[string]bool {
 
 // diffCompatType compares type keywords. Dropping null is safe; every other change breaks a laggard.
 func diffCompatType(schema, path string, oldValue, newValue any) []compatBreak {
-	oldSet := compatTypeSet(oldValue)
-	newSet := compatTypeSet(newValue)
+	oldSet := compatTypeNames(oldValue)
+	newSet := compatTypeNames(newValue)
 
 	if reflect.DeepEqual(oldSet, newSet) {
 		return nil
 	}
 
-	if len(oldSet) == 0 || len(newSet) == 0 {
-		return []compatBreak{{Schema: schema, Path: path, Rule: "type changed", Detail: renderCompatJSON(oldValue) + " → " + renderCompatJSON(newValue)}}
-	}
+	if len(oldSet) > 0 && len(newSet) > 0 {
+		oldNull, newNull := oldSet["null"], newSet["null"]
 
-	oldNull := oldSet["null"]
-	newNull := newSet["null"]
+		delete(oldSet, "null")
+		delete(newSet, "null")
 
-	if reflect.DeepEqual(compatBaseTypes(oldSet), compatBaseTypes(newSet)) {
-		if oldNull && !newNull {
-			return nil
+		if reflect.DeepEqual(oldSet, newSet) {
+			if oldNull && !newNull {
+				return nil
+			}
+
+			return []compatBreak{{Schema: schema, Path: path, Rule: "now nullable", Detail: "old clients reject null"}}
 		}
-
-		return []compatBreak{{Schema: schema, Path: path, Rule: "now nullable", Detail: "old clients reject null"}}
 	}
 
 	return []compatBreak{{Schema: schema, Path: path, Rule: "type changed", Detail: renderCompatJSON(oldValue) + " → " + renderCompatJSON(newValue)}}
-}
-
-// compatBaseTypes returns the type set without null.
-func compatBaseTypes(set map[string]bool) map[string]bool {
-	base := make(map[string]bool, len(set))
-
-	for name := range set {
-		if name != "null" {
-			base[name] = true
-		}
-	}
-
-	return base
 }
 
 // compatProps returns the properties map of an object schema, or an empty map.
@@ -281,8 +137,39 @@ func compatRequiredSet(node map[string]any) map[string]bool {
 	return set
 }
 
-// diffCompatObject compares properties, required and items of two object schemas.
-func diffCompatObject(schema, path string, oldMap, newMap map[string]any, oldSide, newSide string, resolver *compatResolver) []compatBreak {
+// compatPath joins a child name onto a dotted schema path.
+func compatPath(path, name string) string {
+	if path == "" {
+		return name
+	}
+
+	return path + "." + name
+}
+
+// diffCompatSchema compares two schema nodes and reports every breaking change.
+func diffCompatSchema(schema, path string, oldNode, newNode any) []compatBreak {
+	oldMap, oldOK := oldNode.(map[string]any)
+	newMap, newOK := newNode.(map[string]any)
+
+	if !oldOK || !newOK {
+		if reflect.DeepEqual(oldNode, newNode) {
+			return nil
+		}
+
+		return []compatBreak{{Schema: schema, Path: path, Rule: "shape changed", Detail: renderCompatJSON(oldNode) + " → " + renderCompatJSON(newNode)}}
+	}
+
+	return slices.Concat(
+		diffCompatType(schema, path, oldMap["type"], newMap["type"]),
+		diffCompatProperties(schema, path, oldMap, newMap),
+		diffCompatRequired(schema, path, oldMap, newMap),
+		diffCompatItems(schema, path, oldMap, newMap),
+		diffCompatKeywords(schema, path, oldMap, newMap),
+	)
+}
+
+// diffCompatProperties compares properties, including the rename hint and nested schemas.
+func diffCompatProperties(schema, path string, oldMap, newMap map[string]any) []compatBreak {
 	oldProps := compatProps(oldMap)
 	newProps := compatProps(newMap)
 	newRequired := compatRequiredSet(newMap)
@@ -304,7 +191,7 @@ func diffCompatObject(schema, path string, oldMap, newMap map[string]any, oldSid
 	slices.Sort(added)
 	slices.Sort(removed)
 
-	breaks := make([]compatBreak, 0, len(added)+len(removed)+len(oldProps))
+	var breaks []compatBreak
 
 	if len(added) == 1 && len(removed) == 1 && reflect.DeepEqual(oldProps[removed[0]], newProps[added[0]]) {
 		breaks = append(breaks, compatBreak{Schema: schema, Path: path, Rule: "field renamed", Detail: removed[0] + " → " + added[0]})
@@ -321,109 +208,12 @@ func diffCompatObject(schema, path string, oldMap, newMap map[string]any, oldSid
 	}
 
 	for name, oldChild := range oldProps {
-		newChild, ok := newProps[name]
-		if !ok {
-			continue
+		if newChild, ok := newProps[name]; ok {
+			breaks = append(breaks, diffCompatSchema(schema, compatPath(path, name), oldChild, newChild)...)
 		}
-
-		breaks = append(breaks, diffCompatValue(schema, compatPath(path, name), oldChild, newChild, oldSide, newSide, resolver)...)
 	}
 
-	return append(breaks, diffCompatItems(schema, path, oldMap["items"], newMap["items"], oldSide, newSide, resolver)...)
-}
-
-// resolveCompatRefs follows $refs on either side. It returns the resolved nodes with
-// resolved true, or a report with resolved false when there is nothing more to compare.
-func resolveCompatRefs(schema, path string, oldNode, newNode any, oldSide, newSide string, resolver *compatResolver) (any, any, []compatBreak, bool) {
-	oldRef, oldIsRef := compatRefOf(oldNode)
-	newRef, newIsRef := compatRefOf(newNode)
-
-	if !oldIsRef && !newIsRef {
-		return oldNode, newNode, nil, true
-	}
-
-	if oldIsRef && newIsRef && oldRef == newRef {
-		return resolveCompatSameRef(schema, path, oldSide, newSide, oldRef, resolver)
-	}
-
-	if oldIsRef {
-		resolved, err := resolver.resolve(oldSide, oldRef)
-		if err != nil {
-			return nil, nil, []compatBreak{{Schema: schema, Path: path, Rule: "reference unresolvable", Detail: oldRef}}, false
-		}
-
-		oldNode = resolved
-	}
-
-	if newIsRef {
-		resolved, err := resolver.resolve(newSide, newRef)
-		if err != nil {
-			return nil, nil, []compatBreak{{Schema: schema, Path: path, Rule: "reference unresolvable", Detail: newRef}}, false
-		}
-
-		newNode = resolved
-	}
-
-	return oldNode, newNode, nil, true
-}
-
-// resolveCompatSameRef compares two nodes that reference the same target.
-func resolveCompatSameRef(schema, path, oldSide, newSide, ref string, resolver *compatResolver) (any, any, []compatBreak, bool) {
-	resolvedOld, oldErr := resolver.resolve(oldSide, ref)
-	resolvedNew, newErr := resolver.resolve(newSide, ref)
-
-	if oldErr == nil && newErr == nil && reflect.DeepEqual(resolvedOld, resolvedNew) {
-		return nil, nil, nil, false
-	}
-
-	if oldErr != nil {
-		return nil, nil, []compatBreak{{Schema: schema, Path: path, Rule: "reference unresolvable", Detail: ref}}, false
-	}
-
-	if newErr != nil {
-		return nil, nil, []compatBreak{{Schema: schema, Path: path, Rule: "reference unresolvable", Detail: ref}}, false
-	}
-
-	return resolvedOld, resolvedNew, nil, true
-}
-
-// compatPath joins a child name onto a dotted schema path.
-func compatPath(path, name string) string {
-	if path == "" {
-		return name
-	}
-
-	return path + "." + name
-}
-
-// diffCompatItems compares array item schemas, including tuple form.
-func diffCompatItems(schema, path string, oldNode, newNode any, oldSide, newSide string, resolver *compatResolver) []compatBreak {
-	if oldNode == nil && newNode == nil {
-		return nil
-	}
-
-	if oldNode == nil || newNode == nil {
-		return []compatBreak{{Schema: schema, Path: path, Rule: "array items changed", Detail: renderCompatJSON(oldNode) + " → " + renderCompatJSON(newNode)}}
-	}
-
-	oldTuple, oldIsTuple := oldNode.([]any)
-	newTuple, newIsTuple := newNode.([]any)
-
-	if oldIsTuple || newIsTuple {
-		if !oldIsTuple || !newIsTuple || len(oldTuple) != len(newTuple) {
-			return []compatBreak{{Schema: schema, Path: path, Rule: "tuple shape changed", Detail: renderCompatJSON(oldNode) + " → " + renderCompatJSON(newNode)}}
-		}
-
-		var breaks []compatBreak
-
-		for i := range oldTuple {
-			breaks = append(breaks, diffCompatValue(schema, fmt.Sprintf("%s[%d]", path, i), oldTuple[i], newTuple[i], oldSide, newSide, resolver)...)
-		}
-
-		return breaks
-	}
-
-	return diffCompatValue(schema, path+"[]", oldNode, newNode, oldSide, newSide, resolver)
+	return breaks
 }
 
 // diffCompatRequired compares required sets. Either direction breaks a laggard.
@@ -437,21 +227,13 @@ func diffCompatRequired(schema, path string, oldMap, newMap map[string]any) []co
 	var breaks []compatBreak
 
 	for name := range newRequired {
-		if _, existed := oldProps[name]; !existed {
-			continue
-		}
-
-		if !oldRequired[name] {
+		if _, existed := oldProps[name]; existed && !oldRequired[name] {
 			breaks = append(breaks, compatBreak{Schema: schema, Path: compatPath(path, name), Rule: "now required", Detail: "old servers omit it"})
 		}
 	}
 
 	for name := range oldRequired {
-		if _, kept := newProps[name]; !kept {
-			continue
-		}
-
-		if !newRequired[name] {
+		if _, kept := newProps[name]; kept && !newRequired[name] {
 			breaks = append(breaks, compatBreak{Schema: schema, Path: compatPath(path, name), Rule: "now optional", Detail: "old clients still require it"})
 		}
 	}
@@ -459,109 +241,193 @@ func diffCompatRequired(schema, path string, oldMap, newMap map[string]any) []co
 	return breaks
 }
 
-// diffCompatConstraints compares value keywords. Any addition, removal or change breaks a laggard.
-func diffCompatConstraints(schema, path string, nodeOld, nodeNew map[string]any) []compatBreak {
-	var breaks []compatBreak
+// diffCompatItems compares array item schemas.
+func diffCompatItems(schema, path string, oldMap, newMap map[string]any) []compatBreak {
+	oldItems, oldOK := oldMap["items"]
+	newItems, newOK := newMap["items"]
 
-	for _, keyword := range compatConstraintKeywords {
-		oldValue, oldOK := nodeOld[keyword]
-		newValue, newOK := nodeNew[keyword]
-
-		switch {
-		case !oldOK && !newOK:
-			continue
-		case !oldOK || !newOK || !reflect.DeepEqual(oldValue, newValue):
-			breaks = append(breaks, compatBreak{Schema: schema, Path: path, Rule: "constraint " + keyword + " changed", Detail: renderCompatJSON(oldValue) + " → " + renderCompatJSON(newValue)})
-		}
+	if !oldOK && !newOK {
+		return nil
 	}
 
-	return breaks
+	if !oldOK || !newOK {
+		return []compatBreak{{Schema: schema, Path: path, Rule: "array items changed", Detail: renderCompatJSON(oldItems) + " → " + renderCompatJSON(newItems)}}
+	}
+
+	return diffCompatSchema(schema, path+"[]", oldItems, newItems)
 }
 
-// diffCompatComposed compares anyOf, oneOf and allOf branches by index.
-func diffCompatComposed(schema, path string, oldMap, newMap map[string]any, oldSide, newSide string, resolver *compatResolver) []compatBreak {
-	var breaks []compatBreak
-
-	for _, keyword := range []string{"anyOf", "oneOf", "allOf"} {
-		oldBranches, oldOK := oldMap[keyword].([]any)
-		newBranches, newOK := newMap[keyword].([]any)
-
-		switch {
-		case !oldOK && !newOK:
-			continue
-		case !oldOK || !newOK:
-			breaks = append(breaks, compatBreak{Schema: schema, Path: path, Rule: "composition " + keyword + " changed", Detail: renderCompatJSON(oldMap[keyword]) + " → " + renderCompatJSON(newMap[keyword])})
-		case len(oldBranches) != len(newBranches):
-			breaks = append(breaks, compatBreak{Schema: schema, Path: path, Rule: "composition " + keyword + " changed", Detail: fmt.Sprintf("%d → %d branches", len(oldBranches), len(newBranches))})
-		default:
-			for i := range oldBranches {
-				breaks = append(breaks, diffCompatValue(schema, fmt.Sprintf("%s[%d]", path, i), oldBranches[i], newBranches[i], oldSide, newSide, resolver)...)
-			}
-		}
-	}
-
-	return breaks
-}
-
-// diffCompatUnknown flags changes to validation keywords the classifier does not model, and ignores metadata.
-func diffCompatUnknown(schema, path string, oldMap, newMap map[string]any) []compatBreak {
-	known := map[string]bool{
-		"$ref": true, "type": true, "properties": true, "required": true, "items": true,
-		"anyOf": true, "oneOf": true, "allOf": true, "prefixItems": true, "contains": true,
-	}
-
-	for _, keyword := range compatConstraintKeywords {
-		known[keyword] = true
-	}
-
-	for _, keyword := range compatMetadataKeywords {
-		known[keyword] = true
-	}
-
-	names := map[string]bool{}
-
+// diffCompatKeywords compares every keyword the differ does not model, including constraints and
+// composition. A change to any of them is reported, which stays safe when the generator grows.
+func diffCompatKeywords(schema, path string, oldMap, newMap map[string]any) []compatBreak {
+	seen := make(map[string]bool, len(oldMap)+len(newMap))
 	for keyword := range oldMap {
-		names[keyword] = true
+		seen[keyword] = true
 	}
-
 	for keyword := range newMap {
-		names[keyword] = true
+		seen[keyword] = true
 	}
 
 	var breaks []compatBreak
 
-	for keyword := range names {
-		if known[keyword] || strings.HasPrefix(keyword, "x-") {
+	for _, keyword := range slices.Sorted(maps.Keys(seen)) {
+		if compatWalked[keyword] || compatIgnored[keyword] || strings.HasPrefix(keyword, "x-") {
 			continue
 		}
 
-		if !reflect.DeepEqual(oldMap[keyword], newMap[keyword]) {
-			breaks = append(breaks, compatBreak{Schema: schema, Path: path, Rule: "keyword " + keyword + " changed", Detail: renderCompatJSON(oldMap[keyword]) + " → " + renderCompatJSON(newMap[keyword])})
+		oldValue, oldOK := oldMap[keyword]
+		newValue, newOK := newMap[keyword]
+
+		if oldOK == newOK && reflect.DeepEqual(oldValue, newValue) {
+			continue
 		}
+
+		breaks = append(breaks, compatBreak{Schema: schema, Path: path, Rule: "keyword " + keyword + " changed", Detail: renderCompatJSON(oldValue) + " → " + renderCompatJSON(newValue)})
 	}
 
 	return breaks
 }
 
-// compatDetailMax caps rendered JSON values in reports.
-const compatDetailMax = 120
-
-// renderCompatJSON renders one JSON value compactly for reports.
-func renderCompatJSON(value any) string {
-	if value == nil {
-		return "absent"
+// compareCompatBreaks orders reports by schema, path and rule.
+func compareCompatBreaks(a, b compatBreak) int {
+	if a.Schema != b.Schema {
+		return strings.Compare(a.Schema, b.Schema)
 	}
 
-	data, err := json.Marshal(value)
-	if err != nil {
-		return "?"
+	if a.Path != b.Path {
+		return strings.Compare(a.Path, b.Path)
 	}
 
-	if len(data) > compatDetailMax {
-		return string(data[:compatDetailMax-3]) + "..."
+	return strings.Compare(a.Rule, b.Rule)
+}
+
+// compatDocs compares baseline and regenerated schema documents file by file.
+func compatDocs(baseline, current map[string]map[string]any) []compatBreak {
+	names := slices.Sorted(maps.Keys(baseline))
+	for name := range current {
+		if _, ok := baseline[name]; !ok {
+			names = append(names, name)
+		}
 	}
 
-	return string(data)
+	var breaks []compatBreak
+
+	for _, name := range names {
+		oldDoc, oldOK := baseline[name]
+		newDoc, newOK := current[name]
+
+		switch {
+		case !oldOK:
+			continue
+		case !newOK:
+			breaks = append(breaks, compatBreak{Schema: name, Rule: "schema removed", Detail: "old clients still expect it"})
+			continue
+		}
+
+		oldInlined, err := inlineCompatRefs(baseline, oldDoc, nil)
+		if err != nil {
+			breaks = append(breaks, compatBreak{Schema: name, Rule: "reference unresolvable", Detail: err.Error()})
+			continue
+		}
+
+		newInlined, err := inlineCompatRefs(current, newDoc, nil)
+		if err != nil {
+			breaks = append(breaks, compatBreak{Schema: name, Rule: "reference unresolvable", Detail: err.Error()})
+			continue
+		}
+
+		breaks = append(breaks, diffCompatSchema(name, "", oldInlined, newInlined)...)
+	}
+
+	slices.SortFunc(breaks, compareCompatBreaks)
+
+	return breaks
+}
+
+// inlineCompatRefs replaces sibling-file references with their targets so the differ sees plain trees.
+// A recursive reference is left in place; its target document is still compared on its own.
+func inlineCompatRefs(docs map[string]map[string]any, node any, stack []string) (any, error) {
+	switch typed := node.(type) {
+	case map[string]any:
+		ref, isRef := typed["$ref"].(string)
+		if !isRef {
+			out := make(map[string]any, len(typed))
+
+			for key, value := range typed {
+				inlined, err := inlineCompatRefs(docs, value, stack)
+				if err != nil {
+					return nil, err
+				}
+
+				out[key] = inlined
+			}
+
+			return out, nil
+		}
+
+		target, err := resolveCompatRef(docs, ref)
+		if err != nil {
+			return nil, err
+		}
+
+		if slices.Contains(stack, ref) {
+			return typed, nil
+		}
+
+		return inlineCompatRefs(docs, target, append(stack, ref))
+	case []any:
+		out := make([]any, len(typed))
+
+		for i, value := range typed {
+			inlined, err := inlineCompatRefs(docs, value, stack)
+			if err != nil {
+				return nil, err
+			}
+
+			out[i] = inlined
+		}
+
+		return out, nil
+	default:
+		return node, nil
+	}
+}
+
+// resolveCompatRef resolves a sibling-file reference like message.json or message.json#/properties/id.
+func resolveCompatRef(docs map[string]map[string]any, ref string) (any, error) {
+	file, fragment, _ := strings.Cut(ref, "#")
+
+	doc, ok := docs[file]
+	if !ok {
+		return nil, fmt.Errorf("unresolvable reference %s", ref)
+	}
+
+	if fragment == "" {
+		return doc, nil
+	}
+
+	return walkCompatPointer(doc, fragment)
+}
+
+// walkCompatPointer follows a JSON pointer fragment like /properties/counts.
+func walkCompatPointer(node any, fragment string) (any, error) {
+	current := node
+
+	for part := range strings.SplitSeq(strings.TrimPrefix(fragment, "/"), "/") {
+		part = strings.ReplaceAll(strings.ReplaceAll(part, "~1", "/"), "~0", "~")
+
+		mapped, ok := current.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("reference fragment %s does not resolve", fragment)
+		}
+
+		current, ok = mapped[part]
+		if !ok {
+			return nil, fmt.Errorf("reference fragment %s does not resolve", fragment)
+		}
+	}
+
+	return current, nil
 }
 
 // loadCompatDocs parses every schema document in the generated tree.
@@ -667,14 +533,6 @@ func runCompat(dir, web, appName, ref string) error {
 	}
 
 	breaks := compatDocs(baseline, current)
-
-	slices.SortFunc(breaks, func(a, b compatBreak) int {
-		if a.Schema != b.Schema {
-			return strings.Compare(a.Schema, b.Schema)
-		}
-
-		return strings.Compare(a.Path, b.Path)
-	})
 
 	if len(breaks) == 0 {
 		fmt.Fprintln(os.Stderr, "compat: no breaking changes")
