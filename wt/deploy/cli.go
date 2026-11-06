@@ -236,7 +236,33 @@ func checkAPI(status int, body []byte) error {
 		return nil
 	}
 
-	return fmt.Errorf("status %d: %s", status, strings.TrimSpace(string(body)))
+	text := strings.TrimSpace(string(body))
+	if strings.HasPrefix(text, "<") {
+		if title := htmlErrorTitle(text); title != "" {
+			return fmt.Errorf("status %d: %s", status, title)
+		}
+
+		return fmt.Errorf("status %d: non-JSON error page (%d bytes)", status, len(body))
+	}
+
+	return fmt.Errorf("status %d: %s", status, text)
+}
+
+// htmlErrorTitle pulls the title out of an HTML error page, so an outage reads as one line instead of a markup dump.
+func htmlErrorTitle(page string) string {
+	lower := strings.ToLower(page)
+	start := strings.Index(lower, "<title>")
+
+	if start < 0 {
+		return ""
+	}
+
+	title := strings.TrimSpace(page[start+len("<title>"):])
+	if end := strings.Index(strings.ToLower(title), "</title>"); end >= 0 {
+		title = strings.TrimSpace(title[:end])
+	}
+
+	return title
 }
 
 func printRawOrJSON(cfg clientOptions, body []byte) {

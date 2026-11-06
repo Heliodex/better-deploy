@@ -248,6 +248,10 @@ func buildBundle(cfg *deployConfig) (manifest, []byte, buildStatus, error) {
 		return m, nil, buildStatus{}, err
 	}
 
+	if cfg.overlayEnv {
+		overlayDevEnv(&m)
+	}
+
 	if cfg.app != "" {
 		if !validName(cfg.app) {
 			return m, nil, buildStatus{}, fmt.Errorf("invalid app name %q", cfg.app)
@@ -271,6 +275,59 @@ func buildBundle(cfg *deployConfig) (manifest, []byte, buildStatus, error) {
 	}
 
 	return m, data, status, nil
+}
+
+// checkDeploySecrets fails fast when the manifest references secrets the supervisor does not have, instead of failing after the build and upload.
+func checkDeploySecrets(cfg *deployConfig, m manifest) error {
+	var wanted []string
+
+	for _, value := range m.Env {
+		name, ok := strings.CutPrefix(value, "secret://")
+		if !ok || name == "" {
+			continue
+		}
+
+		wanted = append(wanted, name)
+	}
+
+	if len(wanted) == 0 {
+		return nil
+	}
+
+	client := clientOptions{host: cfg.host, token: cfg.token, jsonOut: cfg.jsonOut, timeout: deployPollTimeout}
+
+	status, _, body, err := apiDo(client, http.MethodGet, "/apps/"+m.Name+"/secrets", nil, "")
+	if err != nil {
+		return err
+	}
+
+	if err := checkAPI(status, body); err != nil {
+		return err
+	}
+
+	var result secretKeysResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return fmt.Errorf("read secrets: %w", err)
+	}
+
+	have := map[string]struct{}{}
+	for _, key := range result.Keys {
+		have[key] = struct{}{}
+	}
+
+	var missing []string
+
+	for _, name := range wanted {
+		if _, ok := have[name]; !ok {
+			missing = append(missing, name)
+		}
+	}
+
+	if len(missing) > 0 {
+		return fmt.Errorf("missing secrets for app %q: %s (set with wt secrets %s set KEY)", m.Name, strings.Join(missing, ", "), m.Name)
+	}
+
+	return nil
 }
 
 // deploy builds the bundle and uploads it, omitting the component when the supervisor already runs the same wasm.
@@ -301,6 +358,10 @@ func deploy(args []string) error {
 
 	preflight, err := preflightDeploy(cfg)
 	if err != nil {
+		return err
+	}
+
+	if err := checkDeploySecrets(cfg, m); err != nil {
 		return err
 	}
 

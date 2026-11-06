@@ -66,3 +66,24 @@ func TestCompletionAndHelpDoNotPanic(t *testing.T) {
 		t.Error("unknown shell was accepted")
 	}
 }
+
+func TestCheckAPISummarizesHTMLErrors(t *testing.T) {
+	err := checkAPI(http.StatusServiceUnavailable, []byte(`<!doctype html><html><head><title>503 · Orchard</title></head><body>down</body></html>`))
+	if err == nil || err.Error() != "status 503: 503 · Orchard" {
+		t.Errorf("html error = %v, want the page title", err)
+	}
+
+	err = checkAPI(http.StatusBadGateway, []byte(`<html><body>no title here</body></html>`))
+	if err == nil || err.Error() != "status 502: non-JSON error page (39 bytes)" {
+		t.Errorf("title-less error = %v, want a byte count", err)
+	}
+
+	if err := checkAPI(http.StatusOK, []byte(`{"ok":true}`)); err != nil {
+		t.Errorf("success should pass: %v", err)
+	}
+
+	err = checkAPI(http.StatusUnauthorized, []byte(`{"error":"nope","code":"denied"}`))
+	if err == nil || err.Error() != `status 401: {"error":"nope","code":"denied"}` {
+		t.Errorf("json error = %v, want the body", err)
+	}
+}

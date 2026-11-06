@@ -462,3 +462,45 @@ func TestCheckStaticSvelteKit(t *testing.T) {
 		}
 	}
 }
+
+func TestOverlayDevEnvOverridesManifestKeys(t *testing.T) {
+	m := manifest{Env: map[string]string{"KEEP": "manifest", "SWITCH": "manifest", "SECRET": "secret://NAME"}}
+
+	t.Setenv("SWITCH", "client")
+	t.Setenv("SECRET", "plaintext")
+	t.Setenv("INJECTED", "client")
+
+	overlayDevEnv(&m)
+
+	if m.Env["SWITCH"] != "client" {
+		t.Errorf("SWITCH = %q, want the client value", m.Env["SWITCH"])
+	}
+
+	if m.Env["KEEP"] != "manifest" {
+		t.Errorf("KEEP = %q, want the manifest value", m.Env["KEEP"])
+	}
+
+	if m.Env["SECRET"] != "plaintext" {
+		t.Errorf("SECRET = %q, want the explicit client value over the secret reference", m.Env["SECRET"])
+	}
+
+	if _, ok := m.Env["INJECTED"]; ok {
+		t.Error("unknown keys must not enter the manifest")
+	}
+}
+
+func TestDevWorkDirIsolatesPorts(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "app.json"), `{"name":"demo"}`)
+
+	first := devWorkDir(&devConfig{port: 8080}, []string{dir})
+	second := devWorkDir(&devConfig{port: 8090}, []string{dir})
+
+	if first == second {
+		t.Errorf("same work dir %q for two ports", first)
+	}
+
+	if devWorkDir(&devConfig{port: 8080}, []string{dir}) != first {
+		t.Error("same port should reuse its state dir")
+	}
+}

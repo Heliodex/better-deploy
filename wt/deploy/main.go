@@ -15,6 +15,7 @@ type deployConfig struct {
 	dir, app, host, token, wasmtime, target, appHost, out                   string
 	buildComponentCommand                                                   string
 	skipBuild, skipCompile, skipStatic, jsonOut, forceBuild, skipRouteCheck bool
+	overlayEnv                                                              bool
 	targetConfigured                                                        bool
 	start                                                                   time.Time
 }

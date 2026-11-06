@@ -362,14 +362,27 @@ func resolveDevVite(cfg *devConfig, dirs []string) (*viteDev, error) {
 	return vite, nil
 }
 
-// devWorkDir names the temporary state tree for one dev run.
+// devWorkDir names the temporary state tree for one dev run. The port is part of the key so two supervisors for the same app do not share runner state.
 func devWorkDir(cfg *devConfig, dirs []string) string {
 	if len(dirs) == 1 {
 		m, _ := readManifest(dirs[0])
-		return filepath.Join(os.TempDir(), "wt-dev", m.Name)
+		return filepath.Join(os.TempDir(), "wt-dev", fmt.Sprintf("%s-%d", m.Name, cfg.port))
 	}
 
 	return filepath.Join(os.TempDir(), "wt-dev", "workspace-"+filepath.Base(filepath.Clean(cfg.workspace)))
+}
+
+// overlayDevEnv lets client environment override manifest values in dev, so `FOO=1 wt dev` behaves like the README says. Only keys the manifest already defines are touched, and production deploys stay manifest-pinned.
+func overlayDevEnv(m *manifest) {
+	if m.Env == nil {
+		return
+	}
+
+	for key := range m.Env {
+		if value, ok := os.LookupEnv(key); ok {
+			m.Env[key] = value
+		}
+	}
 }
 
 // prepareDevState creates the apps and state directories the dev supervisor uses.
@@ -454,6 +467,7 @@ func deployDevApps(cfg *devConfig, dirs []string, deployAddr, target string, vit
 			appHost:     host,
 			skipBuild:   cfg.skipBuild,
 			skipCompile: cfg.skipCompile,
+			overlayEnv:  true,
 		}
 		if vite != nil && dir == vite.appDir {
 			dcfg.buildComponentCommand = vite.build
