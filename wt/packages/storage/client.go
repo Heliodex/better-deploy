@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -228,14 +229,41 @@ func (c *Client) Exec(ctx context.Context, query string, args ...any) (Result, e
 	return Result{RowsAffected: resp.RowsAffected, LastInsertID: resp.LastInsertID}, nil
 }
 
+// MaxTransactionStatements caps one storage transaction at the service limit. Larger Transaction calls run as consecutive batches.
+const MaxTransactionStatements = 64
+
 // Transaction runs statements in one transaction and returns each result, including rows for statements marked Query. A failure rolls back every statement.
+//
+// Calls larger than the service limit run as consecutive batches, so a big ingest cannot fail on size alone. Batches are not atomic with each other: when a later batch fails, earlier batches stay committed.
 func (c *Client) Transaction(ctx context.Context, statements ...TransactionStatement) ([]TransactionResult, error) {
 	if len(statements) == 0 {
 		return nil, nil
 	}
 
-	req := transactionRequest{Statements: make([]transactionStatement, len(statements))}
-	for i, statement := range statements {
+	batches := (len(statements) + MaxTransactionStatements - 1) / MaxTransactionStatements
+
+	var out []TransactionResult
+
+	index := 0
+
+	for batch := range slices.Chunk(statements, MaxTransactionStatements) {
+		index++
+
+		results, err := c.transact(ctx, batch)
+		if err != nil {
+			return nil, fmt.Errorf("transaction batch %d of %d: %w", index, batches, err)
+		}
+
+		out = append(out, results...)
+	}
+
+	return out, nil
+}
+
+// transact posts one batch within the service limit. Callers use Transaction, which splits larger calls.
+func (c *Client) transact(ctx context.Context, batch []TransactionStatement) ([]TransactionResult, error) {
+	req := transactionRequest{Statements: make([]transactionStatement, len(batch))}
+	for i, statement := range batch {
 		req.Statements[i] = transactionStatement{SQL: statement.SQL, Params: encodeParams(statement.Args), Query: statement.Query}
 	}
 

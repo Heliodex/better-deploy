@@ -664,3 +664,106 @@ func TestClientWriteReturning(t *testing.T) {
 		t.Errorf("row = %q %q", id, value)
 	}
 }
+
+func TestClientTransactionChunksBatches(t *testing.T) {
+	var sizes []int
+
+	var numbered int
+
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/transaction" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+
+		var received transactionRequest
+		if err := json.UnmarshalRead(r.Body, &received); err != nil {
+			t.Errorf("body: %v", err)
+		}
+
+		sizes = append(sizes, len(received.Statements))
+
+		results := make([]string, len(received.Statements))
+		for i := range results {
+			numbered++
+			results[i] = fmt.Sprintf(`{"rows_affected":%d}`, numbered)
+		}
+
+		_, _ = io.WriteString(w, `{"results":[`+strings.Join(results, ",")+`]}`)
+	})
+
+	statements := make([]TransactionStatement, MaxTransactionStatements+6)
+	for i := range statements {
+		statements[i] = TransactionStatement{SQL: `insert into things (value) values (?)`, Args: []any{i}}
+	}
+
+	results, err := client.Transaction(context.Background(), statements...)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(sizes) != 2 || sizes[0] != MaxTransactionStatements || sizes[1] != 6 {
+		t.Fatalf("batch sizes = %v, want [%d 6]", sizes, MaxTransactionStatements)
+	}
+
+	if len(results) != len(statements) {
+		t.Fatalf("results = %d, want %d", len(results), len(statements))
+	}
+
+	for i, result := range results {
+		if result.RowsAffected != int64(i+1) {
+			t.Fatalf("results[%d].rows = %d, want %d in order", i, result.RowsAffected, i+1)
+		}
+	}
+}
+
+func TestClientTransactionKeepsSmallCallsWhole(t *testing.T) {
+	var calls int
+
+	client := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+
+		_, _ = io.WriteString(w, `{"results":[{"rows_affected":1}]}`)
+	})
+
+	statements := make([]TransactionStatement, MaxTransactionStatements)
+	for i := range statements {
+		statements[i] = TransactionStatement{SQL: `insert into things (value) values (?)`}
+	}
+
+	if _, err := client.Transaction(context.Background(), statements...); err != nil {
+		t.Fatal(err)
+	}
+
+	if calls != 1 {
+		t.Errorf("calls = %d, want one batch at the limit", calls)
+	}
+}
+
+func TestClientTransactionNamesFailingBatch(t *testing.T) {
+	calls := 0
+
+	client := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+
+		if calls == 1 {
+			_, _ = io.WriteString(w, `{"results":[{"rows_affected":1}]}`)
+			return
+		}
+
+		http.Error(w, "boom", http.StatusInternalServerError)
+	})
+
+	statements := make([]TransactionStatement, MaxTransactionStatements+1)
+	for i := range statements {
+		statements[i] = TransactionStatement{SQL: `insert into things (value) values (?)`}
+	}
+
+	results, err := client.Transaction(context.Background(), statements...)
+	if err == nil || results != nil {
+		t.Fatalf("results, err = %v, %v, want nil and a batch error", results, err)
+	}
+
+	if got := err.Error(); !strings.Contains(got, "batch 2 of 2") {
+		t.Errorf("error = %q, want the failing batch", got)
+	}
+}
