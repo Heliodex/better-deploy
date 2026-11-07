@@ -199,6 +199,60 @@ var helpCommands = []helpCommand{
 		client: true,
 	},
 	{
+		name:    "auth",
+		summary: "save the supervisor URL and deploy token",
+		usage:   []string{"wt auth <login|status|logout> [flags]"},
+		details: []string{"Credentials are stored in the shared config file with 0600 permissions. Use a scoped deploy token, not the admin bootstrap token."},
+		examples: []string{
+			"wt auth login --host https://wt.example.com",
+			"wt auth status --check",
+			"wt auth logout",
+		},
+		subs: []helpCommand{
+			{
+				name:    "login",
+				summary: "save a supervisor URL and deploy token",
+				usage:   []string{"wt auth login [flags]"},
+				details: []string{"The token is read from the terminal without echo or from stdin when piped. It is checked against GET /capabilities before the config is replaced."},
+				flags: []helpFlag{
+					{"--host", "URL", "supervisor URL (default WT_DEPLOY_HOST or the current config)"},
+					{"--config", helpPathValue, "config file (default ~/.config/wt/config.json)"},
+					{"--token-stdin", "", "read the token from stdin instead of the terminal"},
+				},
+				examples: []string{
+					"wt auth login --host https://wt.example.com",
+					`printf '%s' "$WT_TOKEN" | wt auth login --host https://wt.example.com --token-stdin`,
+				},
+			},
+			{
+				name:    "status",
+				summary: "show where the host and token come from",
+				usage:   []string{"wt auth status [flags]"},
+				details: []string{"Never prints the token. --check contacts the supervisor and reports whether it accepts the current credentials."},
+				flags: []helpFlag{
+					{"--host", "URL", "supervisor URL override"},
+					{"--config", helpPathValue, "config file (default ~/.config/wt/config.json)"},
+					{"--check", "", "check the host and token against the supervisor"},
+					{"--json", "", "print token-free status as JSON"},
+				},
+				examples: []string{
+					"wt auth status",
+					"wt auth status --check",
+				},
+			},
+			{
+				name:    "logout",
+				summary: "remove the saved token",
+				usage:   []string{"wt auth logout [flags]"},
+				details: []string{"Leaves the supervisor URL and unrelated config fields in place."},
+				flags: []helpFlag{
+					{"--config", helpPathValue, "config file (default ~/.config/wt/config.json)"},
+				},
+				examples: []string{"wt auth logout"},
+			},
+		},
+	},
+	{
 		name:    "runtime",
 		summary: "compare the local and supervisor wasmtime releases",
 		usage:   []string{"wt runtime [flags]"},

@@ -266,6 +266,8 @@ func runCommand(command string, args []string) error {
 		return runRoute(args)
 	case "doctor":
 		return runDoctor(args)
+	case "auth":
+		return runAuth(args)
 	case "runtime":
 		return runRuntime(args)
 	case "inspect":

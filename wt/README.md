@@ -56,7 +56,7 @@ For the local loop, `wt/supervisor/dev.sh` rebuilds the admin panel and binary a
 
 ## CLI
 
-The `wt-deploy` binary also acts as the operator CLI. Every command accepts `--host`, `--token` and `--config`, and most accept `--json` for raw output. These global flags may appear before or after the app and action; command-specific flags stay with their command. Defaults come from environment variables and then an optional `~/.config/wt/config.json` (or `WT_CONFIG`):
+The `wt-deploy` binary also acts as the operator CLI. Every command accepts `--host`, `--token` and `--config`, and most accept `--json` for raw output. These global flags may appear before or after the app and action; command-specific flags stay with their command. Defaults come from command-line flags, then environment variables, then an optional `~/.config/wt/config.json` (or `WT_CONFIG`). Save the shared host and a scoped deploy token with `wt auth login`, which writes the config file with `0600` permissions after checking the token against `GET /capabilities`:
 
 ```json
 {
@@ -66,6 +66,8 @@ The `wt-deploy` binary also acts as the operator CLI. Every command accepts `--h
   "target": "x86_64-unknown-linux-musl"
 }
 ```
+
+`wt auth login` prompts for the supervisor URL and reads the token without echo, or takes the token from stdin when piped. `wt auth status --check` reports where the host and token come from and verifies them; `wt auth logout` removes the token but leaves the host and unrelated fields. Use a scoped `deploy` token with an app allowlist, not the admin bootstrap token. The token is plaintext at rest, protected only by the file's `0600` mode, so keep `~/.config/wt` out of dotfile sync and backups. For CI, supply `WT_TOKEN` from the CI secret store, or point `WT_CONFIG` at a file created from a mounted secret.
 
 Running `wt-deploy` with no command prints the current directory, the local `app.json` name and host, whether a host is configured and where the config file is expected, then points at `wt-deploy help`. It does not attempt a deploy, so a fresh directory can be scaffolded with `wt-deploy new` before any supervisor host exists. Deploy explicitly with `wt-deploy deploy`. `wt-deploy help <command>` describes one command's usage, flags and examples, including subcommands such as `wt-deploy help jobs enqueue`; `<command> --help` and `<command> -h` do the same.
 
@@ -87,6 +89,9 @@ wt-deploy route check passport
 wt-deploy doctor passport
 wt-deploy runtime
 wt-deploy inspect passport --dir ./passport
+wt auth login --host https://wt.example.com
+wt auth status --check
+wt auth logout
 wt-deploy contract --dir ./passport
 wt-deploy deploy --dir ./notes --app-host notes.example.com
 wt-deploy build --dir ./notes --out notes.tar.gz

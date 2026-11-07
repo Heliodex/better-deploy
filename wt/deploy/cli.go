@@ -89,6 +89,8 @@ func loadFileConfig(explicit string) (fileConfig, error) {
 		return fileConfig{}, fmt.Errorf("config %s: %w", path, err)
 	}
 
+	warnInsecureConfig(path, cfg.Token)
+
 	return cfg, nil
 }
 
