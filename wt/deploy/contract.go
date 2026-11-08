@@ -144,7 +144,18 @@ func generateRegistryOutputs(dir, webDir string) error {
 }
 
 // runClientEmitter runs the embedded client generator from the web directory so its imports resolve.
+// Both paths are absolute so a relative app directory does not resolve them against the web directory twice.
 func runClientEmitter(webDir, outPath string, quiet bool) error {
+	webDir, err := filepath.Abs(webDir)
+	if err != nil {
+		return err
+	}
+
+	outPath, err = filepath.Abs(outPath)
+	if err != nil {
+		return err
+	}
+
 	env := []string{"WT_CLIENT_OUT=" + outPath}
 	if quiet {
 		env = append(env, "WT_CLIENT_QUIET=1")
