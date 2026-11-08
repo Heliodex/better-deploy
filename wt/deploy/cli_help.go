@@ -149,10 +149,10 @@ var helpCommands = []helpCommand{
 		client:  true,
 		subs: []helpCommand{
 			{
-				name:     "query",
-				summary:  "run a read-only SQL statement",
-				usage:    []string{"wt db <app> query <sql> [flags]", "wt db <app> query --sql <sql> [flags]"},
-				details:  []string{"Returns columns and rows from the app's SQLite database on the supervisor."},
+				name:    "query",
+				summary: "run a read-only SQL statement",
+				usage:   []string{"wt db <app> query <sql> [flags]", "wt db <app> query --sql <sql> [flags]"},
+				details: []string{"Returns columns and rows from the app's SQLite database on the supervisor."},
 				flags: []helpFlag{
 					{"--sql", "SQL", "statement to run; can also follow the action as arguments"},
 					{"--params", "JSON", "JSON array of bound parameters"},
@@ -161,10 +161,10 @@ var helpCommands = []helpCommand{
 				examples: []string{"wt db ire query 'select count(*) from user'", "wt db ire query --sql 'select * from membership where active = 0'"},
 			},
 			{
-				name:     "exec",
-				summary:  "run a write SQL statement",
-				usage:    []string{"wt db <app> exec <sql> [flags]", "wt db <app> exec --sql <sql> [flags]"},
-				details:  []string{"Runs one statement that changes the app's SQLite database on the supervisor. Use with care."},
+				name:    "exec",
+				summary: "run a write SQL statement",
+				usage:   []string{"wt db <app> exec <sql> [flags]", "wt db <app> exec --sql <sql> [flags]"},
+				details: []string{"Runs one statement that changes the app's SQLite database on the supervisor. Use with care."},
 				flags: []helpFlag{
 					{"--sql", "SQL", "statement to run; can also follow the action as arguments"},
 					{"--params", "JSON", "JSON array of bound parameters"},

@@ -37,6 +37,7 @@ func runDBQuery(cfg clientOptions, name string, args []string) error {
 	}
 
 	payload := map[string]any{"sql": statement}
+
 	if strings.TrimSpace(*paramsJSON) != "" {
 		var params []any
 		if err := json.Unmarshal([]byte(*paramsJSON), &params); err != nil {
@@ -118,6 +119,7 @@ func runDBExec(cfg clientOptions, name string, args []string) error {
 	}
 
 	payload := map[string]any{"sql": statement}
+
 	if strings.TrimSpace(*paramsJSON) != "" {
 		var params []any
 		if err := json.Unmarshal([]byte(*paramsJSON), &params); err != nil {
@@ -191,7 +193,7 @@ func runDB(args []string) error {
 	}
 
 	if len(rest) < 2 {
-		return errors.New("usage: wt db <app> <query|exec> ...")
+		return errors.New("usage: wt db <app> <query|exec>")
 	}
 
 	name, action, actionArgs := rest[0], rest[1], rest[2:]
