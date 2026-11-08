@@ -411,6 +411,10 @@ func (s *supervisor) handleAppDatabase(w http.ResponseWriter, r *http.Request, n
 		s.handleDatabase(w, r, name)
 	case "database/rows":
 		s.handleDatabaseRows(w, r, name)
+	case "database/query":
+		s.handleDatabaseQuery(w, r, name)
+	case "database/exec":
+		s.handleDatabaseExec(w, r, name)
 	case "database/changes":
 		s.handleDatabaseChanges(w, r, name)
 	case "database/export":

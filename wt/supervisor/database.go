@@ -455,3 +455,39 @@ func (s *supervisor) handleDatabaseMaintenance(w http.ResponseWriter, r *http.Re
 
 	writeJSON(w, http.StatusOK, databaseMaintenanceResponse{Op: op, Result: result})
 }
+
+// handleDatabaseQuery runs one read-only SQL statement on the app database.
+func (s *supervisor) handleDatabaseQuery(w http.ResponseWriter, r *http.Request, name string) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+
+	if !s.requireStorage(w, r, name) {
+		return
+	}
+
+	if !s.storage.hasDatabase(name) {
+		writeError(w, http.StatusBadRequest, errNoStorageDatabase.Error())
+		return
+	}
+
+	s.storage.query(w, r, name)
+}
+
+// handleDatabaseExec runs one write SQL statement on the app database.
+func (s *supervisor) handleDatabaseExec(w http.ResponseWriter, r *http.Request, name string) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+
+	if !s.requireStorage(w, r, name) {
+		return
+	}
+
+	if !s.storage.hasDatabase(name) {
+		writeError(w, http.StatusBadRequest, errNoStorageDatabase.Error())
+		return
+	}
+
+	s.storage.exec(w, r, name)
+}
