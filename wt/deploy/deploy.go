@@ -241,6 +241,26 @@ func printDeployResult(cfg *deployConfig, name string, body []byte) error {
 	return nil
 }
 
+// prepareManifest applies the deploy name and host overrides, then maps a local manifest host onto the profile's app domain.
+func prepareManifest(m *manifest, cfg *deployConfig) error {
+	if cfg.app != "" {
+		if !validName(cfg.app) {
+			return fmt.Errorf("invalid app name %q", cfg.app)
+		}
+
+		m.Name = cfg.app
+	}
+
+	if cfg.appHost != "" {
+		m.Host = cfg.appHost
+		return nil
+	}
+
+	applyAppDomain(m, cfg.appDomain)
+
+	return nil
+}
+
 // buildBundle runs the app builds, precompiles the component and packs the upload artifact.
 func buildBundle(cfg *deployConfig) (manifest, []byte, buildStatus, error) {
 	m, err := readManifest(cfg.dir)
@@ -252,16 +272,8 @@ func buildBundle(cfg *deployConfig) (manifest, []byte, buildStatus, error) {
 		overlayDevEnv(&m)
 	}
 
-	if cfg.app != "" {
-		if !validName(cfg.app) {
-			return m, nil, buildStatus{}, fmt.Errorf("invalid app name %q", cfg.app)
-		}
-
-		m.Name = cfg.app
-	}
-
-	if cfg.appHost != "" {
-		m.Host = cfg.appHost
+	if err := prepareManifest(&m, cfg); err != nil {
+		return m, nil, buildStatus{}, err
 	}
 
 	status, err := prepareBuilds(cfg, m)
@@ -344,16 +356,12 @@ func deploy(args []string) error {
 		return err
 	}
 
-	if cfg.app != "" {
-		if !validName(cfg.app) {
-			return fmt.Errorf("invalid app name %q", cfg.app)
-		}
-
-		m.Name = cfg.app
+	if err := prepareManifest(&m, cfg); err != nil {
+		return err
 	}
 
-	if cfg.appHost != "" {
-		m.Host = cfg.appHost
+	if err := checkAppHostTarget(cfg.host, m.Host, m.Name, cfg.profile); err != nil {
+		return err
 	}
 
 	if len(cfg.envVars) > 0 {

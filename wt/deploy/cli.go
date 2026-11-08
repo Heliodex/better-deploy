@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -17,34 +18,103 @@ import (
 
 const defaultClientTimeout = 30 * time.Second
 
+// fileProfile is one named deploy target: its supervisor, token and optional app-host suffix.
+type fileProfile struct {
+	Host      string `json:"host,omitempty"`
+	Token     string `json:"token,omitempty"`
+	AppDomain string `json:"app_domain,omitempty"`
+}
+
 // fileConfig is the optional ~/.config/wt/config.json shared by CLI commands.
 type fileConfig struct {
-	Host     string `json:"host,omitempty"`
-	Token    string `json:"token,omitempty"`
-	Wasmtime string `json:"wasmtime,omitempty"`
-	Target   string `json:"target,omitempty"`
-	AppHost  string `json:"app_host,omitempty"`
+	Host      string                 `json:"host,omitempty"`
+	Token     string                 `json:"token,omitempty"`
+	Profile   string                 `json:"profile,omitempty"`
+	Profiles  map[string]fileProfile `json:"profiles,omitempty"`
+	Wasmtime  string                 `json:"wasmtime,omitempty"`
+	Target    string                 `json:"target,omitempty"`
+	AppHost   string                 `json:"app_host,omitempty"`
+	AppDomain string                 `json:"app_domain,omitempty"`
 }
 
 type clientOptions struct {
-	host, token string
-	jsonOut     bool
-	timeout     time.Duration
+	host, token, profile, appDomain string
+	jsonOut                         bool
+	timeout                         time.Duration
+}
+
+// flagValueArg finds the last value of a global flag before parsing, matching the flag package's repeated-flag behaviour.
+func flagValueArg(args []string, name string) string {
+	flagName := "--" + name
+	value := ""
+
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		if arg == "--" {
+			break
+		}
+
+		if arg == flagName {
+			if index+1 < len(args) {
+				value = args[index+1]
+				index++
+			}
+
+			continue
+		}
+
+		if candidate, ok := strings.CutPrefix(arg, flagName+"="); ok {
+			value = candidate
+		}
+	}
+
+	return value
 }
 
 // configArg finds --config before flag parsing so file defaults can seed the flag values.
 func configArg(args []string) string {
-	for index, arg := range args {
-		if arg == "--config" && index+1 < len(args) {
-			return args[index+1]
-		}
+	return flagValueArg(args, "config")
+}
 
-		if value, ok := strings.CutPrefix(arg, "--config="); ok {
-			return value
-		}
+// profileArg finds --profile before flag parsing so a profile can seed the flag values.
+func profileArg(args []string) string {
+	return flagValueArg(args, "profile")
+}
+
+// activeProfileName resolves the profile from a flag, WT_PROFILE and the config default.
+func activeProfileName(flagValue string, cfg fileConfig) string {
+	return firstNonEmpty(flagValue, os.Getenv("WT_PROFILE"), cfg.Profile)
+}
+
+// profileNames lists the configured profiles in a stable order.
+func profileNames(cfg fileConfig) []string {
+	names := make([]string, 0, len(cfg.Profiles))
+	for name := range cfg.Profiles {
+		names = append(names, name)
 	}
 
-	return ""
+	slices.Sort(names)
+
+	return names
+}
+
+// resolveProfile returns the selected profile, or the top-level host and token when no profile is selected.
+func resolveProfile(cfg fileConfig, name string) (fileProfile, error) {
+	if name == "" {
+		return fileProfile{Host: cfg.Host, Token: cfg.Token, AppDomain: cfg.AppDomain}, nil
+	}
+
+	profile, ok := cfg.Profiles[name]
+	if !ok {
+		names := profileNames(cfg)
+		if len(names) == 0 {
+			return fileProfile{}, fmt.Errorf("unknown profile %q; no profiles are configured", name)
+		}
+
+		return fileProfile{}, fmt.Errorf("unknown profile %q; configured profiles: %s", name, strings.Join(names, ", "))
+	}
+
+	return profile, nil
 }
 
 // defaultConfigPath returns WT_CONFIG, then the XDG config path, then ~/.config/wt/config.json.
@@ -106,12 +176,12 @@ func firstNonEmpty(values ...string) string {
 
 // clientFlagValues holds the global client flags extracted from any position.
 type clientFlagValues struct {
-	host, token, config string
-	jsonOut             bool
-	timeout             time.Duration
+	host, token, config, profile string
+	jsonOut                      bool
+	timeout                      time.Duration
 }
 
-// extractClientFlags removes --host, --token, --config, --json and --timeout wherever they appear, leaving command flags and positionals in order.
+// extractClientFlags removes --host, --token, --config, --profile, --json and --timeout wherever they appear, leaving command flags and positionals in order.
 func extractClientFlags(args []string) (clientFlagValues, []string, error) {
 	values := clientFlagValues{timeout: defaultClientTimeout}
 
@@ -130,7 +200,7 @@ func extractClientFlags(args []string) (clientFlagValues, []string, error) {
 		}
 
 		switch strings.TrimLeft(key, "-") {
-		case "host", "token", "config", "timeout":
+		case "host", "token", "config", "profile", "timeout":
 			if !hasValue {
 				index++
 				if index >= len(args) {
@@ -147,6 +217,8 @@ func extractClientFlags(args []string) (clientFlagValues, []string, error) {
 				values.token = value
 			case "config":
 				values.config = value
+			case "profile":
+				values.profile = value
 			case "timeout":
 				parsed, err := time.ParseDuration(value)
 				if err != nil {
@@ -175,7 +247,7 @@ func extractClientFlags(args []string) (clientFlagValues, []string, error) {
 	return values, rest, nil
 }
 
-// clientFlags loads global flags from any position and falls back to WT_DEPLOY_HOST, WT_TOKEN and the config file.
+// clientFlags loads global flags from any position and falls back to WT_DEPLOY_HOST, WT_TOKEN and the selected profile.
 func clientFlags(args []string, requireHost bool) (clientOptions, []string, error) {
 	values, rest, err := extractClientFlags(args)
 	if err != nil {
@@ -187,14 +259,28 @@ func clientFlags(args []string, requireHost bool) (clientOptions, []string, erro
 		return clientOptions{}, nil, err
 	}
 
-	host := firstNonEmpty(values.host, os.Getenv("WT_DEPLOY_HOST"), fileCfg.Host)
-	token := firstNonEmpty(values.token, os.Getenv("WT_TOKEN"), fileCfg.Token)
+	profileName := activeProfileName(values.profile, fileCfg)
+
+	profile, err := resolveProfile(fileCfg, profileName)
+	if err != nil {
+		return clientOptions{}, nil, err
+	}
+
+	host := firstNonEmpty(values.host, os.Getenv("WT_DEPLOY_HOST"), profile.Host)
+	token := firstNonEmpty(values.token, os.Getenv("WT_TOKEN"), profile.Token)
 
 	if requireHost && strings.TrimSpace(host) == "" {
 		return clientOptions{}, nil, errors.New("set --host, WT_DEPLOY_HOST, or host in the config file")
 	}
 
-	return clientOptions{host: host, token: token, jsonOut: values.jsonOut, timeout: values.timeout}, rest, nil
+	return clientOptions{
+		host:      host,
+		token:     token,
+		profile:   profileName,
+		appDomain: profile.AppDomain,
+		jsonOut:   values.jsonOut,
+		timeout:   values.timeout,
+	}, rest, nil
 }
 
 func supervisorURL(host, path string) string {

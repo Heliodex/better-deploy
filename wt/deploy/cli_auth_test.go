@@ -200,3 +200,129 @@ func TestAuthLogoutRemovesOnlyToken(t *testing.T) {
 		t.Errorf("logout config = %+v", cfg)
 	}
 }
+
+func TestAuthLoginSavesProfileAndKeepsOthers(t *testing.T) {
+	server := authTestServer(t, "secret-token")
+	defer server.Close()
+
+	path := filepath.Join(t.TempDir(), "config.json")
+	writeAuthTestConfig(t, path, `{"host":"https://legacy.example","token":"legacy-token","profile":"remote","profiles":{"remote":{"host":"https://wt.example.com","token":"remote-token","app_domain":"example.com"}}}`)
+
+	var out, errOut bytes.Buffer
+
+	err := runAuthWithIO(
+		[]string{"login", "--profile", "local", "--host", server.URL, "--app-domain", "localhost", "--config", path, "--token-stdin"},
+		strings.NewReader("secret-token\n"),
+		&out,
+		&errOut,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := loadFileConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.Host != "https://legacy.example" || cfg.Token != "legacy-token" || cfg.Profile != "remote" {
+		t.Errorf("legacy config was changed: %+v", cfg)
+	}
+
+	local := cfg.Profiles["local"]
+	if local.Host != server.URL || local.Token != "secret-token" || local.AppDomain != "localhost" {
+		t.Errorf("local profile = %+v", local)
+	}
+
+	remote := cfg.Profiles["remote"]
+	if remote.Host != "https://wt.example.com" || remote.Token != "remote-token" || remote.AppDomain != "example.com" {
+		t.Errorf("remote profile was changed: %+v", remote)
+	}
+
+	if !strings.Contains(out.String(), "profile local") {
+		t.Errorf("login output does not name the profile: %q", out.String())
+	}
+}
+
+func TestAuthUseSelectsProfile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	writeAuthTestConfig(t, path, profileTestConfig)
+
+	var out, errOut bytes.Buffer
+	if err := runAuthWithIO([]string{"use", "local", "--config", path}, strings.NewReader(""), &out, &errOut); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := loadFileConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.Profile != "local" {
+		t.Errorf("profile = %q, want local", cfg.Profile)
+	}
+}
+
+func TestAuthUseRejectsUnknownProfile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	writeAuthTestConfig(t, path, profileTestConfig)
+
+	var out, errOut bytes.Buffer
+	if err := runAuthWithIO([]string{"use", "staging", "--config", path}, strings.NewReader(""), &out, &errOut); err == nil {
+		t.Fatal("unknown profile was accepted")
+	}
+}
+
+func TestAuthStatusReportsSelectedProfile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	writeAuthTestConfig(t, path, profileTestConfig)
+
+	var out, errOut bytes.Buffer
+	if err := runAuthWithIO([]string{"status", "--profile", "local", "--config", path, "--json"}, strings.NewReader(""), &out, &errOut); err != nil {
+		t.Fatal(err)
+	}
+
+	var report authStatusReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+
+	if report.Profile != "local" || report.ProfileSource != "command line" {
+		t.Errorf("profile report = %+v", report)
+	}
+
+	if report.Host != "http://127.0.0.1:8080" || report.HostSource != "profile local" {
+		t.Errorf("host report = %+v", report)
+	}
+
+	if report.AppDomain != "localhost" {
+		t.Errorf("app domain = %q, want localhost", report.AppDomain)
+	}
+
+	if strings.Contains(out.String(), "local-token") {
+		t.Errorf("status output leaked the token: %q", out.String())
+	}
+}
+
+func TestAuthLogoutKeepsOtherProfiles(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	writeAuthTestConfig(t, path, profileTestConfig)
+
+	var out, errOut bytes.Buffer
+	if err := runAuthWithIO([]string{"logout", "--profile", "local", "--config", path}, strings.NewReader(""), &out, &errOut); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := loadFileConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if local := cfg.Profiles["local"]; local.Token != "" || local.Host != "http://127.0.0.1:8080" || local.AppDomain != "localhost" {
+		t.Errorf("local profile = %+v", local)
+	}
+
+	if remote := cfg.Profiles["remote"]; remote.Token != "remote-token" {
+		t.Errorf("remote profile was changed: %+v", remote)
+	}
+}

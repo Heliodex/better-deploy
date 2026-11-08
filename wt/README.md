@@ -56,18 +56,31 @@ For the local loop, `wt/supervisor/dev.sh` rebuilds the admin panel and binary a
 
 ## CLI
 
-The `wt-deploy` binary also acts as the operator CLI. Every command accepts `--host`, `--token` and `--config`, and most accept `--json` for raw output. These global flags may appear before or after the app and action; command-specific flags stay with their command. Defaults come from command-line flags, then environment variables, then an optional `~/.config/wt/config.json` (or `WT_CONFIG`). Save the shared host and a scoped deploy token with `wt auth login`, which writes the config file with `0600` permissions after checking the token against `GET /capabilities`:
+The `wt-deploy` binary also acts as the operator CLI. Client commands accept `--profile`, `--host`, `--token` and `--config`, and most accept `--json` for raw output. These global flags may appear before or after the app and action; command-specific flags stay with their command. Defaults come from command-line flags, then environment variables, then an optional `~/.config/wt/config.json` (or `WT_CONFIG`). Save a supervisor and a scoped deploy token with `wt auth login`, which writes the config file with `0600` permissions after checking the token against `GET /capabilities`. Profiles keep several targets side by side, each with its own host, token and app-host suffix:
 
 ```json
 {
-  "host": "https://wt.example.com",
-  "token": "scoped-deploy-token",
+  "profile": "remote",
+  "profiles": {
+    "local": {
+      "host": "http://127.0.0.1:8080",
+      "token": "local-token",
+      "app_domain": "localhost"
+    },
+    "remote": {
+      "host": "https://wt.example.com",
+      "token": "scoped-deploy-token",
+      "app_domain": "example.com"
+    }
+  },
   "wasmtime": "/usr/local/bin/wasmtime",
   "target": "x86_64-unknown-linux-musl"
 }
 ```
 
-`wt auth login` prompts for the supervisor URL and reads the token without echo, or takes the token from stdin when piped. `wt auth status --check` reports where the host and token come from and verifies them; `wt auth logout` removes the token but leaves the host and unrelated fields. Use a scoped `deploy` token with an app allowlist, not the admin bootstrap token. The token is plaintext at rest, protected only by the file's `0600` mode, so keep `~/.config/wt` out of dotfile sync and backups. For CI, supply `WT_TOKEN` from the CI secret store, or point `WT_CONFIG` at a file created from a mounted secret.
+`wt auth login --profile local ...` creates or updates that profile, `wt auth use remote` sets the default for commands that omit `--profile` (also `WT_PROFILE`), and `wt auth status --check` reports the selected profile, where each value came from and verifies the credentials. Top-level `host` and `token` still work as an unnamed target, so an existing config needs no migration. A profile's `app_domain` rewrites `<app>.localhost` manifest hosts, so `ire.localhost` becomes `ire.example.com` for the remote profile while a custom public host such as `peaks.example.org` is left alone. A local app host on a non-loopback supervisor is refused before the build; pass `--app-host` or select a profile with an `app_domain` instead. `wt auth logout` removes the active profile's token but leaves its host, app domain and unrelated fields.
+
+`wt auth login` prompts for the supervisor URL and reads the token without echo, or takes the token from stdin when piped. Use a scoped `deploy` token with an app allowlist, not the admin bootstrap token. The token is plaintext at rest, protected only by the file's `0600` mode, so keep `~/.config/wt` out of dotfile sync and backups. For CI, supply `WT_TOKEN` from the CI secret store, or point `WT_CONFIG` at a file created from a mounted secret.
 
 Running `wt-deploy` with no command prints the current directory, the local `app.json` name and host, whether a host is configured and where the config file is expected, then points at `wt-deploy help`. It does not attempt a deploy, so a fresh directory can be scaffolded with `wt-deploy new` before any supervisor host exists. Deploy explicitly with `wt-deploy deploy`. `wt-deploy help <command>` describes one command's usage, flags and examples, including subcommands such as `wt-deploy help jobs enqueue`; `<command> --help` and `<command> -h` do the same.
 
@@ -89,12 +102,15 @@ wt-deploy route check passport
 wt-deploy doctor passport
 wt-deploy runtime
 wt-deploy inspect passport --dir ./passport
-wt auth login --host https://wt.example.com
+wt auth login --profile remote --host https://wt.example.com --app-domain example.com
+wt auth login --profile local --host http://127.0.0.1:8080 --app-domain localhost
+wt auth use remote
 wt auth status --check
-wt auth logout
+wt auth logout --profile local
 wt-deploy contract --dir ./passport
+wt-deploy deploy --dir ./notes --profile remote
 wt-deploy deploy --dir ./notes --app-host notes.example.com
-wt-deploy build --dir ./notes --out notes.tar.gz
+wt-deploy build --dir ./notes --profile remote --out notes.tar.gz
 wt-deploy rollback notes 20261101T120000.000000000Z
 wt-deploy backup list notes
 wt-deploy backup create notes
@@ -352,7 +368,7 @@ curl -H 'Host: hello.localhost' http://127.0.0.1:8080/hello
 
 `wt-deploy` reads `app.json`, runs its build phases, precompiles `main.wasm` with `wasmtime compile` when available, and uploads `app.json`, `main.wasm`, `artefact.json`, `main.cwasm` when it exists, and any `static/` files as a gzipped tarball. The manifest splits the work into `build_component` and `build_static`. Each phase has its own input hash in `.wt-build.json`, so a frontend edit rebuilds only `static/` and a Go edit rebuilds only the component. The component hash covers Go, assembly, cgo and WIT sources, `go.mod`/`go.sum`, every local `replace` target such as `../packages`, and any `component_inputs` files. The static hash covers the `web` directory (or `dev.web`), its lockfile and config, and any `static_inputs` files. Generated output such as `web/build`, `static/`, `*.gen.go`, `packages/binding` and `packages/tmp` is excluded.
 
-When the component hash and `main.wasm` are unchanged, the component build and compile steps are skipped. The deploy still computes the wasm digest and uploads only `app.json` and `static/` when the running app already has that digest, whether the component was reused or rebuilt. A bundle without `main.wasm` keeps the running component. `--force-build` rebuilds both phases and uploads the component, `--skip-build` skips both phases, and uploads print a coarse progress percentage. `main.wasm` is the artifact; `main.cwasm` is a cache hint. `artefact.json` records the wasm digest and size, the wasmtime version, target triple, baseline CPU policy and compile time. `--skip-compile` does not require a cwasm and warns when none is included, leaving the supervisor to compile from wasm if it has a compiler. `--app-host` overrides the host written into the uploaded `app.json`, which is useful when the supervisor sits behind a real ingress domain. A deploy with the same wasm digest and unchanged runtime config keeps the running process and replaces only `app.json` and `static/`, so a frontend-only change does not restart the app. Otherwise the supervisor starts the new version on a new loopback port while the old one serves, waits for a 2xx health response, swaps the host route, drains in-flight requests for up to ten seconds and then stops the old process. Responses include `X-WT-Wasm-Digest` and `X-WT-Deploy-Mode: full|static`. A deploy also returns an `ETag` over the bundle contents: send it back as `If-None-Match` to get `304 Not Modified` without installing, and send `Idempotency-Key` to replay the same response for 24 hours. The response is stored beside the app's deployment history at `WT_STATE_DIR/.deployments/<app>/idempotency.json` (`0600`), survives supervisor restarts, and keeps the newest 64 keys per app; a delete clears the file. `POST /apps/<name>/validate` is the explicit validation form of `?dry_run=1`, and `GET /apps/<name>/deployments/<id>` returns one history entry with its status, error and current marker. Rollback remains synchronous.
+When the component hash and `main.wasm` are unchanged, the component build and compile steps are skipped. The deploy still computes the wasm digest and uploads only `app.json` and `static/` when the running app already has that digest, whether the component was reused or rebuilt. A bundle without `main.wasm` keeps the running component. `--force-build` rebuilds both phases and uploads the component, `--skip-build` skips both phases, and uploads print a coarse progress percentage. `main.wasm` is the artifact; `main.cwasm` is a cache hint. `artefact.json` records the wasm digest and size, the wasmtime version, target triple, baseline CPU policy and compile time. `--skip-compile` does not require a cwasm and warns when none is included, leaving the supervisor to compile from wasm if it has a compiler. `--app-host` overrides the host written into the uploaded `app.json`, which is useful when the supervisor sits behind a real ingress domain. `--app-domain` instead maps an empty or `<app>.localhost` manifest host onto that suffix, and a profile supplies it automatically. A deploy whose final app host is local while the supervisor is not loopback is refused before the build, so a remote target cannot silently register `notes.localhost`; pass `--app-host` or use a profile with `app_domain`. A deploy with the same wasm digest and unchanged runtime config keeps the running process and replaces only `app.json` and `static/`, so a frontend-only change does not restart the app. Otherwise the supervisor starts the new version on a new loopback port while the old one serves, waits for a 2xx health response, swaps the host route, drains in-flight requests for up to ten seconds and then stops the old process. Responses include `X-WT-Wasm-Digest` and `X-WT-Deploy-Mode: full|static`. A deploy also returns an `ETag` over the bundle contents: send it back as `If-None-Match` to get `304 Not Modified` without installing, and send `Idempotency-Key` to replay the same response for 24 hours. The response is stored beside the app's deployment history at `WT_STATE_DIR/.deployments/<app>/idempotency.json` (`0600`), survives supervisor restarts, and keeps the newest 64 keys per app; a delete clears the file. `POST /apps/<name>/validate` is the explicit validation form of `?dry_run=1`, and `GET /apps/<name>/deployments/<id>` returns one history entry with its status, error and current marker. Rollback remains synchronous.
 
 `GET /capabilities` is the preflight endpoint. It requires the same bearer token as the rest of the API and returns the supervisor build (`version`, `commit`, `goVersion`), the runtime `wasmtime` version and `wasmtimeTarget`, whether the host has a working `compile` subcommand, and epoch support. `wt-deploy deploy` reads it before building. The compile target is taken from `wasmtimeTarget` when `--target` is not set. If the local wasmtime version or target differs, the CLI warns that the supervisor will recompile `main.wasm`; if the supervisor has no compiler and the cwasm will not match, it warns that the deploy may fail. A deploy that uploads the component prints whether the cwasm matched.
 
@@ -681,7 +697,7 @@ The image is built entirely by `wt/Containerfile`: a Rust stage compiles wasmtim
 
 The C API tarball is a shared library for embedding, not a server, and still contains the compiler, so it does not replace this runtime-only CLI. The final image carries only the static supervisor, wasmtime, CA certificates, `/etc/passwd` and `/etc/group`; the volume at `/var/lib/wt` holds apps and state.
 
-On Orchard, create a GitHub-built deployment from this repository with `dockerfilePath: wt/Containerfile`, `buildFromRoot: true`, port `8080`, and a `WT_TOKEN` environment variable. Mount a PVC at `/var/lib/wt` so apps and the storage databases survive a pod roll. Point one ingress at port `8080` for the supervisor host and, if you use wildcard app hosts, add a wildcard DNS name and certificate such as `*.apps.example.com` to the same ingress. Then deploy with `--host https://<ingress-host> --app-host <ingress-host>`, or add `host: "*.apps.example.com"`/`hosts` aliases in `app.json` so a new app does not need a new ingress. The supervisor routes by `Host`, so `/apps/...` (the deploy API) and `/` (the app) share the same ingress host; exact app hosts still need their own ingress unless a wildcard covers them.
+On Orchard, create a GitHub-built deployment from this repository with `dockerfilePath: wt/Containerfile`, `buildFromRoot: true`, port `8080`, and a `WT_TOKEN` environment variable. Mount a PVC at `/var/lib/wt` so apps and the storage databases survive a pod roll. Point one ingress at port `8080` for the supervisor host and, if you use wildcard app hosts, add a wildcard DNS name and certificate such as `*.apps.example.com` to the same ingress. Then store the target with `wt auth login --profile remote --host https://<ingress-host> --app-domain apps.example.com`, or add `host: "*.apps.example.com"`/`hosts` aliases in `app.json` so a new app does not need a new ingress. The supervisor routes by `Host`, so `/apps/...` (the deploy API) and `/` (the app) share the same ingress host; exact app hosts still need their own ingress unless a wildcard covers them.
 
 The deployment can run on a small CPU request because it never compiles: in the demo deployment two apps start from `.cwasm` files rebuilt on a laptop, and the notes database survives a pod roll on the PVC.
 

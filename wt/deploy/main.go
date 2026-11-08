@@ -12,16 +12,16 @@ import (
 )
 
 type deployConfig struct {
-	dir, app, host, token, wasmtime, target, appHost, out                   string
-	buildComponentCommand                                                   string
-	skipBuild, skipCompile, skipStatic, jsonOut, forceBuild, skipRouteCheck bool
-	overlayEnv                                                              bool
-	targetConfigured                                                        bool
-	verify                                                                  bool
-	verifyPath                                                              string
-	verifyTimeout                                                           time.Duration
-	envVars                                                                 []string
-	start                                                                   time.Time
+	dir, app, host, token, wasmtime, target, appHost, appDomain, profile, out string
+	buildComponentCommand                                                     string
+	skipBuild, skipCompile, skipStatic, jsonOut, forceBuild, skipRouteCheck   bool
+	overlayEnv                                                                bool
+	targetConfigured                                                          bool
+	verify                                                                    bool
+	verifyPath                                                                string
+	verifyTimeout                                                             time.Duration
+	envVars                                                                   []string
+	start                                                                     time.Time
 }
 
 func env(key string) string {
@@ -37,11 +37,19 @@ func resolveConfig(args []string) (*deployConfig, error) {
 		return nil, err
 	}
 
+	profileName := activeProfileName(profileArg(args), fileCfg)
+
+	profile, err := resolveProfile(fileCfg, profileName)
+	if err != nil {
+		return nil, err
+	}
+
 	flags := newFlagSet("deploy")
 	dir := flags.String("dir", ".", "app directory containing app.json")
 	app := flags.String("app", "", "app name (default: app.json name or directory name)")
-	host := flags.String("host", firstNonEmpty(env("WT_DEPLOY_HOST"), fileCfg.Host), "supervisor URL, e.g. http://127.0.0.1:8080")
-	token := flags.String("token", firstNonEmpty(env("WT_TOKEN"), fileCfg.Token), "deploy bearer token")
+	profileFlag := flags.String("profile", profileName, "config profile for host, token and app domain")
+	host := flags.String("host", firstNonEmpty(env("WT_DEPLOY_HOST"), profile.Host), "supervisor URL, e.g. http://127.0.0.1:8080")
+	token := flags.String("token", firstNonEmpty(env("WT_TOKEN"), profile.Token), "deploy bearer token")
 	wasmtime := flags.String("wasmtime", firstNonEmpty(env("WT_WASMTIME"), fileCfg.Wasmtime, "wasmtime"), "wasmtime binary")
 	targetDefault := firstNonEmpty(env("WT_WASMTIME_TARGET"), fileCfg.Target)
 
@@ -51,6 +59,7 @@ func resolveConfig(args []string) (*deployConfig, error) {
 	}
 
 	target := flags.String("target", targetDefault, "wasmtime compile target (default: supervisor target or x86_64-unknown-linux-musl)")
+	appDomain := flags.String("app-domain", profile.AppDomain, "app host suffix for <app>.localhost hosts")
 	appHost := flags.String("app-host", fileCfg.AppHost, "override the app host in the uploaded app.json")
 	config := flags.String("config", configPath, "config file (default ~/.config/wt/config.json)")
 	jsonOut := flags.Bool("json", false, "print only the raw API response")
@@ -67,15 +76,23 @@ func resolveConfig(args []string) (*deployConfig, error) {
 		return nil, err
 	}
 
+	profileSet := false
+	appDomainSet := false
+
+	flags.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "target":
+			targetConfigured = true
+		case "profile":
+			profileSet = true
+		case "app-domain":
+			appDomainSet = true
+		}
+	})
+
 	if *target != targetDefault {
 		targetConfigured = true
 	}
-
-	flags.Visit(func(f *flag.Flag) {
-		if f.Name == "target" {
-			targetConfigured = true
-		}
-	})
 
 	if flags.NArg() > 0 {
 		return nil, fmt.Errorf("unexpected argument %q", flags.Arg(0))
@@ -87,17 +104,34 @@ func resolveConfig(args []string) (*deployConfig, error) {
 			return nil, err
 		}
 
+		if !profileSet {
+			*profileFlag = activeProfileName("", fileCfg)
+		}
+
+		profile, err = resolveProfile(fileCfg, *profileFlag)
+		if err != nil {
+			return nil, err
+		}
+
 		if *host == "" {
-			*host = fileCfg.Host
+			*host = profile.Host
 		}
 
 		if *token == "" {
-			*token = fileCfg.Token
+			*token = profile.Token
+		}
+
+		if !appDomainSet {
+			*appDomain = profile.AppDomain
 		}
 	}
 
 	if *host == "" {
 		return nil, errors.New("set --host, WT_DEPLOY_HOST, or host in the config file")
+	}
+
+	if !appDomainSet {
+		*appDomain = appDomainForTarget(profile.Host, *host, *appDomain)
 	}
 
 	return &deployConfig{
@@ -112,6 +146,8 @@ func resolveConfig(args []string) (*deployConfig, error) {
 		forceBuild:       *forceBuild,
 		skipRouteCheck:   *skipRouteCheck,
 		appHost:          *appHost,
+		appDomain:        *appDomain,
+		profile:          strings.TrimSpace(*profileFlag),
 		jsonOut:          *jsonOut,
 		targetConfigured: targetConfigured,
 		verify:           *verify,
@@ -130,11 +166,21 @@ func resolveBundleConfig(args []string) (*deployConfig, error) {
 		return nil, err
 	}
 
+	profileName := activeProfileName(profileArg(args), fileCfg)
+
+	profile, err := resolveProfile(fileCfg, profileName)
+	if err != nil {
+		return nil, err
+	}
+
 	flags := newFlagSet("bundle")
 	dir := flags.String("dir", ".", "app directory containing app.json")
 	wasmtime := flags.String("wasmtime", firstNonEmpty(env("WT_WASMTIME"), fileCfg.Wasmtime, "wasmtime"), "wasmtime binary")
 	target := flags.String("target", firstNonEmpty(env("WT_WASMTIME_TARGET"), fileCfg.Target, "x86_64-unknown-linux-musl"), "wasmtime compile target")
 	out := flags.String("out", "", "output file (default <name>.tar.gz)")
+	profileFlag := flags.String("profile", profileName, "config profile for the app domain")
+	appDomain := flags.String("app-domain", profile.AppDomain, "app host suffix for <app>.localhost hosts")
+	flags.String("config", configPath, "config file (default ~/.config/wt/config.json)")
 	skipBuild := flags.Bool("skip-build", false, "skip running app.json's build commands")
 	skipCompile := flags.Bool("skip-compile", false, "do not compile; include main.cwasm only if it already exists")
 
@@ -152,6 +198,8 @@ func resolveBundleConfig(args []string) (*deployConfig, error) {
 		dir:         *dir,
 		wasmtime:    *wasmtime,
 		target:      *target,
+		profile:     strings.TrimSpace(*profileFlag),
+		appDomain:   *appDomain,
 		skipBuild:   *skipBuild,
 		skipCompile: *skipCompile,
 		forceBuild:  *forceBuild,

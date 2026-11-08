@@ -43,10 +43,12 @@ func TestHelpShowsFlagsAndExamples(t *testing.T) {
 		fragments []string
 	}{
 		{[]string{"logs"}, []string{"--follow", "--tail N", "wt logs notes --follow"}},
-		{[]string{"deploy"}, []string{"--skip-route-check", "--app-host HOST", "wt deploy --dir"}},
+		{[]string{"deploy"}, []string{"--profile NAME", "--app-domain DOMAIN", "--skip-route-check", "--app-host HOST", "wt deploy --dir"}},
 		{[]string{"jobs", "enqueue"}, []string{"--max-attempts N", "--idempotency-key KEY", "wt jobs ticker enqueue"}},
 		{[]string{"secrets", "set"}, []string{"--file PATH", "stdin"}},
 		{[]string{"build"}, []string{"--out FILE", "wt bundle [flags]"}},
+		{[]string{"auth", "login"}, []string{"--profile NAME", "--app-domain DOMAIN", "wt auth login --profile remote"}},
+		{[]string{"auth"}, []string{"use", "Profiles keep local and remote hosts"}},
 	}
 
 	for _, test := range tests {
