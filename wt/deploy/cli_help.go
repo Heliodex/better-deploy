@@ -143,6 +143,37 @@ var helpCommands = []helpCommand{
 		},
 	},
 	{
+		name:    "db",
+		summary: "run one-off SQL on an app's remote database",
+		usage:   []string{"wt db <app> <action> [flags]"},
+		client:  true,
+		subs: []helpCommand{
+			{
+				name:     "query",
+				summary:  "run a read-only SQL statement",
+				usage:    []string{"wt db <app> query <sql> [flags]", "wt db <app> query --sql <sql> [flags]"},
+				details:  []string{"Returns columns and rows from the app's SQLite database on the supervisor."},
+				flags: []helpFlag{
+					{"--sql", "SQL", "statement to run; can also follow the action as arguments"},
+					{"--params", "JSON", "JSON array of bound parameters"},
+					{"--max-rows", "N", "maximum rows to return"},
+				},
+				examples: []string{"wt db ire query 'select count(*) from user'", "wt db ire query --sql 'select * from membership where active = 0'"},
+			},
+			{
+				name:     "exec",
+				summary:  "run a write SQL statement",
+				usage:    []string{"wt db <app> exec <sql> [flags]", "wt db <app> exec --sql <sql> [flags]"},
+				details:  []string{"Runs one statement that changes the app's SQLite database on the supervisor. Use with care."},
+				flags: []helpFlag{
+					{"--sql", "SQL", "statement to run; can also follow the action as arguments"},
+					{"--params", "JSON", "JSON array of bound parameters"},
+				},
+				examples: []string{"wt db ire exec \"update membership set active = 1 where user_id = 'usr_...'\""},
+			},
+		},
+	},
+	{
 		name:    "secrets",
 		summary: "list, set and delete an app's secrets",
 		usage:   []string{"wt secrets <app> <action> [flags]"},

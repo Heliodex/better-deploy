@@ -308,6 +308,8 @@ func runCommand(command string, args []string) error {
 		return runJobs(args)
 	case "blobs":
 		return runBlobs(args)
+	case "db":
+		return runDB(args)
 	case "secrets":
 		return runSecrets(args)
 	case "route":
