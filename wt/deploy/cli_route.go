@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json/v2"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"net"
@@ -176,7 +175,7 @@ func runRoute(args []string) error {
 
 // routeCheck checks one app's public host.
 func routeCheck(cfg clientOptions, args []string) error {
-	flags := flag.NewFlagSet("route check", flag.ContinueOnError)
+	flags := newFlagSet("route check")
 	healthPath := flags.String("path", defaultRoutePath, "path to request")
 	timeout := flags.Duration("timeout", 8*time.Second, "probe timeout")
 
@@ -227,7 +226,7 @@ func runDoctor(args []string) error {
 		return err
 	}
 
-	flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	flags := newFlagSet("doctor")
 	healthPath := flags.String("path", defaultRoutePath, "path to request")
 	timeout := flags.Duration("timeout", 8*time.Second, "probe timeout")
 

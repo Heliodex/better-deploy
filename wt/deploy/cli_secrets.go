@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json/v2"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -74,7 +73,7 @@ func readSecretValue(file string) (string, error) {
 
 // runSecretsList prints an app's secret key names. Values are never returned by the supervisor.
 func runSecretsList(cfg clientOptions, name string, args []string) error {
-	flags := flag.NewFlagSet("secrets list", flag.ContinueOnError)
+	flags := newFlagSet("secrets list")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -190,7 +189,7 @@ func runSecretsSet(cfg clientOptions, name string, args []string) error {
 
 // runSecretsDelete removes one secret.
 func runSecretsDelete(cfg clientOptions, name string, args []string) error {
-	flags := flag.NewFlagSet("secrets delete", flag.ContinueOnError)
+	flags := newFlagSet("secrets delete")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}

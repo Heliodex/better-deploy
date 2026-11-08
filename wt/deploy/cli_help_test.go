@@ -83,6 +83,22 @@ func TestHelpTargetFindsSubcommandBeforeHelpFlag(t *testing.T) {
 	}
 }
 
+func TestHelpFlagVariants(t *testing.T) {
+	for _, arg := range []string{"-h", "-help", "--help"} {
+		if !isHelpFlag(arg) {
+			t.Errorf("%q is not a help flag", arg)
+		}
+
+		if got := strings.Join(helpTarget("jobs", []string{"ticker", "enqueue", arg}), " "); got != "jobs enqueue" {
+			t.Errorf("%s help target = %q", arg, got)
+		}
+
+		if got := withoutHelpFlags([]string{"jobs", arg}); len(got) != 1 || got[0] != "jobs" {
+			t.Errorf("%s was not dropped from the help topic: %v", arg, got)
+		}
+	}
+}
+
 func TestHelpRejectsUnknownTopics(t *testing.T) {
 	if err := writeHelp(new(strings.Builder), []string{"nope"}); err == nil {
 		t.Error("unknown command was accepted")

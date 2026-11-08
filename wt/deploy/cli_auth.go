@@ -6,7 +6,6 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -382,8 +381,7 @@ func runAuthLogin(args []string, in io.Reader, out, errOut io.Writer) error {
 		return err
 	}
 
-	loginFlags := flag.NewFlagSet("auth login", flag.ContinueOnError)
-	loginFlags.SetOutput(errOut)
+	loginFlags := newFlagSet("auth login")
 	tokenStdin := loginFlags.Bool("token-stdin", false, "read the token from stdin")
 
 	if err := loginFlags.Parse(rest); err != nil {
@@ -457,14 +455,13 @@ func runAuthLogin(args []string, in io.Reader, out, errOut io.Writer) error {
 }
 
 // runAuthStatus reports where the current host and token come from, optionally checking them.
-func runAuthStatus(args []string, out, errOut io.Writer) error {
+func runAuthStatus(args []string, out io.Writer) error {
 	values, rest, err := extractClientFlags(args)
 	if err != nil {
 		return err
 	}
 
-	statusFlags := flag.NewFlagSet("auth status", flag.ContinueOnError)
-	statusFlags.SetOutput(errOut)
+	statusFlags := newFlagSet("auth status")
 	check := statusFlags.Bool("check", false, "check the host and token against the supervisor")
 
 	if err := statusFlags.Parse(rest); err != nil {
@@ -514,14 +511,13 @@ func runAuthStatus(args []string, out, errOut io.Writer) error {
 }
 
 // runAuthLogout removes the stored token and leaves the host and other config fields alone.
-func runAuthLogout(args []string, out, errOut io.Writer) error {
+func runAuthLogout(args []string, out io.Writer) error {
 	values, rest, err := extractClientFlags(args)
 	if err != nil {
 		return err
 	}
 
-	logoutFlags := flag.NewFlagSet("auth logout", flag.ContinueOnError)
-	logoutFlags.SetOutput(errOut)
+	logoutFlags := newFlagSet("auth logout")
 
 	if err := logoutFlags.Parse(rest); err != nil {
 		return err
@@ -563,9 +559,9 @@ func runAuthWithIO(args []string, in io.Reader, out, errOut io.Writer) error {
 	case "login":
 		return runAuthLogin(rest, in, out, errOut)
 	case "status":
-		return runAuthStatus(rest, out, errOut)
+		return runAuthStatus(rest, out)
 	case "logout":
-		return runAuthLogout(rest, out, errOut)
+		return runAuthLogout(rest, out)
 	default:
 		return fmt.Errorf("unknown auth action %q", action)
 	}

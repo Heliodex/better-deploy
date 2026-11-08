@@ -1,13 +1,10 @@
 package main
 
-import (
-	"flag"
-	"fmt"
-)
+import "fmt"
 
 // runContract regenerates or checks the app's JSON Schema and Go contract from the Valibot registries.
 func runContract(args []string) error {
-	flags := flag.NewFlagSet("contract", flag.ContinueOnError)
+	flags := newFlagSet("contract")
 
 	dir := flags.String("dir", ".", "app directory containing app.json")
 

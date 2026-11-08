@@ -37,7 +37,7 @@ func resolveConfig(args []string) (*deployConfig, error) {
 		return nil, err
 	}
 
-	flags := flag.NewFlagSet("deploy", flag.ContinueOnError)
+	flags := newFlagSet("deploy")
 	dir := flags.String("dir", ".", "app directory containing app.json")
 	app := flags.String("app", "", "app name (default: app.json name or directory name)")
 	host := flags.String("host", firstNonEmpty(env("WT_DEPLOY_HOST"), fileCfg.Host), "supervisor URL, e.g. http://127.0.0.1:8080")
@@ -130,7 +130,7 @@ func resolveBundleConfig(args []string) (*deployConfig, error) {
 		return nil, err
 	}
 
-	flags := flag.NewFlagSet("bundle", flag.ContinueOnError)
+	flags := newFlagSet("bundle")
 	dir := flags.String("dir", ".", "app directory containing app.json")
 	wasmtime := flags.String("wasmtime", firstNonEmpty(env("WT_WASMTIME"), fileCfg.Wasmtime, "wasmtime"), "wasmtime binary")
 	target := flags.String("target", firstNonEmpty(env("WT_WASMTIME_TARGET"), fileCfg.Target, "x86_64-unknown-linux-musl"), "wasmtime compile target")
@@ -187,9 +187,9 @@ func runBundle(args []string) error {
 	return nil
 }
 
-// isHelpFlag reports whether arg asks for help.
+// isHelpFlag reports whether arg asks for help, including the single-dash -help form that Go's flag package also accepts.
 func isHelpFlag(arg string) bool {
-	return arg == "-h" || arg == "--help"
+	return arg == "-h" || arg == "-help" || arg == "--help"
 }
 
 // withoutHelpFlags drops help flags from a help command's topic arguments.

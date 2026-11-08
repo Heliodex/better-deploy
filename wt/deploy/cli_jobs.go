@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json/v2"
 	"errors"
-	"flag"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -116,7 +115,7 @@ func printJob(job jobRecord) {
 
 // jobsList requests one page of jobs, optionally filtered by status.
 func jobsList(cfg clientOptions, name string, args []string) error {
-	flags := flag.NewFlagSet("jobs list", flag.ContinueOnError)
+	flags := newFlagSet("jobs list")
 	status := flags.String("status", "", "pending, running, succeeded, failed, dead or canceled")
 
 	jsonOut := flags.Bool("json", false, "print raw JSON")
@@ -155,7 +154,7 @@ func jobsList(cfg clientOptions, name string, args []string) error {
 
 // jobsShow requests one job.
 func jobsShow(cfg clientOptions, name string, args []string) error {
-	flags := flag.NewFlagSet("jobs show", flag.ContinueOnError)
+	flags := newFlagSet("jobs show")
 
 	jsonOut := flags.Bool("json", false, "print raw JSON")
 	if err := flags.Parse(args); err != nil {
@@ -198,7 +197,7 @@ func jobsShow(cfg clientOptions, name string, args []string) error {
 
 // jobsEnqueue creates a durable job from flags.
 func jobsEnqueue(cfg clientOptions, name string, args []string) error {
-	flags := flag.NewFlagSet("jobs enqueue", flag.ContinueOnError)
+	flags := newFlagSet("jobs enqueue")
 	path := flags.String("path", "", "target path, for example /jobs/email")
 	method := flags.String("method", http.MethodPost, "HTTP method")
 	body := flags.String("body", "", "request body")
@@ -321,7 +320,7 @@ func jobsEnqueue(cfg clientOptions, name string, args []string) error {
 
 // jobsAction cancels or retries one job.
 func jobsAction(cfg clientOptions, name, action string, args []string) error {
-	flags := flag.NewFlagSet("jobs "+action, flag.ContinueOnError)
+	flags := newFlagSet("jobs " + action)
 
 	jsonOut := flags.Bool("json", false, "print raw JSON")
 	if err := flags.Parse(args); err != nil {

@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json/v2"
 	"errors"
-	"flag"
 	"fmt"
 	"net/http"
 	"strings"
@@ -29,7 +28,7 @@ type blobGCResult struct {
 
 // runBlobsList prints an app's stored blobs.
 func runBlobsList(cfg clientOptions, name string, args []string) error {
-	flags := flag.NewFlagSet("blobs list", flag.ContinueOnError)
+	flags := newFlagSet("blobs list")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -73,7 +72,7 @@ func runBlobsList(cfg clientOptions, name string, args []string) error {
 
 // runBlobsDelete removes one blob by digest.
 func runBlobsDelete(cfg clientOptions, name string, args []string) error {
-	flags := flag.NewFlagSet("blobs delete", flag.ContinueOnError)
+	flags := newFlagSet("blobs delete")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -100,7 +99,7 @@ func runBlobsDelete(cfg clientOptions, name string, args []string) error {
 
 // runBlobsGC removes old blobs or previews the removal.
 func runBlobsGC(cfg clientOptions, name string, args []string) error {
-	flags := flag.NewFlagSet("blobs gc", flag.ContinueOnError)
+	flags := newFlagSet("blobs gc")
 	olderThan := flags.String("older-than", "", "minimum age, for example 720h")
 	dryRun := flags.Bool("dry-run", false, "report what would be removed")
 	keep := []string{}

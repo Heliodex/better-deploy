@@ -4,7 +4,6 @@ import (
 	"context"
 	"embed"
 	"errors"
-	"flag"
 	"fmt"
 	"io/fs"
 	"os"
@@ -57,7 +56,7 @@ type newConfig struct {
 }
 
 func resolveNewConfig(args []string) (*newConfig, error) {
-	flags := flag.NewFlagSet("new", flag.ContinueOnError)
+	flags := newFlagSet("new")
 	dir := flags.String("dir", ".", "directory to scaffold the app in")
 	module := flags.String("module", "", "Go module path for a standalone app (default: app name)")
 

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"strings"
 	"time"
@@ -14,7 +13,7 @@ func runRuntime(args []string) error {
 		return err
 	}
 
-	flags := flag.NewFlagSet("runtime", flag.ContinueOnError)
+	flags := newFlagSet("runtime")
 
 	wasmtime := flags.String("wasmtime", firstNonEmpty(env("WT_WASMTIME"), "wasmtime"), "local wasmtime binary")
 	if err := flags.Parse(rest); err != nil {

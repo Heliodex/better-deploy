@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"maps"
 	"net/http"
@@ -33,7 +32,7 @@ func resolveDevConfig(args []string) (*devConfig, error) {
 		return nil, err
 	}
 
-	flags := flag.NewFlagSet("dev", flag.ContinueOnError)
+	flags := newFlagSet("dev")
 	dir := flags.String("dir", ".", "app directory containing app.json")
 	workspace := flags.String("workspace", "", "directory whose child apps are all served together")
 	port := flags.Int("port", 0, "loopback port for the dev supervisor (default 8080)")
