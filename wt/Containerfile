@@ -5,7 +5,7 @@
 
 ARG TARGETARCH=amd64
 
-FROM golang:1.27.3-alpine AS supervisor
+FROM golang:1.27.4-alpine AS supervisor
 ARG TARGETARCH=amd64
 WORKDIR /src
 RUN mkdir -p /out
