@@ -20,9 +20,9 @@ RUN go generate ./... && CGO_ENABLED=0 GOOS=linux GOARCH="${TARGETARCH}" \
 # Build wasmtime without Cranelift/Winch: the serving side only deserialises the .cwasm files produced by wt-deploy.
 # The musl build is fully static, so the final image can be scratch. The Rust stage runs for the target platform,
 # so arm64 builds use the arm64 toolchain and wasmtime target.
-FROM rust:1.97-slim AS wasmtime
+FROM rust:1.99-slim AS wasmtime
 ARG TARGETARCH=amd64
-ARG WASMTIME_VERSION=v50.0.0
+ARG WASMTIME_VERSION=v50.0.1
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends build-essential cmake pkg-config curl ca-certificates xz-utils binutils musl-tools \
