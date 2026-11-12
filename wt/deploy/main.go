@@ -28,21 +28,71 @@ func env(key string) string {
 	return os.Getenv(key)
 }
 
+// profileSelection is the config file and profile that deploy and bundle flags default from.
+type profileSelection struct {
+	path, name string
+	file       fileConfig
+	profile    fileProfile
+}
+
+// selectProfile loads the config file named by args and resolves the profile that the flags select.
+func selectProfile(args []string) (profileSelection, error) {
+	path := configArg(args)
+
+	file, err := loadFileConfig(path)
+	if err != nil {
+		return profileSelection{}, err
+	}
+
+	name := activeProfileName(profileArg(args), file)
+
+	profile, err := resolveProfile(file, name)
+	if err != nil {
+		return profileSelection{}, err
+	}
+
+	return profileSelection{path: path, name: name, file: file, profile: profile}, nil
+}
+
+// applyConfigFile reloads the profile from the file named by --config. It fills any host, token or app domain that the flags left empty.
+func applyConfigFile(path string, profileSet, appDomainSet bool, profileFlag, host, token, appDomain *string) (fileProfile, error) {
+	fileCfg, err := loadFileConfig(path)
+	if err != nil {
+		return fileProfile{}, err
+	}
+
+	if !profileSet {
+		*profileFlag = activeProfileName("", fileCfg)
+	}
+
+	profile, err := resolveProfile(fileCfg, *profileFlag)
+	if err != nil {
+		return fileProfile{}, err
+	}
+
+	if *host == "" {
+		*host = profile.Host
+	}
+
+	if *token == "" {
+		*token = profile.Token
+	}
+
+	if !appDomainSet {
+		*appDomain = profile.AppDomain
+	}
+
+	return profile, nil
+}
+
 // resolveConfig builds the deploy config from the config file, environment and deploy flags.
 func resolveConfig(args []string) (*deployConfig, error) {
-	configPath := configArg(args)
-
-	fileCfg, err := loadFileConfig(configPath)
+	sel, err := selectProfile(args)
 	if err != nil {
 		return nil, err
 	}
 
-	profileName := activeProfileName(profileArg(args), fileCfg)
-
-	profile, err := resolveProfile(fileCfg, profileName)
-	if err != nil {
-		return nil, err
-	}
+	configPath, fileCfg, profileName, profile := sel.path, sel.file, sel.name, sel.profile
 
 	flags := newFlagSet("deploy")
 	dir := flags.String("dir", ".", "app directory containing app.json")
@@ -99,30 +149,9 @@ func resolveConfig(args []string) (*deployConfig, error) {
 	}
 
 	if *config != configPath {
-		fileCfg, err = loadFileConfig(*config)
+		profile, err = applyConfigFile(*config, profileSet, appDomainSet, profileFlag, host, token, appDomain)
 		if err != nil {
 			return nil, err
-		}
-
-		if !profileSet {
-			*profileFlag = activeProfileName("", fileCfg)
-		}
-
-		profile, err = resolveProfile(fileCfg, *profileFlag)
-		if err != nil {
-			return nil, err
-		}
-
-		if *host == "" {
-			*host = profile.Host
-		}
-
-		if *token == "" {
-			*token = profile.Token
-		}
-
-		if !appDomainSet {
-			*appDomain = profile.AppDomain
 		}
 	}
 
@@ -159,19 +188,12 @@ func resolveConfig(args []string) (*deployConfig, error) {
 
 // resolveBundleConfig parses the flags for building a bundle without a supervisor.
 func resolveBundleConfig(args []string) (*deployConfig, error) {
-	configPath := configArg(args)
-
-	fileCfg, err := loadFileConfig(configPath)
+	sel, err := selectProfile(args)
 	if err != nil {
 		return nil, err
 	}
 
-	profileName := activeProfileName(profileArg(args), fileCfg)
-
-	profile, err := resolveProfile(fileCfg, profileName)
-	if err != nil {
-		return nil, err
-	}
+	configPath, fileCfg, profileName, profile := sel.path, sel.file, sel.name, sel.profile
 
 	flags := newFlagSet("bundle")
 	dir := flags.String("dir", ".", "app directory containing app.json")
