@@ -13,11 +13,11 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"wt.example/passport/contract"
 	"github.com/heliodex/better-deploy/wt/packages/v2/app"
 	"github.com/heliodex/better-deploy/wt/packages/v2/oauth"
 	"github.com/heliodex/better-deploy/wt/packages/v2/session"
 	"github.com/heliodex/better-deploy/wt/packages/v2/storage"
+	"wt.example/passport/contract"
 )
 
 // errNoSession distinguishes a missing cookie from a storage failure when loading a session.
@@ -435,45 +435,21 @@ func (a *passportApp) takeFlow(ctx context.Context, state string) (callbackFlow,
 	return flow, nil
 }
 
-// handleCallback validates state, exchanges the code, verifies the ID token and opens a session. The static /auth/callback page calls it, because the supervisor serves HTML navigations from static files before the component sees them.
-func (a *passportApp) handleCallback(w http.ResponseWriter, r *http.Request) {
-	noStore(w)
-
-	if !session.SameOrigin(r) {
-		app.WriteErrorCode(w, http.StatusForbidden, "forbidden", "cross-site request rejected")
-		return
-	}
-
-	var request contract.CallbackRequest
-	if !app.ReadJSON(w, r, maxBody, "state", &request) {
-		return
-	}
-
+// callbackStateMatches reports whether the state from the callback body is the one this browser started the login with.
+func callbackStateMatches(r *http.Request, state string) bool {
 	cookie, err := r.Cookie(stateCookie)
-	if err != nil || cookie.Value == "" || request.State == "" || !session.Equal(cookie.Value, request.State) {
-		app.WriteErrorCode(w, http.StatusBadRequest, "state", "the login state did not match this browser")
-		return
-	}
 
-	flow, err := a.takeFlow(r.Context(), request.State)
-	if errors.Is(err, storage.ErrNoRows) {
-		app.WriteErrorCode(w, http.StatusBadRequest, "expired", "the login flow expired or was already used")
-		return
-	}
+	return err == nil && cookie.Value != "" && state != "" && session.Equal(cookie.Value, state)
+}
 
-	if err != nil {
-		log.Printf("take login flow: %v", err)
-		app.WriteErrorCode(w, http.StatusInternalServerError, "internal", "could not complete the login")
-
-		return
-	}
-
-	tokens, err := a.oauth.Exchange(r.Context(), request.Code, flow.redirectURI, flow.verifier)
+// completeLogin exchanges the authorisation code and verifies the ID token. It writes the error response and reports false on failure.
+func (a *passportApp) completeLogin(w http.ResponseWriter, r *http.Request, flow callbackFlow, code string) (oauth.Identity, oauth.Tokens, bool) {
+	tokens, err := a.oauth.Exchange(r.Context(), code, flow.redirectURI, flow.verifier)
 	if err != nil {
 		log.Printf("oauth token exchange: %v", err)
 		app.WriteErrorCode(w, http.StatusBadGateway, "exchange", "the identity provider rejected the code exchange")
 
-		return
+		return oauth.Identity{}, oauth.Tokens{}, false
 	}
 
 	identity, err := a.oauth.VerifyIDToken(r.Context(), tokens.IDToken, flow.nonce)
@@ -481,9 +457,10 @@ func (a *passportApp) handleCallback(w http.ResponseWriter, r *http.Request) {
 		log.Printf("verify id token: %v", err)
 		app.WriteErrorCode(w, http.StatusBadGateway, "token", "the identity token could not be verified")
 
-		return
+		return oauth.Identity{}, oauth.Tokens{}, false
 	}
 
+	// Userinfo enriches the profile but is optional: the verified ID token alone is enough to sign in.
 	if userinfo, err := a.oauth.Userinfo(r.Context(), tokens.AccessToken); err == nil {
 		if err := identity.Merge(userinfo); err != nil {
 			log.Printf("oauth userinfo: %v", err)
@@ -494,13 +471,20 @@ func (a *passportApp) handleCallback(w http.ResponseWriter, r *http.Request) {
 
 	if identity.Subject == "" {
 		app.WriteErrorCode(w, http.StatusBadGateway, "token", "the identity token has no subject")
-		return
+
+		return oauth.Identity{}, oauth.Tokens{}, false
 	}
 
+	return identity, tokens, true
+}
+
+// storeSession issues a session token, saves the session with the provider tokens and sets the session cookie. It writes the error response and reports false on failure.
+func (a *passportApp) storeSession(w http.ResponseWriter, r *http.Request, identity oauth.Identity, tokens oauth.Tokens) bool {
 	token, hash, err := session.Issue()
 	if err != nil {
 		app.WriteErrorCode(w, http.StatusInternalServerError, "internal", "could not create a session")
-		return
+
+		return false
 	}
 
 	now := time.Now().UTC()
@@ -524,11 +508,55 @@ func (a *passportApp) handleCallback(w http.ResponseWriter, r *http.Request) {
 		log.Printf("store session: %v", err)
 		app.WriteErrorCode(w, http.StatusInternalServerError, "internal", "could not store the session")
 
-		return
+		return false
 	}
 
 	a.sessions.Set(w, r, token)
 	session.Clear(w, r, stateCookie)
+
+	return true
+}
+
+// handleCallback validates state, exchanges the code, verifies the ID token and opens a session. The static /auth/callback page calls it, because the supervisor serves HTML navigations from static files before the component sees them.
+func (a *passportApp) handleCallback(w http.ResponseWriter, r *http.Request) {
+	noStore(w)
+
+	if !session.SameOrigin(r) {
+		app.WriteErrorCode(w, http.StatusForbidden, "forbidden", "cross-site request rejected")
+		return
+	}
+
+	var request contract.CallbackRequest
+	if !app.ReadJSON(w, r, maxBody, "state", &request) {
+		return
+	}
+
+	if !callbackStateMatches(r, request.State) {
+		app.WriteErrorCode(w, http.StatusBadRequest, "state", "the login state did not match this browser")
+		return
+	}
+
+	flow, err := a.takeFlow(r.Context(), request.State)
+	if errors.Is(err, storage.ErrNoRows) {
+		app.WriteErrorCode(w, http.StatusBadRequest, "expired", "the login flow expired or was already used")
+		return
+	}
+
+	if err != nil {
+		log.Printf("take login flow: %v", err)
+		app.WriteErrorCode(w, http.StatusInternalServerError, "internal", "could not complete the login")
+
+		return
+	}
+
+	identity, tokens, ok := a.completeLogin(w, r, flow, request.Code)
+	if !ok {
+		return
+	}
+
+	if !a.storeSession(w, r, identity, tokens) {
+		return
+	}
 
 	w.WriteHeader(http.StatusNoContent)
 }
