@@ -50,6 +50,73 @@ func snapshotHash(paths ...string) (string, error) {
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
+// copyFileInto streams the first size bytes of the file at path into w.
+func copyFileInto(w io.Writer, path string, size int64) error {
+	in, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+
+	_, copyErr := io.CopyN(w, in, size)
+	closeErr := in.Close()
+
+	if copyErr != nil {
+		return copyErr
+	}
+
+	return closeErr
+}
+
+// addDataEntry adds one path from the app's /data tree to the archive. Missing roots and non-regular files are skipped.
+func addDataEntry(tw *tar.Writer, src, path string, entry fs.DirEntry, err error) error {
+	if err != nil {
+		if os.IsNotExist(err) && path == src {
+			return nil
+		}
+
+		return err
+	}
+
+	rel, err := filepath.Rel(src, path)
+	if err != nil {
+		return err
+	}
+
+	if rel == "." {
+		return nil
+	}
+
+	info, err := entry.Info()
+	if err != nil {
+		return err
+	}
+
+	if !entry.IsDir() && !info.Mode().IsRegular() {
+		log.Printf("backup: skipping non-regular %s", rel)
+		return nil
+	}
+
+	header, err := tar.FileInfoHeader(info, "")
+	if err != nil {
+		return err
+	}
+
+	header.Name = filepath.ToSlash(rel)
+	if entry.IsDir() {
+		header.Name += "/"
+	}
+
+	if err := tw.WriteHeader(header); err != nil {
+		return err
+	}
+
+	if !info.Mode().IsRegular() {
+		return nil
+	}
+
+	return copyFileInto(tw, path, info.Size())
+}
+
 // archiveData writes a tar.gz of the app's /data directory. A missing directory becomes an empty archive.
 func archiveData(src, dst string) error {
 	file, err := os.Create(dst)
@@ -60,91 +127,24 @@ func archiveData(src, dst string) error {
 	gz := gzip.NewWriter(file)
 	tw := tar.NewWriter(gz)
 
-	writeErr := filepath.WalkDir(src, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			if os.IsNotExist(err) && path == src {
-				return nil
-			}
-
-			return err
-		}
-
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-
-		if rel == "." {
-			return nil
-		}
-
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-
-		if !entry.IsDir() && !info.Mode().IsRegular() {
-			log.Printf("backup: skipping non-regular %s", rel)
-			return nil
-		}
-
-		header, err := tar.FileInfoHeader(info, "")
-		if err != nil {
-			return err
-		}
-
-		header.Name = filepath.ToSlash(rel)
-		if entry.IsDir() {
-			header.Name += "/"
-		}
-
-		if err := tw.WriteHeader(header); err != nil {
-			return err
-		}
-
-		if !info.Mode().IsRegular() {
-			return nil
-		}
-
-		in, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-
-		_, copyErr := io.CopyN(tw, in, info.Size())
-		closeErr := in.Close()
-
-		if copyErr != nil {
-			return copyErr
-		}
-
-		return closeErr
+	err = filepath.WalkDir(src, func(path string, entry fs.DirEntry, err error) error {
+		return addDataEntry(tw, src, path, entry, err)
 	})
-	if writeErr != nil {
-		_ = tw.Close()
-		_ = gz.Close()
-		_ = file.Close()
-		_ = os.Remove(dst)
-
-		return writeErr
+	if err == nil {
+		err = tw.Close()
 	}
 
-	if err := tw.Close(); err != nil {
-		_ = gz.Close()
-		_ = file.Close()
-		_ = os.Remove(dst)
-
-		return err
+	if err == nil {
+		err = gz.Close()
 	}
 
-	if err := gz.Close(); err != nil {
-		_ = file.Close()
-		_ = os.Remove(dst)
-
-		return err
+	// Close the file even after a failure so its descriptor is released before the partial archive is removed.
+	closeErr := file.Close()
+	if err == nil {
+		err = closeErr
 	}
 
-	if err := file.Close(); err != nil {
+	if err != nil {
 		_ = os.Remove(dst)
 		return err
 	}
