@@ -20,13 +20,19 @@ func newJobID() string {
 	return hex.EncodeToString(value[:])
 }
 
-// enqueue validates and persists a new job, deduplicating by idempotency key.
-func (s *jobStore) enqueue(req jobEnqueueRequest) (appJob, bool, error) {
-	now := time.Now().UTC()
+// jobDraft is a validated enqueue request, ready to become a stored job.
+type jobDraft struct {
+	path, method string
+	runAt        time.Time
+	attempts     int
+	headers      map[string]string
+}
 
+// validateEnqueue checks an enqueue request and normalises its path, method, run time, attempt limit and headers. It does not touch the queue.
+func validateEnqueue(req jobEnqueueRequest, now time.Time) (jobDraft, error) {
 	path := strings.TrimSpace(req.Path)
 	if path == "" || !strings.HasPrefix(path, "/") || strings.ContainsAny(path, "\x00\r\n") {
-		return appJob{}, false, errors.New("path must start with / and contain no control characters")
+		return jobDraft{}, errors.New("path must start with / and contain no control characters")
 	}
 
 	method := strings.ToUpper(strings.TrimSpace(req.Method))
@@ -37,15 +43,15 @@ func (s *jobStore) enqueue(req jobEnqueueRequest) (appJob, bool, error) {
 	switch method {
 	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodGet:
 	default:
-		return appJob{}, false, errors.New("method must be GET, POST, PUT, PATCH or DELETE")
+		return jobDraft{}, errors.New("method must be GET, POST, PUT, PATCH or DELETE")
 	}
 
 	if len(req.Body) > jobMaxBodyBytes {
-		return appJob{}, false, fmt.Errorf("body must be at most %d bytes", jobMaxBodyBytes)
+		return jobDraft{}, fmt.Errorf("body must be at most %d bytes", jobMaxBodyBytes)
 	}
 
 	if len(req.IdempotencyKey) > jobMaxKeyBytes {
-		return appJob{}, false, fmt.Errorf("idempotencyKey must be at most %d bytes", jobMaxKeyBytes)
+		return jobDraft{}, fmt.Errorf("idempotencyKey must be at most %d bytes", jobMaxKeyBytes)
 	}
 
 	attempts := req.MaxAttempts
@@ -54,7 +60,7 @@ func (s *jobStore) enqueue(req jobEnqueueRequest) (appJob, bool, error) {
 	}
 
 	if attempts > jobMaxAttempts {
-		return appJob{}, false, fmt.Errorf("maxAttempts must be between 1 and %d", jobMaxAttempts)
+		return jobDraft{}, fmt.Errorf("maxAttempts must be between 1 and %d", jobMaxAttempts)
 	}
 
 	runAt := req.RunAt.UTC()
@@ -72,46 +78,79 @@ func (s *jobStore) enqueue(req jobEnqueueRequest) (appJob, bool, error) {
 		headers[key] = value
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	return jobDraft{path: path, method: method, runAt: runAt, attempts: attempts, headers: headers}, nil
+}
 
-	if req.IdempotencyKey != "" {
-		for _, job := range s.jobs {
-			if job.IdempotencyKey == req.IdempotencyKey {
-				return job, false, nil
-			}
+// jobByIdempotencyKey returns the stored job with this key. An empty key never matches. The caller must hold s.mu.
+func (s *jobStore) jobByIdempotencyKey(key string) (appJob, bool) {
+	if key == "" {
+		return appJob{}, false
+	}
+
+	for _, job := range s.jobs {
+		if job.IdempotencyKey == key {
+			return job, true
 		}
 	}
 
+	return appJob{}, false
+}
+
+// makeRoomLocked prunes finished jobs and fails when the queue is still full. Pruning is saved even when the queue stays full.
+func (s *jobStore) makeRoomLocked() error {
 	before := len(s.jobs)
 	s.jobs = pruneTerminalJobs(s.jobs)
 	pruned := len(s.jobs) != before
 
-	if len(s.jobs) >= jobMaxJobs {
-		if pruned {
-			_ = s.saveLocked()
-		}
+	if len(s.jobs) < jobMaxJobs {
+		return nil
+	}
 
-		return appJob{}, false, fmt.Errorf("job queue is full (%d jobs)", jobMaxJobs)
+	if pruned {
+		_ = s.saveLocked()
+	}
+
+	return fmt.Errorf("job queue is full (%d jobs)", jobMaxJobs)
+}
+
+// enqueue validates and persists a new job, deduplicating by idempotency key.
+func (s *jobStore) enqueue(req jobEnqueueRequest) (appJob, bool, error) {
+	now := time.Now().UTC()
+
+	draft, err := validateEnqueue(req, now)
+	if err != nil {
+		return appJob{}, false, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if existing, ok := s.jobByIdempotencyKey(req.IdempotencyKey); ok {
+		return existing, false, nil
+	}
+
+	if err := s.makeRoomLocked(); err != nil {
+		return appJob{}, false, err
 	}
 
 	job := appJob{
 		ID:             newJobID(),
-		Path:           path,
-		Method:         method,
+		Path:           draft.path,
+		Method:         draft.method,
 		Body:           req.Body,
-		Headers:        headers,
+		Headers:        draft.headers,
 		Status:         jobStatusPending,
-		RunAt:          runAt,
+		RunAt:          draft.runAt,
 		CreatedAt:      now,
 		UpdatedAt:      now,
-		MaxAttempts:    attempts,
+		MaxAttempts:    draft.attempts,
 		IdempotencyKey: req.IdempotencyKey,
 	}
 
 	s.jobs = append(s.jobs, job)
 	if err := s.saveLocked(); err != nil {
 		s.jobs = s.jobs[:len(s.jobs)-1]
+
 		return appJob{}, false, err
 	}
 
