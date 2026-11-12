@@ -173,6 +173,39 @@ func noteProfileSource(values clientFlagValues, cfg fileConfig) string {
 	}
 }
 
+// loginProfile returns the saved settings a login starts from: the top-level settings when no profile is named, otherwise that profile.
+func loginProfile(existing fileConfig, profileName string) fileProfile {
+	if profileName == "" {
+		return fileProfile{Host: existing.Host, Token: existing.Token, AppDomain: existing.AppDomain}
+	}
+
+	return existing.Profiles[profileName]
+}
+
+// loginHost returns the normalised supervisor URL from --host, WT_DEPLOY_HOST, the saved profile or a prompt.
+func loginHost(input *authInput, flagHost string, profile fileProfile) (string, error) {
+	host := firstNonEmpty(flagHost, os.Getenv("WT_DEPLOY_HOST"), profile.Host)
+	if strings.TrimSpace(host) == "" {
+		var err error
+
+		host, err = input.line("Supervisor URL", profile.Host)
+		if err != nil {
+			return "", err
+		}
+	}
+
+	return normaliseSupervisorHost(host)
+}
+
+// loginToken reads the token from stdin, or prompts for it with hidden input when a terminal is attached.
+func loginToken(input *authInput, tokenStdin bool) (string, error) {
+	if !tokenStdin && input.interactive {
+		return input.secret("Token: ")
+	}
+
+	return input.line("Token", "")
+}
+
 // runAuthLogin stores a host and token after checking that the supervisor accepts them.
 func runAuthLogin(args []string, in io.Reader, out, errOut io.Writer) error {
 	values, rest, err := extractClientFlags(args)
@@ -191,14 +224,7 @@ func runAuthLogin(args []string, in io.Reader, out, errOut io.Writer) error {
 	}
 
 	profileName := activeProfileName(values.profile, existing)
-	profile := fileProfile{Host: existing.Host, Token: existing.Token, AppDomain: existing.AppDomain}
-
-	if profileName != "" {
-		profile = fileProfile{}
-		if configured, ok := existing.Profiles[profileName]; ok {
-			profile = configured
-		}
-	}
+	profile := loginProfile(existing, profileName)
 
 	loginFlags := newFlagSet("auth login")
 	tokenStdin := loginFlags.Bool("token-stdin", false, "read the token from stdin")
@@ -218,30 +244,12 @@ func runAuthLogin(args []string, in io.Reader, out, errOut io.Writer) error {
 
 	input := newAuthInput(in, errOut)
 
-	host := firstNonEmpty(values.host, os.Getenv("WT_DEPLOY_HOST"), profile.Host)
-	if strings.TrimSpace(host) == "" {
-		host, err = input.line("Supervisor URL", profile.Host)
-		if err != nil {
-			return err
-		}
-	}
-
-	host, err = normaliseSupervisorHost(host)
+	host, err := loginHost(input, values.host, profile)
 	if err != nil {
 		return err
 	}
 
-	var token string
-
-	switch {
-	case *tokenStdin:
-		token, err = input.line("Token", "")
-	case input.interactive:
-		token, err = input.secret("Token: ")
-	default:
-		token, err = input.line("Token", "")
-	}
-
+	token, err := loginToken(input, *tokenStdin)
 	if err != nil {
 		return err
 	}
