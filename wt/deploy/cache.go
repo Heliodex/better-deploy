@@ -332,6 +332,82 @@ func dedupePaths(paths []string) []string {
 	return out
 }
 
+// walkModuleInput lists every file under an explicit component input directory, skipping build output.
+func walkModuleInput(root string) ([]string, error) {
+	return walkFiles(root, moduleSkipDir(root), nil)
+}
+
+// walkModuleSources lists the module source files under a local replace target.
+func walkModuleSources(root string) ([]string, error) {
+	return walkFiles(root, moduleSkipDir(root), isModuleSource)
+}
+
+// walkStaticInput lists every file under an explicit static input directory, skipping build output and dependencies.
+func walkStaticInput(root string) ([]string, error) {
+	return walkFiles(root, staticSkipDir(root), nil)
+}
+
+// addExplicitInput appends one configured input path to files. A file is added as-is, a directory is expanded with walk, and empty or missing paths are ignored.
+func addExplicitInput(files []string, dir, value string, walk func(string) ([]string, error)) ([]string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return files, nil
+	}
+
+	path := value
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(dir, path)
+	}
+
+	info, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return files, nil
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	if !info.IsDir() {
+		return append(files, path), nil
+	}
+
+	more, err := walk(path)
+	if err != nil {
+		return nil, err
+	}
+
+	return append(files, more...), nil
+}
+
+// goModuleFiles returns the go.mod, go.sum and workspace files of the enclosing module when that module is above the app directory.
+func goModuleFiles(dir string) ([]string, error) {
+	root, err := goModuleRoot(dir)
+	if err != nil || root == "" {
+		return nil, err
+	}
+
+	appAbs, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	if root == appAbs {
+		return nil, nil
+	}
+
+	var files []string
+
+	for _, name := range []string{"go.mod", "go.sum", "go.work", "go.work.sum"} {
+		path := filepath.Join(root, name)
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			files = append(files, path)
+		}
+	}
+
+	return files, nil
+}
+
 // collectComponentInputFiles walks Go, WIT and module files plus explicit component_inputs and local replace targets.
 func collectComponentInputFiles(dir string, m manifest) ([]string, error) {
 	files, err := walkFiles(dir, appComponentSkip(dir), isComponentSource)
@@ -340,36 +416,10 @@ func collectComponentInputFiles(dir string, m manifest) ([]string, error) {
 	}
 
 	for _, value := range m.ComponentInputs {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-
-		path := value
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(dir, path)
-		}
-
-		info, err := os.Stat(path)
-		if os.IsNotExist(err) {
-			continue
-		}
-
+		files, err = addExplicitInput(files, dir, value, walkModuleInput)
 		if err != nil {
 			return nil, err
 		}
-
-		if !info.IsDir() {
-			files = append(files, path)
-			continue
-		}
-
-		more, err := walkFiles(path, moduleSkipDir(path), nil)
-		if err != nil {
-			return nil, err
-		}
-
-		files = append(files, more...)
 	}
 
 	replaces, err := localReplaceDirs(dir)
@@ -377,53 +427,18 @@ func collectComponentInputFiles(dir string, m manifest) ([]string, error) {
 		return nil, err
 	}
 
-	root, err := goModuleRoot(dir)
+	modFiles, err := goModuleFiles(dir)
 	if err != nil {
 		return nil, err
 	}
 
-	if root != "" {
-		appAbs, err := filepath.Abs(dir)
-		if err != nil {
-			return nil, err
-		}
-
-		if root != appAbs {
-			for _, name := range []string{"go.mod", "go.sum", "go.work", "go.work.sum"} {
-				path := filepath.Join(root, name)
-				if info, err := os.Stat(path); err == nil && !info.IsDir() {
-					files = append(files, path)
-				}
-			}
-		}
-	}
+	files = append(files, modFiles...)
 
 	for _, value := range replaces {
-		path := value
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(dir, path)
-		}
-
-		info, err := os.Stat(path)
-		if os.IsNotExist(err) {
-			continue
-		}
-
+		files, err = addExplicitInput(files, dir, value, walkModuleSources)
 		if err != nil {
 			return nil, err
 		}
-
-		if !info.IsDir() {
-			files = append(files, path)
-			continue
-		}
-
-		more, err := walkFiles(path, moduleSkipDir(path), isModuleSource)
-		if err != nil {
-			return nil, err
-		}
-
-		files = append(files, more...)
 	}
 
 	return dedupePaths(files), nil
@@ -455,36 +470,12 @@ func collectStaticInputFiles(dir string, m manifest) ([]string, error) {
 	}
 
 	for _, value := range m.StaticInputs {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-
-		path := value
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(dir, path)
-		}
-
-		info, err := os.Stat(path)
-		if os.IsNotExist(err) {
-			continue
-		}
-
+		added, err := addExplicitInput(files, dir, value, walkStaticInput)
 		if err != nil {
 			return nil, err
 		}
 
-		if !info.IsDir() {
-			files = append(files, path)
-			continue
-		}
-
-		more, err := walkFiles(path, staticSkipDir(path), nil)
-		if err != nil {
-			return nil, err
-		}
-
-		files = append(files, more...)
+		files = added
 	}
 
 	return dedupePaths(files), nil
