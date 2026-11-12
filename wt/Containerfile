@@ -34,9 +34,8 @@ RUN case "${TARGETARCH}" in \
     esac \
  && rustup target add "$(cat /tmp/rust-target)"
 
-WORKDIR /src
-RUN curl -fsSL "https://github.com/bytecodealliance/wasmtime/archive/refs/tags/${WASMTIME_VERSION}.tar.gz" | tar -xz
-WORKDIR /src/wasmtime-50.0.0
+WORKDIR /src/wasmtime
+RUN curl -fsSL "https://github.com/bytecodealliance/wasmtime/archive/refs/tags/${WASMTIME_VERSION}.tar.gz" | tar -xz --strip-components=1
 RUN target=$(cat /tmp/rust-target) \
  && upper=$(echo "$target" | tr '[:lower:]-' '[:upper:]_') \
  && env "CARGO_TARGET_${upper}_LINKER=musl-gcc" cargo build --release --locked --target "$target" --bin wasmtime --no-default-features \
