@@ -195,6 +195,86 @@ func jobsShow(cfg clientOptions, name string, args []string) error {
 	return nil
 }
 
+// headerFlagValue parses one --header value written as Key: Value or Key=Value.
+func headerFlagValue(value string) (string, string, error) {
+	key, val, ok := strings.Cut(value, ":")
+	if !ok {
+		key, val, ok = strings.Cut(value, "=")
+	}
+
+	if !ok || strings.TrimSpace(key) == "" {
+		return "", "", errors.New("header must be Key: Value")
+	}
+
+	return strings.TrimSpace(key), strings.TrimSpace(val), nil
+}
+
+// enqueueRequest holds the enqueue flags before they are checked and encoded as the create-job body.
+type enqueueRequest struct {
+	path, method, body, file, runAt, idempotencyKey string
+	maxAttempts                                     int
+	headers                                         map[string]string
+}
+
+// validate checks the flags that do not need the request body or the clock.
+func (req enqueueRequest) validate() error {
+	if req.path == "" || !strings.HasPrefix(req.path, "/") {
+		return errors.New("--path must start with /")
+	}
+
+	if req.body != "" && req.file != "" {
+		return errors.New("use --body or --file, not both")
+	}
+
+	if req.maxAttempts < 0 {
+		return errors.New("--max-attempts must be 0 or more")
+	}
+
+	return nil
+}
+
+// payload builds the create-job body. It reads --file and parses --run-at, so it can fail after validate passes.
+func (req enqueueRequest) payload() (map[string]any, error) {
+	payload := map[string]any{"path": req.path, "method": strings.ToUpper(req.method)}
+	text := req.body
+
+	if req.file != "" {
+		data, err := os.ReadFile(req.file)
+		if err != nil {
+			return nil, err
+		}
+
+		text = string(data)
+	}
+
+	if text != "" {
+		payload["body"] = text
+	}
+
+	if len(req.headers) > 0 {
+		payload["headers"] = req.headers
+	}
+
+	if req.runAt != "" {
+		parsed, err := time.Parse(time.RFC3339, req.runAt)
+		if err != nil {
+			return nil, fmt.Errorf("--run-at: %w", err)
+		}
+
+		payload["runAt"] = parsed.UTC()
+	}
+
+	if req.maxAttempts > 0 {
+		payload["maxAttempts"] = req.maxAttempts
+	}
+
+	if req.idempotencyKey != "" {
+		payload["idempotencyKey"] = req.idempotencyKey
+	}
+
+	return payload, nil
+}
+
 // jobsEnqueue creates a durable job from flags.
 func jobsEnqueue(cfg clientOptions, name string, args []string) error {
 	flags := newFlagSet("jobs enqueue")
@@ -209,16 +289,12 @@ func jobsEnqueue(cfg clientOptions, name string, args []string) error {
 	headers := map[string]string{}
 
 	flags.Func("header", "request header in Key: Value form (repeatable)", func(value string) error {
-		key, value, ok := strings.Cut(value, ":")
-		if !ok {
-			key, value, ok = strings.Cut(value, "=")
+		key, val, err := headerFlagValue(value)
+		if err != nil {
+			return err
 		}
 
-		if !ok || strings.TrimSpace(key) == "" {
-			return errors.New("header must be Key: Value")
-		}
-
-		headers[strings.TrimSpace(key)] = strings.TrimSpace(value)
+		headers[key] = val
 
 		return nil
 	})
@@ -231,57 +307,27 @@ func jobsEnqueue(cfg clientOptions, name string, args []string) error {
 		return fmt.Errorf("unexpected argument %q", flags.Arg(0))
 	}
 
-	if *path == "" || !strings.HasPrefix(*path, "/") {
-		return errors.New("--path must start with /")
+	req := enqueueRequest{
+		path:           *path,
+		method:         *method,
+		body:           *body,
+		file:           *file,
+		runAt:          *runAt,
+		idempotencyKey: *idempotencyKey,
+		maxAttempts:    *maxAttempts,
+		headers:        headers,
 	}
-
-	if *body != "" && *file != "" {
-		return errors.New("use --body or --file, not both")
-	}
-
-	if *maxAttempts < 0 {
-		return errors.New("--max-attempts must be 0 or more")
+	if err := req.validate(); err != nil {
+		return err
 	}
 
 	if *jsonOut {
 		cfg.jsonOut = true
 	}
 
-	payload := map[string]any{"path": *path, "method": strings.ToUpper(*method)}
-	text := *body
-
-	if *file != "" {
-		data, err := os.ReadFile(*file)
-		if err != nil {
-			return err
-		}
-
-		text = string(data)
-	}
-
-	if text != "" {
-		payload["body"] = text
-	}
-
-	if len(headers) > 0 {
-		payload["headers"] = headers
-	}
-
-	if *runAt != "" {
-		parsed, err := time.Parse(time.RFC3339, *runAt)
-		if err != nil {
-			return fmt.Errorf("--run-at: %w", err)
-		}
-
-		payload["runAt"] = parsed.UTC()
-	}
-
-	if *maxAttempts > 0 {
-		payload["maxAttempts"] = *maxAttempts
-	}
-
-	if *idempotencyKey != "" {
-		payload["idempotencyKey"] = *idempotencyKey
+	payload, err := req.payload()
+	if err != nil {
+		return err
 	}
 
 	data, err := json.Marshal(payload)
