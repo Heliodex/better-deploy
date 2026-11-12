@@ -23,39 +23,13 @@ const (
 	maxLastErrorChars = 1024
 )
 
-// DeliverDue reaps expired leases, claims due messages and sends them. A non-2xx response is retried, except for
-// permanent 4xx responses other than 408 and 429, which are marked failed.
-func (o Outbox) DeliverDue(ctx context.Context, client *storage.Client, limit int) (Summary, error) {
-	if len(o.Signer.Secret) == 0 {
-		return Summary{}, errors.New("outbox: signing secret is empty")
-	}
-
-	table, err := o.tableName()
-	if err != nil {
-		return Summary{}, err
-	}
-
-	if limit <= 0 || limit > 200 {
-		limit = DefaultLimit
-	}
-
-	now := o.now()
-	nowText := now.Format(timeFormat)
-	leaseText := now.Add(o.lease()).Format(timeFormat)
-
-	reaped, err := client.Exec(ctx, fmt.Sprintf(`update %s set status = 'pending', lease_until = NULL
-		where status = 'sending' and lease_until is not null and lease_until <= ?`, table), nowText)
-	if err != nil {
-		return Summary{}, err
-	}
-
-	summary := Summary{Reaped: int(reaped.RowsAffected)}
-
+// dueRecords loads up to limit pending messages whose next attempt is due, oldest first.
+func dueRecords(ctx context.Context, client *storage.Client, table, nowText string, limit int) ([]Record, error) {
 	rows, err := client.Query(ctx, fmt.Sprintf(`select %s from %s
 		where status = 'pending' and next_attempt_at <= ?
 		order by next_attempt_at asc, id asc limit ?`, recordColumns, table), nowText, limit)
 	if err != nil {
-		return summary, err
+		return nil, err
 	}
 
 	records := []Record{}
@@ -65,97 +39,78 @@ func (o Outbox) DeliverDue(ctx context.Context, client *storage.Client, limit in
 		if err != nil {
 			_ = rows.Close()
 
-			return summary, err
+			return nil, err
 		}
 
 		records = append(records, record)
 	}
 
 	if err := rows.Close(); err != nil {
-		return summary, err
+		return nil, err
 	}
 
-	sender := o.sender()
+	return records, nil
+}
 
-	for _, record := range records {
-		if err := ctx.Err(); err != nil {
-			return summary, err
-		}
-
-		claim, err := client.Exec(ctx, fmt.Sprintf(`update %s
-			set status = 'sending', attempts = attempts + 1, lease_until = ?
-			where id = ? and status = 'pending' and next_attempt_at <= ?`, table), leaseText, record.ID, nowText)
-		if err != nil {
-			return summary, err
-		}
-
-		if claim.RowsAffected == 0 {
-			continue
-		}
-
-		attempt := record.Attempts + 1
-		timestamp, signature := o.Signer.Sign(record.DeliveryID, record.Payload)
-		message := Message{
-			ID:          record.ID,
-			Event:       record.Event,
-			DedupeKey:   record.DedupeKey,
-			Payload:     record.Payload,
-			URL:         record.URL,
-			Headers:     record.Headers,
-			Metadata:    record.Metadata,
-			MaxAttempts: record.MaxAttempts,
-			DeliveryID:  record.DeliveryID,
-		}
-		delivery := Delivery{
-			Message:   message,
-			Attempt:   attempt,
-			Timestamp: timestamp,
-			Signature: signature,
-		}
-
-		status, sendErr := sender.Send(ctx, delivery)
-		if sendErr != nil && ctx.Err() != nil {
-			return summary, ctx.Err()
-		}
-
-		if status >= http.StatusOK && status < http.StatusMultipleChoices {
-			if err := o.markDelivered(ctx, client, table, record.ID, status, nowText); err != nil {
-				return summary, err
-			}
-
-			summary.Delivered++
-
-			continue
-		}
-
-		errorText := sendErrText(status, sendErr)
-		permanent := status >= http.StatusBadRequest && status < http.StatusInternalServerError &&
-			status != http.StatusRequestTimeout && status != http.StatusTooManyRequests
-
-		maxAttempts := record.MaxAttempts
-		if maxAttempts <= 0 {
-			maxAttempts = o.maxAttempts()
-		}
-
-		if permanent || attempt >= maxAttempts {
-			if err := o.markFailed(ctx, client, table, record.ID, status, errorText, nowText); err != nil {
-				return summary, err
-			}
-
-			summary.Failed++
-
-			continue
-		}
-
-		next := now.Add(o.retryDelay(attempt)).Format(timeFormat)
-		if err := o.markRetry(ctx, client, table, record.ID, status, errorText, next); err != nil {
-			return summary, err
-		}
-
-		summary.Retried++
+// claimRecord moves a pending message to sending under a lease. It reports false when another worker claimed it first.
+func claimRecord(ctx context.Context, client *storage.Client, table, id, nowText, leaseText string) (bool, error) {
+	claim, err := client.Exec(ctx, fmt.Sprintf(`update %s
+		set status = 'sending', attempts = attempts + 1, lease_until = ?
+		where id = ? and status = 'pending' and next_attempt_at <= ?`, table), leaseText, id, nowText)
+	if err != nil {
+		return false, err
 	}
 
-	return summary, nil
+	return claim.RowsAffected > 0, nil
+}
+
+// recordMessage returns the message fields of a stored record.
+func recordMessage(record Record) Message {
+	return Message{
+		ID:          record.ID,
+		Event:       record.Event,
+		DedupeKey:   record.DedupeKey,
+		Payload:     record.Payload,
+		URL:         record.URL,
+		Headers:     record.Headers,
+		Metadata:    record.Metadata,
+		MaxAttempts: record.MaxAttempts,
+		DeliveryID:  record.DeliveryID,
+	}
+}
+
+// permanentFailure reports whether a status means the receiver will not accept the message later.
+// Request timeouts and rate limits are retryable, so they are excluded from the 4xx range.
+func permanentFailure(status int) bool {
+	return status >= http.StatusBadRequest && status < http.StatusInternalServerError &&
+		status != http.StatusRequestTimeout && status != http.StatusTooManyRequests
+}
+
+// attemptLimit returns the record's own attempt limit, or the outbox default when it has none.
+func (o Outbox) attemptLimit(record Record) int {
+	if record.MaxAttempts > 0 {
+		return record.MaxAttempts
+	}
+
+	return o.maxAttempts()
+}
+
+// truncate bounds the stored error text.
+func truncate(value string) string {
+	if len(value) <= maxLastErrorChars {
+		return value
+	}
+
+	return value[:maxLastErrorChars]
+}
+
+// sendErrText renders the stored failure reason.
+func sendErrText(status int, err error) string {
+	if err != nil {
+		return err.Error()
+	}
+
+	return fmt.Sprintf("HTTP %d", status)
 }
 
 // markDelivered records a successful attempt.
@@ -185,22 +140,6 @@ func (o Outbox) markRetry(ctx context.Context, client *storage.Client, table, id
 	return err
 }
 
-// sender returns the configured sender or the default HTTP sender.
-//
-//nolint:ireturn // The caller may supply any Sender implementation.
-func (o Outbox) sender() Sender {
-	if o.Sender != nil {
-		return o.Sender
-	}
-
-	client := o.HTTP
-	if client == nil {
-		client = &http.Client{Timeout: defaultTimeout}
-	}
-
-	return HTTPSender{Client: client}
-}
-
 // lease returns the configured claim lease.
 func (o Outbox) lease() time.Duration {
 	if o.Lease > 0 {
@@ -210,22 +149,13 @@ func (o Outbox) lease() time.Duration {
 	return DefaultLease
 }
 
-// sendErrText renders the stored failure reason.
-func sendErrText(status int, err error) string {
-	if err != nil {
-		return err.Error()
-	}
-
-	return fmt.Sprintf("HTTP %d", status)
-}
-
-// truncate bounds the stored error text.
-func truncate(value string) string {
-	if len(value) <= maxLastErrorChars {
+// headerOrDefault returns a configured header name or its default.
+func headerOrDefault(value, fallback string) string {
+	if strings.TrimSpace(value) != "" {
 		return value
 	}
 
-	return value[:maxLastErrorChars]
+	return fallback
 }
 
 // HTTPSender posts one signed delivery with net/http.
@@ -278,11 +208,123 @@ func (s HTTPSender) Send(ctx context.Context, delivery Delivery) (int, error) {
 	return resp.StatusCode, nil
 }
 
-// headerOrDefault returns a configured header name or its default.
-func headerOrDefault(value, fallback string) string {
-	if strings.TrimSpace(value) != "" {
-		return value
+// sender returns the configured sender or the default HTTP sender.
+//
+//nolint:ireturn // The caller may supply any Sender implementation.
+func (o Outbox) sender() Sender {
+	if o.Sender != nil {
+		return o.Sender
 	}
 
-	return fallback
+	client := o.HTTP
+	if client == nil {
+		client = &http.Client{Timeout: defaultTimeout}
+	}
+
+	return HTTPSender{Client: client}
+}
+
+// deliverClaimed sends one message this worker has claimed, then records it as delivered, failed or queued for retry.
+func (o Outbox) deliverClaimed(ctx context.Context, client *storage.Client, table string, sender Sender, record Record, now time.Time, summary *Summary) error {
+	attempt := record.Attempts + 1
+	timestamp, signature := o.Signer.Sign(record.DeliveryID, record.Payload)
+	delivery := Delivery{
+		Message:   recordMessage(record),
+		Attempt:   attempt,
+		Timestamp: timestamp,
+		Signature: signature,
+	}
+
+	status, sendErr := sender.Send(ctx, delivery)
+	if sendErr != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	nowText := now.Format(timeFormat)
+	if status >= http.StatusOK && status < http.StatusMultipleChoices {
+		if err := o.markDelivered(ctx, client, table, record.ID, status, nowText); err != nil {
+			return err
+		}
+
+		summary.Delivered++
+
+		return nil
+	}
+
+	errorText := sendErrText(status, sendErr)
+	if permanentFailure(status) || attempt >= o.attemptLimit(record) {
+		if err := o.markFailed(ctx, client, table, record.ID, status, errorText, nowText); err != nil {
+			return err
+		}
+
+		summary.Failed++
+
+		return nil
+	}
+
+	next := now.Add(o.retryDelay(attempt)).Format(timeFormat)
+	if err := o.markRetry(ctx, client, table, record.ID, status, errorText, next); err != nil {
+		return err
+	}
+
+	summary.Retried++
+
+	return nil
+}
+
+// DeliverDue reaps expired leases, claims due messages and sends them. A non-2xx response is retried, except for
+// permanent 4xx responses other than 408 and 429, which are marked failed.
+func (o Outbox) DeliverDue(ctx context.Context, client *storage.Client, limit int) (Summary, error) {
+	if len(o.Signer.Secret) == 0 {
+		return Summary{}, errors.New("outbox: signing secret is empty")
+	}
+
+	table, err := o.tableName()
+	if err != nil {
+		return Summary{}, err
+	}
+
+	if limit <= 0 || limit > 200 {
+		limit = DefaultLimit
+	}
+
+	now := o.now()
+	nowText := now.Format(timeFormat)
+	leaseText := now.Add(o.lease()).Format(timeFormat)
+
+	reaped, err := client.Exec(ctx, fmt.Sprintf(`update %s set status = 'pending', lease_until = NULL
+		where status = 'sending' and lease_until is not null and lease_until <= ?`, table), nowText)
+	if err != nil {
+		return Summary{}, err
+	}
+
+	summary := Summary{Reaped: int(reaped.RowsAffected)}
+
+	records, err := dueRecords(ctx, client, table, nowText, limit)
+	if err != nil {
+		return summary, err
+	}
+
+	sender := o.sender()
+
+	for _, record := range records {
+		if err := ctx.Err(); err != nil {
+			return summary, err
+		}
+
+		claimed, err := claimRecord(ctx, client, table, record.ID, nowText, leaseText)
+		if err != nil {
+			return summary, err
+		}
+
+		if !claimed {
+			continue
+		}
+
+		if err := o.deliverClaimed(ctx, client, table, sender, record, now, &summary); err != nil {
+			return summary, err
+		}
+	}
+
+	return summary, nil
 }
