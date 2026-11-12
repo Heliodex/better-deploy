@@ -69,11 +69,13 @@ jobs:
               run: |
                   (cd wt/example/guestbook/web && bun install --frozen-lockfile)
                   (cd wt/example/pulse/web && bun install --frozen-lockfile)
+                  (cd wt/example/passport/web && bun install --frozen-lockfile)
 
             - name: Generate example contracts
               run: |
                   (cd wt/example/guestbook && go generate ./contract/)
                   (cd wt/example/pulse && go generate ./contract/)
+                  (cd wt/example/passport && go generate ./contract/)
 
             - name: Build embedded admin panel
               working-directory: wt/supervisor
