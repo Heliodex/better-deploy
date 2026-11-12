@@ -153,6 +153,7 @@ jobs:
               run: |
                   (cd wt/example/guestbook/web && bun install --frozen-lockfile)
                   (cd wt/example/pulse/web && bun install --frozen-lockfile)
+                  (cd wt/example/passport/web && bun install --frozen-lockfile)
 
             - name: Check namespace test support
               run: |
@@ -207,6 +208,7 @@ jobs:
                   rm -rf static
                   cp -r web/build static
                   (cd ../pulse && go generate ./contract/)
+                  (cd ../passport && go generate ./contract/)
 
             - name: Vet host packages
               run: |
