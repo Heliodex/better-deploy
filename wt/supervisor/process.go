@@ -517,6 +517,92 @@ func (s *supervisor) adoptApp(name, dir string, cfg appConfig, info runnerAppInf
 	return a, nil
 }
 
+// storedAppConfig prefers the config a running app was started with, when it still normalises for this supervisor.
+func (s *supervisor) storedAppConfig(info runnerAppInfo, name string, cfg appConfig) appConfig {
+	if len(info.Config) == 0 {
+		return cfg
+	}
+
+	var stored appConfig
+	if err := json.Unmarshal(info.Config, &stored); err != nil {
+		return cfg
+	}
+
+	normalised, err := normaliseAppConfig(stored, name, s.cfg.domain, s.cfg.tenantMode)
+	if err != nil {
+		return cfg
+	}
+
+	return normalised
+}
+
+// loadAppEntry adopts the running app with this name, or creates it from its directory. Invalid apps are logged and skipped.
+// An adopted app is removed from snapshot, so whatever remains in snapshot afterwards has no app directory.
+func (s *supervisor) loadAppEntry(name string, snapshot map[string]runnerAppInfo) {
+	dir := filepath.Join(s.cfg.appsDir, name)
+	info, running := snapshot[name]
+
+	if running && info.Dir != "" {
+		dir = info.Dir
+	}
+
+	cfg, err := readAppConfig(dir, name, s.cfg.domain, s.cfg.tenantMode)
+	if err != nil {
+		log.Printf("app %s: %v (skipped)", name, err)
+		return
+	}
+
+	if running {
+		cfg = s.storedAppConfig(info, name, cfg)
+	}
+
+	if err := s.hostConflictError(cfg, name); err != nil {
+		log.Printf("app %s: %v; skipped", name, err)
+		return
+	}
+
+	if !running {
+		a, err := s.createApp(name, dir, cfg, cfg.idleTimeout > 0)
+		if err != nil {
+			log.Printf("app %s: %v (skipped)", name, err)
+			return
+		}
+
+		s.register(a)
+
+		return
+	}
+
+	delete(snapshot, name)
+
+	a, err := s.adoptApp(name, dir, cfg, info)
+	if err != nil {
+		log.Printf("app %s: adopt: %v (skipped)", name, err)
+
+		_ = s.runner.Stop(info.ID)
+
+		return
+	}
+
+	s.register(a)
+}
+
+// checkDependencyCycles returns the first app whose dependency chain loops back on itself.
+func (s *supervisor) checkDependencyCycles() error {
+	for _, a := range s.allApps() {
+		a.mu.Lock()
+		name := a.name
+		deps := append([]string(nil), a.cfg.DependsOn...)
+		a.mu.Unlock()
+
+		if err := s.dependencyCycleError(name, deps); err != nil {
+			return fmt.Errorf("app %s: %w", name, err)
+		}
+	}
+
+	return nil
+}
+
 // loadApps reads the apps directory, adopts runner processes and creates the rest, asleep when they have an idle timeout.
 func (s *supervisor) loadApps() error {
 	entries, err := os.ReadDir(s.cfg.appsDir)
@@ -539,55 +625,7 @@ func (s *supervisor) loadApps() error {
 			continue
 		}
 
-		dir := filepath.Join(s.cfg.appsDir, name)
-		if info, ok := snapshot[name]; ok && info.Dir != "" {
-			dir = info.Dir
-		}
-
-		cfg, err := readAppConfig(dir, name, s.cfg.domain, s.cfg.tenantMode)
-		if err != nil {
-			log.Printf("app %s: %v (skipped)", name, err)
-			continue
-		}
-
-		if info, ok := snapshot[name]; ok && len(info.Config) > 0 {
-			var stored appConfig
-			if err := json.Unmarshal(info.Config, &stored); err == nil {
-				if normalised, err := normaliseAppConfig(stored, name, s.cfg.domain, s.cfg.tenantMode); err == nil {
-					cfg = normalised
-				}
-			}
-		}
-
-		if err := s.hostConflictError(cfg, name); err != nil {
-			log.Printf("app %s: %v; skipped", name, err)
-			continue
-		}
-
-		if info, ok := snapshot[name]; ok {
-			a, err := s.adoptApp(name, dir, cfg, info)
-			delete(snapshot, name)
-
-			if err != nil {
-				log.Printf("app %s: adopt: %v (skipped)", name, err)
-
-				_ = s.runner.Stop(info.ID)
-
-				continue
-			}
-
-			s.register(a)
-
-			continue
-		}
-
-		a, err := s.createApp(name, dir, cfg, cfg.idleTimeout > 0)
-		if err != nil {
-			log.Printf("app %s: %v (skipped)", name, err)
-			continue
-		}
-
-		s.register(a)
+		s.loadAppEntry(name, snapshot)
 	}
 
 	for name, info := range snapshot {
@@ -596,16 +634,5 @@ func (s *supervisor) loadApps() error {
 		_ = s.runner.Stop(info.ID)
 	}
 
-	for _, a := range s.allApps() {
-		a.mu.Lock()
-		name := a.name
-		deps := append([]string(nil), a.cfg.DependsOn...)
-		a.mu.Unlock()
-
-		if err := s.dependencyCycleError(name, deps); err != nil {
-			return fmt.Errorf("app %s: %w", name, err)
-		}
-	}
-
-	return nil
+	return s.checkDependencyCycles()
 }

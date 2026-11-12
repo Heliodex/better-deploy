@@ -76,66 +76,66 @@ func clearCloseOnExec(file *os.File) error {
 	return nil
 }
 
-// startRunner connects to an existing runner during a handover or starts a new one.
-// The runner owns the app processes; its liveness pipe ties it to this supervisor process.
-func (s *supervisor) startRunner() error {
-	socket := runnerSocketPath(s.cfg.stateDir)
-
-	handover := os.Getenv(handoverEnv) == "1"
-	if handover {
-		if raw := os.Getenv(runnerFDEnv); raw != "" {
-			if fd, err := strconv.Atoi(raw); err == nil && fd >= 0 {
-				s.runnerLiveness = os.NewFile(uintptr(fd), "runner-liveness")
-			}
+// waitForSocketGone polls for up to five seconds until the runner socket path is removed.
+func waitForSocketGone(socket string) {
+	for range 50 {
+		if _, err := os.Stat(socket); os.IsNotExist(err) {
+			return
 		}
 
-		client, snapshot, pid, err := dialRunner(socket, 5*time.Second)
-		if err == nil {
-			s.runner = client
+		time.Sleep(100 * time.Millisecond)
+	}
+}
 
-			s.runnerSnapshot = snapshot
-			go s.reapRunner(pid)
-
-			return nil
-		}
-
-		log.Printf("runner handover: %v; starting a new runner", err)
-
-		if s.runnerLiveness != nil {
-			_ = s.runnerLiveness.Close()
-			s.runnerLiveness = nil
-		}
-
-		for range 50 {
-			if _, err := os.Stat(socket); os.IsNotExist(err) {
-				break
-			}
-
-			time.Sleep(100 * time.Millisecond)
-		}
-	} else {
-		// A runner from a supervisor that crashed should have exited when its
-		// liveness pipe closed. If one still answers, stop it rather than
-		// adopting stale apps into a cold start.
-		if client, _, _, err := dialRunner(socket, 500*time.Millisecond); err == nil {
-			_ = client.Shutdown()
-			client.Close()
-
-			for range 50 {
-				if _, err := os.Stat(socket); os.IsNotExist(err) {
-					break
-				}
-
-				time.Sleep(100 * time.Millisecond)
-			}
+// adoptHandoverRunner connects to the runner left by the previous supervisor. It reports false when none answers, and the caller then starts a new runner.
+func (s *supervisor) adoptHandoverRunner(socket string) bool {
+	if raw := os.Getenv(runnerFDEnv); raw != "" {
+		if fd, err := strconv.Atoi(raw); err == nil && fd >= 0 {
+			s.runnerLiveness = os.NewFile(uintptr(fd), "runner-liveness")
 		}
 	}
 
-	_ = os.Remove(socket)
+	client, snapshot, pid, err := dialRunner(socket, 5*time.Second)
+	if err == nil {
+		s.runner = client
 
+		s.runnerSnapshot = snapshot
+		go s.reapRunner(pid)
+
+		return true
+	}
+
+	log.Printf("runner handover: %v; starting a new runner", err)
+
+	if s.runnerLiveness != nil {
+		_ = s.runnerLiveness.Close()
+		s.runnerLiveness = nil
+	}
+
+	waitForSocketGone(socket)
+
+	return false
+}
+
+// stopStaleRunner asks a runner that still answers on the socket to shut down, so a cold start does not adopt its apps.
+// A runner from a supervisor that crashed should have exited when its liveness pipe closed.
+func stopStaleRunner(socket string) {
+	client, _, _, err := dialRunner(socket, 500*time.Millisecond)
+	if err != nil {
+		return
+	}
+
+	_ = client.Shutdown()
+	client.Close()
+
+	waitForSocketGone(socket)
+}
+
+// launchRunner starts a runner process listening on socket. It returns the process and the write end of its liveness pipe, which the supervisor must keep open.
+func launchRunner(socket string) (*exec.Cmd, *os.File, error) {
 	read, write, err := os.Pipe()
 	if err != nil {
-		return fmt.Errorf("runner liveness pipe: %w", err)
+		return nil, nil, fmt.Errorf("runner liveness pipe: %w", err)
 	}
 
 	cmd := exec.CommandContext(context.Background(), "/proc/self/exe", runnerArg)
@@ -150,15 +150,39 @@ func (s *supervisor) startRunner() error {
 		_ = read.Close()
 		_ = write.Close()
 
-		return fmt.Errorf("start runner: %w", err)
+		return nil, nil, fmt.Errorf("start runner: %w", err)
 	}
 
 	_ = read.Close()
-	s.runnerLiveness = write
 
-	client, snapshot, pid, err := dialRunner(socket, 5*time.Second)
+	return cmd, write, nil
+}
+
+// startRunner connects to an existing runner during a handover or starts a new one.
+// The runner owns the app processes; its liveness pipe ties it to this supervisor process.
+func (s *supervisor) startRunner() error {
+	socket := runnerSocketPath(s.cfg.stateDir)
+
+	if os.Getenv(handoverEnv) == "1" {
+		if s.adoptHandoverRunner(socket) {
+			return nil
+		}
+	} else {
+		stopStaleRunner(socket)
+	}
+
+	_ = os.Remove(socket)
+
+	cmd, liveness, err := launchRunner(socket)
 	if err != nil {
-		_ = write.Close()
+		return err
+	}
+
+	s.runnerLiveness = liveness
+
+	client, snapshot, _, err := dialRunner(socket, 5*time.Second)
+	if err != nil {
+		_ = liveness.Close()
 		_ = cmd.Process.Kill()
 
 		return fmt.Errorf("runner: %w", err)
@@ -172,8 +196,6 @@ func (s *supervisor) startRunner() error {
 			log.Printf("runner: %v", err)
 		}
 	}()
-
-	_ = pid
 
 	return nil
 }
