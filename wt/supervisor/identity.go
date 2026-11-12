@@ -4,13 +4,6 @@
 package main
 
 import (
-	"crypto/pbkdf2"
-	"crypto/rand"
-	"crypto/sha256"
-	"crypto/subtle"
-	"encoding/base64"
-	"encoding/hex"
-	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"os"
@@ -83,16 +76,6 @@ type identitySession struct {
 	LastSeenAt time.Time `json:"lastSeenAt"`
 }
 
-type identityUserFile struct {
-	Version int            `json:"version"`
-	Users   []identityUser `json:"users"`
-}
-
-type identitySessionFile struct {
-	Version  int               `json:"version"`
-	Sessions []identitySession `json:"sessions"`
-}
-
 // identityUserInfo is the public view; it never includes the password hash.
 type identityUserInfo struct {
 	ID        string    `json:"id"`
@@ -137,160 +120,6 @@ func newIdentityStore(stateDir string) (*identityStore, error) {
 	}
 
 	return store, nil
-}
-
-func (s *identityStore) usersPath() string {
-	return filepath.Join(s.dir, identityUsersName)
-}
-
-func (s *identityStore) sessionsPath() string {
-	return filepath.Join(s.dir, identitySessionsName)
-}
-
-// loadUsers loads and validates the user file, rejecting duplicate emails.
-func (s *identityStore) loadUsers() error {
-	data, err := os.ReadFile(s.usersPath())
-	if os.IsNotExist(err) {
-		return nil
-	}
-
-	if err != nil {
-		return fmt.Errorf("read users: %w", err)
-	}
-
-	if err := os.Chmod(s.usersPath(), 0o600); err != nil {
-		return fmt.Errorf("users permissions: %w", err)
-	}
-
-	var file identityUserFile
-	if err := json.Unmarshal(data, &file); err != nil {
-		return fmt.Errorf("users file: %w", err)
-	}
-
-	if file.Version != identityVersion {
-		return fmt.Errorf("users file: unsupported version %d", file.Version)
-	}
-
-	if len(file.Users) > identityMaxUsers {
-		return fmt.Errorf("users file: more than %d users", identityMaxUsers)
-	}
-
-	for i := range file.Users {
-		user := &file.Users[i]
-		if user.ID == "" || user.Email == "" || user.Password == "" {
-			return fmt.Errorf("users file: user %q is incomplete", user.ID)
-		}
-
-		if _, exists := s.byEmail[user.Email]; exists {
-			return fmt.Errorf("users file: duplicate email %q", user.Email)
-		}
-
-		s.users[user.ID] = user
-		s.byEmail[user.Email] = user.ID
-	}
-
-	return nil
-}
-
-// loadSessions loads unexpired sessions and drops entries for missing users.
-func (s *identityStore) loadSessions() error {
-	data, err := os.ReadFile(s.sessionsPath())
-	if os.IsNotExist(err) {
-		return nil
-	}
-
-	if err != nil {
-		return fmt.Errorf("read sessions: %w", err)
-	}
-
-	if err := os.Chmod(s.sessionsPath(), 0o600); err != nil {
-		return fmt.Errorf("sessions permissions: %w", err)
-	}
-
-	var file identitySessionFile
-	if err := json.Unmarshal(data, &file); err != nil {
-		return fmt.Errorf("sessions file: %w", err)
-	}
-
-	if file.Version != identityVersion {
-		return fmt.Errorf("sessions file: unsupported version %d", file.Version)
-	}
-
-	if len(file.Sessions) > identityMaxSessions {
-		return fmt.Errorf("sessions file: more than %d sessions", identityMaxSessions)
-	}
-
-	now := time.Now()
-	changed := false
-
-	for i := range file.Sessions {
-		session := &file.Sessions[i]
-		if session.TokenHash == "" || session.UserID == "" || session.CSRF == "" {
-			continue
-		}
-
-		if session.ExpiresAt.Before(now) {
-			changed = true
-			continue
-		}
-
-		if _, ok := s.users[session.UserID]; !ok {
-			changed = true
-			continue
-		}
-
-		s.sessions[session.TokenHash] = session
-	}
-
-	if changed {
-		return s.saveSessionsLocked()
-	}
-
-	return nil
-}
-
-// saveUsersLocked writes users atomically in id order; the caller holds the lock.
-func (s *identityStore) saveUsersLocked() error {
-	ids := make([]string, 0, len(s.users))
-	for id := range s.users {
-		ids = append(ids, id)
-	}
-
-	slices.Sort(ids)
-
-	users := make([]identityUser, 0, len(ids))
-	for _, id := range ids {
-		users = append(users, *s.users[id])
-	}
-
-	data, err := json.Marshal(identityUserFile{Version: identityVersion, Users: users})
-	if err != nil {
-		return err
-	}
-
-	return writeFileAtomicMode(s.usersPath(), append(data, '\n'), 0o600)
-}
-
-// saveSessionsLocked writes sessions atomically in id order; the caller holds the lock.
-func (s *identityStore) saveSessionsLocked() error {
-	hashes := make([]string, 0, len(s.sessions))
-	for hash := range s.sessions {
-		hashes = append(hashes, hash)
-	}
-
-	slices.Sort(hashes)
-
-	sessions := make([]identitySession, 0, len(hashes))
-	for _, hash := range hashes {
-		sessions = append(sessions, *s.sessions[hash])
-	}
-
-	data, err := json.Marshal(identitySessionFile{Version: identityVersion, Sessions: sessions})
-	if err != nil {
-		return err
-	}
-
-	return writeFileAtomicMode(s.sessionsPath(), append(data, '\n'), 0o600)
 }
 
 // normaliseIdentityEmail lowercases and validates a platform user email.
@@ -348,81 +177,6 @@ func normaliseIdentityGroups(groups []string) ([]string, error) {
 	slices.Sort(out)
 
 	return out, nil
-}
-
-// validateIdentityPassword enforces the password length bounds.
-func validateIdentityPassword(password string) error {
-	if len(password) < identityPasswordMin || len(password) > identityPasswordMax {
-		return errIdentityPassword
-	}
-
-	return nil
-}
-
-// hashIdentityPassword derives a salted PBKDF2-SHA256 hash in the stored format.
-func hashIdentityPassword(password string) (string, error) {
-	if err := validateIdentityPassword(password); err != nil {
-		return "", err
-	}
-
-	salt := make([]byte, 16)
-	if _, err := rand.Read(salt); err != nil {
-		return "", err
-	}
-
-	key, err := pbkdf2.Key(sha256.New, password, salt, identityPasswordIter, 32)
-	if err != nil {
-		return "", err
-	}
-
-	return fmt.Sprintf("pbkdf2-sha256$%d$%s$%s", identityPasswordIter,
-		base64.RawStdEncoding.EncodeToString(salt), base64.RawStdEncoding.EncodeToString(key)), nil
-}
-
-// verifyIdentityPassword checks a password against the stored PBKDF2 encoding in constant time.
-func verifyIdentityPassword(encoded, password string) bool {
-	parts := strings.Split(encoded, "$")
-	if len(parts) != 4 || parts[0] != "pbkdf2-sha256" {
-		return false
-	}
-
-	var iter int
-	if _, err := fmt.Sscanf(parts[1], "%d", &iter); err != nil || iter < 1 {
-		return false
-	}
-
-	salt, err := base64.RawStdEncoding.DecodeString(parts[2])
-	if err != nil {
-		return false
-	}
-
-	want, err := base64.RawStdEncoding.DecodeString(parts[3])
-	if err != nil {
-		return false
-	}
-
-	got, err := pbkdf2.Key(sha256.New, password, salt, iter, len(want))
-	if err != nil {
-		return false
-	}
-
-	return subtle.ConstantTimeCompare(got, want) == 1
-}
-
-// newIdentityToken returns n random bytes as hex.
-func newIdentityToken(bytes int) (string, error) {
-	value := make([]byte, bytes)
-	if _, err := rand.Read(value); err != nil {
-		return "", err
-	}
-
-	return hex.EncodeToString(value), nil
-}
-
-// identityTokenHash is the SHA-256 hex digest stored for a session token.
-func identityTokenHash(token string) string {
-	sum := sha256.Sum256([]byte(token))
-	return hex.EncodeToString(sum[:])
 }
 
 func (s *identityStore) createUser(email, name, password string, groups []string) (identityUserInfo, error) {
