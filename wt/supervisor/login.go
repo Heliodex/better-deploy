@@ -13,6 +13,9 @@ const (
 	loginMaxFailures = 5
 	loginWindow      = time.Minute
 	loginLockout     = time.Minute
+
+	// loginMaxTrackedAddresses triggers pruning so unauthenticated requests from many addresses cannot grow the limiter without bound.
+	loginMaxTrackedAddresses = 10_000
 )
 
 type loginRequest struct {
@@ -52,10 +55,25 @@ func (l *loginLimiter) allow(key string, now time.Time) (bool, time.Duration) {
 	return true, 0
 }
 
+// pruneLocked drops windows that have expired without a live lockout, so one-off addresses do not accumulate. The caller holds the lock.
+func (l *loginLimiter) pruneLocked(now time.Time) {
+	for key, attempt := range l.attempts {
+		if attempt.blockedUntil.After(now) || now.Sub(attempt.firstFailure) <= loginWindow {
+			continue
+		}
+
+		delete(l.attempts, key)
+	}
+}
+
 // fail records one failed attempt and starts a lockout at the threshold.
 func (l *loginLimiter) fail(key string, now time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
+	if len(l.attempts) >= loginMaxTrackedAddresses {
+		l.pruneLocked(now)
+	}
 
 	attempt := l.attempts[key]
 	if attempt.firstFailure.IsZero() || now.Sub(attempt.firstFailure) > loginWindow {

@@ -1,11 +1,33 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestLoginLimiterPrunesExpiredAddresses(t *testing.T) {
+	limiter := newLoginLimiter()
+	start := time.Now()
+
+	for i := range loginMaxTrackedAddresses {
+		limiter.fail(fmt.Sprintf("10.0.%d.%d", i/256, i%256), start)
+	}
+
+	if got := len(limiter.attempts); got != loginMaxTrackedAddresses {
+		t.Fatalf("tracked = %d, want %d", got, loginMaxTrackedAddresses)
+	}
+
+	later := start.Add(loginWindow + time.Second)
+	limiter.fail("192.0.2.1", later)
+
+	if got := len(limiter.attempts); got != 1 {
+		t.Errorf("tracked after expiry = %d, want 1", got)
+	}
+}
 
 func TestLoginSetsHttpOnlyCookie(t *testing.T) {
 	s := testSupervisor()
