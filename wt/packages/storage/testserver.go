@@ -4,8 +4,10 @@ package storage
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json/v2"
 	"fmt"
 	"io"
@@ -30,6 +32,7 @@ type TestServer struct {
 	mu         sync.Mutex
 	sessions   map[string]*sql.Tx
 	migrations int
+	checksums  map[int]string
 }
 
 var testServerSequence atomic.Uint64
@@ -77,7 +80,7 @@ func NewTestServer() (*TestServer, error) {
 	// A single connection keeps an in-memory database visible to sessions and serialises test traffic.
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-	server := &TestServer{Token: "test-token", db: db, sessions: map[string]*sql.Tx{}}
+	server := &TestServer{Token: "test-token", db: db, sessions: map[string]*sql.Tx{}, checksums: map[int]string{}}
 	server.Server = httptest.NewServer(http.HandlerFunc(server.handle))
 	return server, nil
 }
@@ -350,10 +353,18 @@ func (s *TestServer) handleMigration(w http.ResponseWriter, r *http.Request) {
 	if !readStorageTestJSON(w, r, &request) {
 		return
 	}
+	checksum := testMigrationChecksum(request)
 	s.mu.Lock()
-	applied := request.Version > s.migrations
+	current := s.migrations
+	stored, recorded := s.checksums[request.Version]
 	s.mu.Unlock()
-	if !applied {
+	if request.Version <= current {
+		// Like the supervisor, an applied version must be resent unchanged. Versions applied before checksums were recorded here have none to compare.
+		if recorded && stored != checksum {
+			message := fmt.Sprintf("migration checksum mismatch: version %d was already applied with different statements; leave applied versions unchanged and put new statements in version %d", request.Version, current+1)
+			writeStorageTestError(w, http.StatusConflict, message, "migration_checksum")
+			return
+		}
 		writeStorageTestJSON(w, http.StatusOK, map[string]any{"version": request.Version, "applied": false})
 		return
 	}
@@ -375,8 +386,17 @@ func (s *TestServer) handleMigration(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	s.migrations = request.Version
+	s.checksums[request.Version] = checksum
 	s.mu.Unlock()
 	writeStorageTestJSON(w, http.StatusOK, map[string]any{"version": request.Version, "applied": true})
+}
+
+// testMigrationChecksum hashes a migration's statements so a re-sent version can be compared with the one applied.
+func testMigrationChecksum(request testMigration) string {
+	data, _ := json.Marshal(request.Statements)
+	sum := sha256.Sum256(data)
+
+	return hex.EncodeToString(sum[:])
 }
 
 // createSession pins one transaction for WithTx.
