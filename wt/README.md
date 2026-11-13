@@ -633,11 +633,14 @@ A component under `wasmtime serve` only runs while it is handling a request: ins
 
 ```json
 "schedule": [
-  { "method": "POST", "path": "/tick", "every": "10s" }
+  { "method": "POST", "path": "/tick", "every": "10s" },
+  { "name": "retention", "path": "/jobs/prune", "every": "1h", "timeout": "10m" }
 ]
 ```
 
-The supervisor starts one goroutine per entry once the app is serving, restarts it after a manual restart, and cancels it when the app stops or is replaced. Calls are sequential, so a slow endpoint delays the next tick rather than piling requests up; failures and non-2xx responses are written to the app's log. `method` defaults to `POST`, `path` must start with `/`, and `every` is a Go duration between `1s` and `24h`. Limits are checked by both `wt-deploy` and the supervisor.
+The supervisor starts one goroutine per entry once the app is serving, restarts it after a manual restart, and cancels it when the app stops or is replaced. Calls are sequential, so a slow endpoint delays the next tick rather than piling requests up; failures and non-2xx responses are written to the supervisor log. `method` defaults to `POST`, `path` must start with `/`, and `every` is a Go duration between `1s` and `24h`. `timeout` bounds one call, between `1s` and `24h`; it defaults to the interval, with a `5s` floor. `name` labels the entry and must be unique within the app; it defaults to the method and path, with a `#2` suffix for a repeat. Each call carries the label in `X-Wt-Schedule`, so one endpoint can serve several entries and tell them apart from user traffic. Limits are checked by both `wt-deploy` and the supervisor.
+
+`GET /apps/<name>` reports each entry under `schedules`: `name`, `every`, `lastRun`, `duration`, the HTTP `status`, the last `error`, the consecutive `failures` and `nextRun`, so a tick that has started failing is visible without reading logs. The status starts empty each time the app starts.
 
 ### Durable jobs
 

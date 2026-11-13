@@ -111,15 +111,22 @@ type egressRule struct {
 
 // scheduleConfig asks the supervisor to call an app endpoint on a timer. Components cannot run their own background loops under `wasmtime serve`, so time is driven from the host.
 type scheduleConfig struct {
+	// Name labels the entry in status and logs; it defaults to the method and path.
+	Name   string `json:"name,omitempty"`
 	Method string `json:"method,omitempty"`
 	Path   string `json:"path"`
 	Every  string `json:"every"`
+	// Timeout bounds one call; it defaults to the interval, with a floor of 5s.
+	Timeout string `json:"timeout,omitempty"`
 }
 
 const (
 	defaultScheduleMethod = http.MethodPost
 	minScheduleInterval   = time.Second
 	maxScheduleInterval   = 24 * time.Hour
+	minScheduleTimeout    = 5 * time.Second
+	// scheduleHeader names the entry on each scheduled call, so one endpoint can serve several entries and tell them from user traffic.
+	scheduleHeader = "X-Wt-Schedule"
 )
 
 type app struct {
@@ -141,6 +148,7 @@ type app struct {
 	mu               sync.Mutex
 	startMu          sync.Mutex
 	scheduleCancel   context.CancelFunc
+	scheduleRuns     map[string]scheduleRun
 	cmd              *exec.Cmd
 	isolation        *isolationPlan
 	done             chan struct{}
@@ -257,6 +265,7 @@ func (s *supervisor) info(a *app) appInfo {
 	info.Ready = a.ready
 	info.Maintenance = a.cfg.Maintenance
 	info.Idle = a.idleStopped
+	info.Schedules = a.scheduleRunsLocked()
 
 	info.UID = a.uid
 	if a.cmd != nil && a.cmd.Process != nil && !a.exited {
@@ -342,6 +351,8 @@ type appInfo struct {
 	LastError      string    `json:"lastError,omitempty"`
 	CurrentDigest  string    `json:"currentDigest,omitempty"`
 	Ready          bool      `json:"ready"`
+	// Schedules reports the last call of each schedule entry since the app started.
+	Schedules []scheduleRun `json:"schedules,omitempty"`
 }
 
 // stopAll stops and drains every app during supervisor shutdown.

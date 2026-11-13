@@ -365,15 +365,32 @@ func validateAppSchedule(cfg *appConfig) error {
 		return errors.New("idle_timeout cannot be used with schedule, because a stopped app cannot fire its timed calls")
 	}
 
+	seen := map[string]bool{}
+
 	for i := range cfg.Schedule {
 		entry := &cfg.Schedule[i]
 		if !strings.HasPrefix(entry.Path, "/") {
 			return fmt.Errorf("schedule[%d]: path must start with /", i)
 		}
 
-		if _, err := parseScheduleInterval(*entry); err != nil {
+		every, err := parseScheduleInterval(*entry)
+		if err != nil {
 			return fmt.Errorf("schedule[%d]: %w", i, err)
 		}
+
+		if _, err := parseScheduleTimeout(*entry, every); err != nil {
+			return fmt.Errorf("schedule[%d]: %w", i, err)
+		}
+
+		if entry.Name == "" {
+			continue
+		}
+
+		if seen[entry.Name] {
+			return fmt.Errorf("schedule[%d]: name %q is already used; give each entry a distinct name", i, entry.Name)
+		}
+
+		seen[entry.Name] = true
 	}
 
 	return nil

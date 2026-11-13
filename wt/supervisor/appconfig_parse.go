@@ -119,3 +119,21 @@ func parseScheduleInterval(entry scheduleConfig) (time.Duration, error) {
 
 	return every, nil
 }
+
+// parseScheduleTimeout reports how long one call of an entry may take. An empty timeout follows the interval, with a floor so short intervals still allow a normal request.
+func parseScheduleTimeout(entry scheduleConfig, every time.Duration) (time.Duration, error) {
+	if entry.Timeout == "" {
+		return max(every, minScheduleTimeout), nil
+	}
+
+	timeout, err := time.ParseDuration(entry.Timeout)
+	if err != nil {
+		return 0, fmt.Errorf("invalid timeout %q: use a duration such as 30s", entry.Timeout)
+	}
+
+	if timeout < minScheduleInterval || timeout > maxScheduleInterval {
+		return 0, fmt.Errorf("timeout %q must be between %s and %s", entry.Timeout, minScheduleInterval, maxScheduleInterval)
+	}
+
+	return timeout, nil
+}

@@ -53,9 +53,11 @@ type appDevConfig struct {
 
 // schedule is carried through the bundle so the supervisor can call the app on a timer.
 type schedule struct {
-	Method string `json:"method,omitempty"`
-	Path   string `json:"path"`
-	Every  string `json:"every"`
+	Name    string `json:"name,omitempty"`
+	Method  string `json:"method,omitempty"`
+	Path    string `json:"path"`
+	Every   string `json:"every"`
+	Timeout string `json:"timeout,omitempty"`
 }
 
 const (
@@ -146,6 +148,13 @@ func readManifest(dir string) (manifest, error) {
 		every, err := time.ParseDuration(entry.Every)
 		if err != nil || every < minScheduleInterval || every > maxScheduleInterval {
 			return m, fmt.Errorf("schedule[%d]: every %q must be a duration between %s and %s", i, entry.Every, minScheduleInterval, maxScheduleInterval)
+		}
+
+		if entry.Timeout != "" {
+			timeout, err := time.ParseDuration(entry.Timeout)
+			if err != nil || timeout < minScheduleInterval || timeout > maxScheduleInterval {
+				return m, fmt.Errorf("schedule[%d]: timeout %q must be a duration between %s and %s", i, entry.Timeout, minScheduleInterval, maxScheduleInterval)
+			}
 		}
 	}
 
