@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json/v2"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -118,6 +119,38 @@ func TestIdentityStorePasswordAndSessions(t *testing.T) {
 
 	if _, err := reloaded.authenticate("ada@example.com", "correct horse battery"); err != nil {
 		t.Errorf("password did not survive reload: %v", err)
+	}
+}
+
+func TestIdentityAuthenticateDoesNotRevealDisabledOrUnknownUsers(t *testing.T) {
+	s := testSupervisor()
+	s.cfg.stateDir = t.TempDir()
+
+	store, err := newIdentityStore(s.cfg.stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	user, err := store.createUser("ada@example.com", "Ada", "correct horse battery", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	disabled := true
+	if _, err := store.updateUser(user.ID, "Ada", nil, &disabled); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := store.authenticate("nobody@example.com", "any password here"); !errors.Is(err, errIdentityNoUser) {
+		t.Errorf("unknown email error = %v, want errIdentityNoUser", err)
+	}
+
+	if _, err := store.authenticate("ada@example.com", "wrong password"); !errors.Is(err, errIdentityNoUser) {
+		t.Errorf("disabled user with wrong password error = %v, want errIdentityNoUser", err)
+	}
+
+	if _, err := store.authenticate("ada@example.com", "correct horse battery"); !errors.Is(err, errIdentityDisabled) {
+		t.Errorf("disabled user with correct password error = %v, want errIdentityDisabled", err)
 	}
 }
 

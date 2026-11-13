@@ -354,32 +354,49 @@ func (s *identityStore) deleteUserSessionsLocked(userID string) {
 	}
 }
 
+// identityDummyHash is verified for unknown emails so a miss costs as much as a real password check.
+var identityDummyHash = sync.OnceValue(func() string {
+	hash, err := hashIdentityPassword("timing-equaliser-password")
+	if err != nil {
+		return ""
+	}
+
+	return hash
+})
+
+// authenticate checks the password before reporting a disabled account, and always runs one password check, so the response reveals neither whether an email exists nor whether it is disabled without the password.
 func (s *identityStore) authenticate(email, password string) (identityUserInfo, error) {
 	email, err := normaliseIdentityEmail(email)
 	if err != nil {
 		return identityUserInfo{}, errIdentityNoUser
 	}
 
+	dummy := identityDummyHash()
+
 	s.mu.Lock()
 
-	id, ok := s.byEmail[email]
-	if !ok {
-		s.mu.Unlock()
+	id, found := s.byEmail[email]
+	encoded := dummy
+
+	var (
+		disabled bool
+		info     identityUserInfo
+	)
+
+	if found {
+		user := s.users[id]
+		encoded = user.Password
+		disabled = user.Disabled
+		info = user.info()
+	}
+	s.mu.Unlock()
+
+	if !verifyIdentityPassword(encoded, password) || !found {
 		return identityUserInfo{}, errIdentityNoUser
 	}
-
-	user := s.users[id]
-	encoded := user.Password
-	disabled := user.Disabled
-	info := user.info()
-	s.mu.Unlock()
 
 	if disabled {
 		return identityUserInfo{}, errIdentityDisabled
-	}
-
-	if !verifyIdentityPassword(encoded, password) {
-		return identityUserInfo{}, errIdentityNoUser
 	}
 
 	return info, nil
