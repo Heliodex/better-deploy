@@ -81,7 +81,8 @@ func TestStorageMigrationChecksums(t *testing.T) {
 	}
 
 	status, _, failure := migrate(1, []map[string]any{{"sql": `create table edited (id integer primary key)`}})
-	if status != http.StatusConflict || failure.Code != "migration_checksum" || !strings.Contains(failure.Error, "version 1") {
+	if status != http.StatusConflict || failure.Code != "migration_checksum" || !strings.Contains(failure.Error, "version 1") ||
+		!strings.Contains(failure.Error, "put new statements in version 2") {
 		t.Errorf("edited migration = %d %+v, want a 409 migration_checksum error", status, failure)
 	}
 

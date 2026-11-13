@@ -110,11 +110,11 @@ func applyMigration(ctx context.Context, conn *sql.Conn, version int, statements
 		}
 
 		if !ok {
-			return false, fmt.Errorf("%w: version %d has no bookkeeping row", errStorageMigrationChecksum, version)
+			return false, fmt.Errorf("%w: version %d is at or below the database version %d but has no bookkeeping row; migrate with version %d instead", errStorageMigrationChecksum, version, current, current+1)
 		}
 
 		if stored != checksum {
-			return false, fmt.Errorf("%w: version %d was applied with a different checksum", errStorageMigrationChecksum, version)
+			return false, fmt.Errorf("%w: version %d was already applied with different statements; leave applied versions unchanged and put new statements in version %d", errStorageMigrationChecksum, version, current+1)
 		}
 
 		return false, nil
