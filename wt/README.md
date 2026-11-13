@@ -565,7 +565,7 @@ func (a *app) handlePage(w http.ResponseWriter, r *http.Request) {
 
 Without `server_pages` the app keeps the pure static-first behaviour. Naming a missing page returns `404` and never falls through to the SPA index. Client-side SvelteKit navigation after the first load does not ask the supervisor for a page, so every protected API must still enforce the session. This gate protects page loads and direct URLs, not each client-side transition.
 
-A static file with a sibling `.br` or `.gz` sidecar is served precompressed when the request accepts that coding. The original must still exist, the supervisor sets `Content-Encoding` and the original file's `Content-Type`, and it adds `Vary: Accept-Encoding`; `.br` wins when both are available. Build pipelines can emit both sidecars without changing `app.json`. For proxied component responses the supervisor asks the app for identity and gzips `application/json` and `+json` responses itself when the client accepts gzip, removing `Content-Length` and adding `Vary: Accept-Encoding`; SSE, `no-transform` responses, already encoded bodies and known responses of 256 bytes or less are left alone.
+A static file with a sibling `.br` or `.gz` sidecar is served precompressed when the request accepts that coding. The original must still exist, the supervisor sets `Content-Encoding` and the original file's `Content-Type`, and it adds `Vary: Accept-Encoding`; `.br` wins when both are available. Build pipelines can emit both sidecars without changing `app.json`. For proxied component responses the supervisor asks the app for identity and gzips text responses itself when the client accepts gzip: `text/*`, `application/json`, `+json`, `application/x-ndjson`, `application/jsonl`, `application/javascript`, XML and SVG. It removes `Content-Length` and adds `Vary: Accept-Encoding`. A response without a known length is flushed after every chunk the app writes, so NDJSON and other streams still arrive line by line. SSE, `no-transform` responses, already encoded bodies and known responses of 256 bytes or less are left alone. Apps should not compress dynamic responses themselves.
 
 ### Public origin
 
@@ -738,7 +738,7 @@ SQLite temp files use `WT_STORAGE_TMP_DIR` (default `WT_STATE_DIR/.tmp`, created
 
 `configureStorageConn` only applies the limits the DSN cannot express on each request: `ATTACH` is disabled, SQL is capped at 64 KiB, a value at 1 MiB, 128 variables, 256 columns, expression depth 100 and 20 compound selects. It no longer runs a pragma list, so the fail-closed pragma settings are not repeated per query and cannot be skipped on a pooled connection.
 
-The API is deliberately small SQL rather than a key-value shim:
+The API is deliberately small SQL, with a separate in-memory [key-value store](#key-value-store) for caches and counters:
 
 ```text
 POST /v1/query   {"sql": "...", "params": [...], "max_rows": 1000}
@@ -777,6 +777,30 @@ Migrations have their own timeout because a `CREATE INDEX` or backfill can take 
 
 The supervisor calls the app's `POST /_wt/migrate` endpoint after the process is listening and before `/healthz`, so a migration is not raced by the startup probe or bounded by `startup_timeout`. The SDK runs the migration on a context without cancellation, so a disconnected probe does not abort it, and an app without the endpoint (an older bundle) falls back to health-only readiness. The app's own `request_timeout` still bounds the guest request that performs the migration; set it at least as long as the longest migration, or leave it unset, when a migration can exceed the default 30s.
 
+An edited version's error names the next free version to use instead. Statements that depend on the live database, such as an `alter table` added only when a column is missing, must never go into a versioned set, because the set (and its checksum) would then differ between databases and between the first and later deploys. Run them after `Migrate` with the client helpers, which are idempotent and can run on every start:
+
+```go
+if err := store.Migrate(ctx, schemaVersion, schemaStatements()...); err != nil {
+    return err
+}
+// Adds the column to an older table; a fresh database already has it from the create statement.
+if _, err := store.AddColumnIfMissing(ctx, "submission", "submitted_at", "text"); err != nil {
+    return err
+}
+// Replaces a table whose key SQLite cannot alter. Guard it, since it copies every row.
+definition, _, err := store.TableSQL(ctx, "answer")
+if err == nil && !strings.Contains(definition, "unique (question_id, reviewer_id)") {
+    err = store.RebuildTable(ctx, storage.TableRebuild{
+        Table:  "answer",
+        Create: `create table answer_new (..., unique (question_id, reviewer_id))`,
+        Copy:   `insert into answer_new (...) select ... from answer`,
+        After:  []string{`create index answer_question_idx on answer(question_id)`},
+    })
+}
+```
+
+`Columns`, `HasColumn` and `TableSQL` read `pragma_table_info` and `sqlite_master`. `AddColumnIfMissing` leaves a missing table alone, because its create statement already holds the column. `RebuildTable` creates the replacement under `<table>_new`, copies the rows, drops the old table, renames the replacement and runs `After` in one transaction of at most 64 statements. Foreign keys stay enforced during the swap, so it refuses a table that another table references rather than run their `on delete` actions.
+
 Migrations must be expand/contract: add columns and tables in one release, move writes over, and remove the old shape only after every deploy that reads it is gone. A code rollback is code-only, so it also has to be able to read the newer schema; for a destructive change, restore a snapshot from before the migration as well (`rollback?backup=<file>`).
 
 The shared `packages/storage` package is the client; it takes an `*http.Client`, and the apps pass `wasihttp.NewClient()` for outbound `wasi:http`:
@@ -799,9 +823,37 @@ err = store.WithTx(ctx, func(tx *storage.Tx) error {
 })
 ```
 
-`storage.NewTestServer()` starts an isolated in-memory SQLite service that speaks the same HTTP wire format for query, exec, write, batch, transaction, migrate and sessions. `server.NewClient(server.Client())` returns a normal `*storage.Client`, so handler tests use the same code as production. The file is `//go:build !wasip1`, so it and its `modernc.org/sqlite` dependency are excluded from the wasm component; the scaffold's `main_test.go` is the reference example.
+`storage.NewTestServer()` starts an isolated in-memory SQLite service that speaks the same HTTP wire format for query, exec, write, batch, transaction, migrate, sessions and KV. Like the supervisor, it rejects an applied version re-sent with different statements. `server.NewClient(server.Client())` returns a normal `*storage.Client`, so handler tests use the same code as production. The file is `//go:build !wasip1`, so it and its `modernc.org/sqlite` dependency are excluded from the wasm component; the scaffold's `main_test.go` is the reference example.
 
-The notes example uses a real `notes` table. The one-time migration from the old JSON value has already run on the demo deployment, and the old `/v1/kv` endpoints have been removed.
+The notes example uses a real `notes` table. The one-time migration from the old JSON value has already run on the demo deployment.
+
+### Key-value store
+
+Component instances are short-lived and do not share memory between requests, so a cache or counter kept in a Go map is not reliable. The storage service also has a small key-value store held in supervisor memory per app, for caches, rate-limit counters and short-lived tokens:
+
+```text
+POST /v1/kv/get     {"key": "..."}                          -> {"found": true, "value": "...", "expires_at": "...", "ttl_ms": n}
+POST /v1/kv/set     {"key": "...", "value": "...", "ttl_ms": n}
+POST /v1/kv/delete  {"key": "..."}                          -> {"deleted": true}
+POST /v1/kv/incr    {"key": "...", "by": 1, "ttl_ms": n}    -> {"value": n, "expires_at": "...", "ttl_ms": n}
+```
+
+Keys are 1 to 512 bytes and values at most 64 KiB, and each app may hold 10,000 keys and 8 MiB; a write over the budget gets `507` with code `kv_full` after expired keys are swept. `ttl_ms` is at most 30 days, and `0` keeps the key until it is deleted. `incr` starts a missing key at zero and applies its TTL only then, so a counter is a fixed window that resets when it expires; incrementing a non-integer value is a `409` with code `not_integer`. The store is not persisted: it is lost when the supervisor restarts and dropped when the app is removed, so anything that must survive belongs in SQL. KV requests do not take one of the 16 storage query slots.
+
+In Go, `store.KVGet`, `KVSet`, `KVDelete` and `KVIncr` wrap the endpoints, and `storage.RateLimit` is a fixed-window limiter on top of `KVIncr` that holds across every instance:
+
+```go
+var loginLimit = storage.RateLimit{Prefix: "rl:login:", Limit: 10, Window: time.Minute}
+
+decision, err := loginLimit.Allow(ctx, store, clientKey)
+if err == nil && !decision.Allowed {
+    w.Header().Set("Retry-After", strconv.Itoa(int(decision.RetryAfter.Seconds())+1))
+    http.Error(w, "too many requests", http.StatusTooManyRequests)
+    return
+}
+```
+
+`storage.NewTestServer` serves the same endpoints from a map, and its `Now` field sets the clock for TTL tests.
 
 ## Blobs
 
