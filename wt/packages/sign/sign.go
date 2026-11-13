@@ -4,6 +4,7 @@ package sign
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"io"
@@ -89,7 +90,39 @@ func (s Signer) VerifyMessage(timestamp, deliveryID, signature string, body []by
 	return hmac.Equal(expected, actual)
 }
 
+// SignFields signs each part with an 8-byte big-endian length prefix, so different splits of the same bytes produce different signatures.
+func (s Signer) SignFields(parts ...[]byte) string {
+	mac := hmac.New(sha256.New, s.Secret)
+
+	for _, part := range parts {
+		var length [8]byte
+
+		binary.BigEndian.PutUint64(length[:], uint64(len(part)))
+		_, _ = mac.Write(length[:])
+		_, _ = mac.Write(part)
+	}
+
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// VerifyFields checks a signature made by SignFields over the same parts in the same order.
+func (s Signer) VerifyFields(signature string, parts ...[]byte) bool {
+	expected, err := hex.DecodeString(s.SignFields(parts...))
+	if err != nil {
+		return false
+	}
+
+	actual, err := hex.DecodeString(strings.TrimSpace(signature))
+	if err != nil {
+		return false
+	}
+
+	return hmac.Equal(expected, actual)
+}
+
 // SignParts signs concatenated parts without separators.
+//
+// Deprecated: the parts are concatenated with no boundaries, so different splits of the same bytes share a signature. Use SignFields, and keep this only for clients that already send the concatenated form.
 func (s Signer) SignParts(parts ...[]byte) string {
 	mac := hmac.New(sha256.New, s.Secret)
 	for _, part := range parts {
@@ -100,6 +133,8 @@ func (s Signer) SignParts(parts ...[]byte) string {
 }
 
 // VerifyParts checks a signature over concatenated parts.
+//
+// Deprecated: use VerifyFields. This accepts any split of the same bytes, so it is only for existing clients that sign the concatenated form.
 func (s Signer) VerifyParts(signature string, parts ...[]byte) bool {
 	expected, err := hex.DecodeString(s.SignParts(parts...))
 	if err != nil {

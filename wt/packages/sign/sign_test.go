@@ -85,3 +85,37 @@ func TestDefaultWindow(t *testing.T) {
 		t.Errorf("window = %v", signer.window())
 	}
 }
+
+func TestSignFields(t *testing.T) {
+	signer := fixedSigner()
+	parts := [][]byte{[]byte("1700000000"), []byte("."), []byte(`{"a":1}`)}
+	signature := signer.SignFields(parts...)
+
+	if !signer.VerifyFields(signature, parts...) {
+		t.Error("VerifyFields() rejected its own signature")
+	}
+
+	if signer.VerifyFields(signature, []byte("1700000000.{\"a\":1}")) {
+		t.Error("VerifyFields() accepted the concatenated form")
+	}
+
+	if signer.VerifyFields(signature, []byte("a"), []byte("bc")) {
+		t.Error("VerifyFields() accepted a different split")
+	}
+
+	if signer.VerifyFields(strings.ToUpper(signature)+"zz", parts...) {
+		t.Error("VerifyFields() accepted a malformed signature")
+	}
+}
+
+func TestSignFieldsSeparatesAmbiguousSplits(t *testing.T) {
+	signer := fixedSigner()
+
+	if signer.SignParts([]byte("a"), []byte("bc")) != signer.SignParts([]byte("ab"), []byte("c")) {
+		t.Fatal("SignParts() no longer has the documented concatenation ambiguity to test against")
+	}
+
+	if signer.SignFields([]byte("a"), []byte("bc")) == signer.SignFields([]byte("ab"), []byte("c")) {
+		t.Error("SignFields() gives the same signature for different splits")
+	}
+}
