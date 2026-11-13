@@ -14,6 +14,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -26,6 +27,8 @@ import (
 type TestServer struct {
 	*httptest.Server
 	Token string
+	// Now is the clock for key-value TTLs; nil uses time.Now. Set it before the first request to test expiry.
+	Now func() time.Time
 
 	db *sql.DB
 
@@ -33,6 +36,12 @@ type TestServer struct {
 	sessions   map[string]*sql.Tx
 	migrations int
 	checksums  map[int]string
+	kv         map[string]testKVItem
+}
+
+type testKVItem struct {
+	value   string
+	expires time.Time
 }
 
 var testServerSequence atomic.Uint64
@@ -80,7 +89,7 @@ func NewTestServer() (*TestServer, error) {
 	// A single connection keeps an in-memory database visible to sessions and serialises test traffic.
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-	server := &TestServer{Token: "test-token", db: db, sessions: map[string]*sql.Tx{}, checksums: map[int]string{}}
+	server := &TestServer{Token: "test-token", db: db, sessions: map[string]*sql.Tx{}, checksums: map[int]string{}, kv: map[string]testKVItem{}}
 	server.Server = httptest.NewServer(http.HandlerFunc(server.handle))
 	return server, nil
 }
@@ -136,6 +145,8 @@ func (s *TestServer) handle(w http.ResponseWriter, r *http.Request) {
 		s.handleTransaction(w, r)
 	case r.URL.Path == "/v1/migrate":
 		s.handleMigration(w, r)
+	case strings.HasPrefix(r.URL.Path, "/v1/kv/"):
+		s.handleKV(w, r, strings.TrimPrefix(r.URL.Path, "/v1/kv/"))
 	case r.URL.Path == "/v1/sessions":
 		s.createSession(w, r)
 	case strings.HasPrefix(r.URL.Path, "/v1/sessions/"):
@@ -397,6 +408,68 @@ func testMigrationChecksum(request testMigration) string {
 	sum := sha256.Sum256(data)
 
 	return hex.EncodeToString(sum[:])
+}
+
+// handleKV serves the key-value endpoints from a map with the supervisor's TTL and fixed-window semantics.
+func (s *TestServer) handleKV(w http.ResponseWriter, r *http.Request, op string) {
+	var request kvRequest
+	if !readStorageTestJSON(w, r, &request) {
+		return
+	}
+	if request.Key == "" {
+		writeStorageTestError(w, http.StatusBadRequest, "key must not be empty", "invalid")
+		return
+	}
+	now := time.Now()
+	if s.Now != nil {
+		now = s.Now()
+	}
+	expires := time.Time{}
+	if request.TTLMS > 0 {
+		expires = now.Add(time.Duration(request.TTLMS) * time.Millisecond)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item, found := s.kv[request.Key]
+	if found && !item.expires.IsZero() && !now.Before(item.expires) {
+		delete(s.kv, request.Key)
+		item, found = testKVItem{}, false
+	}
+	expiry := func(at time.Time) string {
+		if at.IsZero() {
+			return ""
+		}
+		return at.UTC().Format(time.RFC3339Nano)
+	}
+	switch op {
+	case "get":
+		writeStorageTestJSON(w, http.StatusOK, kvResponse{Found: found, Value: item.value, ExpiresAt: expiry(item.expires)})
+	case "set":
+		s.kv[request.Key] = testKVItem{value: request.Value, expires: expires}
+		writeStorageTestJSON(w, http.StatusOK, map[string]bool{"stored": true})
+	case "delete":
+		delete(s.kv, request.Key)
+		writeStorageTestJSON(w, http.StatusOK, map[string]bool{"deleted": found})
+	case "incr":
+		var current int64
+		if found {
+			parsed, err := strconv.ParseInt(item.value, 10, 64)
+			if err != nil {
+				writeStorageTestError(w, http.StatusConflict, "kv value is not an integer", "not_integer")
+				return
+			}
+			current, expires = parsed, item.expires
+		}
+		by := request.By
+		if by == 0 {
+			by = 1
+		}
+		current += by
+		s.kv[request.Key] = testKVItem{value: strconv.FormatInt(current, 10), expires: expires}
+		writeStorageTestJSON(w, http.StatusOK, kvIncrResponse{Value: current, ExpiresAt: expiry(expires)})
+	default:
+		http.NotFound(w, r)
+	}
 }
 
 // createSession pins one transaction for WithTx.
