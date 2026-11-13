@@ -1,9 +1,10 @@
-// On-the-fly gzip for proxied JSON responses.
+// On-the-fly gzip for proxied JSON, NDJSON and text responses.
 
 package main
 
 import (
 	"compress/gzip"
+	"errors"
 	"io"
 	"mime"
 	"net/http"
@@ -13,8 +14,56 @@ import (
 
 type acceptEncodingKey struct{}
 
-// compressJSONResponse gzips a buffered or streamed JSON response when the client accepts it. SSE, already encoded bodies, no-transform responses and tiny known bodies stay untouched.
-func compressJSONResponse(res *http.Response, acceptEncoding string) error {
+// compressibleMediaType reports whether a dynamic response of this type is worth gzipping. SSE stays plain, because browsers and proxies expect each event to arrive as soon as it is written.
+func compressibleMediaType(mediaType string) bool {
+	switch {
+	case mediaType == "text/event-stream":
+		return false
+	case strings.HasPrefix(mediaType, "text/"), strings.HasSuffix(mediaType, "+json"), strings.HasSuffix(mediaType, "+xml"):
+		return true
+	}
+
+	switch mediaType {
+	case "application/json", "application/x-ndjson", "application/jsonl", "application/javascript", "application/xml", "image/svg+xml":
+		return true
+	}
+
+	return false
+}
+
+// copyCompressed copies src into gz. A streamed body is flushed after every read, so each chunk the app writes reaches the client instead of waiting for gzip to fill a block.
+func copyCompressed(gz *gzip.Writer, src io.Reader, stream bool) error {
+	if !stream {
+		_, err := io.Copy(gz, src)
+		return err
+	}
+
+	buf := make([]byte, 32<<10)
+
+	for {
+		n, readErr := src.Read(buf)
+		if n > 0 {
+			if _, err := gz.Write(buf[:n]); err != nil {
+				return err
+			}
+
+			if err := gz.Flush(); err != nil {
+				return err
+			}
+		}
+
+		if errors.Is(readErr, io.EOF) {
+			return nil
+		}
+
+		if readErr != nil {
+			return readErr
+		}
+	}
+}
+
+// compressResponse gzips a buffered or streamed JSON, NDJSON or text response when the client accepts it. SSE, already encoded bodies, no-transform responses and tiny known bodies stay untouched.
+func compressResponse(res *http.Response, acceptEncoding string) error {
 	if res == nil || res.Body == nil || res.Request == nil || res.Request.Method == http.MethodHead {
 		return nil
 	}
@@ -36,7 +85,7 @@ func compressJSONResponse(res *http.Response, acceptEncoding string) error {
 		return nil
 	}
 
-	if mediaType != "application/json" && !strings.HasSuffix(mediaType, "+json") {
+	if !compressibleMediaType(mediaType) {
 		return nil
 	}
 
@@ -45,6 +94,7 @@ func compressJSONResponse(res *http.Response, acceptEncoding string) error {
 	}
 
 	original := res.Body
+	stream := res.ContentLength < 0
 	reader, writer := io.Pipe()
 	gz := gzip.NewWriter(writer)
 	res.Body = &compressedBody{PipeReader: reader, original: original}
@@ -54,7 +104,7 @@ func compressJSONResponse(res *http.Response, acceptEncoding string) error {
 	addVary(res.Header, "Accept-Encoding")
 
 	go func() {
-		_, copyErr := io.Copy(gz, original)
+		copyErr := copyCompressed(gz, original, stream)
 		closeErr := gz.Close()
 		_ = original.Close()
 		_ = writer.CloseWithError(firstError(copyErr, closeErr))

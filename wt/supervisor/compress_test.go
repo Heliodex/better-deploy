@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"compress/gzip"
 	"io"
 	"net/http"
@@ -9,7 +10,127 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
+
+// testProxyPort returns the port of a test backend.
+func testProxyPort(t *testing.T, backend *httptest.Server) int {
+	t.Helper()
+
+	parsed, err := url.Parse(backend.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	port, err := strconv.Atoi(parsed.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return port
+}
+
+func TestCompressibleMediaType(t *testing.T) {
+	for mediaType, want := range map[string]bool{
+		"application/json":         true,
+		"application/x-ndjson":     true,
+		"application/ld+json":      true,
+		"text/html":                true,
+		"text/csv":                 true,
+		"image/svg+xml":            true,
+		"text/event-stream":        false,
+		"image/png":                false,
+		"application/octet-stream": false,
+	} {
+		if got := compressibleMediaType(mediaType); got != want {
+			t.Errorf("compressibleMediaType(%q) = %v, want %v", mediaType, got, want)
+		}
+	}
+}
+
+// TestProxyStreamsCompressedNDJSON checks that a compressed stream still delivers each flushed line before the app finishes.
+func TestProxyStreamsCompressedNDJSON(t *testing.T) {
+	release := make(chan struct{})
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = io.WriteString(w, `{"line":1}`+"\n")
+		_ = http.NewResponseController(w).Flush()
+
+		<-release
+
+		_, _ = io.WriteString(w, `{"line":2}`+"\n")
+	}))
+	defer backend.Close()
+	defer close(release)
+
+	s := testSupervisor()
+	proxy := s.newProxy(&app{name: "demo", port: testProxyPort(t, backend)})
+
+	front := httptest.NewServer(proxy)
+	defer front.Close()
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, front.URL+"/stream", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Set("Accept-Encoding", "gzip")
+
+	resp, err := (&http.Transport{DisableCompression: true}).RoundTrip(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.Header.Get("Content-Encoding") != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip", resp.Header.Get("Content-Encoding"))
+	}
+
+	lines := make(chan string, 1)
+
+	go func() {
+		reader, err := gzip.NewReader(resp.Body)
+		if err != nil {
+			lines <- "error: " + err.Error()
+			return
+		}
+
+		line, _ := bufio.NewReader(reader).ReadString('\n')
+		lines <- line
+	}()
+
+	select {
+	case line := <-lines:
+		if line != `{"line":1}`+"\n" {
+			t.Errorf("first line = %q", line)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("first NDJSON line was held back by compression")
+	}
+}
+
+func TestProxyCompressesText(t *testing.T) {
+	payload := strings.Repeat("plain text ", 100)
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = io.WriteString(w, payload)
+	}))
+	defer backend.Close()
+
+	s := testSupervisor()
+	proxy := s.newProxy(&app{name: "demo", port: testProxyPort(t, backend)})
+	req := httptest.NewRequest(http.MethodGet, "http://demo.localhost/text", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+
+	rec := httptest.NewRecorder()
+	proxy.ServeHTTP(rec, req)
+
+	if rec.Header().Get("Content-Encoding") != "gzip" {
+		t.Errorf("text was not compressed: %v", rec.Header())
+	}
+}
 
 func TestProxyCompressesJSON(t *testing.T) {
 	payload := `{"data":"` + strings.Repeat("x", 1024) + `"}`
@@ -68,7 +189,7 @@ func TestProxyCompressesJSON(t *testing.T) {
 	}
 }
 
-func TestProxyLeavesTextAndSSEAlone(t *testing.T) {
+func TestProxyLeavesSSEAlone(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("data: hello\n\n"))

@@ -42,11 +42,11 @@ func newRequestID() string {
 	return hex.EncodeToString(value[:])
 }
 
-// newProxy builds the per-app reverse proxy that rewrites forwarded headers and compresses JSON responses.
+// newProxy builds the per-app reverse proxy that rewrites forwarded headers and compresses dynamic text responses.
 func (s *supervisor) newProxy(a *app) *httputil.ReverseProxy {
 	target := &url.URL{Scheme: "http", Host: fmt.Sprintf("127.0.0.1:%d", a.port)}
 	proxy := &httputil.ReverseProxy{
-		// A server-selected page can be filled from the static directory before the supervisor compresses the remaining JSON responses.
+		// A server-selected page can be filled from the static directory before the supervisor compresses the remaining text responses.
 		ModifyResponse: func(res *http.Response) error {
 			served, err := a.serveStaticPageResponse(res)
 			if err != nil || served {
@@ -55,7 +55,7 @@ func (s *supervisor) newProxy(a *app) *httputil.ReverseProxy {
 
 			accept, _ := res.Request.Context().Value(acceptEncodingKey{}).(string)
 
-			return compressJSONResponse(res, accept)
+			return compressResponse(res, accept)
 		},
 		// A hung app must not hold client connections forever: header and dial deadlines bound the wait before the response starts.
 		Transport: &http.Transport{
