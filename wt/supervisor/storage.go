@@ -96,6 +96,7 @@ type storageServer struct {
 	bus     *eventBus
 	jobs    *jobManager
 	blobs   *blobStore
+	kv      *kvStore
 
 	routesCache routeCache
 }
@@ -157,6 +158,7 @@ func newStorageServerOn(dir string, listener net.Listener) (*storageServer, erro
 		sessionStop: make(chan struct{}),
 		sessionDone: make(chan struct{}),
 		querySem:    make(chan struct{}, maxStorageConcurrentQueries),
+		kv:          newKVStore(),
 
 		migrationTimeout: defaultStorageMigrationTimeout,
 	}
@@ -334,6 +336,7 @@ func (s *storageServer) drop(app string) {
 	delete(s.dbs, app)
 	delete(s.readDBs, app)
 	delete(s.quotas, app)
+	s.kv.drop(app)
 
 	for token, name := range s.tokens {
 		if name == app {

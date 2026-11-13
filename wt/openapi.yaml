@@ -1346,6 +1346,52 @@ paths:
           description: Forbidden
         "404":
           description: Not found
+  /v1/kv/get:
+    post:
+      summary: Read a KV key
+      responses:
+        "200":
+          description: "OK: found, value, expires_at and ttl_ms"
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+  /v1/kv/set:
+    post:
+      summary: Set a KV key with an optional TTL
+      responses:
+        "200":
+          description: "OK: stored"
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "507":
+          description: The app's KV budget is full
+  /v1/kv/delete:
+    post:
+      summary: Delete a KV key
+      responses:
+        "200":
+          description: "OK: deleted"
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+  /v1/kv/incr:
+    post:
+      summary: Add to an integer KV key, starting a fixed TTL window when created
+      responses:
+        "200":
+          description: "OK: value, expires_at and ttl_ms"
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "409":
+          description: The key holds a value that is not an integer
+        "507":
+          description: The app's KV budget is full
   /capabilities:
     get:
       summary: Supervisor version and runtime capabilities

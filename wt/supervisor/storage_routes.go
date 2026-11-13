@@ -395,8 +395,8 @@ func (s *storageServer) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Publish traffic is part of the event bus and does not consume a query slot.
-	// Jobs and blob deletion are host operations rather than SQLite work, so they skip the storage query semaphore too.
-	if r.URL.Path != "/v1/publish" && !strings.HasPrefix(r.URL.Path, "/v1/jobs") && !strings.HasPrefix(r.URL.Path, "/v1/blobs") {
+	// Jobs, blob deletion and KV are host operations rather than SQLite work, so they skip the storage query semaphore too.
+	if r.URL.Path != "/v1/publish" && !strings.HasPrefix(r.URL.Path, "/v1/jobs") && !strings.HasPrefix(r.URL.Path, "/v1/blobs") && !strings.HasPrefix(r.URL.Path, "/v1/kv/") {
 		if s.tempOver.Load() {
 			writeStorageError(w, errStorageTempBudget)
 			return
