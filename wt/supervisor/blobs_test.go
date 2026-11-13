@@ -104,6 +104,14 @@ func TestBlobUploadDownloadAndDelete(t *testing.T) {
 		t.Errorf("Content-Type = %q", got)
 	}
 
+	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
+	}
+
+	if got := rec.Header().Get("Content-Security-Policy"); got != "default-src 'none'; sandbox" {
+		t.Errorf("Content-Security-Policy = %q", got)
+	}
+
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, downloadURL, nil)
 	req.Header.Set("Range", "bytes=2-5")

@@ -496,7 +496,10 @@ func (s *supervisor) handleBlobDownload(w http.ResponseWriter, r *http.Request, 
 	}
 	defer file.Close()
 
+	// Blobs are uploaded by end users and served from the app's own origin. Forbid sniffing and sandbox any document so an uploaded HTML or SVG file cannot run script with the app's cookies.
 	w.Header().Set("Content-Type", info.ContentType)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
 	w.Header().Set("ETag", `"`+digest+`"`)
 	w.Header().Set("Cache-Control", "private, max-age=3600")
 	http.ServeContent(w, r, digest, info.CreatedAt, file)
