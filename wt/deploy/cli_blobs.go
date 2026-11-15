@@ -9,70 +9,29 @@ import (
 	"time"
 )
 
-type blobRecord struct {
-	Digest string `json:"digest"`
-	Size int64 `json:"size"`
-	ContentType string `json:"contentType"`
-	CreatedAt time.Time `json:"createdAt"`
-}
-
-type blobsResponse struct {
-	Blobs []blobRecord `json:"blobs"`
-}
-
-type blobGCResult struct {
-	Deleted []string `json:"deleted"`
-	DryRun bool `json:"dryRun"`
-	OlderThan string `json:"olderThan"`
-}
-
-// runBlobsList prints an app's stored blobs.
-func runBlobsList(cfg clientOptions, name string, args []string) error {
-	flags := newFlagSet("blobs list")
-	if err := flags.Parse(args); err != nil {
-		return err
+type (
+	blobGCResult struct {
+		Deleted []string `json:"deleted"`
+		DryRun bool `json:"dryRun"`
+		OlderThan string `json:"olderThan"`
 	}
 
-	if flags.NArg() > 0 {
-		return fmt.Errorf("unexpected argument %q", flags.Arg(0))
+	blobRecord struct {
+		Digest string `json:"digest"`
+		Size int64 `json:"size"`
+		ContentType string `json:"contentType"`
+		CreatedAt time.Time `json:"createdAt"`
 	}
 
-	status, _, body, err := apiDo(cfg, http.MethodGet, "/apps/"+name+"/blobs", nil, "")
-	if err != nil {
-		return err
+	blobsResponse struct {
+		Blobs []blobRecord `json:"blobs"`
 	}
-
-	if err := checkAPI(status, body); err != nil {
-		return err
-	}
-
-	if cfg.jsonOut {
-		printRawOrJSON(cfg, body)
-		return nil
-	}
-
-	var result blobsResponse
-	if err := json.Unmarshal(body, &result); err != nil {
-		return err
-	}
-
-	if len(result.Blobs) == 0 {
-		fmt.Println("no blobs")
-		return nil
-	}
-
-	fmt.Printf("%-64s %-12s %-28s %s\n", "DIGEST", "SIZE", "CONTENT TYPE", "CREATED")
-
-	for _, blob := range result.Blobs {
-		fmt.Printf("%-64s %-12d %-28s %s\n", blob.Digest, blob.Size, blob.ContentType, jobTime(blob.CreatedAt))
-	}
-
-	return nil
-}
+)
 
 // runBlobsDelete removes one blob by digest.
 func runBlobsDelete(cfg clientOptions, name string, args []string) error {
 	flags := newFlagSet("blobs delete")
+
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -82,7 +41,6 @@ func runBlobsDelete(cfg clientOptions, name string, args []string) error {
 	}
 
 	digest := flags.Arg(0)
-
 	status, _, body, err := apiDo(cfg, http.MethodDelete, "/apps/"+name+"/blobs/"+digest, nil, "")
 	if err != nil {
 		return err
@@ -91,9 +49,7 @@ func runBlobsDelete(cfg clientOptions, name string, args []string) error {
 	if err := checkAPI(status, body); err != nil {
 		return err
 	}
-
 	fmt.Printf("deleted %s\n", digest)
-
 	return nil
 }
 
@@ -113,7 +69,6 @@ func runBlobsGC(cfg clientOptions, name string, args []string) error {
 
 		return nil
 	})
-
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -130,7 +85,8 @@ func runBlobsGC(cfg clientOptions, name string, args []string) error {
 		return errors.New("--older-than must be a positive duration")
 	}
 
-	payload := map[string]any{"olderThan": *olderThan, "dryRun": *dryRun}
+	payload := map[string]any{"dryRun": *dryRun, "olderThan": *olderThan}
+
 	if len(keep) > 0 {
 		payload["keep"] = keep
 	}
@@ -155,19 +111,63 @@ func runBlobsGC(cfg clientOptions, name string, args []string) error {
 	}
 
 	var result blobGCResult
+
 	if err := json.Unmarshal(body, &result); err != nil {
 		return err
 	}
 
 	verb := "deleted"
+
 	if result.DryRun {
 		verb = "would delete"
 	}
-
 	fmt.Printf("%s %d blob(s) older than %s\n", verb, len(result.Deleted), result.OlderThan)
-
 	for _, digest := range result.Deleted {
 		fmt.Println(digest)
+	}
+
+	return nil
+}
+
+// runBlobsList prints an app's stored blobs.
+func runBlobsList(cfg clientOptions, name string, args []string) error {
+	flags := newFlagSet("blobs list")
+
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+
+	if flags.NArg() > 0 {
+		return fmt.Errorf("unexpected argument %q", flags.Arg(0))
+	}
+
+	status, _, body, err := apiDo(cfg, http.MethodGet, "/apps/"+name+"/blobs", nil, "")
+	if err != nil {
+		return err
+	}
+
+	if err := checkAPI(status, body); err != nil {
+		return err
+	}
+
+	if cfg.jsonOut {
+		printRawOrJSON(cfg, body)
+		return nil
+	}
+
+	var result blobsResponse
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return err
+	}
+
+	if len(result.Blobs) == 0 {
+		fmt.Println("no blobs")
+		return nil
+	}
+	fmt.Printf("%-64s %-12s %-28s %s\n", "DIGEST", "SIZE", "CONTENT TYPE", "CREATED")
+	for _, blob := range result.Blobs {
+		fmt.Printf("%-64s %-12d %-28s %s\n", blob.Digest, blob.Size, blob.ContentType, jobTime(blob.CreatedAt))
 	}
 
 	return nil

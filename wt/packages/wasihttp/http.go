@@ -35,13 +35,15 @@ const (
 	HeaderRequestID = "X-Request-ID"
 )
 
-// defaultHandler is a placeholder for returning a useful error to stderr when the handler is not set.
-var defaultHandler = func(http.ResponseWriter, *http.Request) {
-	fmt.Fprintln(os.Stderr, "http handler undefined")
-}
+var (
+	// defaultHandler is a placeholder for returning a useful error to stderr when the handler is not set.
+	defaultHandler = func(http.ResponseWriter, *http.Request) {
+		fmt.Fprintln(os.Stderr, "http handler undefined")
+	}
 
-// handlerFn is the function called by the HTTP trigger.
-var handlerFn = defaultHandler
+	// handlerFn is the function called by the HTTP trigger.
+	handlerFn = defaultHandler
+)
 
 // Handle sets the handler function for the http trigger. It must be set in an init() function.
 func Handle(fn func(http.ResponseWriter, *http.Request)) {
@@ -53,63 +55,50 @@ func RequestID(r *http.Request) string {
 	return r.Header.Get(HeaderRequestID)
 }
 
-// handleErr is wit.Err instantiated for the handler result, so the call sites don't need explicit type arguments.
-var handleErr = wit.Err[*wasi.Response, wasi.ErrorCode]
+var (
+	// handleErr is wit.Err instantiated for the handler result, so the call sites don't need explicit type arguments.
+	handleErr = wit.Err[*wasi.Response, wasi.ErrorCode]
+	wasiHandle = func(request *wasi.Request) wit.Result[*wasi.Response, wasi.ErrorCode] {
+		ctx, cancel := context.WithCancel(context.Background())
+		httpRes := newHTTPResponseWriter(cancel)
 
-var wasiHandle = func(request *wasi.Request) wit.Result[*wasi.Response, wasi.ErrorCode] {
-	ctx, cancel := context.WithCancel(context.Background())
-	httpRes := newHTTPResponseWriter(cancel)
+		go func() {
+			defer cancel()
+			defer httpRes.close()
+			defer func() {
+				recovered := recover()
+				if recovered == nil {
+					return
+				}
+				fmt.Fprintf(os.Stderr, "http handler panic: %v\n%s", recovered, debug.Stack())
+				if httpRes.channel != nil {
+					httpRes.channel <- handleErr(wasi.MakeErrorCodeInternalError(wit.Some(fmt.Sprintf("panic: %v", recovered))))
+					httpRes.channel = nil
+				}
+			}()
 
-	go func() {
-		defer cancel()
-		defer httpRes.close()
-		defer func() {
-			recovered := recover()
-			if recovered == nil {
+			// convert the incoming request to go's net/http type
+			httpReq, err := newHTTPRequest(ctx, request)
+			if err != nil {
+				httpRes.channel <- handleErr(wasi.MakeErrorCodeInternalError(wit.Some(fmt.Sprintf("failed to convert WASI Request to http.Request: %v\n", err))))
+
 				return
 			}
 
-			fmt.Fprintf(os.Stderr, "http handler panic: %v\n%s", recovered, debug.Stack())
+			defer httpReq.Body.Close()
 
-			if httpRes.channel != nil {
-				httpRes.channel <- handleErr(
-					wasi.MakeErrorCodeInternalError(wit.Some(fmt.Sprintf("panic: %v", recovered))),
-				)
+			// run the user's handler
+			handlerFn(httpRes, httpReq)
 
-				httpRes.channel = nil
+			// If the user's handler never sent a response, send a default one here.
+			if err := httpRes.send(); err != nil {
+				httpRes.channel <- handleErr(wasi.MakeErrorCodeInternalError(wit.Some(fmt.Sprintf("failed to produce a response: %v\n", err))))
 			}
 		}()
 
-		// convert the incoming request to go's net/http type
-		httpReq, err := newHTTPRequest(ctx, request)
-		if err != nil {
-			httpRes.channel <- handleErr(
-				wasi.MakeErrorCodeInternalError(wit.Some(fmt.Sprintf(
-					"failed to convert WASI Request to http.Request: %v\n",
-					err,
-				))),
-			)
-
-			return
-		}
-		defer httpReq.Body.Close()
-
-		// run the user's handler
-		handlerFn(httpRes, httpReq)
-
-		// If the user's handler never sent a response, send a default one here.
-		if err := httpRes.send(); err != nil {
-			httpRes.channel <- handleErr(
-				wasi.MakeErrorCodeInternalError(wit.Some(fmt.Sprintf(
-					"failed to produce a response: %v\n",
-					err,
-				))),
-			)
-		}
-	}()
-
-	return (<-httpRes.channel)
-}
+		return (<-httpRes.channel)
+	}
+)
 
 func init() {
 	handler.Exports.Handle = wasiHandle
@@ -121,20 +110,16 @@ func toWasiHeaders(headers http.Header) (*wasi.Fields, error) {
 
 	for key, vals := range headers {
 		fieldVals := make([][]uint8, 0, len(vals))
+
 		for _, val := range vals {
 			fieldVals = append(fieldVals, []uint8(val))
 		}
 
 		if result := fields.Set(key, fieldVals); result.IsErr() {
 			fields.Drop()
-
 			switch result.Err().Tag() {
 			case wasi.HeaderErrorInvalidSyntax:
-				return nil, fmt.Errorf(
-					"failed to set header %s to [%s]: invalid syntax",
-					key,
-					strings.Join(vals, ","),
-				)
+				return nil, fmt.Errorf("failed to set header %s to [%s]: invalid syntax", key, strings.Join(vals, ","))
 			case wasi.HeaderErrorForbidden:
 				return nil, fmt.Errorf("failed to set forbidden header key %s", key)
 			case wasi.HeaderErrorImmutable:
@@ -151,6 +136,7 @@ func toWasiHeaders(headers http.Header) (*wasi.Fields, error) {
 // trailersFuture returns an already-completed future with no trailers.
 func trailersFuture() *wit.FutureReader[wit.Result[wit.Option[*wasi.Fields], wasi.ErrorCode]] {
 	tx, rx := wasi.MakeFutureResultOptionFieldsErrorCode()
+
 	go tx.Write(wit.Ok[wit.Option[*wasi.Fields], wasi.ErrorCode](wit.None[*wasi.Fields]()))
 
 	return rx
@@ -159,6 +145,7 @@ func trailersFuture() *wit.FutureReader[wit.Result[wit.Option[*wasi.Fields], was
 // unitFuture returns an already-completed unit future.
 func unitFuture() *wit.FutureReader[wit.Result[wit.Unit, wasi.ErrorCode]] {
 	tx, rx := wasi.MakeFutureResultUnitErrorCode()
+
 	go tx.Write(wit.Ok[wit.Unit, wasi.ErrorCode](wit.Unit{}))
 
 	return rx

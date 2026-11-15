@@ -11,21 +11,26 @@ import (
 func TestStorageJobsAPI(t *testing.T) {
 	s, manager := jobTestSupervisor(t, 0)
 	a := s.apps["demo"]
+
 	a.mu.Lock()
+
 	a.ready = false
+
 	a.mu.Unlock()
 
-	storage := &storageServer{jobs: manager}
-
+	storage := &storageServer{
+		jobs: manager,
+	}
 	req := httptest.NewRequest(http.MethodPost, "/v1/jobs", strings.NewReader(`{"path":"/jobs/run","body":"hello","runAt":"2030-01-01T00:00:00Z","maxAttempts":2}`))
 	rec := httptest.NewRecorder()
-	storage.storageJobs(rec, req, "demo")
 
+	storage.storageJobs(rec, req, "demo")
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("enqueue = %d: %s", rec.Code, rec.Body.String())
 	}
 
 	var job appJob
+
 	if err := json.Unmarshal(rec.Body.Bytes(), &job); err != nil {
 		t.Fatal(err)
 	}
@@ -36,13 +41,14 @@ func TestStorageJobsAPI(t *testing.T) {
 
 	req = httptest.NewRequest(http.MethodGet, "/v1/jobs?status=pending", nil)
 	rec = httptest.NewRecorder()
-	storage.storageJobs(rec, req, "demo")
 
+	storage.storageJobs(rec, req, "demo")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("list = %d: %s", rec.Code, rec.Body.String())
 	}
 
 	var listed jobsResponse
+
 	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
 		t.Fatal(err)
 	}
@@ -53,16 +59,16 @@ func TestStorageJobsAPI(t *testing.T) {
 
 	req = httptest.NewRequest(http.MethodGet, "/v1/jobs/"+job.ID, nil)
 	rec = httptest.NewRecorder()
-	storage.storageJob(rec, req, "demo", job.ID, "")
 
+	storage.storageJob(rec, req, "demo", job.ID, "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("show = %d: %s", rec.Code, rec.Body.String())
 	}
 
 	req = httptest.NewRequest(http.MethodPost, "/v1/jobs/"+job.ID+"/cancel", nil)
 	rec = httptest.NewRecorder()
-	storage.storageJob(rec, req, "demo", job.ID, "cancel")
 
+	storage.storageJob(rec, req, "demo", job.ID, "cancel")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("cancel = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -76,8 +82,8 @@ func TestStorageJobsUnavailable(t *testing.T) {
 	storage := &storageServer{}
 	req := httptest.NewRequest(http.MethodGet, "/v1/jobs", nil)
 	rec := httptest.NewRecorder()
-	storage.storageJobs(rec, req, "demo")
 
+	storage.storageJobs(rec, req, "demo")
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("status = %d, want 503", rec.Code)
 	}

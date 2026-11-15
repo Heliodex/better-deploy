@@ -8,22 +8,35 @@ import (
 	wit "go.bytecodealliance.org/pkg/wit/types"
 )
 
-// Assert `bodyReader` implements the required interfaces.
-var _ io.Reader = &bodyReader{}
-
-var _ io.ReadCloser = &bodyReader{}
-
 type bodyReader struct {
 	stream *wit.StreamReader[uint8]
 	trailers *wit.FutureReader[wit.Result[wit.Option[*wasi.Fields], wasi.ErrorCode]]
+}
+
+var (
+	// Assert `bodyReader` implements the required interfaces.
+	_ io.Reader = &bodyReader{}
+	_ io.ReadCloser = &bodyReader{}
+)
+
+func (r *bodyReader) Close() error {
+	if r.stream != nil {
+		r.stream.Drop()
+	}
+
+	if r.trailers != nil {
+		r.trailers.Drop()
+	}
+
+	return nil
 }
 
 // takeError consumes the trailers future and returns its error, or io.EOF when the body ended cleanly.
 func (r *bodyReader) takeError() error {
 	if r.trailers != nil {
 		trailers := r.trailers.Read()
-
 		r.trailers = nil
+
 		if trailers.IsErr() {
 			return fmt.Errorf("failed to read from HTTP body stream: %s", errorString(trailers.Err()))
 		}
@@ -45,23 +58,8 @@ func (r *bodyReader) Read(p []byte) (n int, err error) {
 	return int(count), nil
 }
 
-func (r *bodyReader) Close() error {
-	if r.stream != nil {
-		r.stream.Drop()
-	}
-
-	if r.trailers != nil {
-		r.trailers.Drop()
-	}
-
-	return nil
-}
-
 // newReader creates an io.Reader from the input stream.
-func newReader(
-	stream *wit.StreamReader[uint8],
-	trailers *wit.FutureReader[wit.Result[wit.Option[*wasi.Fields], wasi.ErrorCode]],
-) *bodyReader {
+func newReader(stream *wit.StreamReader[uint8], trailers *wit.FutureReader[wit.Result[wit.Option[*wasi.Fields], wasi.ErrorCode]]) *bodyReader {
 	return &bodyReader{
 		stream: stream,
 		trailers: trailers,

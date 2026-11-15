@@ -13,6 +13,5 @@ func (s *storageServer) storageBlobDelete(w http.ResponseWriter, _ *http.Request
 		writeBlobError(w, err)
 		return
 	}
-
 	w.WriteHeader(http.StatusNoContent)
 }

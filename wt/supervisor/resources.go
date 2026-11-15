@@ -16,15 +16,39 @@ import (
 	"time"
 )
 
-const (
-	// resourcePersistInterval is how often chart histories are written to disk. A crash loses at most this much history.
-	resourcePersistInterval = 10 * time.Second
+type (
+	// resourceSample is one point in an app's CPU and memory history.
+	resourceSample struct {
+		At time.Time `json:"at"`
+		CPUPercent float64 `json:"cpuPercent"`
+		MemoryBytes int64 `json:"memoryBytes"`
+	}
+
+	// appStats caches the last resource sample for one app process and keeps a short history for the charts.
+	appStats struct {
+		mu sync.Mutex
+		pid int
+		lastTicks uint64
+		lastSample, sampledAt time.Time
+		cpuPercent float64
+		memoryBytes int64
+		lastAppend time.Time
+		history []resourceSample
+	}
+
+	resourceHistoryResponse struct {
+		Samples []resourceSample `json:"samples"`
+	}
 )
 
-// clockTicks is Linux USER_HZ, which is 100 on every architecture the supervisor supports.
-const clockTicks = 100
-
 const (
+
+	// resourcePersistInterval is how often chart histories are written to disk. A crash loses at most this much history.
+	resourcePersistInterval = 10 * time.Second
+
+	// clockTicks is Linux USER_HZ, which is 100 on every architecture the supervisor supports.
+	clockTicks = 100
+
 	// resourceSampleInterval is how often the supervisor reads CPU and memory and how often open panels receive them.
 	resourceSampleInterval = time.Second
 	// resourceHistoryWindow is how much history the panel charts; at the sample interval this is 1800 points.
@@ -32,23 +56,25 @@ const (
 	resourceHistoryPoints = int(resourceHistoryWindow / resourceSampleInterval)
 )
 
-// resourceSample is one point in an app's CPU and memory history.
-type resourceSample struct {
-	At time.Time `json:"at"`
-	CPUPercent float64 `json:"cpuPercent"`
-	MemoryBytes int64 `json:"memoryBytes"`
+// resourceHistory returns a copy of the app's recent samples, oldest first.
+func (a *app) resourceHistory() []resourceSample {
+	a.stats.mu.Lock()
+
+	defer a.stats.mu.Unlock()
+
+	out := make([]resourceSample, len(a.stats.history))
+
+	copy(out, a.stats.history)
+	return out
 }
 
-// appStats caches the last resource sample for one app process and keeps a short history for the charts.
-type appStats struct {
-	mu sync.Mutex
-	pid int
-	lastTicks uint64
-	lastSample, sampledAt time.Time
-	cpuPercent float64
-	memoryBytes int64
-	lastAppend time.Time
-	history []resourceSample
+// resourceStats returns the last CPU percentage (of one core), memory in bytes (PSS when available), and when it was sampled.
+func (a *app) resourceStats() (float64, int64, time.Time) {
+	a.stats.mu.Lock()
+
+	defer a.stats.mu.Unlock()
+
+	return a.stats.cpuPercent, a.stats.memoryBytes, a.stats.sampledAt
 }
 
 // appendHistory records a point when the chart interval has passed. The caller holds stats.mu.
@@ -58,8 +84,12 @@ func (s *appStats) appendHistory(now time.Time, cpu float64, memory int64) {
 	}
 
 	s.lastAppend = now
+	s.history = append(s.history, resourceSample{
+		At: now.UTC(),
+		CPUPercent: cpu,
+		MemoryBytes: memory,
+	})
 
-	s.history = append(s.history, resourceSample{At: now.UTC(), CPUPercent: cpu, MemoryBytes: memory})
 	if len(s.history) > resourceHistoryPoints {
 		s.history = s.history[len(s.history)-resourceHistoryPoints:]
 	}
@@ -68,131 +98,13 @@ func (s *appStats) appendHistory(now time.Time, cpu float64, memory int64) {
 // recordHistory appends the current figures with the sample timestamp, so the panel can deduplicate history fetched from the API against snapshots arriving over SSE.
 func (a *app) recordHistory() {
 	a.stats.mu.Lock()
+
 	defer a.stats.mu.Unlock()
 
 	if a.stats.sampledAt.IsZero() || time.Since(a.stats.sampledAt) > 2*resourceSampleInterval {
 		return
 	}
-
 	a.stats.appendHistory(a.stats.sampledAt, a.stats.cpuPercent, a.stats.memoryBytes)
-}
-
-// resourceStats returns the last CPU percentage (of one core), memory in bytes (PSS when available), and when it was sampled.
-func (a *app) resourceStats() (float64, int64, time.Time) {
-	a.stats.mu.Lock()
-	defer a.stats.mu.Unlock()
-
-	return a.stats.cpuPercent, a.stats.memoryBytes, a.stats.sampledAt
-}
-
-// resourceHistory returns a copy of the app's recent samples, oldest first.
-func (a *app) resourceHistory() []resourceSample {
-	a.stats.mu.Lock()
-	defer a.stats.mu.Unlock()
-
-	out := make([]resourceSample, len(a.stats.history))
-	copy(out, a.stats.history)
-
-	return out
-}
-
-// recordAll appends one history point per app; the monitor calls it after sampling.
-func (s *supervisor) recordAll() {
-	for _, a := range s.allApps() {
-		a.recordHistory()
-	}
-}
-
-type resourceHistoryResponse struct {
-	Samples []resourceSample `json:"samples"`
-}
-
-// resourcesDir holds one JSON history file per app, outside any app's /data preopen.
-func (s *supervisor) resourcesDir() string {
-	return filepath.Join(s.cfg.stateDir, ".resources")
-}
-
-func (s *supervisor) resourceHistoryPath(name string) string {
-	return filepath.Join(s.resourcesDir(), name+".json")
-}
-
-// persistResources writes each app's chart history to disk so it survives restarts.
-// Failures are logged and ignored: history is best-effort.
-func (s *supervisor) persistResources() {
-	if s.cfg.stateDir == "" {
-		return
-	}
-
-	if err := os.MkdirAll(s.resourcesDir(), 0o755); err != nil {
-		log.Printf("resources: persist: %v", err)
-		return
-	}
-
-	for _, a := range s.allApps() {
-		data, err := json.Marshal(resourceHistoryResponse{Samples: a.resourceHistory()})
-		if err != nil {
-			continue
-		}
-
-		tmp, err := os.CreateTemp(s.resourcesDir(), "."+a.name+".*.json")
-		if err != nil {
-			continue
-		}
-
-		tmpName := tmp.Name()
-		_, writeErr := tmp.Write(append(data, '\n'))
-
-		closeErr := tmp.Close()
-		if writeErr != nil || closeErr != nil {
-			_ = os.Remove(tmpName)
-			continue
-		}
-
-		if err := os.Rename(tmpName, s.resourceHistoryPath(a.name)); err != nil {
-			_ = os.Remove(tmpName)
-		}
-	}
-}
-
-// loadResourceHistory reads a persisted history back into a fresh app, trimming to the chart window. A missing or corrupt file means empty history.
-func (s *supervisor) loadResourceHistory(a *app) {
-	data, err := os.ReadFile(s.resourceHistoryPath(a.name))
-	if err != nil {
-		return
-	}
-
-	var out resourceHistoryResponse
-	if err := json.Unmarshal(data, &out); err != nil {
-		return
-	}
-
-	cutoff := time.Now().Add(-resourceHistoryWindow)
-
-	kept := make([]resourceSample, 0, len(out.Samples))
-	for _, sample := range out.Samples {
-		if sample.At.IsZero() || sample.At.Before(cutoff) {
-			continue
-		}
-
-		kept = append(kept, sample)
-	}
-
-	sort.Slice(kept, func(i, j int) bool {
-		return kept[i].At.Before(kept[j].At)
-	})
-
-	if len(kept) > resourceHistoryPoints {
-		kept = kept[len(kept)-resourceHistoryPoints:]
-	}
-
-	if len(kept) == 0 {
-		return
-	}
-
-	a.stats.mu.Lock()
-	a.stats.history = kept
-	a.stats.lastAppend = kept[len(kept)-1].At
-	a.stats.mu.Unlock()
 }
 
 // cpuPercent converts a CPU-tick delta into percent of one core over elapsed.
@@ -310,11 +222,14 @@ func readProcessStats(pid int) (uint64, int64, error) {
 // sampleResources refreshes the app's CPU and memory figures from procfs. Calling it more than twice per sample interval reuses the previous sample so CPU deltas stay meaningful.
 func (a *app) sampleResources(now time.Time) {
 	a.mu.Lock()
-	pid := 0
+
+	var pid int
 
 	started := a.started
+
 	if a.cmd != nil && a.cmd.Process != nil && !a.exited {
 		pid = a.cmd.Process.Pid
+
 		if a.workPID > 0 {
 			pid = a.workPID
 		}
@@ -322,7 +237,9 @@ func (a *app) sampleResources(now time.Time) {
 	a.mu.Unlock()
 
 	stats := &a.stats
+
 	stats.mu.Lock()
+
 	defer stats.mu.Unlock()
 
 	if pid == 0 {
@@ -362,14 +279,111 @@ func (a *app) sampleResources(now time.Time) {
 // handleResources returns the app's CPU and memory history for the charts.
 func (s *supervisor) handleResources(w http.ResponseWriter, _ *http.Request, a *app) {
 	a.sampleResources(time.Now())
-	writeJSON(w, http.StatusOK, resourceHistoryResponse{Samples: a.resourceHistory()})
+	writeJSON(w, http.StatusOK, resourceHistoryResponse{
+		Samples: a.resourceHistory(),
+	})
+}
+
+// recordAll appends one history point per app; the monitor calls it after sampling.
+func (s *supervisor) recordAll() {
+	for _, a := range s.allApps() {
+		a.recordHistory()
+	}
+}
+
+// resourcesDir holds one JSON history file per app, outside any app's /data preopen.
+func (s *supervisor) resourcesDir() string {
+	return filepath.Join(s.cfg.stateDir, ".resources")
+}
+
+func (s *supervisor) resourceHistoryPath(name string) string {
+	return filepath.Join(s.resourcesDir(), name+".json")
+}
+
+// loadResourceHistory reads a persisted history back into a fresh app, trimming to the chart window. A missing or corrupt file means empty history.
+func (s *supervisor) loadResourceHistory(a *app) {
+	data, err := os.ReadFile(s.resourceHistoryPath(a.name))
+	if err != nil {
+		return
+	}
+
+	var out resourceHistoryResponse
+
+	if err := json.Unmarshal(data, &out); err != nil {
+		return
+	}
+
+	cutoff := time.Now().Add(-resourceHistoryWindow)
+	kept := make([]resourceSample, 0, len(out.Samples))
+
+	for _, sample := range out.Samples {
+		if sample.At.IsZero() || sample.At.Before(cutoff) {
+			continue
+		}
+
+		kept = append(kept, sample)
+	}
+	sort.Slice(kept, func(i, j int) bool {
+		return kept[i].At.Before(kept[j].At)
+	})
+	if len(kept) > resourceHistoryPoints {
+		kept = kept[len(kept)-resourceHistoryPoints:]
+	}
+
+	if len(kept) == 0 {
+		return
+	}
+	a.stats.mu.Lock()
+
+	a.stats.history = kept
+	a.stats.lastAppend = kept[len(kept)-1].At
+
+	a.stats.mu.Unlock()
+}
+
+// persistResources writes each app's chart history to disk so it survives restarts.
+// Failures are logged and ignored: history is best-effort.
+func (s *supervisor) persistResources() {
+	if s.cfg.stateDir == "" {
+		return
+	}
+
+	if err := os.MkdirAll(s.resourcesDir(), 0o755); err != nil {
+		log.Printf("resources: persist: %v", err)
+		return
+	}
+
+	for _, a := range s.allApps() {
+		data, err := json.Marshal(resourceHistoryResponse{
+			Samples: a.resourceHistory(),
+		})
+		if err != nil {
+			continue
+		}
+
+		tmp, err := os.CreateTemp(s.resourcesDir(), "."+a.name+".*.json")
+		if err != nil {
+			continue
+		}
+
+		tmpName := tmp.Name()
+		_, writeErr := tmp.Write(append(data, '\n'))
+		if closeErr := tmp.Close(); writeErr != nil || closeErr != nil {
+			_ = os.Remove(tmpName)
+			continue
+		}
+
+		if err := os.Rename(tmpName, s.resourceHistoryPath(a.name)); err != nil {
+			_ = os.Remove(tmpName)
+		}
+	}
 }
 
 // sampleAll refreshes resource usage for every app.
 func (s *supervisor) sampleAll() {
 	apps := s.allApps()
-
 	now := time.Now()
+
 	for _, a := range apps {
 		a.sampleResources(now)
 	}
@@ -382,18 +396,16 @@ func (s *supervisor) monitorResources(every time.Duration) {
 	s.persistResources()
 
 	lastPersist := time.Now()
-
 	ticker := time.NewTicker(every)
+
 	defer ticker.Stop()
 
 	for range ticker.C {
 		if s.stopping.Load() {
 			return
 		}
-
 		s.sampleAll()
 		s.recordAll()
-
 		if time.Since(lastPersist) >= resourcePersistInterval {
 			s.persistResources()
 

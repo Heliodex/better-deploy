@@ -18,6 +18,7 @@ func SeedOnce(ctx context.Context, store *storage.Client, table string, seed fun
 	}
 
 	var seeded int64
+
 	if err := store.QueryRow(ctx, `select count(*) from meta where key = 'seeded'`).Scan(&seeded); err != nil {
 		return err
 	}
@@ -27,6 +28,7 @@ func SeedOnce(ctx context.Context, store *storage.Client, table string, seed fun
 	}
 
 	var count int64
+
 	if err := store.QueryRow(ctx, `select count(*) from `+quoteIdentifier(table)).Scan(&count); err != nil {
 		return err
 	}

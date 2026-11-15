@@ -10,33 +10,27 @@ import (
 	"strings"
 )
 
-// checkContract regenerates the contract in a temporary directory and compares it with the checked-in files.
-func checkContract(dir, web, appName string) error {
-	abs, err := filepath.Abs(dir)
+// compareContractFile reports one generated file as missing or different.
+func compareContractFile(generatedPath, currentPath, label string) error {
+	generated, err := os.ReadFile(generatedPath)
 	if err != nil {
 		return err
 	}
 
-	generated, err := os.MkdirTemp(abs, ".wt-contract-check-*")
+	current, err := os.ReadFile(currentPath)
+	if os.IsNotExist(err) {
+		return fmt.Errorf("%s is missing", label)
+	}
+
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(generated)
 
-	if err := generateContractTo(abs, web, appName, generated, true); err != nil {
-		return err
+	if !bytes.Equal(generated, current) {
+		return fmt.Errorf("%s differs", label)
 	}
 
-	if err := compareContractTrees(generated, filepath.Join(abs, "contract")); err != nil {
-		return err
-	}
-
-	return checkClient(abs, web, generated)
-}
-
-// checkClient compares the generated fetch client with the checked-in one when the app keeps an endpoint registry.
-func checkClient(dir, web, generatedDir string) error {
-	return checkGeneratedFile(dir, web, generatedDir, "api.gen.ts")
+	return nil
 }
 
 // checkGeneratedFile compares one generated web file with its checked-in copy.
@@ -56,22 +50,35 @@ func checkGeneratedFile(dir, web, generatedDir, name string) error {
 		return registryErr
 	}
 
-	return compareContractFile(
-		filepath.Join(generatedDir, name),
-		current,
-		"src/lib/"+name,
-	)
+	return compareContractFile(filepath.Join(generatedDir, name), current, "src/lib/"+name)
+}
+
+// checkClient compares the generated fetch client with the checked-in one when the app keeps an endpoint registry.
+func checkClient(dir, web, generatedDir string) error {
+	return checkGeneratedFile(dir, web, generatedDir, "api.gen.ts")
+}
+
+// contractSchemaFiles maps schema file names to paths under one contract directory.
+func contractSchemaFiles(dir string) (map[string]string, error) {
+	paths, err := filepath.Glob(filepath.Join(dir, "schemas", "*.json"))
+	if err != nil {
+		return nil, err
+	}
+
+	files := make(map[string]string, len(paths))
+
+	for _, path := range paths {
+		files[filepath.Base(path)] = path
+	}
+
+	return files, nil
 }
 
 // compareContractTrees reports every generated file that is missing, stale or different in currentDir.
 func compareContractTrees(generatedDir, currentDir string) error {
 	problems := []string{}
 
-	if err := compareContractFile(
-		filepath.Join(generatedDir, "contract.gen.go"),
-		filepath.Join(currentDir, "contract.gen.go"),
-		"contract/contract.gen.go",
-	); err != nil {
+	if err := compareContractFile(filepath.Join(generatedDir, "contract.gen.go"), filepath.Join(currentDir, "contract.gen.go"), "contract/contract.gen.go"); err != nil {
 		problems = append(problems, err.Error())
 	}
 
@@ -86,6 +93,7 @@ func compareContractTrees(generatedDir, currentDir string) error {
 	}
 
 	names := make([]string, 0, len(generated)+len(current))
+
 	for name := range generated {
 		names = append(names, name)
 	}
@@ -95,12 +103,10 @@ func compareContractTrees(generatedDir, currentDir string) error {
 			names = append(names, name)
 		}
 	}
-
 	sort.Strings(names)
-
 	for _, name := range names {
-		generatedPath, generatedOK := generated[name]
 		currentPath, currentOK := current[name]
+		generatedPath, generatedOK := generated[name]
 		label := "contract/schemas/" + name
 
 		switch {
@@ -132,40 +138,27 @@ func compareContractTrees(generatedDir, currentDir string) error {
 	return nil
 }
 
-// compareContractFile reports one generated file as missing or different.
-func compareContractFile(generatedPath, currentPath, label string) error {
-	generated, err := os.ReadFile(generatedPath)
+// checkContract regenerates the contract in a temporary directory and compares it with the checked-in files.
+func checkContract(dir, web, appName string) error {
+	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return err
 	}
 
-	current, err := os.ReadFile(currentPath)
-	if os.IsNotExist(err) {
-		return fmt.Errorf("%s is missing", label)
-	}
-
+	generated, err := os.MkdirTemp(abs, ".wt-contract-check-*")
 	if err != nil {
 		return err
 	}
 
-	if !bytes.Equal(generated, current) {
-		return fmt.Errorf("%s differs", label)
+	defer os.RemoveAll(generated)
+
+	if err := generateContractTo(abs, web, appName, generated, true); err != nil {
+		return err
 	}
 
-	return nil
-}
-
-// contractSchemaFiles maps schema file names to paths under one contract directory.
-func contractSchemaFiles(dir string) (map[string]string, error) {
-	paths, err := filepath.Glob(filepath.Join(dir, "schemas", "*.json"))
-	if err != nil {
-		return nil, err
+	if err := compareContractTrees(generated, filepath.Join(abs, "contract")); err != nil {
+		return err
 	}
 
-	files := make(map[string]string, len(paths))
-	for _, path := range paths {
-		files[filepath.Base(path)] = path
-	}
-
-	return files, nil
+	return checkClient(abs, web, generated)
 }

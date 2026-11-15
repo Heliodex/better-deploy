@@ -6,37 +6,19 @@ import (
 	"time"
 )
 
-type blobGCRequest struct {
-	OlderThan string `json:"olderThan"`
-	Keep []string `json:"keep,omitempty"`
-	DryRun bool `json:"dryRun,omitempty"`
-}
-
-type blobGCResponse struct {
-	Deleted []string `json:"deleted"`
-	DryRun bool `json:"dryRun"`
-	OlderThan string `json:"olderThan"`
-}
-
-// handleAppBlobs lists one app's stored blobs, including ones whose metadata sidecar is missing.
-func (s *supervisor) handleAppBlobs(w http.ResponseWriter, r *http.Request, name string) {
-	if s.blobs == nil {
-		writeError(w, http.StatusServiceUnavailable, errBlobStoreEmpty.Error())
-		return
+type (
+	blobGCRequest struct {
+		OlderThan string `json:"olderThan"`
+		Keep []string `json:"keep,omitempty"`
+		DryRun bool `json:"dryRun,omitempty"`
 	}
 
-	if !requireMethod(w, r, http.MethodGet) {
-		return
+	blobGCResponse struct {
+		Deleted []string `json:"deleted"`
+		DryRun bool `json:"dryRun"`
+		OlderThan string `json:"olderThan"`
 	}
-
-	blobs, err := s.blobs.list(name)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{"blobs": blobs})
-}
+)
 
 // handleAppBlob deletes one blob by its digest.
 func (s *supervisor) handleAppBlob(w http.ResponseWriter, r *http.Request, name, digest string) {
@@ -53,7 +35,6 @@ func (s *supervisor) handleAppBlob(w http.ResponseWriter, r *http.Request, name,
 		writeBlobError(w, err)
 		return
 	}
-
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -74,7 +55,6 @@ func (s *supervisor) handleAppBlobGC(w http.ResponseWriter, r *http.Request, nam
 	}
 
 	olderThan := strings.TrimSpace(request.OlderThan)
-
 	duration, err := time.ParseDuration(olderThan)
 	if err != nil || duration <= 0 {
 		writeError(w, http.StatusBadRequest, "olderThan must be a positive duration such as 720h")
@@ -85,6 +65,7 @@ func (s *supervisor) handleAppBlobGC(w http.ResponseWriter, r *http.Request, nam
 
 	for _, digest := range request.Keep {
 		digest = strings.TrimSpace(digest)
+
 		if digest == "" {
 			continue
 		}
@@ -116,11 +97,34 @@ func (s *supervisor) handleAppBlobGC(w http.ResponseWriter, r *http.Request, nam
 		}
 	} else {
 		deleted, err = s.blobs.gc(name, cutoff, keep)
+
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	}
+	writeJSON(w, http.StatusOK, blobGCResponse{
+		Deleted: deleted,
+		DryRun: request.DryRun,
+		OlderThan: olderThan,
+	})
+}
 
-	writeJSON(w, http.StatusOK, blobGCResponse{Deleted: deleted, DryRun: request.DryRun, OlderThan: olderThan})
+// handleAppBlobs lists one app's stored blobs, including ones whose metadata sidecar is missing.
+func (s *supervisor) handleAppBlobs(w http.ResponseWriter, r *http.Request, name string) {
+	if s.blobs == nil {
+		writeError(w, http.StatusServiceUnavailable, errBlobStoreEmpty.Error())
+		return
+	}
+
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+
+	blobs, err := s.blobs.list(name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"blobs": blobs})
 }

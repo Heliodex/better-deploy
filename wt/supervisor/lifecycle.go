@@ -17,23 +17,6 @@ type deleteAppResponse struct {
 
 var errNoComponent = errors.New("app has no precompiled component")
 
-// unregister removes an app from the live maps and notifies the panel. Its process and files are left to the caller.
-func (s *supervisor) unregister(a *app) {
-	s.mu.Lock()
-	if s.apps[a.name] == a {
-		delete(s.apps, a.name)
-	}
-
-	s.removeAppHostsLocked(a, a.cfg)
-	s.mu.Unlock()
-
-	if s.jobs != nil {
-		s.jobs.stop(a.name)
-	}
-
-	s.broadcast()
-}
-
 // handleStop drains in-flight requests and stops an app without removing it; its host returns 503 until it is started again.
 func (s *supervisor) handleStop(w http.ResponseWriter, r *http.Request, name string) {
 	defer s.lockApp(name)()
@@ -42,98 +25,12 @@ func (s *supervisor) handleStop(w http.ResponseWriter, r *http.Request, name str
 	if !ok {
 		return
 	}
-
 	a.mu.Lock()
-	a.idleStopped = false
-	a.mu.Unlock()
 
+	a.idleStopped = false
+
+	a.mu.Unlock()
 	s.drainAndStop(a, "stop")
-	writeJSON(w, http.StatusOK, s.info(a))
-}
-
-// startStopped launches an app from its existing main.cwasm and starts its schedule.
-func (s *supervisor) startStopped(a *app) error {
-	a.startMu.Lock()
-	defer a.startMu.Unlock()
-
-	a.mu.Lock()
-	if a.cmd != nil && !a.exited && !a.retired {
-		a.mu.Unlock()
-		return nil
-	}
-
-	dir := a.dir
-	requireEpoch := a.cfg.requestTimeout > 0
-	a.mu.Unlock()
-
-	cwasm := filepath.Join(dir, "main.cwasm")
-
-	epoch, err := s.ensureArtifact(dir, requireEpoch)
-	if err != nil {
-		return err
-	}
-
-	s.stopSchedule(a)
-	a.mu.Lock()
-	a.retired = false
-	a.draining = false
-	a.idleStopped = false
-	a.lastRequest = time.Now().UTC()
-	a.delay = time.Second
-	a.wasmEpoch = epoch
-	a.digest = sourceDigest(dir)
-	a.mu.Unlock()
-
-	if err := s.launch(a, cwasm); err != nil {
-		return err
-	}
-
-	s.startSchedule(a)
-
-	if s.jobs != nil {
-		if err := s.jobs.start(a.name, a.cfg.JobConcurrency); err != nil {
-			log.Printf("jobs %s: %v", a.name, err)
-		}
-	}
-
-	a.sampleResources(time.Now())
-
-	return nil
-}
-
-// handleStart relaunches a stopped app from its existing main.cwasm.
-func (s *supervisor) handleStart(w http.ResponseWriter, r *http.Request, name string) {
-	defer s.lockApp(name)()
-
-	a, ok := s.requireApp(w, r, name)
-	if !ok {
-		return
-	}
-
-	a.mu.Lock()
-	running := a.cmd != nil && !a.exited
-	a.mu.Unlock()
-
-	if running {
-		writeError(w, http.StatusConflict, "app is already running")
-		return
-	}
-
-	s.cancelRestart(a)
-
-	if err := s.startStopped(a); err != nil {
-		log.Printf("start %s: %v", name, err)
-
-		status := http.StatusBadGateway
-		if errors.Is(err, errNoComponent) {
-			status = http.StatusInternalServerError
-		}
-
-		writeError(w, status, "app did not start: "+err.Error())
-
-		return
-	}
-
 	writeJSON(w, http.StatusOK, s.info(a))
 }
 
@@ -142,6 +39,7 @@ func (s *supervisor) purgeAppState(name string) error {
 	// Hold this app's backup lock so its snapshot cannot start while its database and files disappear.
 	if s.backups != nil {
 		s.backups.lock(name)
+
 		defer s.backups.unlock(name)
 	}
 
@@ -165,6 +63,7 @@ func (s *supervisor) purgeAppState(name string) error {
 	}
 
 	resource := filepath.Join(s.cfg.stateDir, ".resources", name+".json")
+
 	if err := os.Remove(resource); err != nil && !os.IsNotExist(err) {
 		return err
 	}
@@ -176,6 +75,99 @@ func (s *supervisor) purgeAppState(name string) error {
 	return nil
 }
 
+// startStopped launches an app from its existing main.cwasm and starts its schedule.
+func (s *supervisor) startStopped(a *app) error {
+	a.startMu.Lock()
+
+	defer a.startMu.Unlock()
+
+	a.mu.Lock()
+	if a.cmd != nil && !a.exited && !a.retired {
+		a.mu.Unlock()
+		return nil
+	}
+
+	dir := a.dir
+	requireEpoch := a.cfg.requestTimeout > 0
+
+	a.mu.Unlock()
+
+	cwasm := filepath.Join(dir, "main.cwasm")
+	epoch, err := s.ensureArtifact(dir, requireEpoch)
+	if err != nil {
+		return err
+	}
+	s.stopSchedule(a)
+	a.mu.Lock()
+
+	a.retired = false
+	a.draining = false
+	a.idleStopped = false
+	a.lastRequest = time.Now().UTC()
+	a.delay = time.Second
+	a.wasmEpoch = epoch
+	a.digest = sourceDigest(dir)
+
+	a.mu.Unlock()
+	if err := s.launch(a, cwasm); err != nil {
+		return err
+	}
+	s.startSchedule(a)
+	if s.jobs != nil {
+		if err := s.jobs.start(a.name, a.cfg.JobConcurrency); err != nil {
+			log.Printf("jobs %s: %v", a.name, err)
+		}
+	}
+	a.sampleResources(time.Now())
+	return nil
+}
+
+// handleStart relaunches a stopped app from its existing main.cwasm.
+func (s *supervisor) handleStart(w http.ResponseWriter, r *http.Request, name string) {
+	defer s.lockApp(name)()
+
+	a, ok := s.requireApp(w, r, name)
+	if !ok {
+		return
+	}
+	a.mu.Lock()
+
+	running := a.cmd != nil && !a.exited
+
+	a.mu.Unlock()
+	if running {
+		writeError(w, http.StatusConflict, "app is already running")
+		return
+	}
+	s.cancelRestart(a)
+	if err := s.startStopped(a); err != nil {
+		log.Printf("start %s: %v", name, err)
+
+		status := http.StatusBadGateway
+
+		if errors.Is(err, errNoComponent) {
+			status = http.StatusInternalServerError
+		}
+		writeError(w, status, "app did not start: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, s.info(a))
+}
+
+// unregister removes an app from the live maps and notifies the panel. Its process and files are left to the caller.
+func (s *supervisor) unregister(a *app) {
+	s.mu.Lock()
+	if s.apps[a.name] == a {
+		delete(s.apps, a.name)
+	}
+	s.removeAppHostsLocked(a, a.cfg)
+	s.mu.Unlock()
+	if s.jobs != nil {
+		s.jobs.stop(a.name)
+	}
+	s.broadcast()
+}
+
 // handleDelete removes an app's code and process. State is kept unless ?purge=1 is set.
 func (s *supervisor) handleDelete(w http.ResponseWriter, r *http.Request, name string) {
 	defer s.lockApp(name)()
@@ -185,7 +177,7 @@ func (s *supervisor) handleDelete(w http.ResponseWriter, r *http.Request, name s
 		return
 	}
 
-	purge := false
+	var purge bool
 
 	if value := r.URL.Query().Get("purge"); value != "" {
 		parsed, err := strconv.ParseBool(value)
@@ -196,21 +188,15 @@ func (s *supervisor) handleDelete(w http.ResponseWriter, r *http.Request, name s
 
 		purge = parsed
 	}
-
 	s.unregister(a)
-
 	if s.bus != nil {
 		s.bus.remove(name)
 	}
-
 	s.drainAndStop(a, "delete")
-
 	if a.logs != nil {
 		a.logs.close()
 	}
-
 	s.clearAppDataQuota(name, a)
-
 	if err := os.RemoveAll(filepath.Join(s.cfg.appsDir, name)); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -228,6 +214,8 @@ func (s *supervisor) handleDelete(w http.ResponseWriter, r *http.Request, name s
 			log.Printf("deploy replay %s: %v", name, err)
 		}
 	}
-
-	writeJSON(w, http.StatusOK, deleteAppResponse{Name: name, Purged: purge})
+	writeJSON(w, http.StatusOK, deleteAppResponse{
+		Name: name,
+		Purged: purge,
+	})
 }

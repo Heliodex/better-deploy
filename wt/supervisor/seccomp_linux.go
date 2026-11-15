@@ -15,9 +15,9 @@ import (
 )
 
 const (
-	seccompRetKillProcess = 0x80000000
 	seccompRetAllow = 0x7fff0000
 	seccompRetErrno = 0x00050000
+	seccompRetKillProcess = 0x80000000
 	x32SyscallBit = 0x40000000
 )
 
@@ -84,35 +84,79 @@ func seccompArch() (uint32, error) {
 // seccompFilter builds a classic BPF program that kills a foreign ABI, rejects x32 syscalls on amd64, denies replacing the filter through prctl, then returns EPERM for each denied syscall and allows everything else.
 func seccompFilter(arch uint32, denied []uintptr) []unix.SockFilter {
 	filter := []unix.SockFilter{
-		{Code: unix.BPF_LD | unix.BPF_W | unix.BPF_ABS, K: 4},
-		{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jt: 1, K: arch},
-		{Code: unix.BPF_RET | unix.BPF_K, K: seccompRetKillProcess},
-		{Code: unix.BPF_LD | unix.BPF_W | unix.BPF_ABS, K: 0},
+		{
+			Code: unix.BPF_LD | unix.BPF_W | unix.BPF_ABS,
+			K: 4,
+		},
+		{
+			Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K,
+			Jt: 1,
+			K: arch,
+		},
+		{
+			Code: unix.BPF_RET | unix.BPF_K,
+			K: seccompRetKillProcess,
+		},
+		{
+			Code: unix.BPF_LD | unix.BPF_W | unix.BPF_ABS,
+			K: 0,
+		},
 	}
+
 	if runtime.GOARCH == "amd64" {
-		filter = append(filter,
-			unix.SockFilter{Code: unix.BPF_JMP | unix.BPF_JSET | unix.BPF_K, Jf: 1, K: x32SyscallBit},
-			unix.SockFilter{Code: unix.BPF_RET | unix.BPF_K, K: seccompRetErrno | uint32(unix.EPERM)},
-		)
+		filter = append(filter, unix.SockFilter{
+			Code: unix.BPF_JMP | unix.BPF_JSET | unix.BPF_K,
+			Jf: 1,
+			K: x32SyscallBit,
+		}, unix.SockFilter{
+			Code: unix.BPF_RET | unix.BPF_K,
+			K: seccompRetErrno | uint32(unix.EPERM),
+		})
 	}
 	// Deny prctl(PR_SET_SECCOMP) and prctl(PR_SET_MM); a non-prctl syscall skips all five following instructions.
-	filter = append(filter,
-		unix.SockFilter{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jf: 5, K: uint32(unix.SYS_PRCTL)},
-		unix.SockFilter{Code: unix.BPF_LD | unix.BPF_W | unix.BPF_ABS, K: 16},
-		unix.SockFilter{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jf: 1, K: uint32(unix.PR_SET_SECCOMP)},
-		unix.SockFilter{Code: unix.BPF_RET | unix.BPF_K, K: seccompRetErrno | uint32(unix.EPERM)},
-		unix.SockFilter{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jf: 1, K: uint32(unix.PR_SET_MM)},
-		unix.SockFilter{Code: unix.BPF_RET | unix.BPF_K, K: seccompRetErrno | uint32(unix.EPERM)},
-	)
+	filter = append(filter, unix.SockFilter{
+		Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K,
+		Jf: 5,
+		K: uint32(unix.SYS_PRCTL),
+	}, unix.SockFilter{
+		Code: unix.BPF_LD | unix.BPF_W | unix.BPF_ABS,
+		K: 16,
+	}, unix.SockFilter{
+		Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K,
+		Jf: 1,
+		K: uint32(unix.PR_SET_SECCOMP),
+	}, unix.SockFilter{
+		Code: unix.BPF_RET | unix.BPF_K,
+		K: seccompRetErrno | uint32(unix.EPERM),
+	}, unix.SockFilter{
+		Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K,
+		Jf: 1,
+		K: uint32(unix.PR_SET_MM),
+	}, unix.SockFilter{
+		Code: unix.BPF_RET | unix.BPF_K,
+		K: seccompRetErrno | uint32(unix.EPERM),
+	})
+
 	for _, nr := range denied {
-		filter = append(filter,
+		filter = append(
+			filter,
 			//nolint:gosec // Seccomp syscall numbers fit in uint32.
-			unix.SockFilter{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jf: 1, K: uint32(nr)},
-			unix.SockFilter{Code: unix.BPF_RET | unix.BPF_K, K: seccompRetErrno | uint32(unix.EPERM)},
+			unix.SockFilter{
+				Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K,
+				Jf: 1,
+				K: uint32(nr),
+			},
+			unix.SockFilter{
+				Code: unix.BPF_RET | unix.BPF_K,
+				K: seccompRetErrno | uint32(unix.EPERM),
+			},
 		)
 	}
 
-	return append(filter, unix.SockFilter{Code: unix.BPF_RET | unix.BPF_K, K: seccompRetAllow})
+	return append(filter, unix.SockFilter{
+		Code: unix.BPF_RET | unix.BPF_K,
+		K: seccompRetAllow,
+	})
 }
 
 func installSeccomp() error {
@@ -123,7 +167,10 @@ func installSeccomp() error {
 
 	filter := seccompFilter(arch, deniedSyscalls())
 	//nolint:gosec // The filter count is bounded by the kernel limit.
-	program := unix.SockFprog{Len: uint16(len(filter)), Filter: &filter[0]}
+	program := unix.SockFprog{
+		Len: uint16(len(filter)),
+		Filter: &filter[0],
+	}
 
 	if err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); err != nil {
 		return fmt.Errorf("set no_new_privs: %w", err)

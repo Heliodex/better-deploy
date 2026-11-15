@@ -9,10 +9,6 @@ import (
 	wit "go.bytecodealliance.org/pkg/wit/types"
 )
 
-// Assert that `responseWriter` implements the required interface.
-var _ http.ResponseWriter = &responseWriter{}
-var _ http.Flusher = &responseWriter{}
-
 type responseWriter struct {
 	// channel to which the response will be sent
 	channel chan wit.Result[*wasi.Response, wasi.ErrorCode]
@@ -28,6 +24,16 @@ type responseWriter struct {
 	cancel context.CancelFunc
 }
 
+var (
+	// Assert that `responseWriter` implements the required interface.
+	_ http.ResponseWriter = &responseWriter{}
+	_ http.Flusher = &responseWriter{}
+)
+
+func (w *responseWriter) Header() http.Header {
+	return w.headers
+}
+
 func newHTTPResponseWriter(cancel context.CancelFunc) *responseWriter {
 	return &responseWriter{
 		channel: make(chan wit.Result[*wasi.Response, wasi.ErrorCode]),
@@ -37,8 +43,8 @@ func newHTTPResponseWriter(cancel context.CancelFunc) *responseWriter {
 	}
 }
 
-func (w *responseWriter) Header() http.Header {
-	return w.headers
+func (w *responseWriter) WriteHeader(statusCode int) {
+	w.statusCode = statusCode
 }
 
 // send starts the response by handing its headers and body stream to the caller. Only the first call has an effect.
@@ -54,10 +60,8 @@ func (w *responseWriter) send() error {
 
 	channel := w.channel
 	w.channel = nil
-
 	tx, rx := wasi.MakeStreamU8()
 	w.stream = tx
-
 	response, send := wasi.ResponseNew(
 		fields,
 		wit.Some(rx),
@@ -72,43 +76,6 @@ func (w *responseWriter) send() error {
 	return nil
 }
 
-// takeError consumes the body stream result and reports a transport error once writing has finished.
-func (w *responseWriter) takeError() error {
-	if w.streamResult != nil {
-		streamResult := w.streamResult.Read()
-
-		w.streamResult = nil
-		if streamResult.IsErr() {
-			return fmt.Errorf(
-				"failed to read from HTTP body stream: %s",
-				errorString(streamResult.Err()),
-			)
-		}
-	}
-
-	return nil
-}
-
-func (w *responseWriter) Write(buf []byte) (int, error) {
-	err := w.send()
-	if err != nil {
-		return 0, err
-	}
-
-	count := w.stream.Write(buf)
-
-	if count == 0 && w.stream.ReaderDropped() {
-		w.stop()
-		return 0, w.takeError()
-	}
-
-	return int(count), nil
-}
-
-func (w *responseWriter) WriteHeader(statusCode int) {
-	w.statusCode = statusCode
-}
-
 // Flush starts the response before the handler writes a body.
 func (w *responseWriter) Flush() {
 	_ = w.send()
@@ -118,6 +85,7 @@ func (w *responseWriter) Flush() {
 func (w *responseWriter) stop() {
 	if w.cancel != nil {
 		w.cancel()
+
 		w.cancel = nil
 	}
 }
@@ -125,7 +93,6 @@ func (w *responseWriter) stop() {
 // close cancels the request context and drops the body stream.
 func (w *responseWriter) close() {
 	w.stop()
-
 	if w.stream != nil {
 		w.stream.Drop()
 	}
@@ -133,4 +100,32 @@ func (w *responseWriter) close() {
 	if w.streamResult != nil {
 		w.streamResult.Drop()
 	}
+}
+
+// takeError consumes the body stream result and reports a transport error once writing has finished.
+func (w *responseWriter) takeError() error {
+	if w.streamResult != nil {
+		streamResult := w.streamResult.Read()
+		w.streamResult = nil
+
+		if streamResult.IsErr() {
+			return fmt.Errorf("failed to read from HTTP body stream: %s", errorString(streamResult.Err()))
+		}
+	}
+
+	return nil
+}
+
+func (w *responseWriter) Write(buf []byte) (int, error) {
+	if err := w.send(); err != nil {
+		return 0, err
+	}
+
+	count := w.stream.Write(buf)
+	if count == 0 && w.stream.ReaderDropped() {
+		w.stop()
+		return 0, w.takeError()
+	}
+
+	return int(count), nil
 }

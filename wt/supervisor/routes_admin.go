@@ -9,6 +9,7 @@ import (
 func (s *supervisor) adminRoutes() *routeTable {
 	return s.adminRoutesCache.get(func() *routeTable {
 		rt := newRouteTable()
+
 		rt.add("", "/healthz", plainHandler(s.handleHealthz))
 		rt.add("", "/readyz", plainHandler(s.handleReadyz))
 		rt.add("", "/apps", plainHandler(s.handleApps))
@@ -36,11 +37,9 @@ func (s *supervisor) adminRoutes() *routeTable {
 				files.ServeHTTP(w, r)
 				return
 			}
-
 			http.Redirect(w, r, "/admin/", http.StatusFound)
 		})
 		rt.add("", "/admin/{rest...}", plainHandler(files.ServeHTTP))
-
 		return rt
 	})
 }
@@ -49,9 +48,9 @@ func (s *supervisor) adminRoutes() *routeTable {
 func (s *supervisor) publicRoutes() *routeTable {
 	return s.publicRoutesCache.get(func() *routeTable {
 		rt := newRouteTable()
+
 		rt.add("", "/healthz", plainHandler(s.handleHealthz))
 		rt.add("", "/readyz", plainHandler(s.handleReadyz))
-
 		return rt
 	})
 }
@@ -59,7 +58,6 @@ func (s *supervisor) publicRoutes() *routeTable {
 // serveAdminOrProxy serves an admin route and falls back to the app proxy for anything else.
 func (s *supervisor) serveAdminOrProxy(w http.ResponseWriter, r *http.Request) {
 	routes := s.adminRoutes()
-
 	route, _, allowed := routes.match(r.Method, r.URL.Path)
 	if route != nil {
 		routes.ServeHTTP(w, r)
@@ -69,9 +67,7 @@ func (s *supervisor) serveAdminOrProxy(w http.ResponseWriter, r *http.Request) {
 	if len(allowed) > 0 {
 		w.Header().Set("Allow", strings.Join(allowed, ", "))
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-
 		return
 	}
-
 	s.handleProxy(w, r)
 }

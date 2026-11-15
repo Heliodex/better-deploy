@@ -12,8 +12,37 @@ import (
 	"path/filepath"
 )
 
+// bundle packs app.json, the component files and static output into a gzipped tarball for upload.
+// manifestJSON preserves app.json fields the deploy tool does not model, while applying name and host overrides.
+func manifestJSON(dir string, m manifest) ([]byte, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "app.json"))
+	if err != nil {
+		return json.Marshal(m, jsontext.WithIndent("  "))
+	}
+
+	var values map[string]any
+
+	if err := json.Unmarshal(data, &values); err != nil {
+		return nil, err
+	}
+
+	if m.Name != "" {
+		values["name"] = m.Name
+	}
+
+	if m.Host != "" {
+		values["host"] = m.Host
+	}
+
+	return json.Marshal(values, jsontext.WithIndent("  "))
+}
+
 func writeTarFile(tw *tar.Writer, name string, data []byte) error {
-	if err := tw.WriteHeader(&tar.Header{Name: name, Mode: tarFileMode, Size: int64(len(data))}); err != nil {
+	if err := tw.WriteHeader(&tar.Header{
+		Name: name,
+		Mode: tarFileMode,
+		Size: int64(len(data)),
+	}); err != nil {
 		return fmt.Errorf("write %s: %w", name, err)
 	}
 
@@ -30,6 +59,7 @@ func writeTarPath(tw *tar.Writer, name, path string) error {
 	if err != nil {
 		return err
 	}
+
 	defer file.Close()
 
 	info, err := file.Stat()
@@ -43,6 +73,7 @@ func writeTarPath(tw *tar.Writer, name, path string) error {
 	}
 
 	header.Name = name
+
 	if err := tw.WriteHeader(header); err != nil {
 		return err
 	}
@@ -52,36 +83,11 @@ func writeTarPath(tw *tar.Writer, name, path string) error {
 	return err
 }
 
-// bundle packs app.json, the component files and static output into a gzipped tarball for upload.
-// manifestJSON preserves app.json fields the deploy tool does not model, while applying name and host overrides.
-func manifestJSON(dir string, m manifest) ([]byte, error) {
-	data, err := os.ReadFile(filepath.Join(dir, "app.json"))
-	if err != nil {
-		return json.Marshal(m, jsontext.WithIndent("  "))
-	}
-
-	var values map[string]any
-	if err := json.Unmarshal(data, &values); err != nil {
-		return nil, err
-	}
-
-	if m.Name != "" {
-		values["name"] = m.Name
-	}
-
-	if m.Host != "" {
-		values["host"] = m.Host
-	}
-
-	return json.Marshal(values, jsontext.WithIndent("  "))
-}
-
 func bundle(dir string, m manifest, includeComponent bool) ([]byte, error) {
 	var buf bytes.Buffer
 
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
-
 	appJSON, err := manifestJSON(dir, m)
 	if err != nil {
 		return nil, err
@@ -118,8 +124,9 @@ func bundle(dir string, m manifest, includeComponent bool) ([]byte, error) {
 	}
 	// Static files are served by the supervisor, so a frontend change does not need to be inside the component.
 	static := filepath.Join(dir, "static")
+
 	if info, err := os.Stat(static); err == nil && info.IsDir() {
-		err := filepath.WalkDir(static, func(path string, entry os.DirEntry, err error) error {
+		if err := filepath.WalkDir(static, func(path string, entry os.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
@@ -138,8 +145,7 @@ func bundle(dir string, m manifest, includeComponent bool) ([]byte, error) {
 			}
 
 			return writeTarPath(tw, filepath.ToSlash(rel), path)
-		})
-		if err != nil {
+		}); err != nil {
 			return nil, fmt.Errorf("add static files: %w", err)
 		}
 	}

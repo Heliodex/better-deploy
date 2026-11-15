@@ -32,6 +32,7 @@ func configMap(path string) (map[string]any, error) {
 	}
 
 	values := map[string]any{}
+
 	if len(bytes.TrimSpace(data)) == 0 {
 		return values, nil
 	}
@@ -47,18 +48,65 @@ func configMap(path string) (map[string]any, error) {
 	return values, nil
 }
 
+// configMode returns the octal mode and whether only the owner can read the file.
+func configMode(path string) (string, bool) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", false
+	}
+
+	perm := info.Mode().Perm()
+	private := perm&configPrivateMask == 0
+
+	if runtime.GOOS == "windows" {
+		private = true
+	}
+
+	return fmt.Sprintf("%04o", perm), private
+}
+
 // marshalConfig writes a readable config with two-space indentation.
 func marshalConfig(values map[string]any) ([]byte, error) {
 	var buf bytes.Buffer
 
 	encoder := jsontext.NewEncoder(&buf, jsontext.WithIndent("  "))
+
 	if err := json.MarshalEncode(encoder, values); err != nil {
 		return nil, err
 	}
-
 	buf.WriteByte('\n')
-
 	return buf.Bytes(), nil
+}
+
+// objectMap returns a nested config object, creating it when it does not exist.
+func objectMap(parent map[string]any, key string) (map[string]any, error) {
+	value, ok := parent[key]
+	if !ok || value == nil {
+		child := map[string]any{}
+		parent[key] = child
+
+		return child, nil
+	}
+
+	child, ok := value.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("config field %q is not an object", key)
+	}
+
+	return child, nil
+}
+
+// warnInsecureConfig prints one warning when a token-bearing config is readable by other users.
+func warnInsecureConfig(path, token string) {
+	if token == "" || runtime.GOOS == "windows" {
+		return
+	}
+
+	mode, private := configMode(path)
+	if mode == "" || private {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "wt-deploy: warning: %s contains a token and has mode %s; run chmod 600 %s\n", path, mode, path)
 }
 
 // writeConfigMap atomically replaces a config file with private permissions.
@@ -69,6 +117,7 @@ func writeConfigMap(path string, values map[string]any) error {
 	}
 
 	dir := filepath.Dir(path)
+
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("config directory %s: %w", dir, err)
 	}
@@ -79,7 +128,8 @@ func writeConfigMap(path string, values map[string]any) error {
 	}
 
 	tmpName := tmp.Name()
-	closed := false
+
+	var closed bool
 
 	defer func() {
 		if !closed {
@@ -118,22 +168,33 @@ func writeConfigMap(path string, values map[string]any) error {
 	return nil
 }
 
-// objectMap returns a nested config object, creating it when it does not exist.
-func objectMap(parent map[string]any, key string) (map[string]any, error) {
-	value, ok := parent[key]
-	if !ok || value == nil {
-		child := map[string]any{}
-		parent[key] = child
-
-		return child, nil
+// removeAuthToken deletes the token from the selected profile while keeping its host and every other config field.
+func removeAuthToken(path, profile string) (bool, error) {
+	values, err := configMap(path)
+	if err != nil {
+		return false, err
 	}
 
-	child, ok := value.(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("config field %q is not an object", key)
+	target := values
+
+	if profile != "" {
+		profiles, ok := values["profiles"].(map[string]any)
+		if !ok {
+			return false, nil
+		}
+
+		target, ok = profiles[profile].(map[string]any)
+
+		if !ok {
+			return false, nil
+		}
 	}
 
-	return child, nil
+	if _, ok := target["token"]; !ok {
+		return false, nil
+	}
+	delete(target, "token")
+	return true, writeConfigMap(path, values)
 }
 
 // saveAuthConfig stores the host, token and optional app domain without dropping unrelated config fields.
@@ -152,6 +213,7 @@ func saveAuthConfig(path, profile, host, token, appDomain string) error {
 		}
 
 		target, err = objectMap(profiles, profile)
+
 		if err != nil {
 			return err
 		}
@@ -169,36 +231,6 @@ func saveAuthConfig(path, profile, host, token, appDomain string) error {
 	return writeConfigMap(path, values)
 }
 
-// removeAuthToken deletes the token from the selected profile while keeping its host and every other config field.
-func removeAuthToken(path, profile string) (bool, error) {
-	values, err := configMap(path)
-	if err != nil {
-		return false, err
-	}
-
-	target := values
-
-	if profile != "" {
-		profiles, ok := values["profiles"].(map[string]any)
-		if !ok {
-			return false, nil
-		}
-
-		target, ok = profiles[profile].(map[string]any)
-		if !ok {
-			return false, nil
-		}
-	}
-
-	if _, ok := target["token"]; !ok {
-		return false, nil
-	}
-
-	delete(target, "token")
-
-	return true, writeConfigMap(path, values)
-}
-
 // setDefaultProfile records which profile commands use when --profile is not given.
 func setDefaultProfile(path, profile string) error {
 	values, err := configMap(path)
@@ -209,41 +241,4 @@ func setDefaultProfile(path, profile string) error {
 	values["profile"] = profile
 
 	return writeConfigMap(path, values)
-}
-
-// configMode returns the octal mode and whether only the owner can read the file.
-func configMode(path string) (string, bool) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return "", false
-	}
-
-	perm := info.Mode().Perm()
-
-	private := perm&configPrivateMask == 0
-	if runtime.GOOS == "windows" {
-		private = true
-	}
-
-	return fmt.Sprintf("%04o", perm), private
-}
-
-// warnInsecureConfig prints one warning when a token-bearing config is readable by other users.
-func warnInsecureConfig(path, token string) {
-	if token == "" || runtime.GOOS == "windows" {
-		return
-	}
-
-	mode, private := configMode(path)
-	if mode == "" || private {
-		return
-	}
-
-	fmt.Fprintf(
-		os.Stderr,
-		"wt-deploy: warning: %s contains a token and has mode %s; run chmod 600 %s\n",
-		path,
-		mode,
-		path,
-	)
 }

@@ -19,6 +19,14 @@ import (
 	"time"
 )
 
+// appFetchServer serves the internal app-to-app endpoint on loopback. It is separate from storage and the admin listener so an app never needs the admin surface.
+type appFetchServer struct {
+	listener net.Listener
+	server *http.Server
+	baseURL string
+	supervisor *supervisor
+}
+
 const (
 	appFetchPathPrefix = "/apps/"
 	appCallerHeader = "X-WT-App-Caller"
@@ -32,52 +40,31 @@ const (
 	appURLEnvPrefix = "WT_APP_URL_"
 )
 
-// appFetchServer serves the internal app-to-app endpoint on loopback. It is separate from storage and the admin listener so an app never needs the admin surface.
-type appFetchServer struct {
-	listener net.Listener
-	server *http.Server
-	baseURL string
-	supervisor *supervisor
+// allowsAppCaller reports whether the target's allow_callers list names the caller.
+func allowsAppCaller(allowed []string, caller string) bool {
+	return slices.Contains(allowed, caller)
 }
 
-func newAppFetchServer(listen string, s *supervisor) (*appFetchServer, error) {
-	var listenConfig net.ListenConfig
+func appBodySHA256(body []byte) string {
+	sum := sha256.Sum256(body)
 
-	listener, err := listenConfig.Listen(context.Background(), "tcp", listen)
-	if err != nil {
-		return nil, fmt.Errorf("app fetch listen: %w", err)
-	}
-
-	return newAppFetchServerOn(listener, s)
+	return hex.EncodeToString(sum[:])
 }
 
-func newAppFetchServerOn(listener net.Listener, s *supervisor) (*appFetchServer, error) {
-	fetch := &appFetchServer{
-		listener: listener,
-		baseURL: "http://" + listener.Addr().String(),
-		supervisor: s,
-	}
+// appCallSignatureV2 also binds the body digest, so a target can reject a changed body.
+func appCallSignatureV2(key, caller, method, path, timestamp, bodyHash string) string {
+	mac := hmac.New(sha256.New, []byte(key))
+	_, _ = io.WriteString(mac, caller+"\n"+method+"\n"+path+"\n"+timestamp+"\n"+bodyHash)
 
-	fetch.server = &http.Server{
-		Handler: http.HandlerFunc(fetch.handle),
-		ReadHeaderTimeout: 5 * time.Second,
-		IdleTimeout: 60 * time.Second,
-	}
-	go func() {
-		if err := fetch.server.Serve(listener); err != nil && err != http.ErrServerClosed {
-			log.Printf("app fetch: %v", err)
-		}
-	}()
-
-	return fetch, nil
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
-func (f *appFetchServer) url() string {
-	if f == nil {
-		return ""
+func (f *appFetchServer) close() {
+	if f == nil || f.server == nil {
+		return
 	}
 
-	return f.baseURL
+	_ = f.server.Close()
 }
 
 func (f *appFetchServer) endpoint() (string, int) {
@@ -98,12 +85,34 @@ func (f *appFetchServer) endpoint() (string, int) {
 	return ip.String(), address.Port
 }
 
-func (f *appFetchServer) close() {
-	if f == nil || f.server == nil {
-		return
+func (f *appFetchServer) url() string {
+	if f == nil {
+		return ""
 	}
 
-	_ = f.server.Close()
+	return f.baseURL
+}
+
+// appURL builds the base URL for one target app.
+func (f *appFetchServer) appURL(name string) string {
+	return f.url() + appFetchPathPrefix + name
+}
+
+// appURLEnvName maps an app name to the env key that carries its internal URL.
+func appURLEnvName(name string) string {
+	var key strings.Builder
+
+	key.WriteString(appURLEnvPrefix)
+	for _, char := range strings.ToUpper(name) {
+		switch {
+		case char >= 'A' && char <= 'Z', char >= '0' && char <= '9':
+			key.WriteRune(char)
+		default:
+			key.WriteByte('_')
+		}
+	}
+
+	return key.String()
 }
 
 // bearerToken returns the bearer credential from a request.
@@ -119,6 +128,7 @@ func bearerToken(r *http.Request) string {
 // parseAppFetchPath splits "/apps/<target>/<rest>" into the target app and the target path.
 func parseAppFetchPath(path string) (target, rest string, ok bool) {
 	rest, ok = strings.CutPrefix(path, appFetchPathPrefix)
+
 	if !ok || rest == "" {
 		return "", "", false
 	}
@@ -135,29 +145,6 @@ func parseAppFetchPath(path string) (target, rest string, ok bool) {
 	return target, "/" + rest, true
 }
 
-// allowsAppCaller reports whether the target's allow_callers list names the caller.
-func allowsAppCaller(allowed []string, caller string) bool {
-	return slices.Contains(allowed, caller)
-}
-
-// appCallSignatureV2 also binds the body digest, so a target can reject a changed body.
-func appCallSignatureV2(key, caller, method, path, timestamp, bodyHash string) string {
-	mac := hmac.New(sha256.New, []byte(key))
-	_, _ = io.WriteString(mac, caller+"\n"+method+"\n"+path+"\n"+timestamp+"\n"+bodyHash)
-
-	return hex.EncodeToString(mac.Sum(nil))
-}
-
-func appBodySHA256(body []byte) string {
-	sum := sha256.Sum256(body)
-	return hex.EncodeToString(sum[:])
-}
-
-// handle forwards one authenticated app-to-app request.
-func (f *appFetchServer) handle(w http.ResponseWriter, r *http.Request) {
-	f.supervisor.handleAppFetch(w, r)
-}
-
 // handleAppFetch authenticates the caller with its storage token. The target's allow_callers list decides whether the call proceeds.
 func (s *supervisor) handleAppFetch(w http.ResponseWriter, r *http.Request) {
 	if s.storage == nil {
@@ -169,7 +156,6 @@ func (s *supervisor) handleAppFetch(w http.ResponseWriter, r *http.Request) {
 	if !ok || s.lookup(caller) == nil {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="wt-app-fetch"`)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
-
 		return
 	}
 
@@ -184,11 +170,11 @@ func (s *supervisor) handleAppFetch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "app not found")
 		return
 	}
-
 	a.mu.Lock()
-	cfg := a.cfg
-	a.mu.Unlock()
 
+	cfg := a.cfg
+
+	a.mu.Unlock()
 	if !allowsAppCaller(cfg.AllowCallers, caller) {
 		writeError(w, http.StatusForbidden, "app does not allow calls from "+caller)
 		return
@@ -200,16 +186,13 @@ func (s *supervisor) handleAppFetch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxAppFetchBody)
-
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			writeError(w, http.StatusRequestEntityTooLarge, "app fetch body is too large")
 			return
 		}
-
 		writeError(w, http.StatusBadRequest, "read app fetch body: "+err.Error())
-
 		return
 	}
 
@@ -219,12 +202,12 @@ func (s *supervisor) handleAppFetch(w http.ResponseWriter, r *http.Request) {
 	r.URL.RawPath = ""
 	r.RequestURI = r.URL.RequestURI()
 	r.Host = cfg.Host
+
 	r.Header.Del("Authorization")
 	r.Header.Del("Cookie")
 	r.Header.Del("X-Forwarded-For")
 	r.Header.Del("X-Forwarded-Host")
 	r.Header.Del("X-Forwarded-Proto")
-
 	for key := range r.Header {
 		if strings.HasPrefix(strings.ToLower(key), "x-wt-") {
 			delete(r.Header, key)
@@ -246,24 +229,39 @@ func (s *supervisor) handleAppFetch(w http.ResponseWriter, r *http.Request) {
 	s.serveApp(w, r, a)
 }
 
-// appURLEnvName maps an app name to the env key that carries its internal URL.
-func appURLEnvName(name string) string {
-	var key strings.Builder
-	key.WriteString(appURLEnvPrefix)
-
-	for _, char := range strings.ToUpper(name) {
-		switch {
-		case char >= 'A' && char <= 'Z', char >= '0' && char <= '9':
-			key.WriteRune(char)
-		default:
-			key.WriteByte('_')
-		}
-	}
-
-	return key.String()
+// handle forwards one authenticated app-to-app request.
+func (f *appFetchServer) handle(w http.ResponseWriter, r *http.Request) {
+	f.supervisor.handleAppFetch(w, r)
 }
 
-// appURL builds the base URL for one target app.
-func (f *appFetchServer) appURL(name string) string {
-	return f.url() + appFetchPathPrefix + name
+func newAppFetchServerOn(listener net.Listener, s *supervisor) (*appFetchServer, error) {
+	fetch := &appFetchServer{
+		listener: listener,
+		baseURL: "http://" + listener.Addr().String(),
+		supervisor: s,
+	}
+	fetch.server = &http.Server{
+		Handler: http.HandlerFunc(fetch.handle),
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout: 60 * time.Second,
+	}
+
+	go func() {
+		if err := fetch.server.Serve(listener); err != nil && err != http.ErrServerClosed {
+			log.Printf("app fetch: %v", err)
+		}
+	}()
+
+	return fetch, nil
+}
+
+func newAppFetchServer(listen string, s *supervisor) (*appFetchServer, error) {
+	var listenConfig net.ListenConfig
+
+	listener, err := listenConfig.Listen(context.Background(), "tcp", listen)
+	if err != nil {
+		return nil, fmt.Errorf("app fetch listen: %w", err)
+	}
+
+	return newAppFetchServerOn(listener, s)
 }

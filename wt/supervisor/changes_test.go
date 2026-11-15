@@ -8,10 +8,22 @@ import (
 	"testing"
 )
 
+func TestStorageChangeLogTrimsHugeParams(t *testing.T) {
+	change := storageChange{
+		SQL: `insert into items (value) values (?)`,
+		Params: []jsontext.Value{jsontext.Value([]byte(`"` + strings.Repeat("x", maxChangeEntrySize) + `"`))},
+	}
+
+	if trimmed := trimChange(change); len(trimmed.Params) != 1 || !strings.Contains(string(trimmed.Params[0]), "params omitted") {
+		t.Errorf("trimmed params = %s", trimmed.Params)
+	}
+}
+
 func storageExec(t *testing.T, s *storageServer, token, sql string, params []any) {
 	t.Helper()
 
 	body := map[string]any{"sql": sql}
+
 	if params != nil {
 		body["params"] = params
 	}
@@ -20,8 +32,91 @@ func storageExec(t *testing.T, s *storageServer, token, sql string, params []any
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("exec %q: %d %s", sql, resp.StatusCode, readBody(t, resp))
 	}
-
 	resp.Body.Close()
+}
+
+func TestHandleDatabaseChanges(t *testing.T) {
+	s, storage := testDatabaseSupervisor(t)
+	token := storage.tokenFor("notes")
+
+	storageExec(t, storage, token, `create table items (value text not null)`, nil)
+	storageExec(t, storage, token, `insert into items (value) values (?)`, []any{"one"})
+
+	rec := databaseGET(t, s, "/apps/notes/database/changes")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("changes = %d %s", rec.Code, rec.Body.String())
+	}
+
+	var result storageChangesResponse
+
+	if err := json.UnmarshalRead(rec.Body, &result); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result.Changes) != 2 {
+		t.Fatalf("changes = %d, want 2", len(result.Changes))
+	}
+
+	if result.Changes[0].SQL != `insert into items (value) values (?)` || result.Changes[0].RowsAffected != 1 {
+		t.Errorf("newest change = %+v", result.Changes[0])
+	}
+
+	if len(result.Changes[0].Rows) != 1 || result.Changes[0].Rows[0].New[0] != "one" {
+		t.Errorf("newest change rows = %+v", result.Changes[0].Rows)
+	}
+
+	for _, target := range []string{
+		"/apps/notes/database/changes?limit=0",
+		"/apps/notes/database/changes?limit=1001",
+		"/apps/notes/database/changes?limit=abc",
+	} {
+		rec = databaseGET(t, s, target)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s = %d, want 400", target, rec.Code)
+		}
+	}
+}
+
+func TestStorageBatchRowChanges(t *testing.T) {
+	s, err := newStorageServer(t.TempDir(), "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer s.close()
+
+	token := s.tokenFor("notes")
+
+	storageExec(t, s, token, `create table items (value text not null)`, nil)
+
+	resp := storageSQL(t, s, token, "/v1/batch", map[string]any{
+		"statements": []any{
+			map[string]any{"params": []any{"one"}, "sql": `insert into items (value) values (?)`},
+			map[string]any{"params": []any{"two"}, "sql": `insert into items (value) values (?)`},
+		},
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("batch: %d %s", resp.StatusCode, readBody(t, resp))
+	}
+	resp.Body.Close()
+
+	changes, err := s.recentChanges("notes", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(changes) != 3 {
+		t.Fatalf("changes = %d, want 3", len(changes))
+	}
+
+	if len(changes[0].Rows) != 1 || changes[0].Rows[0].New[0] != "two" {
+		t.Errorf("second batch rows = %+v", changes[0].Rows)
+	}
+
+	if len(changes[1].Rows) != 1 || changes[1].Rows[0].New[0] != "one" {
+		t.Errorf("first batch rows = %+v", changes[1].Rows)
+	}
 }
 
 func TestStorageChangeLog(t *testing.T) {
@@ -29,6 +124,7 @@ func TestStorageChangeLog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	defer s.close()
 
 	token := s.tokenFor("notes")
@@ -38,14 +134,13 @@ func TestStorageChangeLog(t *testing.T) {
 
 	resp := storageSQL(t, s, token, "/v1/batch", map[string]any{
 		"statements": []any{
-			map[string]any{"sql": `insert into items (value) values (?)`, "params": []any{"two"}},
-			map[string]any{"sql": `insert into items (value) values (?)`, "params": []any{"three"}},
+			map[string]any{"params": []any{"two"}, "sql": `insert into items (value) values (?)`},
+			map[string]any{"params": []any{"three"}, "sql": `insert into items (value) values (?)`},
 		},
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("batch: %d %s", resp.StatusCode, readBody(t, resp))
 	}
-
 	resp.Body.Close()
 
 	changes, err := s.recentChanges("notes", 10)
@@ -88,13 +183,11 @@ func TestStorageChangeLog(t *testing.T) {
 		t.Errorf("limited changes = %+v", limited)
 	}
 
-	resp = storageSQL(t, s, token, "/v1/exec", map[string]any{
-		"sql": `insert into missing (value) values ('nope')`,
-	})
+	resp = storageSQL(t, s, token, "/v1/exec", map[string]any{"sql": `insert into missing (value) values ('nope')`})
+
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("bad exec = %d, want 500", resp.StatusCode)
 	}
-
 	resp.Body.Close()
 
 	after, err := s.recentChanges("notes", 10)
@@ -112,6 +205,7 @@ func TestStorageRowChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	defer s.close()
 
 	token := s.tokenFor("notes")
@@ -153,8 +247,7 @@ func TestStorageRowChanges(t *testing.T) {
 		t.Fatalf("update rows = %+v", update.Rows)
 	}
 
-	updateRow := update.Rows[0]
-	if len(updateRow.Old) != 2 || updateRow.Old[1] != "one" || len(updateRow.New) != 2 || updateRow.New[1] != "two" {
+	if updateRow := update.Rows[0]; len(updateRow.Old) != 2 || updateRow.Old[1] != "one" || len(updateRow.New) != 2 || updateRow.New[1] != "two" {
 		t.Errorf("update values = old %+v new %+v", updateRow.Old, updateRow.New)
 	}
 
@@ -165,98 +258,5 @@ func TestStorageRowChanges(t *testing.T) {
 
 	if len(deleteChange.Rows[0].Old) != 2 || deleteChange.Rows[0].Old[1] != "two" {
 		t.Errorf("delete values = %+v", deleteChange.Rows[0].Old)
-	}
-}
-
-func TestStorageBatchRowChanges(t *testing.T) {
-	s, err := newStorageServer(t.TempDir(), "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.close()
-
-	token := s.tokenFor("notes")
-
-	storageExec(t, s, token, `create table items (value text not null)`, nil)
-
-	resp := storageSQL(t, s, token, "/v1/batch", map[string]any{
-		"statements": []any{
-			map[string]any{"sql": `insert into items (value) values (?)`, "params": []any{"one"}},
-			map[string]any{"sql": `insert into items (value) values (?)`, "params": []any{"two"}},
-		},
-	})
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("batch: %d %s", resp.StatusCode, readBody(t, resp))
-	}
-
-	resp.Body.Close()
-
-	changes, err := s.recentChanges("notes", 10)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(changes) != 3 {
-		t.Fatalf("changes = %d, want 3", len(changes))
-	}
-
-	if len(changes[0].Rows) != 1 || changes[0].Rows[0].New[0] != "two" {
-		t.Errorf("second batch rows = %+v", changes[0].Rows)
-	}
-
-	if len(changes[1].Rows) != 1 || changes[1].Rows[0].New[0] != "one" {
-		t.Errorf("first batch rows = %+v", changes[1].Rows)
-	}
-}
-
-func TestStorageChangeLogTrimsHugeParams(t *testing.T) {
-	change := storageChange{
-		SQL: `insert into items (value) values (?)`,
-		Params: []jsontext.Value{jsontext.Value([]byte(`"` + strings.Repeat("x", maxChangeEntrySize) + `"`))},
-	}
-
-	trimmed := trimChange(change)
-	if len(trimmed.Params) != 1 || !strings.Contains(string(trimmed.Params[0]), "params omitted") {
-		t.Errorf("trimmed params = %s", trimmed.Params)
-	}
-}
-
-func TestHandleDatabaseChanges(t *testing.T) {
-	s, storage := testDatabaseSupervisor(t)
-	token := storage.tokenFor("notes")
-	storageExec(t, storage, token, `create table items (value text not null)`, nil)
-	storageExec(t, storage, token, `insert into items (value) values (?)`, []any{"one"})
-
-	rec := databaseGET(t, s, "/apps/notes/database/changes")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("changes = %d %s", rec.Code, rec.Body.String())
-	}
-
-	var result storageChangesResponse
-	if err := json.UnmarshalRead(rec.Body, &result); err != nil {
-		t.Fatal(err)
-	}
-
-	if len(result.Changes) != 2 {
-		t.Fatalf("changes = %d, want 2", len(result.Changes))
-	}
-
-	if result.Changes[0].SQL != `insert into items (value) values (?)` || result.Changes[0].RowsAffected != 1 {
-		t.Errorf("newest change = %+v", result.Changes[0])
-	}
-
-	if len(result.Changes[0].Rows) != 1 || result.Changes[0].Rows[0].New[0] != "one" {
-		t.Errorf("newest change rows = %+v", result.Changes[0].Rows)
-	}
-
-	for _, target := range []string{
-		"/apps/notes/database/changes?limit=0",
-		"/apps/notes/database/changes?limit=1001",
-		"/apps/notes/database/changes?limit=abc",
-	} {
-		rec = databaseGET(t, s, target)
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("%s = %d, want 400", target, rec.Code)
-		}
 	}
 }

@@ -12,42 +12,152 @@ import (
 	"time"
 )
 
-type requestMetricKey struct {
-	app, method, status string
+type (
+	durationMetricKey struct {
+		app, method string
+	}
+
+	durationStat struct {
+		count, nanos uint64
+	}
+
+	outcomeKey struct {
+		app, action, result string
+	}
+
+	requestMetricKey struct {
+		app, method, status string
+	}
+
+	storageDurationKey struct {
+		app, pool string
+	}
+
+	storageMetricKey struct {
+		app, pool, result string
+	}
+
+	metrics struct {
+		mu sync.Mutex
+		requests map[requestMetricKey]uint64
+		durations map[durationMetricKey]durationStat
+		inflight map[string]int64
+		storage map[storageMetricKey]uint64
+		storageDur map[storageDurationKey]durationStat
+		deploys, backups, jobs map[outcomeKey]uint64
+	}
+)
+
+func (m *metrics) beginRequest(app string) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+
+	m.inflight[app]++
+
+	m.mu.Unlock()
 }
 
-type durationMetricKey struct {
-	app, method string
+func (m *metrics) endRequest(app, method string, status int, duration time.Duration) {
+	if m == nil {
+		return
+	}
+
+	statusText := strconv.Itoa(status)
+
+	m.mu.Lock()
+
+	m.inflight[app]--
+
+	if m.inflight[app] < 0 {
+		m.inflight[app] = 0
+	}
+
+	m.requests[requestMetricKey{
+		app: app,
+		method: method,
+		status: statusText,
+	}]++
+	stat := m.durations[durationMetricKey{
+		app: app,
+		method: method,
+	}]
+	stat.count++
+	stat.nanos += uint64(duration) //nolint:gosec // Durations are non-negative.
+	m.durations[durationMetricKey{
+		app: app,
+		method: method,
+	}] = stat
+
+	m.mu.Unlock()
 }
 
-type storageMetricKey struct {
-	app, pool, result string
+func (m *metrics) observeOutcome(target map[outcomeKey]uint64, app, action, result string) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+
+	target[outcomeKey{
+		app: app,
+		action: action,
+		result: result,
+	}]++
+
+	m.mu.Unlock()
 }
 
-type storageDurationKey struct {
-	app, pool string
+func (m *metrics) observeBackup(app, action, result string) {
+	if m == nil {
+		return
+	}
+	m.observeOutcome(m.backups, app, action, result)
 }
 
-type durationStat struct {
-	count uint64
-	nanos uint64
+func (m *metrics) observeDeploy(app, result string) {
+	if m == nil {
+		return
+	}
+	m.observeOutcome(m.deploys, app, "deploy", result)
 }
 
-type outcomeKey struct {
-	app, action, result string
+func (m *metrics) observeJob(app, result string) {
+	if m == nil {
+		return
+	}
+	m.observeOutcome(m.jobs, app, "job", result)
 }
 
-type metrics struct {
-	mu sync.Mutex
+func (m *metrics) observeStorage(app, pool string, err error, duration time.Duration) {
+	if m == nil {
+		return
+	}
 
-	requests map[requestMetricKey]uint64
-	durations map[durationMetricKey]durationStat
-	inflight map[string]int64
-	storage map[storageMetricKey]uint64
-	storageDur map[storageDurationKey]durationStat
-	deploys map[outcomeKey]uint64
-	backups map[outcomeKey]uint64
-	jobs map[outcomeKey]uint64
+	result := "ok"
+
+	if err != nil {
+		result = "error"
+	}
+	m.mu.Lock()
+
+	m.storage[storageMetricKey{
+		app: app,
+		pool: pool,
+		result: result,
+	}]++
+	stat := m.storageDur[storageDurationKey{
+		app: app,
+		pool: pool,
+	}]
+	stat.count++
+	stat.nanos += uint64(duration) //nolint:gosec // Durations are non-negative.
+	m.storageDur[storageDurationKey{
+		app: app,
+		pool: pool,
+	}] = stat
+
+	m.mu.Unlock()
 }
 
 func newMetrics() *metrics {
@@ -63,91 +173,6 @@ func newMetrics() *metrics {
 	}
 }
 
-func (m *metrics) beginRequest(app string) {
-	if m == nil {
-		return
-	}
-
-	m.mu.Lock()
-	m.inflight[app]++
-	m.mu.Unlock()
-}
-
-func (m *metrics) endRequest(app, method string, status int, duration time.Duration) {
-	if m == nil {
-		return
-	}
-
-	statusText := strconv.Itoa(status)
-
-	m.mu.Lock()
-
-	m.inflight[app]--
-	if m.inflight[app] < 0 {
-		m.inflight[app] = 0
-	}
-
-	m.requests[requestMetricKey{app: app, method: method, status: statusText}]++
-	stat := m.durations[durationMetricKey{app: app, method: method}]
-	stat.count++
-	stat.nanos += uint64(duration) //nolint:gosec // Durations are non-negative.
-	m.durations[durationMetricKey{app: app, method: method}] = stat
-	m.mu.Unlock()
-}
-
-func (m *metrics) observeStorage(app, pool string, err error, duration time.Duration) {
-	if m == nil {
-		return
-	}
-
-	result := "ok"
-	if err != nil {
-		result = "error"
-	}
-
-	m.mu.Lock()
-	m.storage[storageMetricKey{app: app, pool: pool, result: result}]++
-	stat := m.storageDur[storageDurationKey{app: app, pool: pool}]
-	stat.count++
-	stat.nanos += uint64(duration) //nolint:gosec // Durations are non-negative.
-	m.storageDur[storageDurationKey{app: app, pool: pool}] = stat
-	m.mu.Unlock()
-}
-
-func (m *metrics) observeOutcome(target map[outcomeKey]uint64, app, action, result string) {
-	if m == nil {
-		return
-	}
-
-	m.mu.Lock()
-	target[outcomeKey{app: app, action: action, result: result}]++
-	m.mu.Unlock()
-}
-
-func (m *metrics) observeDeploy(app, result string) {
-	if m == nil {
-		return
-	}
-
-	m.observeOutcome(m.deploys, app, "deploy", result)
-}
-
-func (m *metrics) observeBackup(app, action, result string) {
-	if m == nil {
-		return
-	}
-
-	m.observeOutcome(m.backups, app, action, result)
-}
-
-func (m *metrics) observeJob(app, result string) {
-	if m == nil {
-		return
-	}
-
-	m.observeOutcome(m.jobs, app, "job", result)
-}
-
 // prometheusLabel escapes a value for use inside a Prometheus label.
 func prometheusLabel(value string) string {
 	value = strings.ReplaceAll(value, `\`, `\\`)
@@ -158,43 +183,79 @@ func prometheusLabel(value string) string {
 }
 
 // writeMetric appends one metric sample with optional labels.
-func writeMetric(builder *strings.Builder, name, labels string, value string) {
+func writeMetric(builder *strings.Builder, name, labels, value string) {
 	builder.WriteString(name)
-
 	if labels != "" {
 		builder.WriteByte('{')
 		builder.WriteString(labels)
 		builder.WriteByte('}')
 	}
-
 	builder.WriteByte(' ')
 	builder.WriteString(value)
 	builder.WriteByte('\n')
 }
 
-// writeOutcomes writes one counter family from an outcome map.
-func writeOutcomes(builder *strings.Builder, name, help string, values map[outcomeKey]uint64) {
-	fmt.Fprintf(builder, "# HELP %s %s\n# TYPE %s counter\n", name, help, name)
+// renderApps writes the per-app gauges outside the metrics lock.
+func (m *metrics) renderApps(builder *strings.Builder, s *supervisor) {
+	builder.WriteString("# HELP wt_app_cpu_percent CPU usage of one app process.\n# TYPE wt_app_cpu_percent gauge\n")
+	builder.WriteString("# HELP wt_app_memory_bytes Proportional set size of one app process, falling back to resident memory.\n# TYPE wt_app_memory_bytes gauge\n")
+	builder.WriteString("# HELP wt_app_ready Whether the app is ready for traffic.\n# TYPE wt_app_ready gauge\n")
+	builder.WriteString("# HELP wt_app_disk_bytes Measured /data and database bytes.\n# TYPE wt_app_disk_bytes gauge\n")
+	for _, a := range s.allApps() {
+		cpu, memory, _ := a.resourceStats()
+		_, ready := a.servingState()
+		labels := fmt.Sprintf(`app="%s"`, prometheusLabel(a.name))
 
-	keys := make([]outcomeKey, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
+		writeMetric(builder, "wt_app_cpu_percent", labels, fmt.Sprintf("%.3f", cpu))
+		writeMetric(builder, "wt_app_memory_bytes", labels, strconv.FormatInt(memory, 10))
+
+		var readyValue int
+
+		if ready {
+			readyValue = 1
+		}
+		writeMetric(builder, "wt_app_ready", labels, strconv.Itoa(readyValue))
+		writeMetric(builder, "wt_app_disk_bytes", labels, strconv.FormatInt(s.diskBytes(a), 10))
 	}
+}
 
-	sort.Slice(keys, func(i, j int) bool {
-		if keys[i].app != keys[j].app {
-			return keys[i].app < keys[j].app
+// renderDurations writes request duration summaries; the caller holds m.mu.
+func (m *metrics) renderDurations(builder *strings.Builder) {
+	builder.WriteString("# HELP wt_request_duration_seconds Proxied request duration.\n# TYPE wt_request_duration_seconds summary\n")
+
+	durationKeys := make([]durationMetricKey, 0, len(m.durations))
+
+	for key := range m.durations {
+		durationKeys = append(durationKeys, key)
+	}
+	sort.Slice(durationKeys, func(i, j int) bool {
+		if durationKeys[i].app != durationKeys[j].app {
+			return durationKeys[i].app < durationKeys[j].app
 		}
 
-		if keys[i].action != keys[j].action {
-			return keys[i].action < keys[j].action
-		}
-
-		return keys[i].result < keys[j].result
+		return durationKeys[i].method < durationKeys[j].method
 	})
+	for _, key := range durationKeys {
+		stat := m.durations[key]
+		labels := fmt.Sprintf(`app="%s",method="%s"`, prometheusLabel(key.app), prometheusLabel(key.method))
 
-	for _, key := range keys {
-		writeMetric(builder, name, fmt.Sprintf(`app="%s",action="%s",result="%s"`, prometheusLabel(key.app), prometheusLabel(key.action), prometheusLabel(key.result)), strconv.FormatUint(values[key], 10))
+		writeMetric(builder, "wt_request_duration_seconds_sum", labels, fmt.Sprintf("%.6f", float64(stat.nanos)/float64(time.Second)))
+		writeMetric(builder, "wt_request_duration_seconds_count", labels, strconv.FormatUint(stat.count, 10))
+	}
+}
+
+// renderInflight writes the current in-flight gauge; the caller holds m.mu.
+func (m *metrics) renderInflight(builder *strings.Builder) {
+	builder.WriteString("# HELP wt_inflight_requests Requests currently being proxied.\n# TYPE wt_inflight_requests gauge\n")
+
+	inflightKeys := make([]string, 0, len(m.inflight))
+
+	for app := range m.inflight {
+		inflightKeys = append(inflightKeys, app)
+	}
+	sort.Strings(inflightKeys)
+	for _, app := range inflightKeys {
+		writeMetric(builder, "wt_inflight_requests", fmt.Sprintf(`app="%s"`, prometheusLabel(app)), strconv.FormatInt(m.inflight[app], 10))
 	}
 }
 
@@ -205,10 +266,10 @@ func (m *metrics) renderRequests(builder *strings.Builder) {
 	builder.WriteString("# HELP wt_requests_total Proxied requests by app, method and status.\n# TYPE wt_requests_total counter\n")
 
 	requestKeys := make([]requestMetricKey, 0, len(m.requests))
+
 	for key := range m.requests {
 		requestKeys = append(requestKeys, key)
 	}
-
 	sort.Slice(requestKeys, func(i, j int) bool {
 		if requestKeys[i].app != requestKeys[j].app {
 			return requestKeys[i].app < requestKeys[j].app
@@ -220,50 +281,8 @@ func (m *metrics) renderRequests(builder *strings.Builder) {
 
 		return requestKeys[i].status < requestKeys[j].status
 	})
-
 	for _, key := range requestKeys {
 		writeMetric(builder, "wt_requests_total", fmt.Sprintf(`app="%s",method="%s",status="%s"`, prometheusLabel(key.app), prometheusLabel(key.method), prometheusLabel(key.status)), strconv.FormatUint(m.requests[key], 10))
-	}
-}
-
-// renderDurations writes request duration summaries; the caller holds m.mu.
-func (m *metrics) renderDurations(builder *strings.Builder) {
-	builder.WriteString("# HELP wt_request_duration_seconds Proxied request duration.\n# TYPE wt_request_duration_seconds summary\n")
-
-	durationKeys := make([]durationMetricKey, 0, len(m.durations))
-	for key := range m.durations {
-		durationKeys = append(durationKeys, key)
-	}
-
-	sort.Slice(durationKeys, func(i, j int) bool {
-		if durationKeys[i].app != durationKeys[j].app {
-			return durationKeys[i].app < durationKeys[j].app
-		}
-
-		return durationKeys[i].method < durationKeys[j].method
-	})
-
-	for _, key := range durationKeys {
-		stat := m.durations[key]
-		labels := fmt.Sprintf(`app="%s",method="%s"`, prometheusLabel(key.app), prometheusLabel(key.method))
-		writeMetric(builder, "wt_request_duration_seconds_sum", labels, fmt.Sprintf("%.6f", float64(stat.nanos)/float64(time.Second)))
-		writeMetric(builder, "wt_request_duration_seconds_count", labels, strconv.FormatUint(stat.count, 10))
-	}
-}
-
-// renderInflight writes the current in-flight gauge; the caller holds m.mu.
-func (m *metrics) renderInflight(builder *strings.Builder) {
-	builder.WriteString("# HELP wt_inflight_requests Requests currently being proxied.\n# TYPE wt_inflight_requests gauge\n")
-
-	inflightKeys := make([]string, 0, len(m.inflight))
-	for app := range m.inflight {
-		inflightKeys = append(inflightKeys, app)
-	}
-
-	sort.Strings(inflightKeys)
-
-	for _, app := range inflightKeys {
-		writeMetric(builder, "wt_inflight_requests", fmt.Sprintf(`app="%s"`, prometheusLabel(app)), strconv.FormatInt(m.inflight[app], 10))
 	}
 }
 
@@ -274,10 +293,10 @@ func (m *metrics) renderStorage(builder *strings.Builder) {
 	builder.WriteString("# HELP wt_storage_operations_total Storage operations by app, pool and result.\n# TYPE wt_storage_operations_total counter\n")
 
 	storageKeys := make([]storageMetricKey, 0, len(m.storage))
+
 	for key := range m.storage {
 		storageKeys = append(storageKeys, key)
 	}
-
 	sort.Slice(storageKeys, func(i, j int) bool {
 		if storageKeys[i].app != storageKeys[j].app {
 			return storageKeys[i].app < storageKeys[j].app
@@ -289,7 +308,6 @@ func (m *metrics) renderStorage(builder *strings.Builder) {
 
 		return storageKeys[i].result < storageKeys[j].result
 	})
-
 	for _, key := range storageKeys {
 		writeMetric(builder, "wt_storage_operations_total", fmt.Sprintf(`app="%s",pool="%s",result="%s"`, prometheusLabel(key.app), prometheusLabel(key.pool), prometheusLabel(key.result)), strconv.FormatUint(m.storage[key], 10))
 	}
@@ -300,10 +318,10 @@ func (m *metrics) renderStorageDurations(builder *strings.Builder) {
 	builder.WriteString("# HELP wt_storage_operation_duration_seconds Storage operation duration.\n# TYPE wt_storage_operation_duration_seconds summary\n")
 
 	storageDurationKeys := make([]storageDurationKey, 0, len(m.storageDur))
+
 	for key := range m.storageDur {
 		storageDurationKeys = append(storageDurationKeys, key)
 	}
-
 	sort.Slice(storageDurationKeys, func(i, j int) bool {
 		if storageDurationKeys[i].app != storageDurationKeys[j].app {
 			return storageDurationKeys[i].app < storageDurationKeys[j].app
@@ -311,36 +329,37 @@ func (m *metrics) renderStorageDurations(builder *strings.Builder) {
 
 		return storageDurationKeys[i].pool < storageDurationKeys[j].pool
 	})
-
 	for _, key := range storageDurationKeys {
 		stat := m.storageDur[key]
 		labels := fmt.Sprintf(`app="%s",pool="%s"`, prometheusLabel(key.app), prometheusLabel(key.pool))
+
 		writeMetric(builder, "wt_storage_operation_duration_seconds_sum", labels, fmt.Sprintf("%.6f", float64(stat.nanos)/float64(time.Second)))
 		writeMetric(builder, "wt_storage_operation_duration_seconds_count", labels, strconv.FormatUint(stat.count, 10))
 	}
 }
 
-// renderApps writes the per-app gauges outside the metrics lock.
-func (m *metrics) renderApps(builder *strings.Builder, s *supervisor) {
-	builder.WriteString("# HELP wt_app_cpu_percent CPU usage of one app process.\n# TYPE wt_app_cpu_percent gauge\n")
-	builder.WriteString("# HELP wt_app_memory_bytes Proportional set size of one app process, falling back to resident memory.\n# TYPE wt_app_memory_bytes gauge\n")
-	builder.WriteString("# HELP wt_app_ready Whether the app is ready for traffic.\n# TYPE wt_app_ready gauge\n")
-	builder.WriteString("# HELP wt_app_disk_bytes Measured /data and database bytes.\n# TYPE wt_app_disk_bytes gauge\n")
+// writeOutcomes writes one counter family from an outcome map.
+func writeOutcomes(builder *strings.Builder, name, help string, values map[outcomeKey]uint64) {
+	fmt.Fprintf(builder, "# HELP %s %s\n# TYPE %s counter\n", name, help, name)
 
-	for _, a := range s.allApps() {
-		cpu, memory, _ := a.resourceStats()
-		_, ready := a.servingState()
-		labels := fmt.Sprintf(`app="%s"`, prometheusLabel(a.name))
-		writeMetric(builder, "wt_app_cpu_percent", labels, fmt.Sprintf("%.3f", cpu))
-		writeMetric(builder, "wt_app_memory_bytes", labels, strconv.FormatInt(memory, 10))
+	keys := make([]outcomeKey, 0, len(values))
 
-		readyValue := 0
-		if ready {
-			readyValue = 1
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].app != keys[j].app {
+			return keys[i].app < keys[j].app
 		}
 
-		writeMetric(builder, "wt_app_ready", labels, strconv.Itoa(readyValue))
-		writeMetric(builder, "wt_app_disk_bytes", labels, strconv.FormatInt(s.diskBytes(a), 10))
+		if keys[i].action != keys[j].action {
+			return keys[i].action < keys[j].action
+		}
+
+		return keys[i].result < keys[j].result
+	})
+	for _, key := range keys {
+		writeMetric(builder, name, fmt.Sprintf(`app="%s",action="%s",result="%s"`, prometheusLabel(key.app), prometheusLabel(key.action), prometheusLabel(key.result)), strconv.FormatUint(values[key], 10))
 	}
 }
 
@@ -359,7 +378,6 @@ func (m *metrics) render(s *supervisor) string {
 	writeOutcomes(&builder, "wt_jobs_total", "Job outcomes.", m.jobs)
 	m.mu.Unlock()
 	m.renderApps(&builder, s)
-
 	return builder.String()
 }
 
@@ -372,7 +390,7 @@ func (s *supervisor) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "metrics unavailable")
 		return
 	}
-
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+
 	_, _ = w.Write([]byte(s.metrics.render(s)))
 }

@@ -14,22 +14,79 @@ import (
 	"testing"
 )
 
+func TestServerPathMatch(t *testing.T) {
+	prefixes := []string{"/auth", "/api/v1"}
+
+	for path, want := range map[string]bool{
+		"/api/v1": true,
+		"/api/v1/users": true,
+		"/api/v2": false,
+		"/auth": true,
+		"/auth/": true,
+		"/auth/login": true,
+		"/authentic": false,
+	} {
+		if got := serverPathMatch(path, prefixes); got != want {
+			t.Errorf("serverPathMatch(%q) = %v, want %v", path, got, want)
+		}
+	}
+
+	if !serverPathMatch("/anything", []string{"/"}) {
+		t.Error("root prefix did not match")
+	}
+}
+
+// proxyStaticPage sends one page request through the app proxy to a test backend.
+func proxyStaticPage(t *testing.T, a *app, backend http.Handler, requestPath string, pageRequest bool) *http.Response {
+	t.Helper()
+
+	server := httptest.NewServer(backend)
+
+	t.Cleanup(server.Close)
+
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	port, err := strconv.Atoi(parsed.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	a.port = port
+	a.proxy = testSupervisor().newProxy(a)
+	req := httptest.NewRequest(http.MethodGet, "http://demo.localhost"+requestPath, nil)
+
+	req.Header.Set("Accept", "text/html")
+	if pageRequest {
+		req = req.WithContext(context.WithValue(req.Context(), staticPageRequestKey{}, true))
+	}
+
+	rec := httptest.NewRecorder()
+
+	a.proxy.ServeHTTP(rec, req)
+	return rec.Result()
+}
+
 func staticTestApp(t *testing.T) *app {
 	t.Helper()
-	dir := t.TempDir()
 
+	dir := t.TempDir()
 	files := map[string]string{
-		"static/index.html": "<html>spa</html>",
 		"static/_app/immutable/app.js": "console.log('app')",
-		"static/assets/logo.svg": "<svg></svg>",
-		"static/auth/callback/index.html": "<html>callback</html>",
 		"static/about.html": "<html>about</html>",
 		"static/admin/page.html": "<html>admin</html>",
+		"static/assets/logo.svg": "<svg></svg>",
+		"static/auth/callback/index.html": "<html>callback</html>",
 		"static/home.html": "<html>home</html>",
+		"static/index.html": "<html>spa</html>",
 		"static/login/index.html": "<html>login</html>",
 	}
+
 	for name, body := range files {
 		path := filepath.Join(dir, name)
+
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -39,12 +96,209 @@ func staticTestApp(t *testing.T) *app {
 		}
 	}
 
-	return &app{name: "demo", dir: dir}
+	return &app{
+		name: "demo",
+		dir: dir,
+	}
+}
+
+func TestProxyFallsBackToStaticPageOnNotFound(t *testing.T) {
+	a := staticTestApp(t)
+	backend := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+
+		_, _ = w.Write([]byte(`{"error":"missing"}`))
+	})
+	res := proxyStaticPage(t, a, backend, "/login/", true)
+
+	defer res.Body.Close()
+
+	if body, _ := io.ReadAll(res.Body); res.StatusCode != http.StatusOK || string(body) != "<html>login</html>" {
+		t.Errorf("response = %d %q", res.StatusCode, body)
+	}
+
+	if got := res.Header.Get("Cache-Control"); got != "no-cache" {
+		t.Errorf("Cache-Control = %q", got)
+	}
+}
+
+func TestProxyIgnoresStaticPageOutsideServerPages(t *testing.T) {
+	a := staticTestApp(t)
+	backend := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(staticPageHeader, "/home")
+		w.WriteHeader(http.StatusOK)
+
+		_, _ = w.Write([]byte("component body"))
+	})
+	res := proxyStaticPage(t, a, backend, "/", false)
+
+	defer res.Body.Close()
+
+	if body, _ := io.ReadAll(res.Body); res.StatusCode != http.StatusOK || string(body) != "component body" {
+		t.Errorf("response = %d %q", res.StatusCode, body)
+	}
+
+	if got := res.Header.Get(staticPageHeader); got != "" {
+		t.Errorf("%s leaked to the client: %q", staticPageHeader, got)
+	}
+}
+
+func TestProxyKeepsNotFoundWithoutStaticPage(t *testing.T) {
+	a := staticTestApp(t)
+	backend := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+
+		_, _ = w.Write([]byte(`{"error":"missing"}`))
+	})
+	res := proxyStaticPage(t, a, backend, "/nowhere", true)
+
+	defer res.Body.Close()
+
+	if body, _ := io.ReadAll(res.Body); res.StatusCode != http.StatusNotFound || string(body) != `{"error":"missing"}` {
+		t.Errorf("response = %d %q", res.StatusCode, body)
+	}
+}
+
+func TestProxyMissingNamedStaticPageIsNotFound(t *testing.T) {
+	a := staticTestApp(t)
+	backend := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(staticPageHeader, "/does-not-exist")
+		w.WriteHeader(http.StatusOK)
+	})
+	res := proxyStaticPage(t, a, backend, "/", true)
+
+	defer res.Body.Close()
+
+	if body, _ := io.ReadAll(res.Body); res.StatusCode != http.StatusNotFound || len(body) != 0 {
+		t.Errorf("response = %d %q, want an empty 404", res.StatusCode, body)
+	}
+
+	if got := res.Header.Get(staticPageHeader); got != "" {
+		t.Errorf("%s leaked to the client: %q", staticPageHeader, got)
+	}
+}
+
+func TestProxyServesNamedStaticPage(t *testing.T) {
+	a := staticTestApp(t)
+	backend := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Set-Cookie", "session=1; Path=/")
+		w.Header().Set(staticPageHeader, "/home")
+		w.WriteHeader(http.StatusOK)
+
+		_, _ = w.Write([]byte("component body"))
+	})
+	res := proxyStaticPage(t, a, backend, "/", true)
+
+	defer res.Body.Close()
+
+	if body, _ := io.ReadAll(res.Body); res.StatusCode != http.StatusOK || string(body) != "<html>home</html>" {
+		t.Errorf("response = %d %q", res.StatusCode, body)
+	}
+
+	if got := res.Header.Get("Content-Type"); !strings.HasPrefix(got, "text/html") {
+		t.Errorf("content type = %q", got)
+	}
+
+	if got := res.Header.Get(staticPageHeader); got != "" {
+		t.Errorf("%s leaked to the client: %q", staticPageHeader, got)
+	}
+
+	if got := res.Header.Get("Set-Cookie"); got != "session=1; Path=/" {
+		t.Errorf("Set-Cookie = %q", got)
+	}
+
+	if got := res.Header.Get("Cache-Control"); got != "no-store" {
+		t.Errorf("Cache-Control = %q, want the component value", got)
+	}
+}
+
+func TestServeAppRoutesServerPageToComponent(t *testing.T) {
+	a := staticTestApp(t)
+	a.cfg.ServerPages = []string{"/"}
+	a.cmd = &exec.Cmd{}
+	a.ready = true
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+
+		_, _ = w.Write([]byte("component saw the page request"))
+	}))
+
+	defer backend.Close()
+
+	parsed, err := url.Parse(backend.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	a.port, err = strconv.Atoi(parsed.Port())
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := testSupervisor()
+	a.proxy = s.newProxy(a)
+	s.apps[a.name] = a
+	s.hosts["demo.localhost"] = a
+	req := httptest.NewRequest(http.MethodGet, "http://demo.localhost/login/", nil)
+
+	req.Header.Set("Accept", "text/html")
+
+	rec := httptest.NewRecorder()
+
+	s.serveApp(rec, req, a)
+	if rec.Code != http.StatusOK || rec.Body.String() != "<html>login</html>" {
+		t.Errorf("response = %d %q, want the static login page", rec.Code, rec.Body.String())
+	}
+}
+
+func TestServePrecompressedStatic(t *testing.T) {
+	a := staticTestApp(t)
+	dir := a.staticDir()
+	files := map[string]string{"_app/immutable/app.js.br": "br-app", "_app/immutable/app.js.gz": "gz-app"}
+
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, test := range []struct {
+		accept, body, encoding string
+	}{
+		{"br, gzip", "br-app", "br"},
+		{"gzip", "gz-app", "gzip"},
+		{"gzip;q=0, br;q=1", "br-app", "br"},
+		{"identity", "console.log('app')", ""},
+	} {
+		req := httptest.NewRequest(http.MethodGet, "http://demo.localhost/_app/immutable/app.js", nil)
+
+		req.Header.Set("Accept-Encoding", test.accept)
+
+		rec := httptest.NewRecorder()
+		if !a.serveStatic(rec, req) {
+			t.Fatalf("%s was not served", test.accept)
+		}
+
+		if rec.Body.String() != test.body || rec.Header().Get("Content-Encoding") != test.encoding {
+			t.Errorf("%s = encoding %q body %q, want %q %q", test.accept, rec.Header().Get("Content-Encoding"), rec.Body.String(), test.encoding, test.body)
+		}
+
+		if rec.Header().Get("Content-Type") == "" {
+			t.Errorf("%s has no content type", test.accept)
+		}
+
+		if !strings.Contains(rec.Header().Get("Vary"), "Accept-Encoding") {
+			t.Errorf("%s Vary = %q", test.accept, rec.Header().Get("Vary"))
+		}
+	}
 }
 
 func TestServeStaticFiles(t *testing.T) {
 	a := staticTestApp(t)
-
 	cases := []struct {
 		path, accept, body, cache string
 		served bool
@@ -61,11 +315,14 @@ func TestServeStaticFiles(t *testing.T) {
 		{"/missing", "text/html", "<html>spa</html>", "no-cache", true},
 		{"/api/notes", "*/*", "", "", false},
 	}
+
 	for _, tc := range cases {
 		req := httptest.NewRequest(http.MethodGet, "http://demo.localhost"+tc.path, nil)
+
 		req.Header.Set("Accept", tc.accept)
 
 		rec := httptest.NewRecorder()
+
 		if got := a.serveStatic(rec, req); got != tc.served {
 			t.Errorf("%s served = %v, want %v", tc.path, got, tc.served)
 			continue
@@ -89,17 +346,58 @@ func TestServeStaticFiles(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "http://demo.localhost/", nil)
-	req.Header.Set("Accept", "text/html")
 
+	req.Header.Set("Accept", "text/html")
 	if a.serveStatic(httptest.NewRecorder(), req) {
 		t.Error("POST was served from static files")
+	}
+}
+
+func TestServeStaticRespectsServerPages(t *testing.T) {
+	a := staticTestApp(t)
+	a.cfg.ServerPages = []string{"/"}
+	cases := []struct {
+		path, accept, body string
+		served bool
+	}{
+		{"/", "text/html", "", false},
+		{"/about", "*/*", "<html>about</html>", true},
+		{"/home", "text/html", "", false},
+		{"/_app/immutable/app.js", "*/*", "console.log('app')", true},
+	}
+
+	for _, tc := range cases {
+		req := httptest.NewRequest(http.MethodGet, "http://demo.localhost"+tc.path, nil)
+
+		req.Header.Set("Accept", tc.accept)
+
+		rec := httptest.NewRecorder()
+
+		if got := a.serveStatic(rec, req); got != tc.served {
+			t.Errorf("%s served = %v, want %v", tc.path, got, tc.served)
+			continue
+		}
+
+		if tc.served && rec.Body.String() != tc.body {
+			t.Errorf("%s body = %q, want %q", tc.path, rec.Body.String(), tc.body)
+		}
+	}
+
+	a.cfg.ServerPages = []string{"/login"}
+
+	for path, want := range map[string]bool{"/login": false, "/login/": false, "/login/page": false, "/loginfoo": true} {
+		req := httptest.NewRequest(http.MethodGet, "http://demo.localhost"+path, nil)
+
+		req.Header.Set("Accept", "text/html")
+		if got := a.serveStatic(httptest.NewRecorder(), req); got != want {
+			t.Errorf("%s served = %v, want %v", path, got, want)
+		}
 	}
 }
 
 func TestServeStaticRespectsServerPaths(t *testing.T) {
 	a := staticTestApp(t)
 	a.cfg.ServerPaths = []string{"/auth", "/admin"}
-
 	cases := []struct {
 		path, accept, body string
 		served bool
@@ -113,11 +411,14 @@ func TestServeStaticRespectsServerPaths(t *testing.T) {
 		{"/assets/logo.svg", "image/svg+xml", "<svg></svg>", true},
 		{"/authentic", "text/html", "<html>spa</html>", true},
 	}
+
 	for _, tc := range cases {
 		req := httptest.NewRequest(http.MethodGet, "http://demo.localhost"+tc.path, nil)
+
 		req.Header.Set("Accept", tc.accept)
 
 		rec := httptest.NewRecorder()
+
 		if got := a.serveStatic(rec, req); got != tc.served {
 			t.Errorf("%s served = %v, want %v", tc.path, got, tc.served)
 			continue
@@ -130,54 +431,20 @@ func TestServeStaticRespectsServerPaths(t *testing.T) {
 
 	a.cfg.ServerPaths = []string{"/"}
 	req := httptest.NewRequest(http.MethodGet, "http://demo.localhost/missing", nil)
-	req.Header.Set("Accept", "text/html")
 
+	req.Header.Set("Accept", "text/html")
 	if a.serveStatic(httptest.NewRecorder(), req) {
 		t.Error("root server path still fell back to index.html")
 	}
 }
 
-func TestServeStaticRespectsServerPages(t *testing.T) {
+func TestStaticFileRejectsTraversal(t *testing.T) {
 	a := staticTestApp(t)
-	a.cfg.ServerPages = []string{"/"}
+	dir := a.staticDir()
 
-	cases := []struct {
-		path, accept, body string
-		served bool
-	}{
-		{"/", "text/html", "", false},
-		{"/about", "*/*", "<html>about</html>", true},
-		{"/home", "text/html", "", false},
-		{"/_app/immutable/app.js", "*/*", "console.log('app')", true},
-	}
-	for _, tc := range cases {
-		req := httptest.NewRequest(http.MethodGet, "http://demo.localhost"+tc.path, nil)
-		req.Header.Set("Accept", tc.accept)
-
-		rec := httptest.NewRecorder()
-		if got := a.serveStatic(rec, req); got != tc.served {
-			t.Errorf("%s served = %v, want %v", tc.path, got, tc.served)
-			continue
-		}
-
-		if tc.served && rec.Body.String() != tc.body {
-			t.Errorf("%s body = %q, want %q", tc.path, rec.Body.String(), tc.body)
-		}
-	}
-
-	a.cfg.ServerPages = []string{"/login"}
-
-	for path, want := range map[string]bool{
-		"/login": false,
-		"/login/": false,
-		"/loginfoo": true,
-		"/login/page": false,
-	} {
-		req := httptest.NewRequest(http.MethodGet, "http://demo.localhost"+path, nil)
-		req.Header.Set("Accept", "text/html")
-
-		if got := a.serveStatic(httptest.NewRecorder(), req); got != want {
-			t.Errorf("%s served = %v, want %v", path, got, want)
+	for _, path := range []string{"/../main.cwasm", "/..%2fmain.cwasm", "/./../main.cwasm", "/"} {
+		if _, ok := staticFile(dir, path); ok {
+			t.Errorf("staticFile(%q) resolved outside the file set", path)
 		}
 	}
 }
@@ -187,15 +454,16 @@ func TestStaticPageFile(t *testing.T) {
 
 	for path, want := range map[string]string{
 		"/": "static/index.html",
+		"/../main.cwasm": "",
+		"/_app/immutable/app.js": "",
+		"/about": "static/about.html",
 		"/home": "static/home.html",
 		"/login": "static/login/index.html",
 		"/login/": "static/login/index.html",
-		"/about": "static/about.html",
-		"/_app/immutable/app.js": "",
-		"/../main.cwasm": "",
 		"/missing": "",
 	} {
 		got, ok := staticPageFile(a.staticDir(), path)
+
 		if want == "" {
 			if ok {
 				t.Errorf("%s resolved to %q, want no page", path, got)
@@ -210,230 +478,18 @@ func TestStaticPageFile(t *testing.T) {
 	}
 }
 
-// proxyStaticPage sends one page request through the app proxy to a test backend.
-func proxyStaticPage(t *testing.T, a *app, backend http.Handler, requestPath string, pageRequest bool) *http.Response {
-	t.Helper()
-
-	server := httptest.NewServer(backend)
-	t.Cleanup(server.Close)
-
-	parsed, err := url.Parse(server.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	port, err := strconv.Atoi(parsed.Port())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	a.port = port
-	a.proxy = testSupervisor().newProxy(a)
-
-	req := httptest.NewRequest(http.MethodGet, "http://demo.localhost"+requestPath, nil)
-	req.Header.Set("Accept", "text/html")
-
-	if pageRequest {
-		req = req.WithContext(context.WithValue(req.Context(), staticPageRequestKey{}, true))
-	}
-
-	rec := httptest.NewRecorder()
-	a.proxy.ServeHTTP(rec, req)
-
-	return rec.Result()
-}
-
-func TestServeAppRoutesServerPageToComponent(t *testing.T) {
-	a := staticTestApp(t)
-	a.cfg.ServerPages = []string{"/"}
-	a.cmd = &exec.Cmd{}
-	a.ready = true
-
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte("component saw the page request"))
-	}))
-	defer backend.Close()
-
-	parsed, err := url.Parse(backend.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	a.port, err = strconv.Atoi(parsed.Port())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	s := testSupervisor()
-	a.proxy = s.newProxy(a)
-	s.apps[a.name] = a
-	s.hosts["demo.localhost"] = a
-
-	req := httptest.NewRequest(http.MethodGet, "http://demo.localhost/login/", nil)
-	req.Header.Set("Accept", "text/html")
-
-	rec := httptest.NewRecorder()
-	s.serveApp(rec, req, a)
-
-	if rec.Code != http.StatusOK || rec.Body.String() != "<html>login</html>" {
-		t.Errorf("response = %d %q, want the static login page", rec.Code, rec.Body.String())
-	}
-}
-
-func TestProxyServesNamedStaticPage(t *testing.T) {
-	a := staticTestApp(t)
-	backend := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("Set-Cookie", "session=1; Path=/")
-		w.Header().Set(staticPageHeader, "/home")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("component body"))
-	})
-
-	res := proxyStaticPage(t, a, backend, "/", true)
-	defer res.Body.Close()
-
-	body, _ := io.ReadAll(res.Body)
-
-	if res.StatusCode != http.StatusOK || string(body) != "<html>home</html>" {
-		t.Errorf("response = %d %q", res.StatusCode, body)
-	}
-
-	if got := res.Header.Get("Content-Type"); !strings.HasPrefix(got, "text/html") {
-		t.Errorf("content type = %q", got)
-	}
-
-	if got := res.Header.Get(staticPageHeader); got != "" {
-		t.Errorf("%s leaked to the client: %q", staticPageHeader, got)
-	}
-
-	if got := res.Header.Get("Set-Cookie"); got != "session=1; Path=/" {
-		t.Errorf("Set-Cookie = %q", got)
-	}
-
-	if got := res.Header.Get("Cache-Control"); got != "no-store" {
-		t.Errorf("Cache-Control = %q, want the component value", got)
-	}
-}
-
-func TestProxyFallsBackToStaticPageOnNotFound(t *testing.T) {
-	a := staticTestApp(t)
-	backend := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"error":"missing"}`))
-	})
-
-	res := proxyStaticPage(t, a, backend, "/login/", true)
-	defer res.Body.Close()
-
-	body, _ := io.ReadAll(res.Body)
-
-	if res.StatusCode != http.StatusOK || string(body) != "<html>login</html>" {
-		t.Errorf("response = %d %q", res.StatusCode, body)
-	}
-
-	if got := res.Header.Get("Cache-Control"); got != "no-cache" {
-		t.Errorf("Cache-Control = %q", got)
-	}
-}
-
-func TestProxyKeepsNotFoundWithoutStaticPage(t *testing.T) {
-	a := staticTestApp(t)
-	backend := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"error":"missing"}`))
-	})
-
-	res := proxyStaticPage(t, a, backend, "/nowhere", true)
-	defer res.Body.Close()
-
-	body, _ := io.ReadAll(res.Body)
-
-	if res.StatusCode != http.StatusNotFound || string(body) != `{"error":"missing"}` {
-		t.Errorf("response = %d %q", res.StatusCode, body)
-	}
-}
-
-func TestProxyIgnoresStaticPageOutsideServerPages(t *testing.T) {
-	a := staticTestApp(t)
-	backend := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set(staticPageHeader, "/home")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("component body"))
-	})
-
-	res := proxyStaticPage(t, a, backend, "/", false)
-	defer res.Body.Close()
-
-	body, _ := io.ReadAll(res.Body)
-
-	if res.StatusCode != http.StatusOK || string(body) != "component body" {
-		t.Errorf("response = %d %q", res.StatusCode, body)
-	}
-
-	if got := res.Header.Get(staticPageHeader); got != "" {
-		t.Errorf("%s leaked to the client: %q", staticPageHeader, got)
-	}
-}
-
-func TestProxyMissingNamedStaticPageIsNotFound(t *testing.T) {
-	a := staticTestApp(t)
-	backend := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set(staticPageHeader, "/does-not-exist")
-		w.WriteHeader(http.StatusOK)
-	})
-
-	res := proxyStaticPage(t, a, backend, "/", true)
-	defer res.Body.Close()
-
-	body, _ := io.ReadAll(res.Body)
-
-	if res.StatusCode != http.StatusNotFound || len(body) != 0 {
-		t.Errorf("response = %d %q, want an empty 404", res.StatusCode, body)
-	}
-
-	if got := res.Header.Get(staticPageHeader); got != "" {
-		t.Errorf("%s leaked to the client: %q", staticPageHeader, got)
-	}
-}
-
-func TestServerPathMatch(t *testing.T) {
-	prefixes := []string{"/auth", "/api/v1"}
-
-	for path, want := range map[string]bool{
-		"/auth": true,
-		"/auth/": true,
-		"/auth/login": true,
-		"/authentic": false,
-		"/api/v1": true,
-		"/api/v1/users": true,
-		"/api/v2": false,
-	} {
-		if got := serverPathMatch(path, prefixes); got != want {
-			t.Errorf("serverPathMatch(%q) = %v, want %v", path, got, want)
-		}
-	}
-
-	if !serverPathMatch("/anything", []string{"/"}) {
-		t.Error("root prefix did not match")
-	}
-}
-
 func TestStoppedAppDoesNotServeStatic(t *testing.T) {
 	s := testSupervisor()
 	a := staticTestApp(t)
 	s.apps[a.name] = a
 	s.hosts["demo.localhost"] = a
-
 	req := httptest.NewRequest(http.MethodGet, "http://demo.localhost/", nil)
+
 	req.Header.Set("Accept", "text/html")
 
 	rec := httptest.NewRecorder()
-	s.handleProxy(rec, req)
 
+	s.handleProxy(rec, req)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("stopped app status = %d, want 503", rec.Code)
 	}
@@ -441,69 +497,17 @@ func TestStoppedAppDoesNotServeStatic(t *testing.T) {
 	if strings.Contains(rec.Body.String(), "spa") {
 		t.Error("stopped app served its static index")
 	}
-
 	a.mu.Lock()
+
 	a.cmd = &exec.Cmd{}
 	a.ready = true
+
 	a.mu.Unlock()
 
 	rec = httptest.NewRecorder()
-	s.handleProxy(rec, req)
 
+	s.handleProxy(rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "spa") {
 		t.Errorf("running app static response = %d %q", rec.Code, rec.Body.String())
-	}
-}
-
-func TestStaticFileRejectsTraversal(t *testing.T) {
-	a := staticTestApp(t)
-
-	dir := a.staticDir()
-	for _, path := range []string{"/../main.cwasm", "/..%2fmain.cwasm", "/./../main.cwasm", "/"} {
-		if _, ok := staticFile(dir, path); ok {
-			t.Errorf("staticFile(%q) resolved outside the file set", path)
-		}
-	}
-}
-
-func TestServePrecompressedStatic(t *testing.T) {
-	a := staticTestApp(t)
-	dir := a.staticDir()
-
-	files := map[string]string{
-		"_app/immutable/app.js.br": "br-app",
-		"_app/immutable/app.js.gz": "gz-app",
-	}
-	for name, body := range files {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	for _, test := range []struct{ accept, body, encoding string }{
-		{"br, gzip", "br-app", "br"},
-		{"gzip", "gz-app", "gzip"},
-		{"gzip;q=0, br;q=1", "br-app", "br"},
-		{"identity", "console.log('app')", ""},
-	} {
-		req := httptest.NewRequest(http.MethodGet, "http://demo.localhost/_app/immutable/app.js", nil)
-		req.Header.Set("Accept-Encoding", test.accept)
-
-		rec := httptest.NewRecorder()
-		if !a.serveStatic(rec, req) {
-			t.Fatalf("%s was not served", test.accept)
-		}
-
-		if rec.Body.String() != test.body || rec.Header().Get("Content-Encoding") != test.encoding {
-			t.Errorf("%s = encoding %q body %q, want %q %q", test.accept, rec.Header().Get("Content-Encoding"), rec.Body.String(), test.encoding, test.body)
-		}
-
-		if rec.Header().Get("Content-Type") == "" {
-			t.Errorf("%s has no content type", test.accept)
-		}
-
-		if !strings.Contains(rec.Header().Get("Vary"), "Accept-Encoding") {
-			t.Errorf("%s Vary = %q", test.accept, rec.Header().Get("Vary"))
-		}
 	}
 }

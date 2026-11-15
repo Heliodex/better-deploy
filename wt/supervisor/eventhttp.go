@@ -11,17 +11,24 @@ import (
 	"time"
 )
 
+type (
+	eventPublishRequest struct {
+		Topic string `json:"topic"`
+		Data jsontext.Value `json:"data"`
+	}
+
+	eventPublishResponse struct {
+		ID int64 `json:"id"`
+		Topic string `json:"topic"`
+		Time time.Time `json:"time"`
+	}
+)
+
 const eventKeepAlive = 20 * time.Second
 
-type eventPublishRequest struct {
-	Topic string `json:"topic"`
-	Data jsontext.Value `json:"data"`
-}
-
-type eventPublishResponse struct {
-	ID int64 `json:"id"`
-	Topic string `json:"topic"`
-	Time time.Time `json:"time"`
+// appEventPath reports whether a path belongs to the host event bus rather than the app's wasm component.
+func appEventPath(path string) bool {
+	return path == "/v1/events"
 }
 
 // handleEventPublish is shared by the storage loopback service and the authenticated app-fetch publish path.
@@ -45,8 +52,21 @@ func handleEventPublish(bus *eventBus, w http.ResponseWriter, r *http.Request, a
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	writeJSON(w, http.StatusAccepted, eventPublishResponse{
+		ID: event.ID,
+		Topic: event.Topic,
+		Time: event.Time,
+	})
+}
 
-	writeJSON(w, http.StatusAccepted, eventPublishResponse{ID: event.ID, Topic: event.Topic, Time: event.Time})
+// writeBusEvent serialises and sends one bus event with its cursor id.
+func writeBusEvent(stream *sseStream, event busEvent) bool {
+	data := event.json()
+	if data == nil {
+		return true
+	}
+
+	return stream.idEvent(event.ID, "message", data)
 }
 
 // handleAppEvents streams an app's bus over SSE on the app host. It is public to the app's own origin, like the static files.
@@ -83,13 +103,13 @@ func (s *supervisor) handleAppEvents(w http.ResponseWriter, r *http.Request, a *
 
 		since = &parsed
 	} else if value := r.Header.Get("Last-Event-ID"); value != "" {
-		parsed, err := strconv.ParseInt(value, 10, 64)
-		if err == nil && parsed >= 0 {
+		if parsed, err := strconv.ParseInt(value, 10, 64); err == nil && parsed >= 0 {
 			since = &parsed
 		}
 	}
 
 	sub, replay, oldest, gap := s.bus.subscribe(a.name, topic, since)
+
 	defer s.bus.unsubscribe(a.name, sub)
 
 	if !stream.retry(3000) {
@@ -107,6 +127,7 @@ func (s *supervisor) handleAppEvents(w http.ResponseWriter, r *http.Request, a *
 	}
 
 	ticker := time.NewTicker(eventKeepAlive)
+
 	defer ticker.Stop()
 
 	for {
@@ -127,19 +148,4 @@ func (s *supervisor) handleAppEvents(w http.ResponseWriter, r *http.Request, a *
 			return
 		}
 	}
-}
-
-// writeBusEvent serialises and sends one bus event with its cursor id.
-func writeBusEvent(stream *sseStream, event busEvent) bool {
-	data := event.json()
-	if data == nil {
-		return true
-	}
-
-	return stream.idEvent(event.ID, "message", data)
-}
-
-// appEventPath reports whether a path belongs to the host event bus rather than the app's wasm component.
-func appEventPath(path string) bool {
-	return path == "/v1/events"
 }

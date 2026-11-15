@@ -11,32 +11,6 @@ import (
 	wit "go.bytecodealliance.org/pkg/wit/types"
 )
 
-// toWasiMethod maps an HTTP method name to a wasi:http method, using the "other" variant for extensions.
-func toWasiMethod(s string) wasi.Method {
-	switch s {
-	case http.MethodConnect:
-		return wasi.MakeMethodConnect()
-	case http.MethodDelete:
-		return wasi.MakeMethodDelete()
-	case http.MethodGet:
-		return wasi.MakeMethodGet()
-	case http.MethodHead:
-		return wasi.MakeMethodHead()
-	case http.MethodOptions:
-		return wasi.MakeMethodOptions()
-	case http.MethodPatch:
-		return wasi.MakeMethodPatch()
-	case http.MethodPost:
-		return wasi.MakeMethodPost()
-	case http.MethodPut:
-		return wasi.MakeMethodPut()
-	case http.MethodTrace:
-		return wasi.MakeMethodTrace()
-	default:
-		return wasi.MakeMethodOther(s)
-	}
-}
-
 // outgoingRequestOptions turns the request context deadline into wasi:http transport timeouts. The caller keeps the context as the cancellation signal.
 func outgoingRequestOptions(ctx context.Context) wit.Option[*wasi.RequestOptions] {
 	deadline, ok := ctx.Deadline()
@@ -51,11 +25,37 @@ func outgoingRequestOptions(ctx context.Context) wit.Option[*wasi.RequestOptions
 
 	options := wasi.MakeRequestOptions()
 	duration := wit.Some(uint64(remaining))
+
 	options.SetConnectTimeout(duration)
 	options.SetFirstByteTimeout(duration)
 	options.SetBetweenBytesTimeout(duration)
-
 	return wit.Some(options)
+}
+
+// toWasiMethod maps an HTTP method name to a wasi:http method, using the "other" variant for extensions.
+func toWasiMethod(s string) wasi.Method {
+	switch s {
+	case http.MethodGet:
+		return wasi.MakeMethodGet()
+	case http.MethodHead:
+		return wasi.MakeMethodHead()
+	case http.MethodPost:
+		return wasi.MakeMethodPost()
+	case http.MethodPut:
+		return wasi.MakeMethodPut()
+	case http.MethodPatch:
+		return wasi.MakeMethodPatch()
+	case http.MethodDelete:
+		return wasi.MakeMethodDelete()
+	case http.MethodConnect:
+		return wasi.MakeMethodConnect()
+	case http.MethodOptions:
+		return wasi.MakeMethodOptions()
+	case http.MethodTrace:
+		return wasi.MakeMethodTrace()
+	default:
+		return wasi.MakeMethodOther(s)
+	}
 }
 
 // newOutgoingHTTPRequest converts an http.Request to a wasi.Request. The body copier stops when the request context is cancelled.
@@ -64,11 +64,13 @@ func newOutgoingHTTPRequest(req *http.Request) (*wasi.Request, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	defer headers.Drop()
 
 	ctx := req.Context()
 
 	var body wit.Option[*wit.StreamReader[uint8]]
+
 	if req.Body == nil {
 		body = wit.None[*wit.StreamReader[uint8]]()
 	} else {
@@ -94,7 +96,6 @@ func newOutgoingHTTPRequest(req *http.Request) (*wasi.Request, error) {
 
 					return
 				}
-
 				tx.WriteAll(buffer[:count])
 			}
 		}()
@@ -106,17 +107,16 @@ func newOutgoingHTTPRequest(req *http.Request) (*wasi.Request, error) {
 		trailersFuture(), // Trailers are not supported yet.
 		outgoingRequestOptions(ctx),
 	)
+
 	send.Drop()
 
 	authority := req.Host
 	if authority == "" {
 		authority = req.URL.Host
 	}
-
 	request.SetMethod(toWasiMethod(req.Method))
 	request.SetAuthority(wit.Some(authority))
 	request.SetPathWithQuery(wit.Some(req.URL.RequestURI()))
-
 	switch req.URL.Scheme {
 	case "http":
 		request.SetScheme(wit.Some(wasi.MakeSchemeHttp()))

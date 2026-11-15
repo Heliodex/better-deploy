@@ -12,226 +12,39 @@ import (
 	"time"
 )
 
-// jobRecord is the subset of the supervisor's job resource the CLI prints.
-type jobRecord struct {
-	ID string `json:"id"`
-	Path string `json:"path"`
-	Method string `json:"method"`
-	Body string `json:"body,omitempty"`
-	Headers map[string]string `json:"headers,omitempty"`
-	Status string `json:"status"`
-	RunAt time.Time `json:"runAt"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
-	StartedAt time.Time `json:"startedAt"`
-	FinishedAt time.Time `json:"finishedAt"`
-	Attempts int `json:"attempts"`
-	MaxAttempts int `json:"maxAttempts"`
-	IdempotencyKey string `json:"idempotencyKey,omitempty"`
-	LeaseUntil time.Time `json:"leaseUntil"`
-	LastError string `json:"lastError,omitempty"`
-	StatusCode int `json:"statusCode,omitempty"`
-}
-
-type jobsResponse struct {
-	Jobs []jobRecord `json:"jobs"`
-}
-
-// jobTime renders a job timestamp, or a placeholder for the zero time.
-func jobTime(value time.Time) string {
-	if value.IsZero() {
-		return "-"
+type (
+	// enqueueRequest holds the enqueue flags before they are checked and encoded as the create-job body.
+	enqueueRequest struct {
+		path, method, body, file, runAt, idempotencyKey string
+		maxAttempts int
+		headers map[string]string
 	}
 
-	return value.UTC().Format(time.RFC3339)
-}
-
-// printJobs prints the newest jobs first, or the raw response with --json.
-func printJobs(cfg clientOptions, body []byte) error {
-	if cfg.jsonOut {
-		printRawOrJSON(cfg, body)
-		return nil
+	// jobRecord is the subset of the supervisor's job resource the CLI prints.
+	jobRecord struct {
+		ID string `json:"id"`
+		Path string `json:"path"`
+		Method string `json:"method"`
+		Body string `json:"body,omitempty"`
+		Headers map[string]string `json:"headers,omitempty"`
+		Status string `json:"status"`
+		RunAt time.Time `json:"runAt"`
+		CreatedAt time.Time `json:"createdAt"`
+		UpdatedAt time.Time `json:"updatedAt"`
+		StartedAt time.Time `json:"startedAt"`
+		FinishedAt time.Time `json:"finishedAt"`
+		Attempts int `json:"attempts"`
+		MaxAttempts int `json:"maxAttempts"`
+		IdempotencyKey string `json:"idempotencyKey,omitempty"`
+		LeaseUntil time.Time `json:"leaseUntil"`
+		LastError string `json:"lastError,omitempty"`
+		StatusCode int `json:"statusCode,omitempty"`
 	}
 
-	var result jobsResponse
-	if err := json.Unmarshal(body, &result); err != nil {
-		return err
+	jobsResponse struct {
+		Jobs []jobRecord `json:"jobs"`
 	}
-
-	if len(result.Jobs) == 0 {
-		fmt.Println("no jobs")
-		return nil
-	}
-
-	fmt.Printf("%-26s %-10s %-7s %-8s %-20s %s\n", "ID", "STATUS", "METHOD", "ATTEMPTS", "RUN AT", "PATH")
-
-	for _, job := range result.Jobs {
-		fmt.Printf("%-26s %-10s %-7s %-8s %-20s %s\n", job.ID, job.Status, job.Method, fmt.Sprintf("%d/%d", job.Attempts, job.MaxAttempts), jobTime(job.RunAt), job.Path)
-	}
-
-	return nil
-}
-
-// printJob prints one job's fields.
-func printJob(job jobRecord) {
-	fmt.Printf("ID: %s\n", job.ID)
-	fmt.Printf("Status: %s\n", job.Status)
-	fmt.Printf("Path: %s %s\n", job.Method, job.Path)
-	fmt.Printf("Attempts: %d/%d\n", job.Attempts, job.MaxAttempts)
-	fmt.Printf("Run at: %s\n", jobTime(job.RunAt))
-	fmt.Printf("Created: %s\n", jobTime(job.CreatedAt))
-	fmt.Printf("Started: %s\n", jobTime(job.StartedAt))
-	fmt.Printf("Finished: %s\n", jobTime(job.FinishedAt))
-
-	if job.StatusCode != 0 {
-		fmt.Printf("Status code: %d\n", job.StatusCode)
-	}
-
-	if job.Body != "" {
-		fmt.Printf("Body: %s\n", job.Body)
-	}
-
-	if len(job.Headers) > 0 {
-		keys := make([]string, 0, len(job.Headers))
-		for key := range job.Headers {
-			keys = append(keys, key)
-		}
-
-		sort.Strings(keys)
-
-		for _, key := range keys {
-			fmt.Printf("Header: %s: %s\n", key, job.Headers[key])
-		}
-	}
-
-	if job.LastError != "" {
-		fmt.Printf("Last error: %s\n", job.LastError)
-	}
-
-	if job.IdempotencyKey != "" {
-		fmt.Printf("Idempotency key: %s\n", job.IdempotencyKey)
-	}
-}
-
-// jobsList requests one page of jobs, optionally filtered by status.
-func jobsList(cfg clientOptions, name string, args []string) error {
-	flags := newFlagSet("jobs list")
-	status := flags.String("status", "", "pending, running, succeeded, failed, dead or canceled")
-
-	jsonOut := flags.Bool("json", false, "print raw JSON")
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-
-	if flags.NArg() > 0 {
-		return fmt.Errorf("unexpected argument %q", flags.Arg(0))
-	}
-
-	if *status != "" && !validJobStatus(*status) {
-		return fmt.Errorf("unknown job status %q", *status)
-	}
-
-	if *jsonOut {
-		cfg.jsonOut = true
-	}
-
-	path := "/apps/" + name + "/jobs"
-	if *status != "" {
-		path += "?status=" + url.QueryEscape(*status)
-	}
-
-	statusCode, _, body, err := apiDo(cfg, http.MethodGet, path, nil, "")
-	if err != nil {
-		return err
-	}
-
-	if err := checkAPI(statusCode, body); err != nil {
-		return err
-	}
-
-	return printJobs(cfg, body)
-}
-
-// jobsShow requests one job.
-func jobsShow(cfg clientOptions, name string, args []string) error {
-	flags := newFlagSet("jobs show")
-
-	jsonOut := flags.Bool("json", false, "print raw JSON")
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-
-	if flags.NArg() != 1 {
-		return errors.New("usage: wt jobs <app> show <id>")
-	}
-
-	if *jsonOut {
-		cfg.jsonOut = true
-	}
-
-	id := flags.Arg(0)
-
-	statusCode, _, body, err := apiDo(cfg, http.MethodGet, "/apps/"+name+"/jobs/"+url.PathEscape(id), nil, "")
-	if err != nil {
-		return err
-	}
-
-	if err := checkAPI(statusCode, body); err != nil {
-		return err
-	}
-
-	if cfg.jsonOut {
-		printRawOrJSON(cfg, body)
-		return nil
-	}
-
-	var job jobRecord
-	if err := json.Unmarshal(body, &job); err != nil {
-		return err
-	}
-
-	printJob(job)
-
-	return nil
-}
-
-// headerFlagValue parses one --header value written as Key: Value or Key=Value.
-func headerFlagValue(value string) (string, string, error) {
-	key, val, ok := strings.Cut(value, ":")
-	if !ok {
-		key, val, ok = strings.Cut(value, "=")
-	}
-
-	if !ok || strings.TrimSpace(key) == "" {
-		return "", "", errors.New("header must be Key: Value")
-	}
-
-	return strings.TrimSpace(key), strings.TrimSpace(val), nil
-}
-
-// enqueueRequest holds the enqueue flags before they are checked and encoded as the create-job body.
-type enqueueRequest struct {
-	path, method, body, file, runAt, idempotencyKey string
-	maxAttempts int
-	headers map[string]string
-}
-
-// validate checks the flags that do not need the request body or the clock.
-func (req enqueueRequest) validate() error {
-	if req.path == "" || !strings.HasPrefix(req.path, "/") {
-		return errors.New("--path must start with /")
-	}
-
-	if req.body != "" && req.file != "" {
-		return errors.New("use --body or --file, not both")
-	}
-
-	if req.maxAttempts < 0 {
-		return errors.New("--max-attempts must be 0 or more")
-	}
-
-	return nil
-}
+)
 
 // payload builds the create-job body. It reads --file and parses --run-at, so it can fail after validate passes.
 func (req enqueueRequest) payload() (map[string]any, error) {
@@ -275,6 +88,87 @@ func (req enqueueRequest) payload() (map[string]any, error) {
 	return payload, nil
 }
 
+// validate checks the flags that do not need the request body or the clock.
+func (req enqueueRequest) validate() error {
+	if req.path == "" || !strings.HasPrefix(req.path, "/") {
+		return errors.New("--path must start with /")
+	}
+
+	if req.body != "" && req.file != "" {
+		return errors.New("use --body or --file, not both")
+	}
+
+	if req.maxAttempts < 0 {
+		return errors.New("--max-attempts must be 0 or more")
+	}
+
+	return nil
+}
+
+// headerFlagValue parses one --header value written as Key: Value or Key=Value.
+func headerFlagValue(value string) (string, string, error) {
+	key, val, ok := strings.Cut(value, ":")
+	if !ok {
+		key, val, ok = strings.Cut(value, "=")
+	}
+
+	if !ok || strings.TrimSpace(key) == "" {
+		return "", "", errors.New("header must be Key: Value")
+	}
+
+	return strings.TrimSpace(key), strings.TrimSpace(val), nil
+}
+
+// jobTime renders a job timestamp, or a placeholder for the zero time.
+func jobTime(value time.Time) string {
+	if value.IsZero() {
+		return "-"
+	}
+
+	return value.UTC().Format(time.RFC3339)
+}
+
+// jobsAction cancels or retries one job.
+func jobsAction(cfg clientOptions, name, action string, args []string) error {
+	flags := newFlagSet("jobs " + action)
+	jsonOut := flags.Bool("json", false, "print raw JSON")
+
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+
+	if flags.NArg() != 1 {
+		return fmt.Errorf("usage: wt jobs <app> %s <id>", action)
+	}
+
+	if *jsonOut {
+		cfg.jsonOut = true
+	}
+
+	id := flags.Arg(0)
+	status, _, body, err := apiDo(cfg, http.MethodPost, "/apps/"+name+"/jobs/"+url.PathEscape(id)+"/"+action, nil, "")
+	if err != nil {
+		return err
+	}
+
+	if err := checkAPI(status, body); err != nil {
+		return err
+	}
+
+	if cfg.jsonOut {
+		printRawOrJSON(cfg, body)
+		return nil
+	}
+
+	var job jobRecord
+
+	if err := json.Unmarshal(body, &job); err != nil {
+		return err
+	}
+	fmt.Printf("%s %s %s\n", action, job.ID, job.Status)
+	return nil
+}
+
 // jobsEnqueue creates a durable job from flags.
 func jobsEnqueue(cfg clientOptions, name string, args []string) error {
 	flags := newFlagSet("jobs enqueue")
@@ -298,7 +192,6 @@ func jobsEnqueue(cfg clientOptions, name string, args []string) error {
 
 		return nil
 	})
-
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -317,6 +210,7 @@ func jobsEnqueue(cfg clientOptions, name string, args []string) error {
 		maxAttempts: *maxAttempts,
 		headers: headers,
 	}
+
 	if err := req.validate(); err != nil {
 		return err
 	}
@@ -350,31 +244,70 @@ func jobsEnqueue(cfg clientOptions, name string, args []string) error {
 	}
 
 	var job jobRecord
+
 	if err := json.Unmarshal(response, &job); err != nil {
 		return err
 	}
 
 	verb := "enqueued"
+
 	if status == http.StatusOK {
 		verb = "existing"
 	}
-
 	fmt.Printf("%s %s %s %s\n", verb, job.ID, job.Status, job.Path)
-
 	return nil
 }
 
-// jobsAction cancels or retries one job.
-func jobsAction(cfg clientOptions, name, action string, args []string) error {
-	flags := newFlagSet("jobs " + action)
+// printJob prints one job's fields.
+func printJob(job jobRecord) {
+	fmt.Printf("ID: %s\n", job.ID)
+	fmt.Printf("Status: %s\n", job.Status)
+	fmt.Printf("Path: %s %s\n", job.Method, job.Path)
+	fmt.Printf("Attempts: %d/%d\n", job.Attempts, job.MaxAttempts)
+	fmt.Printf("Run at: %s\n", jobTime(job.RunAt))
+	fmt.Printf("Created: %s\n", jobTime(job.CreatedAt))
+	fmt.Printf("Started: %s\n", jobTime(job.StartedAt))
+	fmt.Printf("Finished: %s\n", jobTime(job.FinishedAt))
+	if job.StatusCode != 0 {
+		fmt.Printf("Status code: %d\n", job.StatusCode)
+	}
 
+	if job.Body != "" {
+		fmt.Printf("Body: %s\n", job.Body)
+	}
+
+	if len(job.Headers) > 0 {
+		keys := make([]string, 0, len(job.Headers))
+
+		for key := range job.Headers {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			fmt.Printf("Header: %s: %s\n", key, job.Headers[key])
+		}
+	}
+
+	if job.LastError != "" {
+		fmt.Printf("Last error: %s\n", job.LastError)
+	}
+
+	if job.IdempotencyKey != "" {
+		fmt.Printf("Idempotency key: %s\n", job.IdempotencyKey)
+	}
+}
+
+// jobsShow requests one job.
+func jobsShow(cfg clientOptions, name string, args []string) error {
+	flags := newFlagSet("jobs show")
 	jsonOut := flags.Bool("json", false, "print raw JSON")
+
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 
 	if flags.NArg() != 1 {
-		return fmt.Errorf("usage: wt jobs <app> %s <id>", action)
+		return errors.New("usage: wt jobs <app> show <id>")
 	}
 
 	if *jsonOut {
@@ -382,13 +315,12 @@ func jobsAction(cfg clientOptions, name, action string, args []string) error {
 	}
 
 	id := flags.Arg(0)
-
-	status, _, body, err := apiDo(cfg, http.MethodPost, "/apps/"+name+"/jobs/"+url.PathEscape(id)+"/"+action, nil, "")
+	statusCode, _, body, err := apiDo(cfg, http.MethodGet, "/apps/"+name+"/jobs/"+url.PathEscape(id), nil, "")
 	if err != nil {
 		return err
 	}
 
-	if err := checkAPI(status, body); err != nil {
+	if err := checkAPI(statusCode, body); err != nil {
 		return err
 	}
 
@@ -398,11 +330,35 @@ func jobsAction(cfg clientOptions, name, action string, args []string) error {
 	}
 
 	var job jobRecord
+
 	if err := json.Unmarshal(body, &job); err != nil {
 		return err
 	}
+	printJob(job)
+	return nil
+}
 
-	fmt.Printf("%s %s %s\n", action, job.ID, job.Status)
+// printJobs prints the newest jobs first, or the raw response with --json.
+func printJobs(cfg clientOptions, body []byte) error {
+	if cfg.jsonOut {
+		printRawOrJSON(cfg, body)
+		return nil
+	}
+
+	var result jobsResponse
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return err
+	}
+
+	if len(result.Jobs) == 0 {
+		fmt.Println("no jobs")
+		return nil
+	}
+	fmt.Printf("%-26s %-10s %-7s %-8s %-20s %s\n", "ID", "STATUS", "METHOD", "ATTEMPTS", "RUN AT", "PATH")
+	for _, job := range result.Jobs {
+		fmt.Printf("%-26s %-10s %-7s %-8s %-20s %s\n", job.ID, job.Status, job.Method, fmt.Sprintf("%d/%d", job.Attempts, job.MaxAttempts), jobTime(job.RunAt), job.Path)
+	}
 
 	return nil
 }
@@ -410,11 +366,51 @@ func jobsAction(cfg clientOptions, name, action string, args []string) error {
 // validJobStatus reports whether status is one the supervisor accepts.
 func validJobStatus(status string) bool {
 	switch status {
-	case "pending", "running", "succeeded", "failed", "dead", "canceled":
+	case "canceled", "dead", "failed", "pending", "running", "succeeded":
 		return true
 	}
 
 	return false
+}
+
+// jobsList requests one page of jobs, optionally filtered by status.
+func jobsList(cfg clientOptions, name string, args []string) error {
+	flags := newFlagSet("jobs list")
+	status := flags.String("status", "", "pending, running, succeeded, failed, dead or canceled")
+	jsonOut := flags.Bool("json", false, "print raw JSON")
+
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+
+	if flags.NArg() > 0 {
+		return fmt.Errorf("unexpected argument %q", flags.Arg(0))
+	}
+
+	if *status != "" && !validJobStatus(*status) {
+		return fmt.Errorf("unknown job status %q", *status)
+	}
+
+	if *jsonOut {
+		cfg.jsonOut = true
+	}
+
+	path := "/apps/" + name + "/jobs"
+
+	if *status != "" {
+		path += "?status=" + url.QueryEscape(*status)
+	}
+
+	statusCode, _, body, err := apiDo(cfg, http.MethodGet, path, nil, "")
+	if err != nil {
+		return err
+	}
+
+	if err := checkAPI(statusCode, body); err != nil {
+		return err
+	}
+
+	return printJobs(cfg, body)
 }
 
 // runJobs dispatches wt jobs <app> <action>.

@@ -24,37 +24,21 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func nsFatal(err error) {
-	fmt.Fprintf(os.Stderr, "wt ns-init: %v\n", err)
-	os.Exit(125)
-}
+// applyPlanRlimits lowers the helper's limits before it starts wasmtime, so the child inherits them at exec time.
+// The supervisor cannot apply them after start because the helper may already have launched the runtime.
+func applyPlanRlimits(plan *nsPlan) error {
+	for _, spec := range plan.Rlimits {
+		limit := &unix.Rlimit{
+			Cur: spec.Value,
+			Max: spec.Value,
+		}
 
-func readNSPlan() (nsPlan, error) {
-	var plan nsPlan
-
-	raw := os.Getenv(nsPlanEnv)
-	if raw == "" {
-		return plan, fmt.Errorf("%s is not set", nsPlanEnv)
+		if err := unix.Setrlimit(spec.Resource, limit); err != nil {
+			return fmt.Errorf("set %s=%d: %w", spec.Name, spec.Value, err)
+		}
 	}
 
-	if err := json.Unmarshal([]byte(raw), &plan); err != nil {
-		return plan, fmt.Errorf("parse namespace plan: %w", err)
-	}
-
-	if plan.Root == "" || plan.AppDir == "" || plan.DataDir == "" || plan.Wasmtime == "" || !strings.HasPrefix(plan.BinPath, "/") {
-		return plan, errors.New("namespace plan is incomplete")
-	}
-
-	if plan.TmpfsMB < 1 || plan.TmpfsMB > 1024 {
-		return plan, fmt.Errorf("invalid tmpfs size %d", plan.TmpfsMB)
-	}
-
-	return plan, nil
-}
-
-// insideRoot joins a host path into the new root without letting an absolute path discard the root prefix.
-func insideRoot(root, path string) string {
-	return filepath.Join(root, strings.TrimPrefix(path, "/"))
+	return nil
 }
 
 func bindDir(src, dst string, readOnly bool) error {
@@ -67,6 +51,7 @@ func bindDir(src, dst string, readOnly bool) error {
 	}
 
 	flags := uintptr(unix.MS_BIND | unix.MS_REMOUNT | unix.MS_NOSUID | unix.MS_NODEV)
+
 	if readOnly {
 		flags |= unix.MS_RDONLY
 	}
@@ -110,6 +95,154 @@ func bindPath(src, dst string, readOnly bool) error {
 	return bindFile(src, dst, readOnly)
 }
 
+// childEnv passes the app environment to wasmtime without the internal plan.
+func childEnv() []string {
+	env := os.Environ()
+	out := env[:0]
+
+	for _, pair := range env {
+		if strings.HasPrefix(pair, nsPlanEnv+"=") {
+			continue
+		}
+
+		out = append(out, pair)
+	}
+
+	return out
+}
+
+func clearCaps() error {
+	header := unix.CapUserHeader{
+		Version: unix.LINUX_CAPABILITY_VERSION_3,
+	}
+
+	var empty [2]unix.CapUserData
+
+	_, _, errno := syscall.AllThreadsSyscall6(syscall.SYS_CAPSET, uintptr(unsafe.Pointer(&header)), uintptr(unsafe.Pointer(&empty[0])), 0, 0, 0, 0)
+	if errno == 0 {
+		return nil
+	}
+	// AllThreadsSyscall returns ENOTSUP in cgo binaries.
+	// The goroutine is locked to its thread, so clearing that thread is enough for the child to inherit no capabilities.
+	if err := unix.Capset(&header, &empty[0]); err == nil {
+		return nil
+	}
+	// setuid to a non-zero uid may already have cleared the sets.
+	// Verify before treating an EPERM from capset as a setup failure.
+	var current [2]unix.CapUserData
+
+	if err := unix.Capget(&header, &current[0]); err == nil {
+		if current[0] == (unix.CapUserData{}) && current[1] == (unix.CapUserData{}) {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("clear capabilities: %w", errno)
+}
+
+func dropBoundingCaps() error {
+	for capability := range 64 {
+		if err := unix.Prctl(unix.PR_CAPBSET_DROP, uintptr(capability), 0, 0, 0); err != nil && !errors.Is(err, unix.EINVAL) {
+			return fmt.Errorf("drop capability %d: %w", capability, err)
+		}
+	}
+
+	return nil
+}
+
+// insideRoot joins a host path into the new root without letting an absolute path discard the root prefix.
+func insideRoot(root, path string) string {
+	return filepath.Join(root, strings.TrimPrefix(path, "/"))
+}
+
+func nsFatal(err error) {
+	fmt.Fprintf(os.Stderr, "wt ns-init: %v\n", err)
+	os.Exit(125)
+}
+
+func readNSPlan() (nsPlan, error) {
+	var plan nsPlan
+
+	raw := os.Getenv(nsPlanEnv)
+	if raw == "" {
+		return plan, fmt.Errorf("%s is not set", nsPlanEnv)
+	}
+
+	if err := json.Unmarshal([]byte(raw), &plan); err != nil {
+		return plan, fmt.Errorf("parse namespace plan: %w", err)
+	}
+
+	if plan.Root == "" || plan.AppDir == "" || plan.DataDir == "" || plan.Wasmtime == "" || !strings.HasPrefix(plan.BinPath, "/") {
+		return plan, errors.New("namespace plan is incomplete")
+	}
+
+	if plan.TmpfsMB < 1 || plan.TmpfsMB > 1024 {
+		return plan, fmt.Errorf("invalid tmpfs size %d", plan.TmpfsMB)
+	}
+
+	return plan, nil
+}
+
+// runApp starts the runtime as PID 2 in the namespace and stays alive as PID 1 to forward signals.
+// The child's host pid is written to the pid pipe so the supervisor can report and sample the wasmtime process rather than the helper.
+func runApp(plan *nsPlan, args []string) int {
+	cmd := exec.CommandContext(context.Background(), plan.BinPath, args...)
+	cmd.Env = childEnv()
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setpgid: true,
+	}
+
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "wt ns-init: start %s: %v\n", plan.BinPath, err)
+		return 125
+	}
+
+	if file := os.NewFile(nsPIDFile, "wt-pid"); file != nil {
+		_, _ = fmt.Fprintf(file, "%d\n", cmd.Process.Pid)
+		_ = file.Close()
+	}
+
+	signals := make(chan os.Signal, 8)
+
+	signal.Notify(signals, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGHUP)
+
+	done := make(chan struct{})
+
+	go func() {
+		for {
+			select {
+			case sig := <-signals:
+				if value, ok := sig.(syscall.Signal); ok {
+					_ = syscall.Kill(-cmd.Process.Pid, value)
+				}
+			case <-done:
+				return
+			}
+		}
+	}()
+
+	err := cmd.Wait()
+
+	close(done)
+	signal.Stop(signals)
+	if err == nil {
+		return 0
+	}
+
+	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
+		if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+			return 128 + int(status.Signal())
+		}
+
+		return exitErr.ExitCode()
+	}
+
+	return 125
+}
+
 // setupNamespace builds the new root and pivots into it.
 // All mounts happen in the helper's private mount namespace, so the host never sees them.
 func setupNamespace(plan *nsPlan) error {
@@ -118,6 +251,7 @@ func setupNamespace(plan *nsPlan) error {
 	}
 
 	rootFlags := uintptr(unix.MS_NOSUID | unix.MS_NODEV)
+
 	if err := unix.Mount("tmpfs", plan.Root, "tmpfs", rootFlags, fmt.Sprintf("size=%dm,mode=0755", plan.TmpfsMB)); err != nil {
 		return fmt.Errorf("mount root tmpfs: %w", err)
 	}
@@ -157,11 +291,13 @@ func setupNamespace(plan *nsPlan) error {
 	}
 
 	tmpFlags := uintptr(unix.MS_NOSUID | unix.MS_NODEV | unix.MS_NOEXEC)
+
 	if err := unix.Mount("tmpfs", insideRoot(plan.Root, "/tmp"), "tmpfs", tmpFlags, fmt.Sprintf("size=%dm,mode=1777", defaultTmpfsDir)); err != nil {
 		return fmt.Errorf("mount /tmp: %w", err)
 	}
 
 	oldRoot := insideRoot(plan.Root, "/.oldroot")
+
 	if err := os.MkdirAll(oldRoot, 0o755); err != nil {
 		return fmt.Errorf("create old root: %w", err)
 	}
@@ -184,56 +320,6 @@ func setupNamespace(plan *nsPlan) error {
 
 	if err := unix.Sethostname([]byte(plan.Hostname)); err != nil {
 		return fmt.Errorf("set hostname: %w", err)
-	}
-
-	return nil
-}
-
-func dropBoundingCaps() error {
-	for capability := range 64 {
-		err := unix.Prctl(unix.PR_CAPBSET_DROP, uintptr(capability), 0, 0, 0)
-		if err != nil && !errors.Is(err, unix.EINVAL) {
-			return fmt.Errorf("drop capability %d: %w", capability, err)
-		}
-	}
-
-	return nil
-}
-
-func clearCaps() error {
-	header := unix.CapUserHeader{Version: unix.LINUX_CAPABILITY_VERSION_3}
-
-	var empty [2]unix.CapUserData
-
-	_, _, errno := syscall.AllThreadsSyscall6(syscall.SYS_CAPSET, uintptr(unsafe.Pointer(&header)), uintptr(unsafe.Pointer(&empty[0])), 0, 0, 0, 0)
-	if errno == 0 {
-		return nil
-	}
-	// AllThreadsSyscall returns ENOTSUP in cgo binaries.
-	// The goroutine is locked to its thread, so clearing that thread is enough for the child to inherit no capabilities.
-	if err := unix.Capset(&header, &empty[0]); err == nil {
-		return nil
-	}
-	// setuid to a non-zero uid may already have cleared the sets.
-	// Verify before treating an EPERM from capset as a setup failure.
-	var current [2]unix.CapUserData
-	if err := unix.Capget(&header, &current[0]); err == nil {
-		if current[0] == (unix.CapUserData{}) && current[1] == (unix.CapUserData{}) {
-			return nil
-		}
-	}
-
-	return fmt.Errorf("clear capabilities: %w", errno)
-}
-
-// applyPlanRlimits lowers the helper's limits before it starts wasmtime, so the child inherits them at exec time.
-// The supervisor cannot apply them after start because the helper may already have launched the runtime.
-func applyPlanRlimits(plan *nsPlan) error {
-	for _, spec := range plan.Rlimits {
-		limit := &unix.Rlimit{Cur: spec.Value, Max: spec.Value}
-		if err := unix.Setrlimit(spec.Resource, limit); err != nil {
-			return fmt.Errorf("set %s=%d: %w", spec.Name, spec.Value, err)
-		}
 	}
 
 	return nil
@@ -271,80 +357,6 @@ func switchToApp(plan *nsPlan) error {
 	return applyPlanRlimits(plan)
 }
 
-// childEnv passes the app environment to wasmtime without the internal plan.
-func childEnv() []string {
-	env := os.Environ()
-
-	out := env[:0]
-	for _, pair := range env {
-		if strings.HasPrefix(pair, nsPlanEnv+"=") {
-			continue
-		}
-
-		out = append(out, pair)
-	}
-
-	return out
-}
-
-// runApp starts the runtime as PID 2 in the namespace and stays alive as PID 1 to forward signals.
-// The child's host pid is written to the pid pipe so the supervisor can report and sample the wasmtime process rather than the helper.
-func runApp(plan *nsPlan, args []string) int {
-	cmd := exec.CommandContext(context.Background(), plan.BinPath, args...)
-	cmd.Env = childEnv()
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := cmd.Start(); err != nil {
-		fmt.Fprintf(os.Stderr, "wt ns-init: start %s: %v\n", plan.BinPath, err)
-		return 125
-	}
-
-	if file := os.NewFile(nsPIDFile, "wt-pid"); file != nil {
-		_, _ = fmt.Fprintf(file, "%d\n", cmd.Process.Pid)
-		_ = file.Close()
-	}
-
-	signals := make(chan os.Signal, 8)
-	signal.Notify(signals, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGHUP)
-
-	done := make(chan struct{})
-
-	go func() {
-		for {
-			select {
-			case sig := <-signals:
-				if value, ok := sig.(syscall.Signal); ok {
-					_ = syscall.Kill(-cmd.Process.Pid, value)
-				}
-			case <-done:
-				return
-			}
-		}
-	}()
-
-	err := cmd.Wait()
-
-	close(done)
-	signal.Stop(signals)
-
-	if err == nil {
-		return 0
-	}
-
-	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
-		if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
-			return 128 + int(status.Signal())
-		}
-
-		return exitErr.ExitCode()
-	}
-
-	return 125
-}
-
 // waitForStart blocks until the supervisor has added the helper to its cgroup.
 // The runtime starts only after that, so it inherits the cgroup membership at fork time instead of racing the supervisor's addPID call.
 func waitForStart() error {
@@ -352,9 +364,11 @@ func waitForStart() error {
 	if file == nil {
 		return errors.New("start pipe is missing")
 	}
+
 	defer file.Close()
 
 	var buf [1]byte
+
 	if _, err := io.ReadFull(file, buf[:]); err != nil {
 		return fmt.Errorf("wait for supervisor: %w", err)
 	}
@@ -389,6 +403,5 @@ func nsInitMain(args []string) {
 	if err := waitForStart(); err != nil {
 		nsFatal(err)
 	}
-
 	os.Exit(runApp(&plan, args))
 }

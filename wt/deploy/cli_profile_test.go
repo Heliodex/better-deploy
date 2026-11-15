@@ -28,9 +28,41 @@ func writeProfileTestConfig(t *testing.T) string {
 	t.Helper()
 
 	path := filepath.Join(t.TempDir(), "config.json")
-	writeTestFile(t, path, profileTestConfig)
 
+	writeTestFile(t, path, profileTestConfig)
 	return path
+}
+
+func TestClientFlagsProfileFromEnvironment(t *testing.T) {
+	t.Setenv("WT_DEPLOY_HOST", "")
+	t.Setenv("WT_TOKEN", "")
+	t.Setenv("WT_PROFILE", "local")
+
+	path := writeProfileTestConfig(t)
+	cfg, _, err := clientFlags([]string{"--config", path}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.host != "http://127.0.0.1:8080" || cfg.token != "local-token" || cfg.profile != "local" {
+		t.Errorf("cfg = %+v", cfg)
+	}
+}
+
+func TestClientFlagsRejectsUnknownProfile(t *testing.T) {
+	t.Setenv("WT_PROFILE", "")
+
+	path := writeProfileTestConfig(t)
+	_, _, err := clientFlags([]string{"--config", path, "--profile", "staging"}, false)
+	if err == nil {
+		t.Fatal("unknown profile was accepted")
+	}
+
+	for _, fragment := range []string{"staging", "local", "remote"} {
+		if !strings.Contains(err.Error(), fragment) {
+			t.Errorf("error %q does not mention %q", err, fragment)
+		}
+	}
 }
 
 func TestClientFlagsSelectsProfile(t *testing.T) {
@@ -39,7 +71,6 @@ func TestClientFlagsSelectsProfile(t *testing.T) {
 	t.Setenv("WT_PROFILE", "")
 
 	path := writeProfileTestConfig(t)
-
 	cfg, rest, err := clientFlags([]string{"apps", "--config", path, "--profile", "local"}, false)
 	if err != nil {
 		t.Fatal(err)
@@ -60,76 +91,7 @@ func TestClientFlagsUsesDefaultProfile(t *testing.T) {
 	t.Setenv("WT_PROFILE", "")
 
 	path := writeProfileTestConfig(t)
-
 	cfg, _, err := clientFlags([]string{"--config", path}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if cfg.host != "https://wt.example.com" || cfg.token != "remote-token" || cfg.profile != "remote" || cfg.appDomain != "example.com" {
-		t.Errorf("cfg = %+v", cfg)
-	}
-}
-
-func TestClientFlagsProfileFromEnvironment(t *testing.T) {
-	t.Setenv("WT_DEPLOY_HOST", "")
-	t.Setenv("WT_TOKEN", "")
-	t.Setenv("WT_PROFILE", "local")
-
-	path := writeProfileTestConfig(t)
-
-	cfg, _, err := clientFlags([]string{"--config", path}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if cfg.host != "http://127.0.0.1:8080" || cfg.token != "local-token" || cfg.profile != "local" {
-		t.Errorf("cfg = %+v", cfg)
-	}
-}
-
-func TestClientFlagsRejectsUnknownProfile(t *testing.T) {
-	t.Setenv("WT_PROFILE", "")
-
-	path := writeProfileTestConfig(t)
-
-	_, _, err := clientFlags([]string{"--config", path, "--profile", "staging"}, false)
-	if err == nil {
-		t.Fatal("unknown profile was accepted")
-	}
-
-	for _, fragment := range []string{"staging", "local", "remote"} {
-		if !strings.Contains(err.Error(), fragment) {
-			t.Errorf("error %q does not mention %q", err, fragment)
-		}
-	}
-}
-
-func TestResolveConfigUsesProfile(t *testing.T) {
-	t.Setenv("WT_DEPLOY_HOST", "")
-	t.Setenv("WT_TOKEN", "")
-	t.Setenv("WT_PROFILE", "")
-
-	path := writeProfileTestConfig(t)
-
-	cfg, err := resolveConfig([]string{"--config", path, "--dir", ".", "--profile", "local"})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if cfg.host != "http://127.0.0.1:8080" || cfg.token != "local-token" || cfg.profile != "local" || cfg.appDomain != "localhost" {
-		t.Errorf("cfg = %+v", cfg)
-	}
-}
-
-func TestResolveConfigUsesDefaultProfile(t *testing.T) {
-	t.Setenv("WT_DEPLOY_HOST", "")
-	t.Setenv("WT_TOKEN", "")
-	t.Setenv("WT_PROFILE", "")
-
-	path := writeProfileTestConfig(t)
-
-	cfg, err := resolveConfig([]string{"--config", path, "--dir", "."})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +107,6 @@ func TestResolveConfigDropsDomainWhenHostChangesLocality(t *testing.T) {
 	t.Setenv("WT_PROFILE", "")
 
 	path := writeProfileTestConfig(t)
-
 	cfg, err := resolveConfig([]string{"--config", path, "--dir", ".", "--profile", "remote", "--host", "http://127.0.0.1:8080"})
 	if err != nil {
 		t.Fatal(err)
@@ -162,13 +123,55 @@ func TestResolveConfigKeepsExplicitAppDomain(t *testing.T) {
 	t.Setenv("WT_PROFILE", "")
 
 	path := writeProfileTestConfig(t)
-
-	cfg, err := resolveConfig([]string{"--config", path, "--dir", ".", "--profile", "remote", "--host", "http://127.0.0.1:8080", "--app-domain", "example.com"})
+	cfg, err := resolveConfig([]string{
+		"--config",
+		path,
+		"--dir",
+		".",
+		"--profile",
+		"remote",
+		"--host",
+		"http://127.0.0.1:8080",
+		"--app-domain",
+		"example.com",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	if cfg.appDomain != "example.com" {
 		t.Errorf("app domain = %q, want the explicit value", cfg.appDomain)
+	}
+}
+
+func TestResolveConfigUsesDefaultProfile(t *testing.T) {
+	t.Setenv("WT_DEPLOY_HOST", "")
+	t.Setenv("WT_TOKEN", "")
+	t.Setenv("WT_PROFILE", "")
+
+	path := writeProfileTestConfig(t)
+	cfg, err := resolveConfig([]string{"--config", path, "--dir", "."})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.host != "https://wt.example.com" || cfg.token != "remote-token" || cfg.profile != "remote" || cfg.appDomain != "example.com" {
+		t.Errorf("cfg = %+v", cfg)
+	}
+}
+
+func TestResolveConfigUsesProfile(t *testing.T) {
+	t.Setenv("WT_DEPLOY_HOST", "")
+	t.Setenv("WT_TOKEN", "")
+	t.Setenv("WT_PROFILE", "")
+
+	path := writeProfileTestConfig(t)
+	cfg, err := resolveConfig([]string{"--config", path, "--dir", ".", "--profile", "local"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.host != "http://127.0.0.1:8080" || cfg.token != "local-token" || cfg.profile != "local" || cfg.appDomain != "localhost" {
+		t.Errorf("cfg = %+v", cfg)
 	}
 }

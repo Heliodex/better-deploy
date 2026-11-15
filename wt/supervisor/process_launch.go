@@ -15,12 +15,6 @@ import (
 	"time"
 )
 
-// epochIdleTimeout stands in for "no request timeout". Epoch interruption always needs a deadline, and wasmtime applies the deadline immediately when none is set.
-const epochIdleTimeout = 24 * time.Hour
-
-// errEpochMismatch reports a cwasm whose epoch instrumentation disagrees with the recorded artifact or the launch flags.
-var errEpochMismatch = errors.New("cwasm epoch setting does not match the host")
-
 // launchSession carries the resolved inputs shared by the runner and direct launch paths.
 type launchSession struct {
 	id string
@@ -33,10 +27,18 @@ type launchSession struct {
 	namespaced bool
 }
 
+// epochIdleTimeout stands in for "no request timeout". Epoch interruption always needs a deadline, and wasmtime applies the deadline immediately when none is set.
+const epochIdleTimeout = 24 * time.Hour
+
+// errEpochMismatch reports a cwasm whose epoch instrumentation disagrees with the recorded artifact or the launch flags.
+var errEpochMismatch = errors.New("cwasm epoch setting does not match the host")
+
 // recordError stores the last launch error for app info and restart logs.
 func (a *app) recordError(err error) {
 	a.mu.Lock()
+
 	a.lastError = err.Error()
+
 	a.mu.Unlock()
 }
 
@@ -46,20 +48,23 @@ func appServeArgs(target string, cfg appConfig, epoch bool) []string {
 		"serve",
 		"-Scli",
 		"-Sp3",
-		"-W", "component-model-async=y",
+		"-W",
+		"component-model-async=y",
 		"--allow-precompiled",
-		"--target", target,
-		"--addr", serveAddr,
+		"--target",
+		target,
+		"--addr",
+		serveAddr,
 		// The Go WASIp3 component cannot safely run concurrent handlers that call wasi:http imports. Let wasmtime use separate instances for concurrent requests instead of multiplexing them into one instance.
 		"--max-instance-concurrent-reuse-count=1",
 	}
+
 	if cfg.Network != "none" {
 		args = append(args, "-S", "inherit-network")
 	}
 
 	if epoch {
 		args = append(args, "-W", "epoch-interruption=y")
-
 		timeout := cfg.requestTimeout
 		if timeout <= 0 {
 			timeout = epochIdleTimeout
@@ -88,10 +93,10 @@ func epochMismatch(output string) (bool, bool) {
 // appEnv resolves secret references and adds the storage, identity and app-fetch settings.
 func (s *supervisor) appEnv(a *app, cfg appConfig, namespaced bool) (extraArgs, env []string, err error) {
 	index := map[string]int{}
-
 	set := func(key, value string) {
 		if i, ok := index[key]; ok {
 			env[i] = key + "=" + value
+
 			return
 		}
 
@@ -99,6 +104,7 @@ func (s *supervisor) appEnv(a *app, cfg appConfig, namespaced bool) (extraArgs, 
 		extraArgs = append(extraArgs, "--env", key)
 		env = append(env, key+"="+value)
 	}
+
 	if namespaced {
 		// These paths exist inside the minimal root. App config can override them through the loop below.
 		set("TMPDIR", "/tmp")
@@ -107,6 +113,7 @@ func (s *supervisor) appEnv(a *app, cfg appConfig, namespaced bool) (extraArgs, 
 
 	for _, key := range sortedKeys(cfg.Env) {
 		value := cfg.Env[key]
+
 		if name, ok := strings.CutPrefix(value, secretRefPrefix); ok {
 			secret, found := s.secrets.get(a.name, name)
 			if !found {
@@ -115,7 +122,6 @@ func (s *supervisor) appEnv(a *app, cfg appConfig, namespaced bool) (extraArgs, 
 
 			value = secret
 		}
-
 		set(key, value)
 	}
 
@@ -125,6 +131,7 @@ func (s *supervisor) appEnv(a *app, cfg appConfig, namespaced bool) (extraArgs, 
 
 	if s.storage != nil {
 		token := s.storage.tokenFor(a.name)
+
 		set("WT_STORAGE_URL", s.storage.url())
 		set("WT_STORAGE_TOKEN", token)
 		set(appTokenEnv, token)
@@ -145,17 +152,16 @@ func (s *supervisor) appEnv(a *app, cfg appConfig, namespaced bool) (extraArgs, 
 	if s.fetch != nil {
 		set(appNameEnv, a.name)
 		set(appFetchURLEnv, s.fetch.url())
-		apps := s.allApps()
 
+		apps := s.allApps()
 		names := make([]string, 0, len(apps))
+
 		for _, other := range apps {
 			if other.name != a.name {
 				names = append(names, other.name)
 			}
 		}
-
 		slices.Sort(names)
-
 		for _, name := range names {
 			set(appURLEnvName(name), s.fetch.appURL(name))
 		}
@@ -167,21 +173,22 @@ func (s *supervisor) appEnv(a *app, cfg appConfig, namespaced bool) (extraArgs, 
 // appArgsFor rewrites the bundle, /data and tmp paths for a namespace launch.
 // The helper pivots into a root where the bundle is /app and the state dir is /data, so the host paths must not leak into wasmtime's argv.
 // appArgsFor builds the wasmtime argv and environment, rewriting paths for a namespace launch.
-func (s *supervisor) appArgsFor(a *app, source string, namespaced bool) (args []string, env []string, err error) {
+func (s *supervisor) appArgsFor(a *app, source string, namespaced bool) (args, env []string, err error) {
 	a.mu.Lock()
+
 	cfg := a.cfg
 	epoch := a.wasmEpoch
+
 	a.mu.Unlock()
 
 	args = appServeArgs(s.cfg.wasmtimeTarget, cfg, epoch)
-
 	dirSpec := filepath.Join(s.cfg.stateDir, a.name) + "::/data"
+
 	if namespaced {
 		dirSpec = "/data::/data"
 	}
 
 	args = append(args, "--dir", dirSpec)
-
 	extraArgs, env, err := s.appEnv(a, cfg, namespaced)
 	if err != nil {
 		return nil, nil, err
@@ -199,56 +206,169 @@ func (s *supervisor) appArgsFor(a *app, source string, namespaced bool) (args []
 // appArgs builds the wasmtime argv and the process environment separately.
 // Only secret names go into argv, so values are not visible in /proc/<pid>/cmdline.
 // appArgs builds argv and environment for the direct, un-namespaced launch path.
-func (s *supervisor) appArgs(a *app, source string) (args []string, env []string, err error) {
+func (s *supervisor) appArgs(a *app, source string) (args, env []string, err error) {
 	return s.appArgsFor(a, source, false)
 }
 
-// launch starts one app, retrying once with the epoch setting wasmtime reports when a retained cwasm was compiled with the opposite one.
-func (s *supervisor) launch(a *app, source string) error {
-	err := s.launchOnce(a, source)
-	if !errors.Is(err, errEpochMismatch) {
-		return err
-	}
-	// The failed attempt already scheduled its own restart; the corrected retry replaces it.
-	s.cancelRestart(a)
+// launchOutput builds the writers shared by the port finder, the supervisor log and the app's own log.
+func (s *supervisor) launchOutput(a *app) (*portFinder, *logRing, io.Writer) {
+	finder := newPortFinder()
+	logging := log.New(os.Stderr, "["+a.name+"] ", 0).Writer()
+	recent := newLogRing()
+	writers := []io.Writer{finder, logging, recent}
 
-	return s.launchOnce(a, source)
+	if a.logs != nil {
+		writers = append(writers, a.logs)
+	}
+
+	return finder, recent, io.MultiWriter(writers...)
 }
 
-// launchOnce starts one app, either through the runner or as a direct child, and returns once it is ready or failed.
-func (s *supervisor) launchOnce(a *app, source string) error {
-	a.mu.Lock()
-	a.starting = true
-	a.port = 0
-	cfg := a.cfg
+// markAppReady hands the app to the proxy and records it as healthy.
+func (s *supervisor) markAppReady(a *app) {
+	proxy := s.newProxy(a)
 
-	deadline := time.Now().Add(cfg.startupLimit())
-	if countBudget(cfg.MaxConcurrent).enabled() {
-		a.slots = make(chan struct{}, cfg.MaxConcurrent)
-	} else {
-		a.slots = nil
-	}
+	a.mu.Lock()
+
+	host, port := a.cfg.Host, a.port
+	a.proxy = proxy
+	a.healthOK = true
+	a.ready = true
+	a.healthFailures = 0
+	a.nextHealth = time.Now().Add(a.cfg.probeInterval())
+	a.lastHealthy = time.Now().UTC()
+	a.lastError = ""
 
 	a.mu.Unlock()
-	defer func() {
-		a.mu.Lock()
-		a.starting = false
-		a.mu.Unlock()
-	}()
+	log.Printf("app %s started on 127.0.0.1:%d (%s)", a.name, port, host)
+	s.broadcast()
+}
 
-	session, err := s.prepareLaunchSession(a, source, cfg, deadline)
+// migrateBeforeReady runs the explicit migration phase before readiness, so a slow schema change is not bounded by startup_timeout.
+func (s *supervisor) migrateBeforeReady(a *app, cfg appConfig, done <-chan struct{}) error {
+	if cfg.Network == "none" {
+		return nil
+	}
+	a.mu.Lock()
+
+	port := a.port
+
+	a.mu.Unlock()
+
+	err := s.migrateApp(a, port, done)
+	if errors.Is(err, errNoMigrateEndpoint) {
+		log.Printf("app %s: no %s endpoint; using health readiness", a.name, migratePath)
+		return nil
+	}
+
+	return err
+}
+
+// awaitAppReady waits for the port, applies egress rules, runs migrations and activates the app.
+func (s *supervisor) awaitAppReady(a *app, l *launchSession, done <-chan struct{}, finder *portFinder, recent *logRing) error {
+	if err := s.waitForPort(a, finder, done, l.deadline); err != nil {
+		if epoch, ok := epochMismatch(recent.String()); ok {
+			s.correctArtifactEpoch(a, epoch)
+			return fmt.Errorf("%w: %w", errEpochMismatch, err)
+		}
+
+		return withLaunchLog(l.source, recent, err)
+	}
+
+	if err := l.iso.activate(s, l.cfg); err != nil {
+		return err
+	}
+
+	if err := s.migrateBeforeReady(a, l.cfg, done); err != nil {
+		return withLaunchLog(l.source, recent, fmt.Errorf("storage migration: %w", err))
+	}
+
+	if err := s.waitReady(a, done); err != nil {
+		return withLaunchLog(l.source, recent, err)
+	}
+	s.markAppReady(a)
+	return nil
+}
+
+// launchRunner starts an app through the runner and then waits for readiness.
+func (s *supervisor) launchRunner(a *app, l *launchSession) error {
+	finder, recent, out := s.launchOutput(a)
+	configData, _ := json.Marshal(l.cfg)
+	request := runnerStartRequest{
+		ID: l.id,
+		Name: a.name,
+		Dir: a.dir,
+		Path: s.cfg.wasmtime,
+		Args: l.args,
+		Env: mergeEnv(minimalEnv(), l.env),
+		Config: configData,
+		Namespaced: l.namespaced,
+		UID: l.iso.uid,
+	}
+
+	if s.storage != nil {
+		request.StorageToken = s.storage.tokenFor(a.name)
+	}
+
+	if l.namespaced {
+		request.Plan = l.plan
+		request.HostID = l.iso.ns.hostID
+		request.HostGID = l.iso.ns.hostGID
+		request.AllowSetgroups = l.iso.ns.plan.ClearGroups
+	}
+
+	stream, started, err := s.runner.Start(request)
 	if err != nil {
+		l.iso.close(s)
+		a.recordError(err)
 		return err
 	}
 
-	session.id = a.name + "-" + newRequestID()
-	if err := s.launchRunner(a, session); err != nil {
-		return err
+	cmd := &exec.Cmd{
+		Process: &os.Process{
+			Pid: started.PID,
+		},
 	}
+	done := make(chan struct{})
 
 	a.mu.Lock()
-	a.isolation = session.iso
+
+	a.cmd = cmd
+	a.done = done
+	a.exited = false
+	a.workPID = started.WorkPID
+	a.port = 0
+	a.started = time.Now().UTC()
+
+	if a.timer != nil {
+		a.timer.Stop()
+
+		a.timer = nil
+	}
 	a.mu.Unlock()
+
+	go s.consumeRunnerStream(a, cmd, done, stream, out, l.iso.nsRoot)
+
+	fail := func(err error) error {
+		a.recordError(err)
+		s.kill(a)
+		l.iso.close(s)
+		return err
+	}
+
+	if err := l.iso.attachProcess(s, cmd.Process.Pid); err != nil {
+		return fail(err)
+	}
+
+	if l.namespaced {
+		if err := s.runner.Go(l.id); err != nil {
+			return fail(fmt.Errorf("release app start: %w", err))
+		}
+	}
+
+	if err := s.awaitAppReady(a, l, done, finder, recent); err != nil {
+		return fail(err)
+	}
 
 	return nil
 }
@@ -261,7 +381,6 @@ func (s *supervisor) prepareLaunchSession(a *app, source string, cfg appConfig, 
 		deadline: deadline,
 		namespaced: s.cfg.appNamespaces,
 	}
-
 	args, env, err := s.appArgsFor(a, source, session.namespaced)
 	if err != nil {
 		a.recordError(err)
@@ -281,6 +400,7 @@ func (s *supervisor) prepareLaunchSession(a *app, source string, cfg appConfig, 
 	}
 
 	session.iso = iso
+
 	if iso.ns == nil {
 		return session, nil
 	}
@@ -296,159 +416,54 @@ func (s *supervisor) prepareLaunchSession(a *app, source string, cfg appConfig, 
 	return session, nil
 }
 
-// launchOutput builds the writers shared by the port finder, the supervisor log and the app's own log.
-func (s *supervisor) launchOutput(a *app) (*portFinder, *logRing, io.Writer) {
-	finder := newPortFinder()
-	logging := log.New(os.Stderr, "["+a.name+"] ", 0).Writer()
-	recent := newLogRing()
-
-	writers := []io.Writer{finder, logging, recent}
-	if a.logs != nil {
-		writers = append(writers, a.logs)
-	}
-
-	return finder, recent, io.MultiWriter(writers...)
-}
-
-// launchRunner starts an app through the runner and then waits for readiness.
-func (s *supervisor) launchRunner(a *app, l *launchSession) error {
-	finder, recent, out := s.launchOutput(a)
-	configData, _ := json.Marshal(l.cfg)
-
-	request := runnerStartRequest{
-		ID: l.id,
-		Name: a.name,
-		Dir: a.dir,
-		Path: s.cfg.wasmtime,
-		Args: l.args,
-		Env: mergeEnv(minimalEnv(), l.env),
-		Config: configData,
-		Namespaced: l.namespaced,
-		UID: l.iso.uid,
-	}
-	if s.storage != nil {
-		request.StorageToken = s.storage.tokenFor(a.name)
-	}
-
-	if l.namespaced {
-		request.Plan = l.plan
-		request.HostID = l.iso.ns.hostID
-		request.HostGID = l.iso.ns.hostGID
-		request.AllowSetgroups = l.iso.ns.plan.ClearGroups
-	}
-
-	stream, started, err := s.runner.Start(request)
-	if err != nil {
-		l.iso.close(s)
-		a.recordError(err)
-
-		return err
-	}
-
-	cmd := &exec.Cmd{Process: &os.Process{Pid: started.PID}}
-	done := make(chan struct{})
-
+// launchOnce starts one app, either through the runner or as a direct child, and returns once it is ready or failed.
+func (s *supervisor) launchOnce(a *app, source string) error {
 	a.mu.Lock()
-	a.cmd = cmd
-	a.done = done
-	a.exited = false
-	a.workPID = started.WorkPID
+
+	a.starting = true
 	a.port = 0
+	cfg := a.cfg
+	deadline := time.Now().Add(cfg.startupLimit())
 
-	a.started = time.Now().UTC()
-	if a.timer != nil {
-		a.timer.Stop()
-		a.timer = nil
+	if countBudget(cfg.MaxConcurrent).enabled() {
+		a.slots = make(chan struct{}, cfg.MaxConcurrent)
+	} else {
+		a.slots = nil
 	}
 	a.mu.Unlock()
 
-	go s.consumeRunnerStream(a, cmd, done, stream, out, l.iso.nsRoot)
+	defer func() {
+		a.mu.Lock()
 
-	fail := func(err error) error {
-		a.recordError(err)
-		s.kill(a)
-		l.iso.close(s)
+		a.starting = false
 
-		return err
-	}
-	if err := l.iso.attachProcess(s, cmd.Process.Pid); err != nil {
-		return fail(err)
-	}
+		a.mu.Unlock()
+	}()
 
-	if l.namespaced {
-		if err := s.runner.Go(l.id); err != nil {
-			return fail(fmt.Errorf("release app start: %w", err))
-		}
-	}
-
-	if err := s.awaitAppReady(a, l, done, finder, recent); err != nil {
-		return fail(err)
-	}
-
-	return nil
-}
-
-// awaitAppReady waits for the port, applies egress rules, runs migrations and activates the app.
-func (s *supervisor) awaitAppReady(a *app, l *launchSession, done <-chan struct{}, finder *portFinder, recent *logRing) error {
-	if err := s.waitForPort(a, finder, done, l.deadline); err != nil {
-		if epoch, ok := epochMismatch(recent.String()); ok {
-			s.correctArtifactEpoch(a, epoch)
-
-			return fmt.Errorf("%w: %w", errEpochMismatch, err)
-		}
-
-		return withLaunchLog(l.source, recent, err)
-	}
-
-	if err := l.iso.activate(s, l.cfg); err != nil {
+	session, err := s.prepareLaunchSession(a, source, cfg, deadline)
+	if err != nil {
 		return err
 	}
 
-	if err := s.migrateBeforeReady(a, l.cfg, done); err != nil {
-		return withLaunchLog(l.source, recent, fmt.Errorf("storage migration: %w", err))
+	session.id = a.name + "-" + newRequestID()
+
+	if err := s.launchRunner(a, session); err != nil {
+		return err
 	}
+	a.mu.Lock()
 
-	if err := s.waitReady(a, done); err != nil {
-		return withLaunchLog(l.source, recent, err)
-	}
+	a.isolation = session.iso
 
-	s.markAppReady(a)
-
+	a.mu.Unlock()
 	return nil
 }
 
-// migrateBeforeReady runs the explicit migration phase before readiness, so a slow schema change is not bounded by startup_timeout.
-func (s *supervisor) migrateBeforeReady(a *app, cfg appConfig, done <-chan struct{}) error {
-	if cfg.Network == "none" {
-		return nil
+// launch starts one app, retrying once with the epoch setting wasmtime reports when a retained cwasm was compiled with the opposite one.
+func (s *supervisor) launch(a *app, source string) error {
+	if err := s.launchOnce(a, source); !errors.Is(err, errEpochMismatch) {
+		return err
 	}
-
-	a.mu.Lock()
-	port := a.port
-	a.mu.Unlock()
-
-	err := s.migrateApp(a, port, done)
-	if errors.Is(err, errNoMigrateEndpoint) {
-		log.Printf("app %s: no %s endpoint; using health readiness", a.name, migratePath)
-		return nil
-	}
-
-	return err
-}
-
-// markAppReady hands the app to the proxy and records it as healthy.
-func (s *supervisor) markAppReady(a *app) {
-	proxy := s.newProxy(a)
-	a.mu.Lock()
-	host, port := a.cfg.Host, a.port
-	a.proxy = proxy
-	a.healthOK = true
-	a.ready = true
-	a.healthFailures = 0
-	a.nextHealth = time.Now().Add(a.cfg.probeInterval())
-	a.lastHealthy = time.Now().UTC()
-	a.lastError = ""
-	a.mu.Unlock()
-	log.Printf("app %s started on 127.0.0.1:%d (%s)", a.name, port, host)
-	s.broadcast()
+	// The failed attempt already scheduled its own restart; the corrected retry replaces it.
+	s.cancelRestart(a)
+	return s.launchOnce(a, source)
 }

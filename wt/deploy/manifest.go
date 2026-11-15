@@ -11,60 +11,95 @@ import (
 	"time"
 )
 
-type manifest struct {
-	Name string `json:"name"`
-	Host string `json:"host"`
-	Health string `json:"health"`
-	Env map[string]string `json:"env"`
-	BuildComponent string `json:"build_component,omitempty"`
-	BuildStatic string `json:"build_static,omitempty"`
-	ComponentInputs []string `json:"component_inputs,omitempty"`
-	StaticInputs []string `json:"static_inputs,omitempty"`
-	MemoryMB int `json:"memory_mb,omitempty"`
-	DiskMB int `json:"disk_mb,omitempty"`
-	MaxConcurrent int `json:"max_concurrency,omitempty"`
-	RequestTimeout string `json:"request_timeout,omitempty"`
-	IdleTimeout string `json:"idle_timeout,omitempty"`
-	Contract string `json:"contract,omitempty"`
-	Network string `json:"network,omitempty"`
-	ServerPaths []string `json:"server_paths,omitempty"`
-	ServerPages []string `json:"server_pages,omitempty"`
-	Schedule []schedule `json:"schedule,omitempty"`
-	Dev *appDevConfig `json:"dev,omitempty"`
-}
+type (
+	// appDevConfig selects the optional SvelteKit development loop for an app.
+	appDevConfig struct {
+		// Web is the frontend directory relative to the app; default web.
+		Web string `json:"web,omitempty"`
+		// Command starts the frontend dev server; default bun run dev.
+		Command string `json:"command,omitempty"`
+		// Build rebuilds only the component; default app.json build_component.
+		Build string `json:"build,omitempty"`
+		// Proxy lists app path prefixes forwarded to the supervisor; default /api.
+		Proxy []string `json:"proxy,omitempty"`
+		// SupervisorProxy lists supervisor-owned app-host prefixes; defaults to the event, blob and identity routes. Set [] to disable them.
+		SupervisorProxy []string `json:"supervisor_proxy,omitempty"`
+		// Watch lists extra files or directories that trigger a component rebuild.
+		Watch []string `json:"watch,omitempty"`
+		// Port fixes the frontend dev port; default is a free port.
+		Port int `json:"port,omitempty"`
+	}
 
-// appDevConfig selects the optional SvelteKit development loop for an app.
-type appDevConfig struct {
-	// Web is the frontend directory relative to the app; default web.
-	Web string `json:"web,omitempty"`
-	// Command starts the frontend dev server; default bun run dev.
-	Command string `json:"command,omitempty"`
-	// Build rebuilds only the component; default app.json build_component.
-	Build string `json:"build,omitempty"`
-	// Proxy lists app path prefixes forwarded to the supervisor; default /api.
-	Proxy []string `json:"proxy,omitempty"`
-	// SupervisorProxy lists supervisor-owned app-host prefixes; defaults to the event, blob and identity routes. Set [] to disable them.
-	SupervisorProxy []string `json:"supervisor_proxy,omitempty"`
-	// Watch lists extra files or directories that trigger a component rebuild.
-	Watch []string `json:"watch,omitempty"`
-	// Port fixes the frontend dev port; default is a free port.
-	Port int `json:"port,omitempty"`
-}
+	// schedule is carried through the bundle so the supervisor can call the app on a timer.
+	schedule struct {
+		Name string `json:"name,omitempty"`
+		Method string `json:"method,omitempty"`
+		Path string `json:"path"`
+		Every string `json:"every"`
+		Timeout string `json:"timeout,omitempty"`
+	}
 
-// schedule is carried through the bundle so the supervisor can call the app on a timer.
-type schedule struct {
-	Name string `json:"name,omitempty"`
-	Method string `json:"method,omitempty"`
-	Path string `json:"path"`
-	Every string `json:"every"`
-	Timeout string `json:"timeout,omitempty"`
-}
+	manifest struct {
+		Name string `json:"name"`
+		Host string `json:"host"`
+		Health string `json:"health"`
+		Env map[string]string `json:"env"`
+		BuildComponent string `json:"build_component,omitempty"`
+		BuildStatic string `json:"build_static,omitempty"`
+		ComponentInputs []string `json:"component_inputs,omitempty"`
+		StaticInputs []string `json:"static_inputs,omitempty"`
+		MemoryMB int `json:"memory_mb,omitempty"`
+		DiskMB int `json:"disk_mb,omitempty"`
+		MaxConcurrent int `json:"max_concurrency,omitempty"`
+		RequestTimeout string `json:"request_timeout,omitempty"`
+		IdleTimeout string `json:"idle_timeout,omitempty"`
+		Contract string `json:"contract,omitempty"`
+		Network string `json:"network,omitempty"`
+		ServerPaths []string `json:"server_paths,omitempty"`
+		ServerPages []string `json:"server_pages,omitempty"`
+		Schedule []schedule `json:"schedule,omitempty"`
+		Dev *appDevConfig `json:"dev,omitempty"`
+	}
+)
 
 const (
-	minScheduleInterval = time.Second
+	// defaultIdleTimeout mirrors the supervisor's scale-to-zero default for an omitted idle_timeout.
+	defaultIdleTimeout = 10 * time.Minute
 	maxScheduleInterval = 24 * time.Hour
 	maxServerPaths = 32
+	minScheduleInterval = time.Second
 )
+
+// defaultSupervisorProxy lists the supervisor-owned app-host routes the Vite dev server must forward in addition to the app API.
+var defaultSupervisorProxy = []string{"/v1/events", "/_wt/blobs", "/_wt/identity"}
+
+// validAppRelative keeps dev paths inside the app directory.
+func validAppRelative(value string) bool {
+	if value == "" {
+		return true
+	}
+
+	if filepath.IsAbs(value) {
+		return false
+	}
+
+	clean := filepath.Clean(value)
+
+	return clean != ".." && !strings.HasPrefix(clean, ".."+string(filepath.Separator))
+}
+
+// validInputPath accepts a relative build input, including a sibling SDK, but rejects the app root and absolute paths.
+func validInputPath(value string) bool {
+	value = strings.TrimSpace(value)
+
+	if value == "" || filepath.IsAbs(value) || strings.HasPrefix(value, "~") {
+		return false
+	}
+
+	clean := filepath.Clean(value)
+
+	return clean != "." && clean != ".." && clean != string(filepath.Separator)
+}
 
 // validName reports whether name is a lowercase DNS label no longer than 63 characters.
 func validName(name string) bool {
@@ -83,6 +118,96 @@ func validName(name string) bool {
 	}
 
 	return true
+}
+
+// validateDevPrefixes checks absolute proxy prefixes and rejects traversal.
+func validateDevPrefixes(name string, prefixes []string) error {
+	for _, prefix := range prefixes {
+		if !strings.HasPrefix(prefix, "/") || strings.Contains(prefix, "..") {
+			return fmt.Errorf("%s %q must be an absolute path prefix such as /api", name, prefix)
+		}
+	}
+
+	return nil
+}
+
+// normaliseDevConfig validates dev paths and fills the default proxy prefixes.
+func normaliseDevConfig(dev *appDevConfig) error {
+	if !validAppRelative(dev.Web) {
+		return fmt.Errorf("dev.web %q must stay inside the app directory", dev.Web)
+	}
+
+	for _, path := range dev.Watch {
+		if !validAppRelative(path) {
+			return fmt.Errorf("dev.watch %q must stay inside the app directory", path)
+		}
+	}
+
+	if len(dev.Proxy) == 0 {
+		dev.Proxy = []string{"/api"}
+	}
+
+	if dev.SupervisorProxy == nil {
+		dev.SupervisorProxy = append([]string(nil), defaultSupervisorProxy...)
+	}
+
+	if err := validateDevPrefixes("dev.proxy", dev.Proxy); err != nil {
+		return err
+	}
+
+	if err := validateDevPrefixes("dev.supervisor_proxy", dev.SupervisorProxy); err != nil {
+		return err
+	}
+
+	if dev.Port < 0 || dev.Port > 65535 {
+		return errors.New("dev.port must be between 1 and 65535, or 0 for a free port")
+	}
+
+	return nil
+}
+
+// validateIdleTimeout checks the optional scale-to-zero delay before the supervisor sees the bundle.
+func validateIdleTimeout(value string) error {
+	value = strings.TrimSpace(value)
+
+	switch {
+	case value == "", value == "0", strings.EqualFold(value, "none"), strings.EqualFold(value, "off"):
+		return nil
+	}
+
+	if timeout, err := time.ParseDuration(value); err != nil || timeout < 10*time.Second || timeout > 24*time.Hour {
+		return fmt.Errorf("idle_timeout %q must be a duration between 10s and 24h, or 0/none/off to disable", value)
+	}
+
+	return nil
+}
+
+// validateServerPaths checks a field of absolute path prefixes, such as runtime-owned server paths or component-selected pages.
+func validateServerPaths(field string, paths []string) error {
+	if len(paths) > maxServerPaths {
+		return fmt.Errorf("%s must contain at most %d prefixes", field, maxServerPaths)
+	}
+
+	for _, raw := range paths {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			return fmt.Errorf("%s must not contain an empty prefix", field)
+		}
+
+		if !strings.HasPrefix(value, "/") {
+			return fmt.Errorf("%s: %q must start with /", field, value)
+		}
+
+		if strings.ContainsAny(value, "?#\\\x00\t\r\n") {
+			return fmt.Errorf("%s: %q contains a query, fragment, backslash or whitespace", field, value)
+		}
+
+		if clean := path.Clean(value); clean != value && clean != strings.TrimSuffix(value, "/") {
+			return fmt.Errorf("%s: %q must be a clean absolute path", field, value)
+		}
+	}
+
+	return nil
 }
 
 // readManifest loads and validates app.json, defaulting the name to the directory name.
@@ -151,8 +276,7 @@ func readManifest(dir string) (manifest, error) {
 		}
 
 		if entry.Timeout != "" {
-			timeout, err := time.ParseDuration(entry.Timeout)
-			if err != nil || timeout < minScheduleInterval || timeout > maxScheduleInterval {
+			if timeout, err := time.ParseDuration(entry.Timeout); err != nil || timeout < minScheduleInterval || timeout > maxScheduleInterval {
 				return m, fmt.Errorf("schedule[%d]: timeout %q must be a duration between %s and %s", i, entry.Timeout, minScheduleInterval, maxScheduleInterval)
 			}
 		}
@@ -165,128 +289,4 @@ func readManifest(dir string) (manifest, error) {
 	}
 
 	return m, nil
-}
-
-// defaultIdleTimeout mirrors the supervisor's scale-to-zero default for an omitted idle_timeout.
-const defaultIdleTimeout = 10 * time.Minute
-
-// validateIdleTimeout checks the optional scale-to-zero delay before the supervisor sees the bundle.
-func validateIdleTimeout(value string) error {
-	value = strings.TrimSpace(value)
-	switch {
-	case value == "", value == "0", strings.EqualFold(value, "none"), strings.EqualFold(value, "off"):
-		return nil
-	}
-
-	timeout, err := time.ParseDuration(value)
-	if err != nil || timeout < 10*time.Second || timeout > 24*time.Hour {
-		return fmt.Errorf("idle_timeout %q must be a duration between 10s and 24h, or 0/none/off to disable", value)
-	}
-
-	return nil
-}
-
-// validateServerPaths checks a field of absolute path prefixes, such as runtime-owned server paths or component-selected pages.
-func validateServerPaths(field string, paths []string) error {
-	if len(paths) > maxServerPaths {
-		return fmt.Errorf("%s must contain at most %d prefixes", field, maxServerPaths)
-	}
-
-	for _, raw := range paths {
-		value := strings.TrimSpace(raw)
-		if value == "" {
-			return fmt.Errorf("%s must not contain an empty prefix", field)
-		}
-
-		if !strings.HasPrefix(value, "/") {
-			return fmt.Errorf("%s: %q must start with /", field, value)
-		}
-
-		if strings.ContainsAny(value, "?#\\\x00\t\r\n") {
-			return fmt.Errorf("%s: %q contains a query, fragment, backslash or whitespace", field, value)
-		}
-
-		clean := path.Clean(value)
-		if clean != value && clean != strings.TrimSuffix(value, "/") {
-			return fmt.Errorf("%s: %q must be a clean absolute path", field, value)
-		}
-	}
-
-	return nil
-}
-
-// validAppRelative keeps dev paths inside the app directory.
-func validAppRelative(value string) bool {
-	if value == "" {
-		return true
-	}
-
-	if filepath.IsAbs(value) {
-		return false
-	}
-
-	clean := filepath.Clean(value)
-
-	return clean != ".." && !strings.HasPrefix(clean, ".."+string(filepath.Separator))
-}
-
-// validInputPath accepts a relative build input, including a sibling SDK, but rejects the app root and absolute paths.
-func validInputPath(value string) bool {
-	value = strings.TrimSpace(value)
-	if value == "" || filepath.IsAbs(value) || strings.HasPrefix(value, "~") {
-		return false
-	}
-
-	clean := filepath.Clean(value)
-
-	return clean != "." && clean != ".." && clean != string(filepath.Separator)
-}
-
-// defaultSupervisorProxy lists the supervisor-owned app-host routes the Vite dev server must forward in addition to the app API.
-var defaultSupervisorProxy = []string{"/v1/events", "/_wt/blobs", "/_wt/identity"}
-
-// normaliseDevConfig validates dev paths and fills the default proxy prefixes.
-func normaliseDevConfig(dev *appDevConfig) error {
-	if !validAppRelative(dev.Web) {
-		return fmt.Errorf("dev.web %q must stay inside the app directory", dev.Web)
-	}
-
-	for _, path := range dev.Watch {
-		if !validAppRelative(path) {
-			return fmt.Errorf("dev.watch %q must stay inside the app directory", path)
-		}
-	}
-
-	if len(dev.Proxy) == 0 {
-		dev.Proxy = []string{"/api"}
-	}
-
-	if dev.SupervisorProxy == nil {
-		dev.SupervisorProxy = append([]string(nil), defaultSupervisorProxy...)
-	}
-
-	if err := validateDevPrefixes("dev.proxy", dev.Proxy); err != nil {
-		return err
-	}
-
-	if err := validateDevPrefixes("dev.supervisor_proxy", dev.SupervisorProxy); err != nil {
-		return err
-	}
-
-	if dev.Port < 0 || dev.Port > 65535 {
-		return errors.New("dev.port must be between 1 and 65535, or 0 for a free port")
-	}
-
-	return nil
-}
-
-// validateDevPrefixes checks absolute proxy prefixes and rejects traversal.
-func validateDevPrefixes(name string, prefixes []string) error {
-	for _, prefix := range prefixes {
-		if !strings.HasPrefix(prefix, "/") || strings.Contains(prefix, "..") {
-			return fmt.Errorf("%s %q must be an absolute path prefix such as /api", name, prefix)
-		}
-	}
-
-	return nil
 }

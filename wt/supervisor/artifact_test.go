@@ -12,23 +12,399 @@ import (
 	"time"
 )
 
+func TestArtifactMatchesCPU(t *testing.T) {
+	base := artifactInfo{
+		Target: "x86_64-test",
+		Epoch: true,
+		WasmSHA256: "wasm",
+		CPU: artifactCPUFeatures,
+	}
+	if !artifactMatches(base, base) {
+		t.Error("identical artifacts did not match")
+	}
+
+	native := base
+	native.CPU = "native"
+
+	if artifactMatches(native, base) {
+		t.Error("a different CPU feature policy matched")
+	}
+
+	legacy := base
+	legacy.CPU = ""
+
+	if artifactMatches(legacy, base) {
+		t.Error("an artifact without a CPU field matched")
+	}
+}
+
+func TestReadArtifactRejectsInvalidJSON(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(dir, artifactName), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := readArtifact(dir); err == nil || !strings.Contains(err.Error(), artifactName) {
+		t.Errorf("readArtifact error = %v", err)
+	}
+}
+
+func TestRuntimeRelease(t *testing.T) {
+	cases := map[string]string{
+		"v50.0.0": "50.0.0",
+		"wasmtime 50.0.0": "50.0.0",
+		"wasmtime 50.0.0 (ebe5e8df1 2026-10-20)": "50.0.0",
+		"wasmtime-cli 51.2.3": "51.2.3",
+	}
+
+	for input, want := range cases {
+		if got := runtimeRelease(input); got != want {
+			t.Errorf("runtimeRelease(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func artifactSupervisorWithCache(t *testing.T, compiler, cache string) *supervisor {
+	t.Helper()
+	return &supervisor{
+		cfg: config{
+			stateDir: t.TempDir(),
+			cacheDir: cache,
+			cacheMaxBytes: defaultCacheMaxBytes,
+			wasmtime: compiler,
+			wasmtimeCompiler: compiler,
+			wasmtimeTarget: "x86_64-test",
+		},
+	}
+}
+
+func TestPruneArtifactCacheRemovesOldestAndKeepsNewEntry(t *testing.T) {
+	cache := t.TempDir()
+	dir := filepath.Join(cache, "cwasm")
+
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now()
+
+	for i, name := range []string{"oldest.cwasm", "middle.cwasm", "newest.cwasm"} {
+		path := filepath.Join(dir, name)
+
+		if err := os.WriteFile(path, []byte("0123456789"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		stamp := now.Add(time.Duration(i-2) * time.Hour)
+
+		if err := os.Chtimes(path, stamp, stamp); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	s := artifactSupervisorWithCache(t, "wasmtime", cache)
+	s.cfg.cacheMaxBytes = 25
+	keep := filepath.Join(dir, "newest.cwasm")
+
+	s.pruneArtifactCache(keep)
+	if _, err := os.Stat(keep); err != nil {
+		t.Errorf("new cache entry was pruned: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "oldest.cwasm")); !os.IsNotExist(err) {
+		t.Errorf("oldest cache entry still exists: %v", err)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(entries) != 2 {
+		t.Errorf("cache entries = %d, want the two newest after pruning", len(entries))
+	}
+}
+
+func artifactSupervisor(t *testing.T, compiler string) *supervisor {
+	t.Helper()
+	return artifactSupervisorWithCache(t, compiler, t.TempDir())
+}
+
+func boolText(value bool) string {
+	if value {
+		return "yes"
+	}
+
+	return "no"
+}
+
+func compileCount(t *testing.T, counter string) int {
+	t.Helper()
+
+	data, err := os.ReadFile(counter)
+	if os.IsNotExist(err) {
+		return 0
+	}
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return len(data)
+}
+
 // digestText returns the content digest the supervisor uses for an in-memory wasm.
 func digestText(body string) string {
 	sum := sha256.Sum256([]byte(body))
+
 	return hex.EncodeToString(sum[:])
 }
 
-// writeCompiler installs a fake wasmtime that reports a version and writes a new artifact on compile.
-func writeCompiler(t *testing.T, version, output string, fail bool) string {
+func TestArtifactKeyIncludesCPUFeatures(t *testing.T) {
+	key := artifactKey{
+		WasmSHA256: digestText("wasm"),
+		Wasmtime: "wasmtime-cli 51.0.0",
+		Target: "x86_64-test",
+		CPU: artifactCPUFeatures,
+		Epoch: true,
+	}
+	other := key
+	other.CPU = "native-avx2"
+
+	if key.digest() == other.digest() {
+		t.Error("artifact key does not change with the CPU feature policy")
+	}
+}
+
+func TestArtifactKeyIncludesEpoch(t *testing.T) {
+	key := artifactKey{
+		WasmSHA256: digestText("wasm"),
+		Wasmtime: "wasmtime-cli 51.0.0",
+		Target: "x86_64-test",
+		CPU: artifactCPUFeatures,
+		Epoch: true,
+	}
+	other := key
+	other.Epoch = false
+
+	if key.digest() == other.digest() {
+		t.Error("artifact key does not change with the epoch setting")
+	}
+}
+
+func TestArtifactMatches(t *testing.T) {
+	digest := digestText("wasm")
+	current := artifactInfo{
+		Wasmtime: "wasmtime-cli 51.0.0",
+		Target: "x86_64-test",
+		Epoch: true,
+		WasmSHA256: digest,
+	}
+	cases := []struct {
+		name string
+		recorded, current artifactInfo
+		want bool
+	}{
+		{"same", current, current, true},
+		{
+			"older runtime",
+			artifactInfo{
+				Wasmtime: "wasmtime-cli 50.0.0",
+				Target: "x86_64-test",
+				Epoch: true,
+				WasmSHA256: digest,
+			},
+			current,
+			false,
+		},
+		{
+			"other target",
+			artifactInfo{
+				Wasmtime: "wasmtime-cli 51.0.0",
+				Target: "aarch64-test",
+				Epoch: true,
+				WasmSHA256: digest,
+			},
+			current,
+			false,
+		},
+		{
+			"no digest",
+			artifactInfo{
+				Wasmtime: "wasmtime-cli 51.0.0",
+				Target: "x86_64-test",
+				Epoch: true,
+			},
+			current,
+			false,
+		},
+		{
+			"other wasm",
+			artifactInfo{
+				Wasmtime: "wasmtime-cli 51.0.0",
+				Target: "x86_64-test",
+				Epoch: true,
+				WasmSHA256: digestText("other"),
+			},
+			current,
+			false,
+		},
+		{
+			"no epoch",
+			artifactInfo{
+				Wasmtime: "wasmtime-cli 51.0.0",
+				Target: "x86_64-test",
+				WasmSHA256: digest,
+			},
+			current,
+			false,
+		},
+		{
+			"unknown recorded version",
+			artifactInfo{
+				Target: "x86_64-test",
+				Epoch: true,
+				WasmSHA256: digest,
+			},
+			current,
+			false,
+		},
+		{
+			"unknown current version",
+			artifactInfo{
+				Wasmtime: "wasmtime-cli 50.0.0",
+				Target: "x86_64-test",
+				Epoch: true,
+				WasmSHA256: digest,
+			},
+			artifactInfo{
+				Target: "x86_64-test",
+				Epoch: true,
+				WasmSHA256: digest,
+			},
+			false,
+		},
+	}
+
+	for _, tc := range cases {
+		if got := artifactMatches(tc.recorded, tc.current); got != tc.want {
+			t.Errorf("%s: artifactMatches = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestCachedArtifactIgnoresEmptyFile(t *testing.T) {
+	cache := t.TempDir()
+	s := artifactSupervisorWithCache(t, "wasmtime", cache)
+	key := artifactKey{
+		WasmSHA256: digestText("wasm"),
+		Wasmtime: "wasmtime-cli 51.0.0",
+		Target: "x86_64-test",
+		CPU: artifactCPUFeatures,
+		Epoch: true,
+	}
+	path := s.artifactCachePath(key)
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, ok := s.cachedArtifact(key); ok {
+		t.Error("empty cache file was treated as a cache hit")
+	}
+}
+
+func writeBundleDir(t *testing.T, wasm, cwasm, artifact string) string {
 	t.Helper()
-	return writeCompilerWithCounter(t, version, output, "", fail)
+
+	dir := t.TempDir()
+
+	for name, body := range map[string]string{"main.cwasm": cwasm, "main.wasm": wasm, artifactName: artifact} {
+		if body == "" {
+			continue
+		}
+
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	return dir
+}
+
+func TestCorrectArtifactEpoch(t *testing.T) {
+	dir := writeBundleDir(t, "wasm", "cwasm", "")
+	s := artifactSupervisor(t, "wasmtime")
+	a := &app{
+		dir: dir,
+	}
+
+	s.correctArtifactEpoch(a, true)
+	if !a.wasmEpoch {
+		t.Error("app did not record the corrected epoch setting")
+	}
+
+	info, err := readArtifact(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !info.Epoch || info.WasmSHA256 != digestText("wasm") {
+		t.Errorf("artifact = %+v, want epoch support and the wasm digest", info)
+	}
+}
+
+func TestEnsureArtifactUsesExistingCwasmWithoutCompiler(t *testing.T) {
+	dir := t.TempDir()
+	compiler := filepath.Join(dir, "wasmtime")
+	script := `#!/bin/sh
+case "$1" in
+--version)
+  echo "wasmtime-cli 51.0.0"
+  ;;
+compile)
+  exit 1
+  ;;
+esac
+`
+
+	if err := os.WriteFile(compiler, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	wasm := "wasm"
+	artifact := fmt.Sprintf(`{"wasmtime":"wasmtime-cli 51.0.0","target":"x86_64-test","epoch_interruption":true,"wasm_sha256":"%s","wasm_bytes":%d,"cpu":"baseline"}`, digestText(wasm), len(wasm))
+	bundle := writeBundleDir(t, wasm, "current", artifact)
+	epoch, err := artifactSupervisor(t, compiler).ensureArtifact(bundle, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !epoch {
+		t.Error("existing epoch cwasm was not kept")
+	}
+
+	cwasm, err := os.ReadFile(filepath.Join(bundle, "main.cwasm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(cwasm) != "current" {
+		t.Errorf("main.cwasm = %q, want the existing artifact", cwasm)
+	}
 }
 
 // writeCompilerWithCounter also counts compile calls, so a test can prove a cache hit skipped the compiler.
 func writeCompilerWithCounter(t *testing.T, version, output, counter string, fail bool) string {
 	t.Helper()
 
-	record := ""
+	var record string
+
 	if counter != "" {
 		record = "  printf x >> '" + counter + "'\n"
 	}
@@ -59,8 +435,8 @@ compile)
   ;;
 esac
 `
-
 	path := filepath.Join(t.TempDir(), "wasmtime")
+
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -68,219 +444,34 @@ esac
 	return path
 }
 
-func boolText(value bool) string {
-	if value {
-		return "yes"
-	}
-
-	return "no"
-}
-
-func artifactSupervisor(t *testing.T, compiler string) *supervisor {
-	t.Helper()
-	return artifactSupervisorWithCache(t, compiler, t.TempDir())
-}
-
-func artifactSupervisorWithCache(t *testing.T, compiler, cache string) *supervisor {
-	t.Helper()
-
-	return &supervisor{cfg: config{
-		stateDir: t.TempDir(),
-		cacheDir: cache,
-		cacheMaxBytes: defaultCacheMaxBytes,
-		wasmtime: compiler,
-		wasmtimeCompiler: compiler,
-		wasmtimeTarget: "x86_64-test",
-	}}
-}
-
-func writeBundleDir(t *testing.T, wasm, cwasm, artifact string) string {
-	t.Helper()
-	dir := t.TempDir()
-
-	for name, body := range map[string]string{"main.wasm": wasm, "main.cwasm": cwasm, artifactName: artifact} {
-		if body == "" {
-			continue
-		}
-
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	return dir
-}
-
-func compileCount(t *testing.T, counter string) int {
-	t.Helper()
-
-	data, err := os.ReadFile(counter)
-	if os.IsNotExist(err) {
-		return 0
-	}
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	return len(data)
-}
-
-func TestCorrectArtifactEpoch(t *testing.T) {
-	dir := writeBundleDir(t, "wasm", "cwasm", "")
-	s := artifactSupervisor(t, "wasmtime")
-
-	a := &app{dir: dir}
-	s.correctArtifactEpoch(a, true)
-
-	if !a.wasmEpoch {
-		t.Error("app did not record the corrected epoch setting")
-	}
-
-	info, err := readArtifact(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if !info.Epoch || info.WasmSHA256 != digestText("wasm") {
-		t.Errorf("artifact = %+v, want epoch support and the wasm digest", info)
-	}
-}
-
-func TestEnsureArtifactRebuildsStaleArtifact(t *testing.T) {
-	compiler := writeCompiler(t, "wasmtime-cli 51.0.0", "rebuilt", false)
-	dir := writeBundleDir(t, "wasm", "old", `{"wasmtime":"wasmtime-cli 50.0.0","target":"x86_64-test"}`)
-
-	epoch, err := artifactSupervisor(t, compiler).ensureArtifact(dir, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if !epoch {
-		t.Error("rebuild did not report epoch support")
-	}
-
-	cwasm, err := os.ReadFile(filepath.Join(dir, "main.cwasm"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if string(cwasm) != "rebuilt" {
-		t.Errorf("main.cwasm = %q, want rebuilt", cwasm)
-	}
-
-	artifact, err := readArtifact(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if artifact.Wasmtime != "wasmtime-cli 51.0.0" || artifact.Target != "x86_64-test" || artifact.CompiledAt.IsZero() || !artifact.Epoch {
-		t.Errorf("artifact = %+v", artifact)
-	}
-
-	if artifact.WasmSHA256 != digestText("wasm") || artifact.WasmBytes != int64(len("wasm")) {
-		t.Errorf("artifact wasm metadata = %+v, want digest %s and %d bytes", artifact, digestText("wasm"), len("wasm"))
-	}
-}
-
-func TestEnsureArtifactKeepsMatchingArtifact(t *testing.T) {
+func TestEnsureArtifactCacheInvalidatesOnRuntimeAndTarget(t *testing.T) {
 	counter := filepath.Join(t.TempDir(), "compiles")
-	compiler := writeCompilerWithCounter(t, "wasmtime-cli 51.0.0", "rebuilt", counter, false)
-	wasm := "wasm"
-	artifact := fmt.Sprintf(`{"wasmtime":"wasmtime-cli 51.0.0","target":"x86_64-test","epoch_interruption":true,"wasm_sha256":"%s","wasm_bytes":%d,"cpu":"baseline"}`, digestText(wasm), len(wasm))
-	dir := writeBundleDir(t, wasm, "current", artifact)
+	cache := t.TempDir()
+	oldCompiler := writeCompilerWithCounter(t, "wasmtime-cli 50.0.0", "old", counter, false)
+	newCompiler := writeCompilerWithCounter(t, "wasmtime-cli 51.0.0", "new", counter, false)
 
-	epoch, err := artifactSupervisor(t, compiler).ensureArtifact(dir, true)
-	if err != nil {
+	if _, err := artifactSupervisorWithCache(t, oldCompiler, cache).ensureArtifact(writeBundleDir(t, "wasm", "", ""), false); err != nil {
 		t.Fatal(err)
 	}
 
-	if !epoch {
-		t.Error("matching epoch artifact was not reported")
-	}
-
-	if got := compileCount(t, counter); got != 0 {
-		t.Errorf("compile calls = %d, want 0 for a matching artifact", got)
-	}
-
-	cwasm, err := os.ReadFile(filepath.Join(dir, "main.cwasm"))
-	if err != nil {
+	if _, err := artifactSupervisorWithCache(t, newCompiler, cache).ensureArtifact(writeBundleDir(t, "wasm", "", ""), false); err != nil {
 		t.Fatal(err)
 	}
 
-	if string(cwasm) != "current" {
-		t.Errorf("main.cwasm = %q, want the existing artifact", cwasm)
+	if got := compileCount(t, counter); got != 2 {
+		t.Fatalf("compile calls = %d, want a runtime version change to invalidate the cache", got)
 	}
-}
 
-func TestRuntimeRelease(t *testing.T) {
-	cases := map[string]string{
-		"wasmtime 50.0.0": "50.0.0",
-		"wasmtime-cli 51.2.3": "51.2.3",
-		"wasmtime 50.0.0 (ebe5e8df1 2026-10-20)": "50.0.0",
-		"v50.0.0": "50.0.0",
-	}
-	for input, want := range cases {
-		if got := runtimeRelease(input); got != want {
-			t.Errorf("runtimeRelease(%q) = %q, want %q", input, got, want)
-		}
-	}
-}
+	otherTarget := artifactSupervisorWithCache(t, newCompiler, cache)
+	otherTarget.cfg.wasmtimeTarget = "aarch64-test"
+	dir := writeBundleDir(t, "wasm", "", "")
 
-func TestEnsureArtifactMatchesReleaseWithBuildMetadata(t *testing.T) {
-	counter := filepath.Join(t.TempDir(), "compiles")
-	compiler := writeCompilerWithCounter(t, "wasmtime-cli 51.0.0", "rebuilt", counter, false)
-	wasm := "wasm"
-	artifact := fmt.Sprintf(`{"wasmtime":"wasmtime-cli 51.0.0 (abc123 2026-10-20)","target":"x86_64-test","epoch_interruption":true,"wasm_sha256":"%s","wasm_bytes":%d,"cpu":"baseline"}`, digestText(wasm), len(wasm))
-	dir := writeBundleDir(t, wasm, "current", artifact)
-
-	if _, err := artifactSupervisor(t, compiler).ensureArtifact(dir, true); err != nil {
+	if _, err := otherTarget.ensureArtifact(dir, false); err != nil {
 		t.Fatal(err)
 	}
 
-	if got := compileCount(t, counter); got != 0 {
-		t.Errorf("compile calls = %d, want 0 for the same release", got)
-	}
-}
-
-func TestEnsureArtifactUsesExistingCwasmWithoutCompiler(t *testing.T) {
-	dir := t.TempDir()
-	compiler := filepath.Join(dir, "wasmtime")
-
-	script := `#!/bin/sh
-case "$1" in
---version)
-  echo "wasmtime-cli 51.0.0"
-  ;;
-compile)
-  exit 1
-  ;;
-esac
-`
-	if err := os.WriteFile(compiler, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	wasm := "wasm"
-	artifact := fmt.Sprintf(`{"wasmtime":"wasmtime-cli 51.0.0","target":"x86_64-test","epoch_interruption":true,"wasm_sha256":"%s","wasm_bytes":%d,"cpu":"baseline"}`, digestText(wasm), len(wasm))
-	bundle := writeBundleDir(t, wasm, "current", artifact)
-
-	epoch, err := artifactSupervisor(t, compiler).ensureArtifact(bundle, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if !epoch {
-		t.Error("existing epoch cwasm was not kept")
-	}
-
-	cwasm, err := os.ReadFile(filepath.Join(bundle, "main.cwasm"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if string(cwasm) != "current" {
-		t.Errorf("main.cwasm = %q, want the existing artifact", cwasm)
+	if got := compileCount(t, counter); got != 3 {
+		t.Errorf("compile calls = %d, want a target change to invalidate the cache", got)
 	}
 }
 
@@ -290,7 +481,6 @@ func TestEnsureArtifactIgnoresLegacyArtifactWithoutDigest(t *testing.T) {
 	cache := t.TempDir()
 	dir := writeBundleDir(t, "wasm", "legacy", `{"wasmtime":"wasmtime-cli 51.0.0","target":"x86_64-test","epoch_interruption":true}`)
 	s := artifactSupervisorWithCache(t, compiler, cache)
-
 	epoch, err := s.ensureArtifact(dir, true)
 	if err != nil {
 		t.Fatal(err)
@@ -323,29 +513,112 @@ func TestEnsureArtifactIgnoresLegacyArtifactWithoutDigest(t *testing.T) {
 	}
 }
 
-func TestCachedArtifactIgnoresEmptyFile(t *testing.T) {
+func TestEnsureArtifactKeepsMatchingArtifact(t *testing.T) {
+	counter := filepath.Join(t.TempDir(), "compiles")
+	compiler := writeCompilerWithCounter(t, "wasmtime-cli 51.0.0", "rebuilt", counter, false)
+	wasm := "wasm"
+	artifact := fmt.Sprintf(`{"wasmtime":"wasmtime-cli 51.0.0","target":"x86_64-test","epoch_interruption":true,"wasm_sha256":"%s","wasm_bytes":%d,"cpu":"baseline"}`, digestText(wasm), len(wasm))
+	dir := writeBundleDir(t, wasm, "current", artifact)
+	epoch, err := artifactSupervisor(t, compiler).ensureArtifact(dir, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !epoch {
+		t.Error("matching epoch artifact was not reported")
+	}
+
+	if got := compileCount(t, counter); got != 0 {
+		t.Errorf("compile calls = %d, want 0 for a matching artifact", got)
+	}
+
+	cwasm, err := os.ReadFile(filepath.Join(dir, "main.cwasm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(cwasm) != "current" {
+		t.Errorf("main.cwasm = %q, want the existing artifact", cwasm)
+	}
+}
+
+func TestEnsureArtifactMatchesReleaseWithBuildMetadata(t *testing.T) {
+	counter := filepath.Join(t.TempDir(), "compiles")
+	compiler := writeCompilerWithCounter(t, "wasmtime-cli 51.0.0", "rebuilt", counter, false)
+	wasm := "wasm"
+	artifact := fmt.Sprintf(`{"wasmtime":"wasmtime-cli 51.0.0 (abc123 2026-10-20)","target":"x86_64-test","epoch_interruption":true,"wasm_sha256":"%s","wasm_bytes":%d,"cpu":"baseline"}`, digestText(wasm), len(wasm))
+	dir := writeBundleDir(t, wasm, "current", artifact)
+
+	if _, err := artifactSupervisor(t, compiler).ensureArtifact(dir, true); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := compileCount(t, counter); got != 0 {
+		t.Errorf("compile calls = %d, want 0 for the same release", got)
+	}
+}
+
+func TestEnsureArtifactReusesCache(t *testing.T) {
+	counter := filepath.Join(t.TempDir(), "compiles")
+	compiler := writeCompilerWithCounter(t, "wasmtime-cli 51.0.0", "compiled", counter, false)
 	cache := t.TempDir()
-	s := artifactSupervisorWithCache(t, "wasmtime", cache)
-	key := artifactKey{WasmSHA256: digestText("wasm"), Wasmtime: "wasmtime-cli 51.0.0", Target: "x86_64-test", CPU: artifactCPUFeatures, Epoch: true}
+	first := writeBundleDir(t, "wasm", "", "")
 
-	path := s.artifactCachePath(key)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if _, err := artifactSupervisorWithCache(t, compiler, cache).ensureArtifact(first, false); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(path, nil, 0o644); err != nil {
+	if got := compileCount(t, counter); got != 1 {
+		t.Fatalf("compile calls = %d, want 1 after the first build", got)
+	}
+
+	second := writeBundleDir(t, "wasm", "", "")
+
+	if _, err := artifactSupervisorWithCache(t, compiler, cache).ensureArtifact(second, false); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, _, ok := s.cachedArtifact(key); ok {
-		t.Error("empty cache file was treated as a cache hit")
+	if got := compileCount(t, counter); got != 1 {
+		t.Errorf("compile calls = %d, want the cache hit to skip compiling", got)
+	}
+
+	cwasm, err := os.ReadFile(filepath.Join(second, "main.cwasm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(cwasm) != "compiled" {
+		t.Errorf("main.cwasm = %q, want the cached artifact", cwasm)
+	}
+
+	artifact, err := readArtifact(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if artifact.WasmSHA256 != digestText("wasm") || artifact.WasmBytes != int64(len("wasm")) {
+		t.Errorf("artifact = %+v, want wasm digest and size", artifact)
+	}
+}
+
+// writeCompiler installs a fake wasmtime that reports a version and writes a new artifact on compile.
+func writeCompiler(t *testing.T, version, output string, fail bool) string {
+	t.Helper()
+	return writeCompilerWithCounter(t, version, output, "", fail)
+}
+
+func TestEnsureArtifactFailsWithoutCompilerOrCwasm(t *testing.T) {
+	compiler := writeCompiler(t, "wasmtime-cli 51.0.0", "", true)
+	dir := writeBundleDir(t, "wasm", "", "")
+
+	if _, err := artifactSupervisor(t, compiler).ensureArtifact(dir, false); err == nil || !strings.Contains(err.Error(), "compile main.wasm") {
+		t.Errorf("ensureArtifact error = %v, want a compile failure", err)
 	}
 }
 
 func TestEnsureArtifactKeepsCwasmWithoutCompiler(t *testing.T) {
 	compiler := writeCompiler(t, "wasmtime-cli 51.0.0", "", true)
 	dir := writeBundleDir(t, "wasm", "old", `{"wasmtime":"wasmtime-cli 50.0.0","target":"x86_64-test"}`)
-
 	epoch, err := artifactSupervisor(t, compiler).ensureArtifact(dir, true)
 	if err != nil {
 		t.Fatal(err)
@@ -365,32 +638,11 @@ func TestEnsureArtifactKeepsCwasmWithoutCompiler(t *testing.T) {
 	}
 }
 
-func TestEnsureArtifactRejectsCwasmForDifferentWasm(t *testing.T) {
-	compiler := writeCompiler(t, "wasmtime-cli 51.0.0", "", true)
-	artifact := fmt.Sprintf(`{"wasmtime":"wasmtime-cli 51.0.0","target":"x86_64-test","epoch_interruption":true,"wasm_sha256":"%s"}`, digestText("other"))
-	dir := writeBundleDir(t, "wasm", "old", artifact)
-
-	_, err := artifactSupervisor(t, compiler).ensureArtifact(dir, false)
-	if err == nil || !strings.Contains(err.Error(), "not "+digestText("wasm")) {
-		t.Errorf("ensureArtifact error = %v, want a stale-wasm error", err)
-	}
-}
-
-func TestEnsureArtifactFailsWithoutCompilerOrCwasm(t *testing.T) {
-	compiler := writeCompiler(t, "wasmtime-cli 51.0.0", "", true)
-	dir := writeBundleDir(t, "wasm", "", "")
-
-	_, err := artifactSupervisor(t, compiler).ensureArtifact(dir, false)
-	if err == nil || !strings.Contains(err.Error(), "compile main.wasm") {
-		t.Errorf("ensureArtifact error = %v, want a compile failure", err)
-	}
-}
-
 func TestEnsureArtifactLegacyBundle(t *testing.T) {
 	// Bundles uploaded before main.wasm was kept still start from their cwasm.
 	compiler := writeCompiler(t, "wasmtime-cli 51.0.0", "rebuilt", false)
-
 	dir := writeBundleDir(t, "", "legacy", "")
+
 	if epoch, err := artifactSupervisor(t, compiler).ensureArtifact(dir, true); err != nil || epoch {
 		t.Errorf("legacy bundle = %v, %v; want no epoch and no error", epoch, err)
 	}
@@ -401,49 +653,11 @@ func TestEnsureArtifactLegacyBundle(t *testing.T) {
 	}
 }
 
-func TestArtifactMatches(t *testing.T) {
-	digest := digestText("wasm")
-	current := artifactInfo{Wasmtime: "wasmtime-cli 51.0.0", Target: "x86_64-test", Epoch: true, WasmSHA256: digest}
-
-	cases := []struct {
-		name string
-		recorded artifactInfo
-		current artifactInfo
-		want bool
-	}{
-		{"same", current, current, true},
-		{"older runtime", artifactInfo{Wasmtime: "wasmtime-cli 50.0.0", Target: "x86_64-test", Epoch: true, WasmSHA256: digest}, current, false},
-		{"other target", artifactInfo{Wasmtime: "wasmtime-cli 51.0.0", Target: "aarch64-test", Epoch: true, WasmSHA256: digest}, current, false},
-		{"no digest", artifactInfo{Wasmtime: "wasmtime-cli 51.0.0", Target: "x86_64-test", Epoch: true}, current, false},
-		{"other wasm", artifactInfo{Wasmtime: "wasmtime-cli 51.0.0", Target: "x86_64-test", Epoch: true, WasmSHA256: digestText("other")}, current, false},
-		{"no epoch", artifactInfo{Wasmtime: "wasmtime-cli 51.0.0", Target: "x86_64-test", WasmSHA256: digest}, current, false},
-		{"unknown recorded version", artifactInfo{Target: "x86_64-test", Epoch: true, WasmSHA256: digest}, current, false},
-		{"unknown current version", artifactInfo{Wasmtime: "wasmtime-cli 50.0.0", Target: "x86_64-test", Epoch: true, WasmSHA256: digest}, artifactInfo{Target: "x86_64-test", Epoch: true, WasmSHA256: digest}, false},
-	}
-	for _, tc := range cases {
-		if got := artifactMatches(tc.recorded, tc.current); got != tc.want {
-			t.Errorf("%s: artifactMatches = %v, want %v", tc.name, got, tc.want)
-		}
-	}
-}
-
-func TestReadArtifactRejectsInvalidJSON(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, artifactName), []byte("{"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := readArtifact(dir); err == nil || !strings.Contains(err.Error(), artifactName) {
-		t.Errorf("readArtifact error = %v", err)
-	}
-}
-
 func TestEnsureArtifactRebuildsForEpoch(t *testing.T) {
 	compiler := writeCompiler(t, "wasmtime-cli 51.0.0", "rebuilt", false)
 	// Matching runtime, target and wasm, but without the instrumentation a per-request timeout needs.
 	artifact := fmt.Sprintf(`{"wasmtime":"wasmtime-cli 51.0.0","target":"x86_64-test","wasm_sha256":"%s"}`, digestText("wasm"))
 	dir := writeBundleDir(t, "wasm", "old", artifact)
-
 	epoch, err := artifactSupervisor(t, compiler).ensureArtifact(dir, true)
 	if err != nil {
 		t.Fatal(err)
@@ -472,161 +686,47 @@ func TestEnsureArtifactRebuildsForEpoch(t *testing.T) {
 	}
 }
 
-func TestEnsureArtifactReusesCache(t *testing.T) {
-	counter := filepath.Join(t.TempDir(), "compiles")
-	compiler := writeCompilerWithCounter(t, "wasmtime-cli 51.0.0", "compiled", counter, false)
-	cache := t.TempDir()
-
-	first := writeBundleDir(t, "wasm", "", "")
-	if _, err := artifactSupervisorWithCache(t, compiler, cache).ensureArtifact(first, false); err != nil {
-		t.Fatal(err)
-	}
-
-	if got := compileCount(t, counter); got != 1 {
-		t.Fatalf("compile calls = %d, want 1 after the first build", got)
-	}
-
-	second := writeBundleDir(t, "wasm", "", "")
-	if _, err := artifactSupervisorWithCache(t, compiler, cache).ensureArtifact(second, false); err != nil {
-		t.Fatal(err)
-	}
-
-	if got := compileCount(t, counter); got != 1 {
-		t.Errorf("compile calls = %d, want the cache hit to skip compiling", got)
-	}
-
-	cwasm, err := os.ReadFile(filepath.Join(second, "main.cwasm"))
+func TestEnsureArtifactRebuildsStaleArtifact(t *testing.T) {
+	compiler := writeCompiler(t, "wasmtime-cli 51.0.0", "rebuilt", false)
+	dir := writeBundleDir(t, "wasm", "old", `{"wasmtime":"wasmtime-cli 50.0.0","target":"x86_64-test"}`)
+	epoch, err := artifactSupervisor(t, compiler).ensureArtifact(dir, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if string(cwasm) != "compiled" {
-		t.Errorf("main.cwasm = %q, want the cached artifact", cwasm)
+	if !epoch {
+		t.Error("rebuild did not report epoch support")
 	}
 
-	artifact, err := readArtifact(second)
+	cwasm, err := os.ReadFile(filepath.Join(dir, "main.cwasm"))
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	if string(cwasm) != "rebuilt" {
+		t.Errorf("main.cwasm = %q, want rebuilt", cwasm)
+	}
+
+	artifact, err := readArtifact(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if artifact.Wasmtime != "wasmtime-cli 51.0.0" || artifact.Target != "x86_64-test" || artifact.CompiledAt.IsZero() || !artifact.Epoch {
+		t.Errorf("artifact = %+v", artifact)
 	}
 
 	if artifact.WasmSHA256 != digestText("wasm") || artifact.WasmBytes != int64(len("wasm")) {
-		t.Errorf("artifact = %+v, want wasm digest and size", artifact)
+		t.Errorf("artifact wasm metadata = %+v, want digest %s and %d bytes", artifact, digestText("wasm"), len("wasm"))
 	}
 }
 
-func TestEnsureArtifactCacheInvalidatesOnRuntimeAndTarget(t *testing.T) {
-	counter := filepath.Join(t.TempDir(), "compiles")
-	cache := t.TempDir()
-	oldCompiler := writeCompilerWithCounter(t, "wasmtime-cli 50.0.0", "old", counter, false)
-	newCompiler := writeCompilerWithCounter(t, "wasmtime-cli 51.0.0", "new", counter, false)
+func TestEnsureArtifactRejectsCwasmForDifferentWasm(t *testing.T) {
+	compiler := writeCompiler(t, "wasmtime-cli 51.0.0", "", true)
+	artifact := fmt.Sprintf(`{"wasmtime":"wasmtime-cli 51.0.0","target":"x86_64-test","epoch_interruption":true,"wasm_sha256":"%s"}`, digestText("other"))
+	dir := writeBundleDir(t, "wasm", "old", artifact)
 
-	if _, err := artifactSupervisorWithCache(t, oldCompiler, cache).ensureArtifact(writeBundleDir(t, "wasm", "", ""), false); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := artifactSupervisorWithCache(t, newCompiler, cache).ensureArtifact(writeBundleDir(t, "wasm", "", ""), false); err != nil {
-		t.Fatal(err)
-	}
-
-	if got := compileCount(t, counter); got != 2 {
-		t.Fatalf("compile calls = %d, want a runtime version change to invalidate the cache", got)
-	}
-
-	otherTarget := artifactSupervisorWithCache(t, newCompiler, cache)
-	otherTarget.cfg.wasmtimeTarget = "aarch64-test"
-
-	dir := writeBundleDir(t, "wasm", "", "")
-	if _, err := otherTarget.ensureArtifact(dir, false); err != nil {
-		t.Fatal(err)
-	}
-
-	if got := compileCount(t, counter); got != 3 {
-		t.Errorf("compile calls = %d, want a target change to invalidate the cache", got)
-	}
-}
-
-func TestArtifactKeyIncludesEpoch(t *testing.T) {
-	key := artifactKey{WasmSHA256: digestText("wasm"), Wasmtime: "wasmtime-cli 51.0.0", Target: "x86_64-test", CPU: artifactCPUFeatures, Epoch: true}
-	other := key
-
-	other.Epoch = false
-	if key.digest() == other.digest() {
-		t.Error("artifact key does not change with the epoch setting")
-	}
-}
-
-func TestArtifactKeyIncludesCPUFeatures(t *testing.T) {
-	key := artifactKey{WasmSHA256: digestText("wasm"), Wasmtime: "wasmtime-cli 51.0.0", Target: "x86_64-test", CPU: artifactCPUFeatures, Epoch: true}
-	other := key
-
-	other.CPU = "native-avx2"
-	if key.digest() == other.digest() {
-		t.Error("artifact key does not change with the CPU feature policy")
-	}
-}
-
-func TestArtifactMatchesCPU(t *testing.T) {
-	base := artifactInfo{Target: "x86_64-test", CPU: artifactCPUFeatures, Epoch: true, WasmSHA256: "wasm"}
-	if !artifactMatches(base, base) {
-		t.Error("identical artifacts did not match")
-	}
-
-	native := base
-
-	native.CPU = "native"
-	if artifactMatches(native, base) {
-		t.Error("a different CPU feature policy matched")
-	}
-
-	legacy := base
-
-	legacy.CPU = ""
-	if artifactMatches(legacy, base) {
-		t.Error("an artifact without a CPU field matched")
-	}
-}
-
-func TestPruneArtifactCacheRemovesOldestAndKeepsNewEntry(t *testing.T) {
-	cache := t.TempDir()
-
-	dir := filepath.Join(cache, "cwasm")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	now := time.Now()
-
-	for i, name := range []string{"oldest.cwasm", "middle.cwasm", "newest.cwasm"} {
-		path := filepath.Join(dir, name)
-		if err := os.WriteFile(path, []byte("0123456789"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-
-		stamp := now.Add(time.Duration(i-2) * time.Hour)
-		if err := os.Chtimes(path, stamp, stamp); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	s := artifactSupervisorWithCache(t, "wasmtime", cache)
-	s.cfg.cacheMaxBytes = 25
-	keep := filepath.Join(dir, "newest.cwasm")
-	s.pruneArtifactCache(keep)
-
-	if _, err := os.Stat(keep); err != nil {
-		t.Errorf("new cache entry was pruned: %v", err)
-	}
-
-	if _, err := os.Stat(filepath.Join(dir, "oldest.cwasm")); !os.IsNotExist(err) {
-		t.Errorf("oldest cache entry still exists: %v", err)
-	}
-
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(entries) != 2 {
-		t.Errorf("cache entries = %d, want the two newest after pruning", len(entries))
+	if _, err := artifactSupervisor(t, compiler).ensureArtifact(dir, false); err == nil || !strings.Contains(err.Error(), "not "+digestText("wasm")) {
+		t.Errorf("ensureArtifact error = %v, want a stale-wasm error", err)
 	}
 }

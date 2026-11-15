@@ -14,13 +14,79 @@ type contentStore struct {
 	dir, tempDir string
 }
 
-func newContentStore(dir, tempDir string) *contentStore {
-	return &contentStore{dir: dir, tempDir: tempDir}
-}
-
 // path returns the location of one digest.
 func (c *contentStore) path(digest string) string {
 	return filepath.Join(c.dir, digest)
+}
+
+// adoptFile moves source into the store and reports its digest and size.
+// An identical blob already in the store is kept and the source is removed.
+func (c *contentStore) adoptFile(source string) (digest string, size int64, created bool, err error) {
+	info, err := os.Stat(source)
+	if err != nil {
+		return "", 0, false, err
+	}
+
+	digest, err = fileDigest(source)
+
+	if err != nil {
+		return "", 0, false, err
+	}
+
+	if err := os.MkdirAll(c.dir, 0o755); err != nil {
+		return "", 0, false, err
+	}
+
+	target := c.path(digest)
+
+	if existing, err := os.Stat(target); err == nil && existing.Size() == info.Size() {
+		_ = os.Remove(source)
+
+		return digest, info.Size(), false, nil
+	}
+
+	if err := os.Rename(source, target); err != nil {
+		return "", 0, false, err
+	}
+
+	return digest, info.Size(), true, nil
+}
+
+// link hardlinks a stored blob into dst, falling back to a copy across filesystems.
+func (c *contentStore) link(digest, dst string) error {
+	if err := os.Link(c.path(digest), dst); err == nil {
+		return nil
+	}
+
+	return copyFile(c.path(digest), dst)
+}
+
+// prune removes stored files that the retained metadata no longer references.
+func (c *contentStore) prune(referenced map[string]struct{}) error {
+	entries, err := os.ReadDir(c.dir)
+	if os.IsNotExist(err) {
+		return nil
+	}
+
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		if _, ok := referenced[entry.Name()]; ok {
+			continue
+		}
+
+		if err := os.Remove(filepath.Join(c.dir, entry.Name())); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // putFile copies source into the store unless an equally sized blob already exists.
@@ -40,6 +106,7 @@ func (c *contentStore) putFile(source string) (string, int64, bool, error) {
 	}
 
 	blob := c.path(digest)
+
 	if existing, err := os.Stat(blob); err == nil && existing.Size() == info.Size() {
 		return digest, info.Size(), false, nil
 	}
@@ -50,7 +117,6 @@ func (c *contentStore) putFile(source string) (string, int64, bool, error) {
 	}
 
 	name := temp.Name()
-
 	src, err := os.Open(source)
 	if err != nil {
 		_ = temp.Close()
@@ -60,8 +126,8 @@ func (c *contentStore) putFile(source string) (string, int64, bool, error) {
 	}
 
 	_, copyErr := io.Copy(temp, src)
-
 	closeErr := src.Close()
+
 	if copyErr == nil {
 		copyErr = temp.Close()
 	} else {
@@ -74,41 +140,13 @@ func (c *contentStore) putFile(source string) (string, int64, bool, error) {
 
 	if copyErr != nil {
 		_ = os.Remove(name)
+
 		return "", 0, false, copyErr
 	}
 
 	if err := os.Rename(name, blob); err != nil {
 		_ = os.Remove(name)
-		return "", 0, false, err
-	}
 
-	return digest, info.Size(), true, nil
-}
-
-// adoptFile moves source into the store and reports its digest and size.
-// An identical blob already in the store is kept and the source is removed.
-func (c *contentStore) adoptFile(source string) (digest string, size int64, created bool, err error) {
-	info, err := os.Stat(source)
-	if err != nil {
-		return "", 0, false, err
-	}
-
-	digest, err = fileDigest(source)
-	if err != nil {
-		return "", 0, false, err
-	}
-
-	if err := os.MkdirAll(c.dir, 0o755); err != nil {
-		return "", 0, false, err
-	}
-
-	target := c.path(digest)
-	if existing, err := os.Stat(target); err == nil && existing.Size() == info.Size() {
-		_ = os.Remove(source)
-		return digest, info.Size(), false, nil
-	}
-
-	if err := os.Rename(source, target); err != nil {
 		return "", 0, false, err
 	}
 
@@ -151,8 +189,8 @@ func (c *contentStore) putReader(src io.Reader, maxBytes int64) (digest string, 
 	}
 
 	digest = hex.EncodeToString(hash.Sum(nil))
-
 	target := c.path(digest)
+
 	if info, err := os.Stat(target); err == nil && info.Mode().IsRegular() {
 		cleanup()
 		return digest, written, false, false, nil
@@ -171,39 +209,9 @@ func (c *contentStore) putReader(src io.Reader, maxBytes int64) (digest string, 
 	return digest, written, true, false, nil
 }
 
-// link hardlinks a stored blob into dst, falling back to a copy across filesystems.
-func (c *contentStore) link(digest, dst string) error {
-	if err := os.Link(c.path(digest), dst); err == nil {
-		return nil
+func newContentStore(dir, tempDir string) *contentStore {
+	return &contentStore{
+		dir: dir,
+		tempDir: tempDir,
 	}
-
-	return copyFile(c.path(digest), dst)
-}
-
-// prune removes stored files that the retained metadata no longer references.
-func (c *contentStore) prune(referenced map[string]struct{}) error {
-	entries, err := os.ReadDir(c.dir)
-	if os.IsNotExist(err) {
-		return nil
-	}
-
-	if err != nil {
-		return err
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		if _, ok := referenced[entry.Name()]; ok {
-			continue
-		}
-
-		if err := os.Remove(filepath.Join(c.dir, entry.Name())); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }

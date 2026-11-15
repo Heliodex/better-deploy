@@ -1,13 +1,6 @@
 package main
 
-import (
-	"net/http"
-)
-
-// appRoutes returns the cached table that dispatches /apps/<name>/<action> requests.
-func (s *supervisor) appRoutes() *routeTable {
-	return s.appRoutesCache.get(s.buildAppRoutes)
-}
+import "net/http"
 
 // actionWithPrefix returns the parent action when rest is empty and parent/rest otherwise.
 func actionWithPrefix(prefix string) func(map[string]string) string {
@@ -20,9 +13,19 @@ func actionWithPrefix(prefix string) func(map[string]string) string {
 	}
 }
 
-// handleAppRootRoute adapts the app root handler to the route table.
-func (s *supervisor) handleAppRootRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
-	s.handleAppRoot(w, r, params["name"])
+// handleAppBlobGCRoute adapts the blob garbage collection handler.
+func (s *supervisor) handleAppBlobGCRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
+	s.handleAppBlobGC(w, r, params["name"])
+}
+
+// handleAppBlobRoute adapts the blob delete handler.
+func (s *supervisor) handleAppBlobRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
+	s.handleAppBlob(w, r, params["name"], params["digest"])
+}
+
+// handleAppBlobsRoute adapts the blob list handler.
+func (s *supervisor) handleAppBlobsRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
+	s.handleAppBlobs(w, r, params["name"])
 }
 
 // handleAppConfigRoute adapts the config handler to the route table.
@@ -30,34 +33,34 @@ func (s *supervisor) handleAppConfigRoute(w http.ResponseWriter, r *http.Request
 	s.handleAppConfig(w, r, params["name"])
 }
 
-// handleMaintenanceRoute adapts the maintenance handler to the route table.
-func (s *supervisor) handleMaintenanceRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
-	s.handleAppMaintenance(w, r, params["name"])
-}
-
-// handleSecretsRoute adapts the secrets handler to the route table.
-func (s *supervisor) handleSecretsRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
-	s.handleAppSecrets(w, r, params["name"], params["key"])
-}
-
-// handleJobsRoute adapts the job handler to the route table.
-func (s *supervisor) handleJobsRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
-	action := "jobs"
-	if params["rest"] != "" {
-		action += "/" + params["rest"]
-	}
-
-	s.handleAppJobs(w, r, params["name"], action)
+// handleAppRootRoute adapts the app root handler to the route table.
+func (s *supervisor) handleAppRootRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
+	s.handleAppRoot(w, r, params["name"])
 }
 
 // handleBackupsRoute adapts the backup handler to the route table.
 func (s *supervisor) handleBackupsRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
-	rest := ""
+	var rest string
+
 	if params["rest"] != "" {
 		rest = "/" + params["rest"]
 	}
-
 	s.handleBackupRoute(w, r, params["name"], rest)
+}
+
+// handleDatabaseRoute adapts the database handler to the route table.
+func (s *supervisor) handleDatabaseRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
+	action := "database"
+
+	if params["rest"] != "" {
+		action += "/" + params["rest"]
+	}
+	s.handleAppDatabase(w, r, params["name"], action)
+}
+
+// handleDeploymentItemRoute adapts the deployment item handler to the route table.
+func (s *supervisor) handleDeploymentItemRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
+	s.handleDeploymentRoute(w, r, params["name"], params["rest"])
 }
 
 // handleDeploymentsRoute adapts the deployment collection handler to the route table.
@@ -66,33 +69,17 @@ func (s *supervisor) handleDeploymentsRoute(w http.ResponseWriter, r *http.Reque
 		s.handleDeploymentCreate(w, r, params["name"])
 		return
 	}
-
 	s.handleDeployments(w, r, params["name"])
 }
 
-// handleDeploymentItemRoute adapts the deployment item handler to the route table.
-func (s *supervisor) handleDeploymentItemRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
-	s.handleDeploymentRoute(w, r, params["name"], params["rest"])
-}
+// handleJobsRoute adapts the job handler to the route table.
+func (s *supervisor) handleJobsRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
+	action := "jobs"
 
-// handleDatabaseRoute adapts the database handler to the route table.
-func (s *supervisor) handleDatabaseRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
-	action := "database"
 	if params["rest"] != "" {
 		action += "/" + params["rest"]
 	}
-
-	s.handleAppDatabase(w, r, params["name"], action)
-}
-
-// handleLogsRoute adapts the log tail and stream handlers to the route table.
-func (s *supervisor) handleLogsRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
-	s.handleAppLogs(w, r, params["name"], "logs")
-}
-
-// handleLogStreamRoute adapts the live log handler to the route table.
-func (s *supervisor) handleLogStreamRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
-	s.handleAppLogs(w, r, params["name"], "logs/stream")
+	s.handleAppJobs(w, r, params["name"], action)
 }
 
 // handleLogExportRoute adapts the log export handler to the route table.
@@ -101,8 +88,22 @@ func (s *supervisor) handleLogExportRoute(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-
 	s.handleLogExport(w, r, a)
+}
+
+// handleLogStreamRoute adapts the live log handler to the route table.
+func (s *supervisor) handleLogStreamRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
+	s.handleAppLogs(w, r, params["name"], "logs/stream")
+}
+
+// handleLogsRoute adapts the log tail and stream handlers to the route table.
+func (s *supervisor) handleLogsRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
+	s.handleAppLogs(w, r, params["name"], "logs")
+}
+
+// handleMaintenanceRoute adapts the maintenance handler to the route table.
+func (s *supervisor) handleMaintenanceRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
+	s.handleAppMaintenance(w, r, params["name"])
 }
 
 // handleResourcesRoute adapts the resource history handler to the route table.
@@ -111,18 +112,7 @@ func (s *supervisor) handleResourcesRoute(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-
 	s.handleResources(w, r, a)
-}
-
-// handleStopRoute adapts the stop handler to the route table.
-func (s *supervisor) handleStopRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
-	s.handleStop(w, r, params["name"])
-}
-
-// handleStartRoute adapts the start handler to the route table.
-func (s *supervisor) handleStartRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
-	s.handleStart(w, r, params["name"])
 }
 
 // handleRestartRoute adapts the restart handler to the route table.
@@ -131,14 +121,7 @@ func (s *supervisor) handleRestartRoute(w http.ResponseWriter, r *http.Request, 
 	if !ok {
 		return
 	}
-
 	s.handleRestart(w, r, a)
-}
-
-// handleValidateRoute runs a deploy in dry-run mode.
-func (s *supervisor) handleValidateRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
-	r.URL.RawQuery = "dry_run=1"
-	s.handleDeploymentCreate(w, r, params["name"])
 }
 
 // handleRollbackRoute adapts the rollback handler to the route table.
@@ -146,24 +129,32 @@ func (s *supervisor) handleRollbackRoute(w http.ResponseWriter, r *http.Request,
 	s.handleRollback(w, r, params["name"], params["id"])
 }
 
-// handleAppBlobsRoute adapts the blob list handler.
-func (s *supervisor) handleAppBlobsRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
-	s.handleAppBlobs(w, r, params["name"])
+// handleSecretsRoute adapts the secrets handler to the route table.
+func (s *supervisor) handleSecretsRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
+	s.handleAppSecrets(w, r, params["name"], params["key"])
 }
 
-// handleAppBlobRoute adapts the blob delete handler.
-func (s *supervisor) handleAppBlobRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
-	s.handleAppBlob(w, r, params["name"], params["digest"])
+// handleStartRoute adapts the start handler to the route table.
+func (s *supervisor) handleStartRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
+	s.handleStart(w, r, params["name"])
 }
 
-// handleAppBlobGCRoute adapts the blob garbage collection handler.
-func (s *supervisor) handleAppBlobGCRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
-	s.handleAppBlobGC(w, r, params["name"])
+// handleStopRoute adapts the stop handler to the route table.
+func (s *supervisor) handleStopRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
+	s.handleStop(w, r, params["name"])
+}
+
+// handleValidateRoute runs a deploy in dry-run mode.
+func (s *supervisor) handleValidateRoute(w http.ResponseWriter, r *http.Request, params map[string]string) {
+	r.URL.RawQuery = "dry_run=1"
+
+	s.handleDeploymentCreate(w, r, params["name"])
 }
 
 // buildAppRoutes declares every app subresource once, with the method and scope label it needs.
 func (s *supervisor) buildAppRoutes() *routeTable {
 	rt := newRouteTable()
+
 	rt.addApp(http.MethodGet, "/apps/{name}", constantAction(""), s.handleAppRootRoute)
 	rt.addApp(http.MethodDelete, "/apps/{name}", constantAction(""), s.handleAppRootRoute)
 	rt.addApp(http.MethodGet, "/apps/{name}/config", constantAction("config"), s.handleAppConfigRoute)
@@ -194,6 +185,10 @@ func (s *supervisor) buildAppRoutes() *routeTable {
 	rt.addApp(http.MethodPost, "/apps/{name}/rollback/{id}", func(params map[string]string) string {
 		return "rollback/" + params["id"]
 	}, s.handleRollbackRoute)
-
 	return rt
+}
+
+// appRoutes returns the cached table that dispatches /apps/<name>/<action> requests.
+func (s *supervisor) appRoutes() *routeTable {
+	return s.appRoutesCache.get(s.buildAppRoutes)
 }

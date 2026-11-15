@@ -8,12 +8,59 @@ import (
 	"testing"
 )
 
-func TestClientFlagsReadConfigFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(path, []byte(`{"host":"http://config.example","token":"config-token"}`), privateFileMode); err != nil {
+func TestAPIRequestSendsBearer(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer secret" {
+			t.Errorf("Authorization = %q", r.Header.Get("Authorization"))
+		}
+
+		_, _ = w.Write([]byte(`[]`))
+	}))
+
+	defer server.Close()
+
+	status, _, body, err := apiDo(clientOptions{
+		host: server.URL,
+		token: "secret",
+	}, http.MethodGet, "/apps", nil, "")
+	if err != nil {
 		t.Fatal(err)
 	}
 
+	if status != http.StatusOK || string(body) != `[]` {
+		t.Errorf("status %d body %q", status, body)
+	}
+}
+
+func TestCheckAPISummarizesHTMLErrors(t *testing.T) {
+	err := checkAPI(http.StatusServiceUnavailable, []byte(`<!doctype html><html><head><title>503 · Orchard</title></head><body>down</body></html>`))
+	if err == nil || err.Error() != "status 503: 503 · Orchard" {
+		t.Errorf("html error = %v, want the page title", err)
+	}
+
+	err = checkAPI(http.StatusBadGateway, []byte(`<html><body>no title here</body></html>`))
+
+	if err == nil || err.Error() != "status 502: non-JSON error page (39 bytes)" {
+		t.Errorf("title-less error = %v, want a byte count", err)
+	}
+
+	if err := checkAPI(http.StatusOK, []byte(`{"ok":true}`)); err != nil {
+		t.Errorf("success should pass: %v", err)
+	}
+
+	err = checkAPI(http.StatusUnauthorized, []byte(`{"error":"nope","code":"denied"}`))
+
+	if err == nil || err.Error() != `status 401: {"error":"nope","code":"denied"}` {
+		t.Errorf("json error = %v, want the body", err)
+	}
+}
+
+func TestClientFlagsReadConfigFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+
+	if err := os.WriteFile(path, []byte(`{"host":"http://config.example","token":"config-token"}`), privateFileMode); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("WT_CONFIG", path)
 
 	cfg, rest, err := clientFlags([]string{"--json"}, true)
@@ -26,32 +73,13 @@ func TestClientFlagsReadConfigFile(t *testing.T) {
 	}
 
 	cfg, _, err = clientFlags([]string{testHostFlag, "http://flag.example", "--token", "flag-token"}, true)
+
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	if cfg.host != "http://flag.example" || cfg.token != "flag-token" {
 		t.Errorf("flags did not override config: %+v", cfg)
-	}
-}
-
-func TestAPIRequestSendsBearer(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer secret" {
-			t.Errorf("Authorization = %q", r.Header.Get("Authorization"))
-		}
-
-		_, _ = w.Write([]byte(`[]`))
-	}))
-	defer server.Close()
-
-	status, _, body, err := apiDo(clientOptions{host: server.URL, token: "secret"}, http.MethodGet, "/apps", nil, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if status != http.StatusOK || string(body) != `[]` {
-		t.Errorf("status %d body %q", status, body)
 	}
 }
 
@@ -64,26 +92,5 @@ func TestCompletionAndHelpDoNotPanic(t *testing.T) {
 
 	if err := runCompletion([]string{"nope"}); err == nil {
 		t.Error("unknown shell was accepted")
-	}
-}
-
-func TestCheckAPISummarizesHTMLErrors(t *testing.T) {
-	err := checkAPI(http.StatusServiceUnavailable, []byte(`<!doctype html><html><head><title>503 · Orchard</title></head><body>down</body></html>`))
-	if err == nil || err.Error() != "status 503: 503 · Orchard" {
-		t.Errorf("html error = %v, want the page title", err)
-	}
-
-	err = checkAPI(http.StatusBadGateway, []byte(`<html><body>no title here</body></html>`))
-	if err == nil || err.Error() != "status 502: non-JSON error page (39 bytes)" {
-		t.Errorf("title-less error = %v, want a byte count", err)
-	}
-
-	if err := checkAPI(http.StatusOK, []byte(`{"ok":true}`)); err != nil {
-		t.Errorf("success should pass: %v", err)
-	}
-
-	err = checkAPI(http.StatusUnauthorized, []byte(`{"error":"nope","code":"denied"}`))
-	if err == nil || err.Error() != `status 401: {"error":"nope","code":"denied"}` {
-		t.Errorf("json error = %v, want the body", err)
 	}
 }

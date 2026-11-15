@@ -16,23 +16,33 @@ func TestRunJobsEnqueue(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
-
 		gotPath = r.URL.Path
+
 		if err := json.UnmarshalRead(r.Body, &got); err != nil {
 			t.Errorf("body: %v", err)
 		}
-
 		w.WriteHeader(http.StatusCreated)
+
 		_, _ = w.Write([]byte(`{"id":"job-1","path":"/jobs/run","method":"POST","status":"pending","attempts":0,"maxAttempts":2}`))
 	}))
+
 	defer server.Close()
 
 	if err := runJobs([]string{
-		testHostFlag, server.URL, "--token", "secret", testAppName, "enqueue",
-		"--path", "/jobs/run",
-		"--body", `{"value":"one"}`,
-		"--header", "X-Test: yes",
-		"--max-attempts", "2",
+		testHostFlag,
+		server.URL,
+		"--token",
+		"secret",
+		testAppName,
+		"enqueue",
+		"--path",
+		"/jobs/run",
+		"--body",
+		`{"value":"one"}`,
+		"--header",
+		"X-Test: yes",
+		"--max-attempts",
+		"2",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -45,8 +55,7 @@ func TestRunJobsEnqueue(t *testing.T) {
 		t.Errorf("payload = %+v", got)
 	}
 
-	headers, ok := got["headers"].(map[string]any)
-	if !ok || headers["X-Test"] != "yes" {
+	if headers, ok := got["headers"].(map[string]any); !ok || headers["X-Test"] != "yes" {
 		t.Errorf("headers = %+v", got["headers"])
 	}
 }
@@ -58,6 +67,7 @@ func TestRunJobsList(t *testing.T) {
 		gotPath = r.URL.RequestURI()
 		_, _ = w.Write([]byte(`{"jobs":[{"id":"job-1","path":"/jobs/run","method":"POST","status":"pending","attempts":0,"maxAttempts":3}]}`))
 	}))
+
 	defer server.Close()
 
 	if err := runJobs([]string{testHostFlag, server.URL, testAppName, "list", "--status", "pending"}); err != nil {
@@ -70,8 +80,7 @@ func TestRunJobsList(t *testing.T) {
 }
 
 func TestRunJobsRejectsInvalidAction(t *testing.T) {
-	err := runJobs([]string{testHostFlag, "http://127.0.0.1:1", testAppName, "explode"})
-	if err == nil || !strings.Contains(err.Error(), "unknown jobs action") {
+	if err := runJobs([]string{testHostFlag, "http://127.0.0.1:1", testAppName, "explode"}); err == nil || !strings.Contains(err.Error(), "unknown jobs action") {
 		t.Errorf("error = %v", err)
 	}
 }

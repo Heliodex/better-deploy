@@ -7,16 +7,22 @@ import (
 	"strings"
 )
 
-// Level is the severity prefix the supervisor parses out of an app's log lines.
-type Level string
+type (
+	// Level is the severity prefix the supervisor parses out of an app's log lines.
+	Level string
+
+	levelWriter struct {
+		level Level
+	}
+)
 
 const (
-	LevelTrace Level = "TRACE"
 	LevelDebug Level = "DEBUG"
-	LevelInfo Level = "INFO"
-	LevelWarn Level = "WARN"
 	LevelError Level = "ERROR"
 	LevelFatal Level = "FATAL"
+	LevelInfo Level = "INFO"
+	LevelTrace Level = "TRACE"
+	LevelWarn Level = "WARN"
 )
 
 // output is swapped in tests; production writes to stderr, which wasmtime forwards.
@@ -27,6 +33,7 @@ func Logf(level Level, format string, args ...any) {
 	message := fmt.Sprintf(format, args...)
 
 	var builder strings.Builder
+
 	for line := range strings.Lines(message) {
 		builder.WriteString(string(level))
 		builder.WriteByte(' ')
@@ -37,20 +44,8 @@ func Logf(level Level, format string, args ...any) {
 	_, _ = io.WriteString(output, builder.String())
 }
 
-func Tracef(format string, args ...any) {
-	Logf(LevelTrace, format, args...)
-}
-
 func Debugf(format string, args ...any) {
 	Logf(LevelDebug, format, args...)
-}
-
-func Infof(format string, args ...any) {
-	Logf(LevelInfo, format, args...)
-}
-
-func Warnf(format string, args ...any) {
-	Logf(LevelWarn, format, args...)
 }
 
 func Errorf(format string, args ...any) {
@@ -63,13 +58,23 @@ func Fatalf(format string, args ...any) {
 	os.Exit(1)
 }
 
-// Writer prefixes every complete line written to it, for handing to the stdlib logger: log.SetFlags(0); log.SetOutput(app.Writer(app.LevelInfo)).
-func Writer(level Level) io.Writer {
-	return levelWriter{level: level}
+func Infof(format string, args ...any) {
+	Logf(LevelInfo, format, args...)
 }
 
-type levelWriter struct {
-	level Level
+func Tracef(format string, args ...any) {
+	Logf(LevelTrace, format, args...)
+}
+
+func Warnf(format string, args ...any) {
+	Logf(LevelWarn, format, args...)
+}
+
+// Writer prefixes every complete line written to it, for handing to the stdlib logger: log.SetFlags(0); log.SetOutput(app.Writer(app.LevelInfo)).
+func Writer(level Level) io.Writer {
+	return levelWriter{
+		level: level,
+	}
 }
 
 func (w levelWriter) Write(p []byte) (int, error) {
@@ -77,7 +82,6 @@ func (w levelWriter) Write(p []byte) (int, error) {
 		if line == "\n" {
 			continue
 		}
-
 		Logf(w.level, "%s", strings.TrimSuffix(line, "\n"))
 	}
 

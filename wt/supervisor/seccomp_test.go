@@ -18,7 +18,6 @@ func TestSeccompFilterShape(t *testing.T) {
 	}
 
 	denied := deniedSyscalls()
-
 	filter := seccompFilter(arch, denied)
 	if len(filter) < len(denied)*2 {
 		t.Fatalf("filter has %d instructions for %d denied syscalls", len(filter), len(denied))
@@ -33,7 +32,7 @@ func TestSeccompFilterShape(t *testing.T) {
 	}
 
 	for _, nr := range denied {
-		found := false
+		var found bool
 
 		for _, instruction := range filter {
 			if instruction.Code == unix.BPF_JMP|unix.BPF_JEQ|unix.BPF_K && instruction.K == uint32(nr) {
@@ -47,7 +46,7 @@ func TestSeccompFilterShape(t *testing.T) {
 		}
 	}
 
-	prctlGuard := false
+	var prctlGuard bool
 
 	for i, instruction := range filter {
 		if instruction.K != uint32(unix.SYS_PRCTL) {
@@ -64,6 +63,19 @@ func TestSeccompFilterShape(t *testing.T) {
 	}
 }
 
+func TestSeccompInstall(t *testing.T) {
+	if os.Getenv("WT_SECCOMP_TEST") != "1" {
+		t.Skip("set WT_SECCOMP_TEST=1 to install a seccomp filter in a child")
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestSeccompInstallHelper$")
+	cmd.Env = append(os.Environ(), "WT_SECCOMP_HELPER=1")
+
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("seccomp helper: %v\n%s", err, out)
+	}
+}
+
 func TestSeccompInstallHelper(t *testing.T) {
 	if os.Getenv("WT_SECCOMP_HELPER") != "1" {
 		t.Skip("seccomp install helper")
@@ -76,18 +88,5 @@ func TestSeccompInstallHelper(t *testing.T) {
 	err := unix.Prctl(unix.PR_SET_SECCOMP, unix.SECCOMP_MODE_FILTER, 0, 0, 0)
 	if !errors.Is(err, unix.EPERM) {
 		t.Fatalf("installing a second filter = %v, want EPERM", err)
-	}
-}
-
-func TestSeccompInstall(t *testing.T) {
-	if os.Getenv("WT_SECCOMP_TEST") != "1" {
-		t.Skip("set WT_SECCOMP_TEST=1 to install a seccomp filter in a child")
-	}
-
-	cmd := exec.Command(os.Args[0], "-test.run=^TestSeccompInstallHelper$")
-
-	cmd.Env = append(os.Environ(), "WT_SECCOMP_HELPER=1")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("seccomp helper: %v\n%s", err, out)
 	}
 }

@@ -10,6 +10,19 @@ import (
 	"testing"
 )
 
+func databaseGET(t *testing.T, s *supervisor, target string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+
+	req.Header.Set("Authorization", "Bearer secret")
+
+	rec := httptest.NewRecorder()
+
+	s.handleApp(rec, req)
+	return rec
+}
+
 func testDatabaseSupervisor(t *testing.T) (*supervisor, *storageServer) {
 	t.Helper()
 
@@ -17,39 +30,126 @@ func testDatabaseSupervisor(t *testing.T) (*supervisor, *storageServer) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	t.Cleanup(storage.close)
 
 	s := testSupervisor()
 	s.storage = storage
-	s.apps["notes"] = &app{name: "notes"}
-	s.apps["empty"] = &app{name: "empty"}
+	s.apps["notes"] = &app{
+		name: "notes",
+	}
+	s.apps["empty"] = &app{
+		name: "empty",
+	}
 
 	return s, storage
 }
 
-func databaseGET(t *testing.T, s *supervisor, target string) *httptest.ResponseRecorder {
-	t.Helper()
+func TestDatabaseExportImportAndMaintenance(t *testing.T) {
+	s, storage := testDatabaseSupervisor(t)
+	token := storage.tokenFor("notes")
 
-	req := httptest.NewRequest(http.MethodGet, target, nil)
+	createItems(t, storage, token)
+
+	rec := databaseGET(t, s, "/apps/notes/database/export")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("export = %d %s", rec.Code, rec.Body.String())
+	}
+
+	if rec.Body.Len() == 0 || !strings.Contains(rec.Header().Get("Content-Disposition"), "notes.db") {
+		t.Fatalf("export = %d bytes, disposition %q", rec.Body.Len(), rec.Header().Get("Content-Disposition"))
+	}
+
+	exported := rec.Body.Bytes()
+
+	insertItem(t, storage, token, "two")
+	if got := storageCount(t, storage, token); got != 2 {
+		t.Fatalf("count before import = %d, want 2", got)
+	}
+
+	var formBody bytes.Buffer
+
+	form := multipart.NewWriter(&formBody)
+	part, err := form.CreateFormFile("database", "notes.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := part.Write(exported); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := form.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/apps/notes/database/import", &formBody)
+
 	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set("Content-Type", form.FormDataContentType())
 
-	rec := httptest.NewRecorder()
+	rec = httptest.NewRecorder()
+
 	s.handleApp(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("import = %d %s", rec.Code, rec.Body.String())
+	}
 
-	return rec
+	if got := storageCount(t, storage, token); got != 1 {
+		t.Errorf("count after import = %d, want 1", got)
+	}
+
+	doMaintenance := func(op string) (*httptest.ResponseRecorder, databaseMaintenanceResponse) {
+		t.Helper()
+
+		body := strings.NewReader(`{"op":"` + op + `"}`)
+		req := httptest.NewRequest(http.MethodPost, "/apps/notes/database/maintenance", body)
+
+		req.Header.Set("Authorization", "Bearer secret")
+
+		rec := httptest.NewRecorder()
+
+		s.handleApp(rec, req)
+
+		var result databaseMaintenanceResponse
+
+		if rec.Code == http.StatusOK {
+			if err := json.UnmarshalRead(rec.Body, &result); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		return rec, result
+	}
+	rec, result := doMaintenance("integrity_check")
+	if rec.Code != http.StatusOK || result.Result != "ok" {
+		t.Errorf("integrity_check = %d %+v", rec.Code, result)
+	}
+
+	for _, op := range []string{"vacuum", "optimize", "checkpoint"} {
+		rec, result = doMaintenance(op)
+
+		if rec.Code != http.StatusOK || result.Op != op {
+			t.Errorf("%s = %d %+v: %s", op, rec.Code, result, rec.Body.String())
+		}
+	}
+
+	rec, _ = doMaintenance("shred")
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("unknown maintenance op = %d, want 400", rec.Code)
+	}
 }
 
 func TestDatabaseOverview(t *testing.T) {
 	s, storage := testDatabaseSupervisor(t)
 	token := storage.tokenFor("notes")
-
 	rec := databaseGET(t, s, "/apps/notes/database")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("empty overview = %d %s", rec.Code, rec.Body.String())
 	}
 
 	var empty databaseOverviewResponse
+
 	if err := json.UnmarshalRead(rec.Body, &empty); err != nil {
 		t.Fatal(err)
 	}
@@ -57,15 +157,16 @@ func TestDatabaseOverview(t *testing.T) {
 	if empty.Database || len(empty.Tables) != 0 {
 		t.Errorf("empty overview = %+v", empty)
 	}
-
 	createItems(t, storage, token)
 
 	rec = databaseGET(t, s, "/apps/notes/database")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("overview = %d %s", rec.Code, rec.Body.String())
 	}
 
 	var overview databaseOverviewResponse
+
 	if err := json.UnmarshalRead(rec.Body, &overview); err != nil {
 		t.Fatal(err)
 	}
@@ -75,11 +176,13 @@ func TestDatabaseOverview(t *testing.T) {
 	}
 
 	rec = databaseGET(t, s, "/apps/empty/database")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("no database = %d %s", rec.Code, rec.Body.String())
 	}
 
 	var none databaseOverviewResponse
+
 	if err := json.UnmarshalRead(rec.Body, &none); err != nil {
 		t.Fatal(err)
 	}
@@ -92,6 +195,7 @@ func TestDatabaseOverview(t *testing.T) {
 func TestDatabaseOverviewStats(t *testing.T) {
 	s, storage := testDatabaseSupervisor(t)
 	token := storage.tokenFor("notes")
+
 	createItems(t, storage, token)
 	insertItem(t, storage, token, "two")
 
@@ -101,6 +205,7 @@ func TestDatabaseOverviewStats(t *testing.T) {
 	}
 
 	var cheap databaseOverviewResponse
+
 	if err := json.UnmarshalRead(rec.Body, &cheap); err != nil {
 		t.Fatal(err)
 	}
@@ -110,11 +215,13 @@ func TestDatabaseOverviewStats(t *testing.T) {
 	}
 
 	rec = databaseGET(t, s, "/apps/notes/database?stats=1")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("overview stats = %d %s", rec.Code, rec.Body.String())
 	}
 
 	var overview databaseOverviewResponse
+
 	if err := json.UnmarshalRead(rec.Body, &overview); err != nil {
 		t.Fatal(err)
 	}
@@ -131,28 +238,28 @@ func TestDatabaseOverviewStats(t *testing.T) {
 func TestDatabaseRows(t *testing.T) {
 	s, storage := testDatabaseSupervisor(t)
 	token := storage.tokenFor("notes")
+
 	createItems(t, storage, token)
 	insertItem(t, storage, token, "two")
 	insertItem(t, storage, token, "three")
 
 	resp := storageSQL(t, storage, token, "/v1/exec", map[string]any{
-		"sql": `create table mixed (id integer primary key, text_value text, blob_value blob)`,
 		"params": []any{},
+		"sql": `create table mixed (id integer primary key, text_value text, blob_value blob)`,
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("create mixed: %d %s", resp.StatusCode, readBody(t, resp))
 	}
-
 	resp.Body.Close()
 
 	resp = storageSQL(t, storage, token, "/v1/exec", map[string]any{
-		"sql": `insert into mixed (text_value, blob_value) values (?, ?)`,
 		"params": []any{"hello", map[string]string{"$b64": "AAEC"}},
+		"sql": `insert into mixed (text_value, blob_value) values (?, ?)`,
 	})
+
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("insert mixed: %d %s", resp.StatusCode, readBody(t, resp))
 	}
-
 	resp.Body.Close()
 
 	rec := databaseGET(t, s, "/apps/notes/database/rows?table=items&limit=2&offset=0")
@@ -161,6 +268,7 @@ func TestDatabaseRows(t *testing.T) {
 	}
 
 	var page databaseRowsResponse
+
 	if err := json.UnmarshalRead(rec.Body, &page); err != nil {
 		t.Fatal(err)
 	}
@@ -174,6 +282,7 @@ func TestDatabaseRows(t *testing.T) {
 	}
 
 	rec = databaseGET(t, s, "/apps/notes/database/rows?table=items&limit=2&offset=2")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("last page = %d %s", rec.Code, rec.Body.String())
 	}
@@ -187,6 +296,7 @@ func TestDatabaseRows(t *testing.T) {
 	}
 
 	rec = databaseGET(t, s, "/apps/notes/database/rows?table=mixed")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("mixed = %d %s", rec.Code, rec.Body.String())
 	}
@@ -203,14 +313,14 @@ func TestDatabaseRows(t *testing.T) {
 		t.Errorf("text value = %#v", page.Rows[0][1])
 	}
 
-	blob, ok := page.Rows[0][2].(map[string]any)
-	if !ok || blob["$b64"] != "AAEC" {
+	if blob, ok := page.Rows[0][2].(map[string]any); !ok || blob["$b64"] != "AAEC" {
 		t.Errorf("blob value = %#v", page.Rows[0][2])
 	}
 }
 
 func TestDatabaseRowsValidation(t *testing.T) {
 	s, storage := testDatabaseSupervisor(t)
+
 	createItems(t, storage, storage.tokenFor("notes"))
 
 	cases := []struct {
@@ -224,102 +334,10 @@ func TestDatabaseRowsValidation(t *testing.T) {
 		{"/apps/notes/database/rows?table=items&limit=501", http.StatusBadRequest},
 		{"/apps/notes/database/rows?table=items&offset=-1", http.StatusBadRequest},
 	}
+
 	for _, tc := range cases {
-		rec := databaseGET(t, s, tc.target)
-		if rec.Code != tc.status {
+		if rec := databaseGET(t, s, tc.target); rec.Code != tc.status {
 			t.Errorf("%s = %d %s, want %d", tc.target, rec.Code, rec.Body.String(), tc.status)
 		}
-	}
-}
-
-func TestDatabaseExportImportAndMaintenance(t *testing.T) {
-	s, storage := testDatabaseSupervisor(t)
-	token := storage.tokenFor("notes")
-	createItems(t, storage, token)
-
-	rec := databaseGET(t, s, "/apps/notes/database/export")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("export = %d %s", rec.Code, rec.Body.String())
-	}
-
-	if rec.Body.Len() == 0 || !strings.Contains(rec.Header().Get("Content-Disposition"), "notes.db") {
-		t.Fatalf("export = %d bytes, disposition %q", rec.Body.Len(), rec.Header().Get("Content-Disposition"))
-	}
-
-	exported := rec.Body.Bytes()
-
-	insertItem(t, storage, token, "two")
-
-	if got := storageCount(t, storage, token); got != 2 {
-		t.Fatalf("count before import = %d, want 2", got)
-	}
-
-	var formBody bytes.Buffer
-
-	form := multipart.NewWriter(&formBody)
-
-	part, err := form.CreateFormFile("database", "notes.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := part.Write(exported); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := form.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/apps/notes/database/import", &formBody)
-	req.Header.Set("Authorization", "Bearer secret")
-	req.Header.Set("Content-Type", form.FormDataContentType())
-
-	rec = httptest.NewRecorder()
-	s.handleApp(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("import = %d %s", rec.Code, rec.Body.String())
-	}
-
-	if got := storageCount(t, storage, token); got != 1 {
-		t.Errorf("count after import = %d, want 1", got)
-	}
-
-	doMaintenance := func(op string) (*httptest.ResponseRecorder, databaseMaintenanceResponse) {
-		t.Helper()
-
-		body := strings.NewReader(`{"op":"` + op + `"}`)
-		req := httptest.NewRequest(http.MethodPost, "/apps/notes/database/maintenance", body)
-		req.Header.Set("Authorization", "Bearer secret")
-
-		rec := httptest.NewRecorder()
-		s.handleApp(rec, req)
-
-		var result databaseMaintenanceResponse
-		if rec.Code == http.StatusOK {
-			if err := json.UnmarshalRead(rec.Body, &result); err != nil {
-				t.Fatal(err)
-			}
-		}
-
-		return rec, result
-	}
-
-	rec, result := doMaintenance("integrity_check")
-	if rec.Code != http.StatusOK || result.Result != "ok" {
-		t.Errorf("integrity_check = %d %+v", rec.Code, result)
-	}
-
-	for _, op := range []string{"vacuum", "optimize", "checkpoint"} {
-		rec, result = doMaintenance(op)
-		if rec.Code != http.StatusOK || result.Op != op {
-			t.Errorf("%s = %d %+v: %s", op, rec.Code, result, rec.Body.String())
-		}
-	}
-
-	rec, _ = doMaintenance("shred")
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("unknown maintenance op = %d, want 400", rec.Code)
 	}
 }

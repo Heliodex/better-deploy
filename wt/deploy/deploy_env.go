@@ -9,29 +9,45 @@ import (
 	"time"
 )
 
+// envAssignments collects repeatable --env KEY=VALUE flags.
+type envAssignments []string
+
 // verifyDefaultTimeout bounds the post-deploy serving probes.
 const verifyDefaultTimeout = 90 * time.Second
 
 // verifyPollDelay spaces the post-deploy serving probes. Tests stub it down.
 var verifyPollDelay = 2 * time.Second
 
-// envAssignments collects repeatable --env KEY=VALUE flags.
-type envAssignments []string
+// applyDeployEnv layers explicit --env values over the manifest. Unlike the dev process-env
+// overlay, explicit flags may introduce keys the manifest does not define yet.
+func applyDeployEnv(m *manifest, vars map[string]string) {
+	if m.Env == nil {
+		m.Env = make(map[string]string, len(vars))
+	}
+	maps.Copy(m.Env, vars)
+}
 
-func (e *envAssignments) String() string {
-	return strings.Join(*e, ", ")
+// deployEnvFlag registers the repeatable --env flag on a flag set.
+func deployEnvFlag(flags *flag.FlagSet) *envAssignments {
+	vars := envAssignments{}
+
+	flags.Var(&vars, "env", "override one app.json env value (repeatable as KEY=VALUE)")
+	return &vars
 }
 
 // Set keeps one KEY=VALUE assignment. An empty value clears the key; an empty key is rejected.
 func (e *envAssignments) Set(value string) error {
-	key, _, ok := strings.Cut(value, "=")
-	if !ok || strings.TrimSpace(key) == "" {
+	if key, _, ok := strings.Cut(value, "="); !ok || strings.TrimSpace(key) == "" {
 		return fmt.Errorf("invalid --env %q: want KEY=VALUE", value)
 	}
 
 	*e = append(*e, value)
 
 	return nil
+}
+
+func (e *envAssignments) String() string {
+	return strings.Join(*e, ", ")
 }
 
 // parseDeployEnv folds assignments into a map. Later entries win, so `--env A=1 --env A=2` sends 2.
@@ -50,29 +66,30 @@ func parseDeployEnv(assignments []string) (map[string]string, error) {
 	return vars, nil
 }
 
-// applyDeployEnv layers explicit --env values over the manifest. Unlike the dev process-env
-// overlay, explicit flags may introduce keys the manifest does not define yet.
-func applyDeployEnv(m *manifest, vars map[string]string) {
-	if m.Env == nil {
-		m.Env = make(map[string]string, len(vars))
-	}
+// pollVerify repeats check until it reports ready or the timeout lapses.
+func pollVerify(timeout time.Duration, check func() (bool, string)) error {
+	deadline := time.Now().Add(timeout)
 
-	maps.Copy(m.Env, vars)
+	for {
+		ready, detail := check()
+		if ready {
+			return nil
+		}
+
+		if time.Now().After(deadline) {
+			return fmt.Errorf("verify: not serving after %s (last: %s)", timeout, detail)
+		}
+		time.Sleep(verifyPollDelay)
+	}
 }
 
-// verifyDeployment polls the supervisor app status and one public HTTP path until the fresh deployment serves.
-func verifyDeployment(cfg *deployConfig, m manifest) error {
-	if m.Host == "" || strings.Contains(m.Host, "*") || localHost(cfg.host) || localHost(m.Host) {
-		fmt.Fprintln(os.Stderr, "verify: skipped (no public app host)")
-
-		return nil
+// routeDetail compresses a probe report into one line for the verify log.
+func routeDetail(report routeReport) string {
+	if report.HTTPError != "" {
+		return report.HTTPError
 	}
 
-	client := clientOptions{host: cfg.host, token: cfg.token, jsonOut: cfg.jsonOut, timeout: deployPollTimeout}
-
-	return pollVerify(cfg.verifyTimeout, func() (bool, string) {
-		return verifyProbe(client, cfg.host, m.Name, m.Host, cfg.verifyPath)
-	})
+	return fmt.Sprintf("HTTP %d", report.HTTPStatus)
 }
 
 // verifyProbe reports whether the app is ready and serving one path. The detail string feeds the final log line either way.
@@ -100,38 +117,21 @@ func verifyProbe(client clientOptions, supervisorHost, name, appHost, path strin
 	}
 }
 
-// routeDetail compresses a probe report into one line for the verify log.
-func routeDetail(report routeReport) string {
-	if report.HTTPError != "" {
-		return report.HTTPError
+// verifyDeployment polls the supervisor app status and one public HTTP path until the fresh deployment serves.
+func verifyDeployment(cfg *deployConfig, m manifest) error {
+	if m.Host == "" || strings.Contains(m.Host, "*") || localHost(cfg.host) || localHost(m.Host) {
+		fmt.Fprintln(os.Stderr, "verify: skipped (no public app host)")
+		return nil
 	}
 
-	return fmt.Sprintf("HTTP %d", report.HTTPStatus)
-}
-
-// pollVerify repeats check until it reports ready or the timeout lapses.
-func pollVerify(timeout time.Duration, check func() (bool, string)) error {
-	deadline := time.Now().Add(timeout)
-
-	for {
-		ready, detail := check()
-		if ready {
-			return nil
-		}
-
-		if time.Now().After(deadline) {
-			return fmt.Errorf("verify: not serving after %s (last: %s)", timeout, detail)
-		}
-
-		time.Sleep(verifyPollDelay)
+	client := clientOptions{
+		host: cfg.host,
+		token: cfg.token,
+		jsonOut: cfg.jsonOut,
+		timeout: deployPollTimeout,
 	}
-}
 
-// deployEnvFlag registers the repeatable --env flag on a flag set.
-func deployEnvFlag(flags *flag.FlagSet) *envAssignments {
-	vars := envAssignments{}
-
-	flags.Var(&vars, "env", "override one app.json env value (repeatable as KEY=VALUE)")
-
-	return &vars
+	return pollVerify(cfg.verifyTimeout, func() (bool, string) {
+		return verifyProbe(client, cfg.host, m.Name, m.Host, cfg.verifyPath)
+	})
 }

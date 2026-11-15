@@ -8,9 +8,29 @@ import (
 	wit "go.bytecodealliance.org/pkg/wit/types"
 )
 
+// dnsErrorString formats the optional resolver code and info code of a DNS failure.
+func dnsErrorString(p wasi.DnsErrorPayload) string {
+	var parts []string
+
+	if p.Rcode.IsSome() {
+		parts = append(parts, "rcode="+p.Rcode.Some())
+	}
+
+	if p.InfoCode.IsSome() {
+		parts = append(parts, fmt.Sprintf("info-code=%d", p.InfoCode.Some()))
+	}
+
+	if len(parts) == 0 {
+		return "DNS error"
+	}
+
+	return "DNS error (" + strings.Join(parts, ", ") + ")"
+}
+
 // fieldSizeString formats an optional field name and size payload for error messages.
 func fieldSizeString(p wasi.FieldSizePayload) string {
 	var parts []string
+
 	if p.FieldName.IsSome() {
 		parts = append(parts, "field-name="+p.FieldName.Some())
 	}
@@ -24,6 +44,24 @@ func fieldSizeString(p wasi.FieldSizePayload) string {
 	}
 
 	return "(" + strings.Join(parts, ", ") + ")"
+}
+
+// fieldSizeOptionString describes an optional field-size payload.
+func fieldSizeOptionString(prefix string, value wit.Option[wasi.FieldSizePayload]) string {
+	if value.IsSome() {
+		return prefix + " " + fieldSizeString(value.Some())
+	}
+
+	return prefix
+}
+
+// optionErrorString appends an option's value to a description when it is present.
+func optionErrorString[T any](prefix string, value wit.Option[T]) string {
+	if value.IsSome() {
+		return fmt.Sprintf("%s: %v", prefix, value.Some())
+	}
+
+	return prefix
 }
 
 // simpleErrorString describes error codes whose payload carries no extra detail.
@@ -82,45 +120,10 @@ func simpleErrorString(tag uint8) (string, bool) {
 	return "", false
 }
 
-// optionErrorString appends an option's value to a description when it is present.
-func optionErrorString[T any](prefix string, value wit.Option[T]) string {
-	if value.IsSome() {
-		return fmt.Sprintf("%s: %v", prefix, value.Some())
-	}
-
-	return prefix
-}
-
-// fieldSizeOptionString describes an optional field-size payload.
-func fieldSizeOptionString(prefix string, value wit.Option[wasi.FieldSizePayload]) string {
-	if value.IsSome() {
-		return prefix + " " + fieldSizeString(value.Some())
-	}
-
-	return prefix
-}
-
-// dnsErrorString formats the optional resolver code and info code of a DNS failure.
-func dnsErrorString(p wasi.DnsErrorPayload) string {
-	var parts []string
-	if p.Rcode.IsSome() {
-		parts = append(parts, "rcode="+p.Rcode.Some())
-	}
-
-	if p.InfoCode.IsSome() {
-		parts = append(parts, fmt.Sprintf("info-code=%d", p.InfoCode.Some()))
-	}
-
-	if len(parts) == 0 {
-		return "DNS error"
-	}
-
-	return "DNS error (" + strings.Join(parts, ", ") + ")"
-}
-
 // tlsAlertString formats the optional alert ID and message of a TLS failure.
 func tlsAlertString(p wasi.TlsAlertReceivedPayload) string {
 	var parts []string
+
 	if p.AlertId.IsSome() {
 		parts = append(parts, fmt.Sprintf("alert-id=%d", p.AlertId.Some()))
 	}

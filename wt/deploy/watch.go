@@ -8,107 +8,43 @@ import (
 	"time"
 )
 
-// devIgnoredDirs hold build output and dependency trees, so a rebuild does not immediately trigger another one.
-var devIgnoredDirs = map[string]struct{}{
-	"node_modules": {},
-	".git": {},
-	".svelte-kit": {},
-	"build": {},
-	"dist": {},
-	"target": {},
-	"static": {},
-}
-
-var devIgnoredFiles = map[string]struct{}{
-	"main.wasm": {},
-	"main.cwasm": {},
-	"artefact.json": {},
-}
-
 type devFileState struct {
 	modified time.Time
 	size int64
 }
 
-// devSourceState records the source files under root, ignoring build output and dependencies.
-func devSourceState(root string) (map[string]devFileState, error) {
-	state := map[string]devFileState{}
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			if os.IsNotExist(err) {
-				return nil
-			}
-
-			return err
-		}
-
-		name := entry.Name()
-		if entry.IsDir() {
-			if path != root {
-				if _, skip := devIgnoredDirs[name]; skip {
-					return filepath.SkipDir
-				}
-			}
-
-			return nil
-		}
-
-		if _, skip := devIgnoredFiles[name]; skip {
-			return nil
-		}
-
-		if filepath.Ext(name) == ".gz" && len(name) > 7 && name[len(name)-7:] == ".tar.gz" {
-			return nil
-		}
-
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-
-		state[path] = devFileState{modified: info.ModTime(), size: info.Size()}
-
-		return nil
-	})
-
-	return state, err
-}
-
-// devSourcesChanged reports whether any watched file changed size or modification time.
-func devSourcesChanged(previous, next map[string]devFileState) bool {
-	if len(previous) != len(next) {
-		return true
+var (
+	// componentIgnoredDirs holds frontend and build output that Vite or the build owns, not the wasm component.
+	componentIgnoredDirs = map[string]struct{}{
+		".git": {},
+		".svelte-kit": {},
+		"build": {},
+		"dist": {},
+		"node_modules": {},
+		"static": {},
+		"target": {},
+		"web": {},
+	}
+	componentIgnoredFiles = map[string]struct{}{
+		".wt-build.json": {},
+		".wt-dev.vite.config.ts": {},
+		"artefact.json": {},
+		"main.cwasm": {},
+		"main.wasm": {},
 	}
 
-	for path, state := range next {
-		before, ok := previous[path]
-		if !ok || !before.modified.Equal(state.modified) || before.size != state.size {
-			return true
-		}
+	// devIgnoredDirs hold build output and dependency trees, so a rebuild does not immediately trigger another one.
+	devIgnoredDirs = map[string]struct{}{
+		".git": {},
+		".svelte-kit": {},
+		"build": {},
+		"dist": {},
+		"node_modules": {},
+		"static": {},
+		"target": {},
 	}
-
-	return false
-}
-
-// componentIgnoredDirs holds frontend and build output that Vite or the build owns, not the wasm component.
-var componentIgnoredDirs = map[string]struct{}{
-	".git": {},
-	".svelte-kit": {},
-	"build": {},
-	"dist": {},
-	"node_modules": {},
-	"static": {},
-	"target": {},
-	"web": {},
-}
-
-var componentIgnoredFiles = map[string]struct{}{
-	"artefact.json": {},
-	"main.cwasm": {},
-	"main.wasm": {},
-	".wt-build.json": {},
-	".wt-dev.vite.config.ts": {},
-}
+	devIgnoredFiles = map[string]struct{}{"artefact.json": {}, "main.cwasm": {}, "main.wasm": {}}
+)
 
 // addDevFile records one explicit dev.watch path when it is a regular file.
 func addDevFile(state map[string]devFileState, path string) error {
@@ -117,7 +53,10 @@ func addDevFile(state map[string]devFileState, path string) error {
 		return nil
 	}
 
-	state[path] = devFileState{modified: info.ModTime(), size: info.Size()}
+	state[path] = devFileState{
+		modified: info.ModTime(),
+		size: info.Size(),
+	}
 
 	return nil
 }
@@ -126,7 +65,6 @@ func addDevFile(state map[string]devFileState, path string) error {
 // The frontend directory is skipped because Vite owns those changes.
 func componentSourceState(root string, extra []string) (map[string]devFileState, error) {
 	state := map[string]devFileState{}
-
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -162,7 +100,6 @@ func componentSourceState(root string, extra []string) (map[string]devFileState,
 
 	for _, value := range extra {
 		path := filepath.Join(root, value)
-
 		info, err := os.Stat(path)
 		if err != nil {
 			continue
@@ -190,6 +127,69 @@ func componentSourceState(root string, extra []string) (map[string]devFileState,
 	return state, nil
 }
 
+// devSourceState records the source files under root, ignoring build output and dependencies.
+func devSourceState(root string) (map[string]devFileState, error) {
+	state := map[string]devFileState{}
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+
+			return err
+		}
+
+		name := entry.Name()
+
+		if entry.IsDir() {
+			if path != root {
+				if _, skip := devIgnoredDirs[name]; skip {
+					return filepath.SkipDir
+				}
+			}
+
+			return nil
+		}
+
+		if _, skip := devIgnoredFiles[name]; skip {
+			return nil
+		}
+
+		if filepath.Ext(name) == ".gz" && len(name) > 7 && name[len(name)-7:] == ".tar.gz" {
+			return nil
+		}
+
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+
+		state[path] = devFileState{
+			modified: info.ModTime(),
+			size: info.Size(),
+		}
+
+		return nil
+	})
+
+	return state, err
+}
+
+// devSourcesChanged reports whether any watched file changed size or modification time.
+func devSourcesChanged(previous, next map[string]devFileState) bool {
+	if len(previous) != len(next) {
+		return true
+	}
+
+	for path, state := range next {
+		if before, ok := previous[path]; !ok || !before.modified.Equal(state.modified) || before.size != state.size {
+			return true
+		}
+	}
+
+	return false
+}
+
 // watchComponent rebuilds only the wasm component and leaves the Vite dev server running.
 func watchComponent(cfg *deployConfig, extra []string, done <-chan struct{}) {
 	previous, err := componentSourceState(cfg.dir, extra)
@@ -199,6 +199,7 @@ func watchComponent(cfg *deployConfig, extra []string, done <-chan struct{}) {
 	}
 
 	ticker := time.NewTicker(time.Second)
+
 	defer ticker.Stop()
 
 	for {
@@ -218,7 +219,6 @@ func watchComponent(cfg *deployConfig, extra []string, done <-chan struct{}) {
 			previous = next
 			continue
 		}
-
 		time.Sleep(devRebuildDelay)
 		fmt.Fprintln(os.Stderr, "dev: component change, rebuilding")
 
@@ -227,21 +227,18 @@ func watchComponent(cfg *deployConfig, extra []string, done <-chan struct{}) {
 			fmt.Fprintln(os.Stderr, "dev: component rebuild failed:", err)
 
 			previous, _ = componentSourceState(cfg.dir, extra)
-
 			continue
 		}
-
 		printBuildStatus(status)
-
 		if err := upload(cfg, m, data); err != nil {
 			fmt.Fprintln(os.Stderr, "dev: component redeploy failed:", err)
 
 			previous, _ = componentSourceState(cfg.dir, extra)
-
 			continue
 		}
 
 		previous, _ = componentSourceState(cfg.dir, extra)
+
 		fmt.Printf("dev: redeployed %s at %s/\n", m.Name, cfg.host)
 	}
 }
@@ -255,6 +252,7 @@ func watchDev(cfg *deployConfig, done <-chan struct{}) {
 	}
 
 	ticker := time.NewTicker(time.Second)
+
 	defer ticker.Stop()
 
 	for {
@@ -286,14 +284,11 @@ func watchDev(cfg *deployConfig, done <-chan struct{}) {
 			fmt.Fprintln(os.Stderr, "dev: rebuild failed:", err)
 			continue
 		}
-
 		printBuildStatus(status)
-
 		if err := upload(cfg, m, data); err != nil {
 			fmt.Fprintln(os.Stderr, "dev: redeploy failed:", err)
 			continue
 		}
-
 		fmt.Printf("dev: redeployed %s at %s/\n", m.Name, cfg.host)
 	}
 }

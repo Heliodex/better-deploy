@@ -10,8 +10,8 @@ import (
 // IncomingTarget returns the scheme, authority, path and client address a WASI HTTP request should expose to a net/http handler.
 func IncomingTarget(pathWithQuery string, headers http.Header) (scheme, host, path, remote string) {
 	scheme = headers.Get("X-Forwarded-Proto")
-
 	host = headers.Get("Host")
+
 	if host == "" {
 		host = headers.Get("X-Forwarded-Host")
 	}
@@ -39,6 +39,7 @@ func IncomingTarget(pathWithQuery string, headers http.Header) (scheme, host, pa
 	}
 
 	remote = headers.Get("Spin-Client-Addr")
+
 	if remote == "" {
 		if forwarded := headers.Get("X-Forwarded-For"); forwarded != "" {
 			remote = strings.TrimSpace(strings.Split(forwarded, ",")[0])

@@ -9,9 +9,6 @@ import (
 	"runtime/debug"
 )
 
-// version is overridden with -ldflags "-X main.version=..." in a release build.
-var version = "dev"
-
 // capabilitiesResponse describes the supervisor and its runtime.
 type capabilitiesResponse struct {
 	Version string `json:"version"`
@@ -23,11 +20,29 @@ type capabilitiesResponse struct {
 	Epoch bool `json:"epoch"`
 }
 
+// version is overridden with -ldflags "-X main.version=..." in a release build.
+var version = "dev"
+
+// canCompile reports whether the configured compiler has a compile subcommand. The runtime-only image does not.
+func (s *supervisor) canCompile() bool {
+	s.compilerOnce.Do(func() {
+		if s.cfg.wasmtimeCompiler == "" {
+			return
+		}
+
+		cmd := exec.CommandContext(context.Background(), s.cfg.wasmtimeCompiler, "compile", "--help")
+		cmd.Stdout = io.Discard
+		cmd.Stderr = io.Discard
+		s.compilerOK = cmd.Run() == nil
+	})
+	return s.compilerOK
+}
+
 // supervisorBuildInfo reads the main module version and VCS settings from the Go build.
 func supervisorBuildInfo() (string, string) {
-	name := version
-	commit := ""
+	var commit string
 
+	name := version
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
 		return name, commit
@@ -46,22 +61,6 @@ func supervisorBuildInfo() (string, string) {
 	return name, commit
 }
 
-// canCompile reports whether the configured compiler has a compile subcommand. The runtime-only image does not.
-func (s *supervisor) canCompile() bool {
-	s.compilerOnce.Do(func() {
-		if s.cfg.wasmtimeCompiler == "" {
-			return
-		}
-
-		cmd := exec.CommandContext(context.Background(), s.cfg.wasmtimeCompiler, "compile", "--help")
-		cmd.Stdout = io.Discard
-		cmd.Stderr = io.Discard
-		s.compilerOK = cmd.Run() == nil
-	})
-
-	return s.compilerOK
-}
-
 // handleCapabilities serves the version and runtime document clients use to preflight a deploy.
 func (s *supervisor) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
@@ -73,6 +72,7 @@ func (s *supervisor) handleCapabilities(w http.ResponseWriter, r *http.Request) 
 	}
 
 	name, commit := supervisorBuildInfo()
+
 	writeJSON(w, http.StatusOK, capabilitiesResponse{
 		Version: name,
 		Commit: commit,

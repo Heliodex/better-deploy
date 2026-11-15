@@ -17,27 +17,32 @@ func TestEnqueueJob(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
-
 		gotPath = r.URL.Path
+
 		if err := json.UnmarshalRead(r.Body, &got); err != nil {
 			t.Errorf("job request: %v", err)
 		}
 
 		status := http.StatusCreated
+
 		if got.IdempotencyKey != "" {
 			status = http.StatusOK
 		}
-
 		w.WriteHeader(status)
-		writeTestJSON(w, Job{ID: "job-1", Path: got.Path, Method: got.Method, Status: JobPending})
+		writeTestJSON(w, Job{
+			ID: "job-1",
+			Path: got.Path,
+			Method: got.Method,
+			Status: JobPending,
+		})
 	}))
+
 	defer server.Close()
 
 	t.Setenv(storageURLEnv, server.URL)
 	t.Setenv(storageTokenEnv, "secret")
 
 	runAt := time.Now().Add(time.Minute).UTC()
-
 	job, created, err := EnqueueJob(t.Context(), server.Client(), JobRequest{
 		Path: "/jobs/run",
 		Method: http.MethodPut,
@@ -63,7 +68,11 @@ func TestEnqueueJob(t *testing.T) {
 		t.Errorf("request = %+v", got)
 	}
 
-	_, created, err = EnqueueJob(t.Context(), server.Client(), JobRequest{Path: "/jobs/run", IdempotencyKey: "same"})
+	_, created, err = EnqueueJob(t.Context(), server.Client(), JobRequest{
+		Path: "/jobs/run",
+		IdempotencyKey: "same",
+	})
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,21 +82,44 @@ func TestEnqueueJob(t *testing.T) {
 	}
 }
 
+func TestJobRequiresStorageEnv(t *testing.T) {
+	t.Setenv(storageURLEnv, "")
+	t.Setenv(storageTokenEnv, "")
+	if _, _, err := EnqueueJob(t.Context(), http.DefaultClient, JobRequest{
+		Path: "/jobs/run",
+	}); err == nil || !strings.Contains(err.Error(), storageURLEnv) {
+		t.Errorf("EnqueueJob error = %v", err)
+	}
+}
+
 func TestListAndJobActions(t *testing.T) {
 	var requests []string
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.Method+" "+r.URL.RequestURI())
+
 		if r.URL.Path == jobsPath {
-			writeTestJSON(w, jobsResponse{Jobs: []Job{{ID: "one", Status: JobPending}}})
+			writeTestJSON(w, jobsResponse{
+				Jobs: []Job{
+					{
+						ID: "one",
+						Status: JobPending,
+					},
+				},
+			})
 			return
 		}
 
 		id := strings.TrimPrefix(r.URL.Path, jobsPath+"/")
 		id = strings.TrimSuffix(id, "/cancel")
 		id = strings.TrimSuffix(id, "/retry")
-		writeTestJSON(w, Job{ID: id, Status: JobCanceled})
+
+		writeTestJSON(w, Job{
+			ID: id,
+			Status: JobCanceled,
+		})
 	}))
+
 	defer server.Close()
 
 	t.Setenv(storageURLEnv, server.URL)
@@ -110,22 +142,12 @@ func TestListAndJobActions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	want := []string{
+	if want := []string{
 		"GET /v1/jobs?status=pending",
 		"GET /v1/jobs/one",
 		"POST /v1/jobs/one/cancel",
 		"POST /v1/jobs/one/retry",
-	}
-	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
+	}; strings.Join(requests, "\n") != strings.Join(want, "\n") {
 		t.Errorf("requests = %v, want %v", requests, want)
-	}
-}
-
-func TestJobRequiresStorageEnv(t *testing.T) {
-	t.Setenv(storageURLEnv, "")
-	t.Setenv(storageTokenEnv, "")
-
-	if _, _, err := EnqueueJob(t.Context(), http.DefaultClient, JobRequest{Path: "/jobs/run"}); err == nil || !strings.Contains(err.Error(), storageURLEnv) {
-		t.Errorf("EnqueueJob error = %v", err)
 	}
 }

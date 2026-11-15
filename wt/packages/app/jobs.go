@@ -13,58 +13,59 @@ import (
 	"time"
 )
 
-const jobsPath = "/v1/jobs"
+type (
+	// Job is one durable unit of work as returned by the supervisor.
+	Job struct {
+		ID string `json:"id"`
+		Path string `json:"path"`
+		Method string `json:"method"`
+		Body string `json:"body,omitempty"`
+		Headers map[string]string `json:"headers,omitempty"`
+		Status string `json:"status"`
+		RunAt time.Time `json:"runAt"`
+		CreatedAt time.Time `json:"createdAt"`
+		UpdatedAt time.Time `json:"updatedAt"`
+		StartedAt time.Time `json:"startedAt"`
+		FinishedAt time.Time `json:"finishedAt"`
+		Attempts int `json:"attempts"`
+		MaxAttempts int `json:"maxAttempts"`
+		IdempotencyKey string `json:"idempotencyKey,omitempty"`
+		LeaseUntil time.Time `json:"leaseUntil"`
+		LastError string `json:"lastError,omitempty"`
+		StatusCode int `json:"statusCode,omitempty"`
+	}
 
-// Job status values returned by the supervisor.
+	// JobRequest is the body for a new job. Body is already-encoded JSON or text; it is sent verbatim to the app.
+	JobRequest struct {
+		Path string `json:"path"`
+		Method string `json:"method,omitempty"`
+		Body string `json:"body,omitempty"`
+		Headers map[string]string `json:"headers,omitempty"`
+		RunAt time.Time `json:"runAt,omitzero"`
+		MaxAttempts int `json:"maxAttempts,omitempty"`
+		IdempotencyKey string `json:"idempotencyKey,omitempty"`
+	}
+
+	jobsResponse struct {
+		Jobs []Job `json:"jobs"`
+	}
+)
+
 const (
+	JobCanceled = "canceled"
+	JobDead = "dead"
+	JobFailed = "failed"
+
+	// Job status values returned by the supervisor.
 	JobPending = "pending"
 	JobRunning = "running"
 	JobSucceeded = "succeeded"
-	JobFailed = "failed"
-	JobDead = "dead"
-	JobCanceled = "canceled"
+	jobsPath = "/v1/jobs"
 )
-
-// Job is one durable unit of work as returned by the supervisor.
-type Job struct {
-	ID string `json:"id"`
-	Path string `json:"path"`
-	Method string `json:"method"`
-	Body string `json:"body,omitempty"`
-	Headers map[string]string `json:"headers,omitempty"`
-	Status string `json:"status"`
-	RunAt time.Time `json:"runAt"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
-	StartedAt time.Time `json:"startedAt"`
-	FinishedAt time.Time `json:"finishedAt"`
-	Attempts int `json:"attempts"`
-	MaxAttempts int `json:"maxAttempts"`
-	IdempotencyKey string `json:"idempotencyKey,omitempty"`
-	LeaseUntil time.Time `json:"leaseUntil"`
-	LastError string `json:"lastError,omitempty"`
-	StatusCode int `json:"statusCode,omitempty"`
-}
-
-// JobRequest is the body for a new job. Body is already-encoded JSON or text; it is sent verbatim to the app.
-type JobRequest struct {
-	Path string `json:"path"`
-	Method string `json:"method,omitempty"`
-	Body string `json:"body,omitempty"`
-	Headers map[string]string `json:"headers,omitempty"`
-	RunAt time.Time `json:"runAt,omitzero"`
-	MaxAttempts int `json:"maxAttempts,omitempty"`
-	IdempotencyKey string `json:"idempotencyKey,omitempty"`
-}
-
-type jobsResponse struct {
-	Jobs []Job `json:"jobs"`
-}
 
 // jobEndpoint reads the storage loopback URL and token that guard an app's job queue.
 func jobEndpoint() (string, string, error) {
 	base := strings.TrimSuffix(os.Getenv(storageURLEnv), "/")
-
 	token := os.Getenv(storageTokenEnv)
 	if base == "" || token == "" {
 		return "", "", fmt.Errorf("%s and %s are not set", storageURLEnv, storageTokenEnv)
@@ -95,9 +96,7 @@ func jobDo(ctx context.Context, client *http.Client, method, path string, body, 
 	if err != nil {
 		return 0, err
 	}
-
 	req.Header.Set("Authorization", "Bearer "+token)
-
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -106,6 +105,7 @@ func jobDo(ctx context.Context, client *http.Client, method, path string, body, 
 	if err != nil {
 		return 0, err
 	}
+
 	defer resp.Body.Close()
 
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -126,6 +126,15 @@ func jobDo(ctx context.Context, client *http.Client, method, path string, body, 
 	return resp.StatusCode, nil
 }
 
+// CancelJob cancels a pending or running job.
+func CancelJob(ctx context.Context, client *http.Client, id string) (Job, error) {
+	var job Job
+
+	_, err := jobDo(ctx, client, http.MethodPost, "/"+url.PathEscape(id)+"/cancel", nil, &job)
+
+	return job, err
+}
+
 // EnqueueJob adds a job to the current app's durable queue. created is false when an idempotency key matched an existing job.
 func EnqueueJob(ctx context.Context, client *http.Client, request JobRequest) (Job, bool, error) {
 	var job Job
@@ -133,21 +142,6 @@ func EnqueueJob(ctx context.Context, client *http.Client, request JobRequest) (J
 	status, err := jobDo(ctx, client, http.MethodPost, "", request, &job)
 
 	return job, status == http.StatusCreated, err
-}
-
-// ListJobs returns the current app's newest jobs, optionally filtered by status.
-func ListJobs(ctx context.Context, client *http.Client, status string) ([]Job, error) {
-	path := ""
-	if status != "" {
-		path = "?status=" + url.QueryEscape(status)
-	}
-
-	var result jobsResponse
-	if _, err := jobDo(ctx, client, http.MethodGet, path, nil, &result); err != nil {
-		return nil, err
-	}
-
-	return result.Jobs, nil
 }
 
 // GetJob returns one job by ID.
@@ -159,13 +153,21 @@ func GetJob(ctx context.Context, client *http.Client, id string) (Job, error) {
 	return job, err
 }
 
-// CancelJob cancels a pending or running job.
-func CancelJob(ctx context.Context, client *http.Client, id string) (Job, error) {
-	var job Job
+// ListJobs returns the current app's newest jobs, optionally filtered by status.
+func ListJobs(ctx context.Context, client *http.Client, status string) ([]Job, error) {
+	var path string
 
-	_, err := jobDo(ctx, client, http.MethodPost, "/"+url.PathEscape(id)+"/cancel", nil, &job)
+	if status != "" {
+		path = "?status=" + url.QueryEscape(status)
+	}
 
-	return job, err
+	var result jobsResponse
+
+	if _, err := jobDo(ctx, client, http.MethodGet, path, nil, &result); err != nil {
+		return nil, err
+	}
+
+	return result.Jobs, nil
 }
 
 // RetryJob requeues a dead, failed or canceled job.

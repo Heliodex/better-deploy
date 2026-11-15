@@ -11,18 +11,44 @@ import (
 	"time"
 )
 
+func TestFakeWasmtimeTarget(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "wasmtime")
+
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho wasmtime 50.0.0\n"), privateDirMode); err != nil {
+		t.Fatal(err)
+	}
+
+	version, err := wasmtimeVersion(bin)
+	if err != nil || version != "wasmtime 50.0.0" {
+		t.Errorf("wasmtimeVersion = %q, %v", version, err)
+	}
+}
+
+func TestRuntimeRelease(t *testing.T) {
+	cases := map[string]string{
+		"v50.0.0": "50.0.0",
+		"wasmtime 50.0.0": "50.0.0",
+		"wasmtime 50.0.0 (ebe5e8df1 2026-10-20)": "50.0.0",
+		"wasmtime-cli 51.2.3": "51.2.3",
+	}
+
+	for input, want := range cases {
+		if got := runtimeRelease(input); got != want {
+			t.Errorf("runtimeRelease(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func capabilityTestServer(t *testing.T, caps supervisorCapabilities, status int) *httptest.Server {
 	t.Helper()
-
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/capabilities" {
 			http.NotFound(w, r)
 			return
 		}
-
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
-
 		if status == http.StatusOK {
 			data, err := json.Marshal(caps)
 			if err != nil {
@@ -43,11 +69,14 @@ func TestFetchCapabilities(t *testing.T) {
 		WasmtimeTarget: testTarget,
 		Compiler: true,
 	}
-
 	server := capabilityTestServer(t, want, http.StatusOK)
+
 	defer server.Close()
 
-	got, err := fetchCapabilities(clientOptions{host: server.URL, timeout: time.Second})
+	got, err := fetchCapabilities(clientOptions{
+		host: server.URL,
+		timeout: time.Second,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,57 +96,20 @@ func TestFetchCapabilities(t *testing.T) {
 
 func TestFetchCapabilitiesOldSupervisor(t *testing.T) {
 	server := capabilityTestServer(t, supervisorCapabilities{}, http.StatusNotFound)
+
 	defer server.Close()
 
-	_, err := fetchCapabilities(clientOptions{host: server.URL, timeout: time.Second})
-	if err == nil || !strings.Contains(err.Error(), "404") {
+	if _, err := fetchCapabilities(clientOptions{
+		host: server.URL,
+		timeout: time.Second,
+	}); err == nil || !strings.Contains(err.Error(), "404") {
 		t.Errorf("error = %v, want a missing-capabilities status", err)
-	}
-}
-
-func TestPreflightDeployUsesServerTarget(t *testing.T) {
-	bin := fakeWasmtime(t, t.TempDir())
-
-	server := capabilityTestServer(t, supervisorCapabilities{
-		Version: "1.2.3",
-		Wasmtime: "wasmtime 50.0.0",
-		WasmtimeTarget: testTarget,
-		Compiler: true,
-	}, http.StatusOK)
-	defer server.Close()
-
-	cfg := &deployConfig{host: server.URL, wasmtime: bin, target: "x86_64-musl"}
-
-	pre, err := preflightDeploy(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if cfg.target != testTarget || !pre.TargetFromServer {
-		t.Errorf("target = %q, from server %v", cfg.target, pre.TargetFromServer)
-	}
-
-	if !pre.RuntimeKnown || !pre.RuntimeMatch {
-		t.Errorf("preflight = %+v, want a matching runtime", pre)
-	}
-}
-
-func TestRuntimeRelease(t *testing.T) {
-	cases := map[string]string{
-		"wasmtime 50.0.0": "50.0.0",
-		"wasmtime-cli 51.2.3": "51.2.3",
-		"wasmtime 50.0.0 (ebe5e8df1 2026-10-20)": "50.0.0",
-		"v50.0.0": "50.0.0",
-	}
-	for input, want := range cases {
-		if got := runtimeRelease(input); got != want {
-			t.Errorf("runtimeRelease(%q) = %q, want %q", input, got, want)
-		}
 	}
 }
 
 func TestPreflightDeployIgnoresWasmtimeBuildMetadata(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "wasmtime")
+
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho 'wasmtime 50.0.0 (ebe5e8df1 2026-10-20)'\n"), privateDirMode); err != nil {
 		t.Fatal(err)
 	}
@@ -128,10 +120,14 @@ func TestPreflightDeployIgnoresWasmtimeBuildMetadata(t *testing.T) {
 		WasmtimeTarget: testTarget,
 		Compiler: true,
 	}, http.StatusOK)
+
 	defer server.Close()
 
-	cfg := &deployConfig{host: server.URL, wasmtime: bin, target: testTarget}
-
+	cfg := &deployConfig{
+		host: server.URL,
+		wasmtime: bin,
+		target: testTarget,
+	}
 	pre, err := preflightDeploy(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -142,37 +138,23 @@ func TestPreflightDeployIgnoresWasmtimeBuildMetadata(t *testing.T) {
 	}
 }
 
-func TestRunRuntime(t *testing.T) {
-	bin := filepath.Join(t.TempDir(), "wasmtime")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho 'wasmtime 50.0.0 (ebe5e8df1 2026-10-20)'\n"), privateDirMode); err != nil {
-		t.Fatal(err)
-	}
-
-	server := capabilityTestServer(t, supervisorCapabilities{
-		Wasmtime: "wasmtime 50.0.0",
-		WasmtimeTarget: testTarget,
-		Compiler: true,
-	}, http.StatusOK)
-	defer server.Close()
-
-	if err := runRuntime([]string{testHostFlag, server.URL, "--wasmtime", bin}); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestPreflightDeployKeepsExplicitTarget(t *testing.T) {
 	bin := fakeWasmtime(t, t.TempDir())
-
 	server := capabilityTestServer(t, supervisorCapabilities{
 		Version: "1.2.3",
 		Wasmtime: "wasmtime 50.0.0",
 		WasmtimeTarget: testTarget,
 		Compiler: true,
 	}, http.StatusOK)
+
 	defer server.Close()
 
-	cfg := &deployConfig{host: server.URL, wasmtime: bin, target: "x86_64-custom", targetConfigured: true}
-
+	cfg := &deployConfig{
+		host: server.URL,
+		wasmtime: bin,
+		target: "x86_64-custom",
+		targetConfigured: true,
+	}
 	pre, err := preflightDeploy(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -189,24 +171,65 @@ func TestPreflightDeployKeepsExplicitTarget(t *testing.T) {
 
 func TestPreflightDeployRejectsOldSupervisor(t *testing.T) {
 	server := capabilityTestServer(t, supervisorCapabilities{}, http.StatusNotFound)
+
 	defer server.Close()
 
-	cfg := &deployConfig{host: server.URL, target: testTarget}
+	cfg := &deployConfig{
+		host: server.URL,
+		target: testTarget,
+	}
+
 	if _, err := preflightDeploy(cfg); err == nil || !strings.Contains(err.Error(), "404") {
 		t.Errorf("error = %v, want a missing-capabilities status", err)
 	}
 }
 
-func TestFakeWasmtimeTarget(t *testing.T) {
-	dir := t.TempDir()
+func TestPreflightDeployUsesServerTarget(t *testing.T) {
+	bin := fakeWasmtime(t, t.TempDir())
+	server := capabilityTestServer(t, supervisorCapabilities{
+		Version: "1.2.3",
+		Wasmtime: "wasmtime 50.0.0",
+		WasmtimeTarget: testTarget,
+		Compiler: true,
+	}, http.StatusOK)
 
-	bin := filepath.Join(dir, "wasmtime")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho wasmtime 50.0.0\n"), privateDirMode); err != nil {
+	defer server.Close()
+
+	cfg := &deployConfig{
+		host: server.URL,
+		wasmtime: bin,
+		target: "x86_64-musl",
+	}
+	pre, err := preflightDeploy(cfg)
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	version, err := wasmtimeVersion(bin)
-	if err != nil || version != "wasmtime 50.0.0" {
-		t.Errorf("wasmtimeVersion = %q, %v", version, err)
+	if cfg.target != testTarget || !pre.TargetFromServer {
+		t.Errorf("target = %q, from server %v", cfg.target, pre.TargetFromServer)
+	}
+
+	if !pre.RuntimeKnown || !pre.RuntimeMatch {
+		t.Errorf("preflight = %+v, want a matching runtime", pre)
+	}
+}
+
+func TestRunRuntime(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "wasmtime")
+
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho 'wasmtime 50.0.0 (ebe5e8df1 2026-10-20)'\n"), privateDirMode); err != nil {
+		t.Fatal(err)
+	}
+
+	server := capabilityTestServer(t, supervisorCapabilities{
+		Wasmtime: "wasmtime 50.0.0",
+		WasmtimeTarget: testTarget,
+		Compiler: true,
+	}, http.StatusOK)
+
+	defer server.Close()
+
+	if err := runRuntime([]string{testHostFlag, server.URL, "--wasmtime", bin}); err != nil {
+		t.Fatal(err)
 	}
 }

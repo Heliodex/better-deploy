@@ -17,7 +17,6 @@ func captureLogs(t *testing.T) *bytes.Buffer {
 	t.Cleanup(func() {
 		output = previous
 	})
-
 	return buffer
 }
 
@@ -31,8 +30,7 @@ func TestLogfPrefixesEveryLevel(t *testing.T) {
 	got := buffer.String()
 
 	for _, level := range []Level{LevelTrace, LevelDebug, LevelInfo, LevelWarn, LevelError, LevelFatal} {
-		want := string(level) + " message for " + string(level) + "\n"
-		if !strings.Contains(got, want) {
+		if want := string(level) + " message for " + string(level) + "\n"; !strings.Contains(got, want) {
 			t.Errorf("missing %q in %q", want, got)
 		}
 	}
@@ -51,8 +49,8 @@ func TestLogfSplitsLines(t *testing.T) {
 
 func TestWriterPrefixesLines(t *testing.T) {
 	buffer := captureLogs(t)
-
 	writer := Writer(LevelInfo)
+
 	if _, err := io.WriteString(writer, "one\ntwo\n"); err != nil {
 		t.Fatal(err)
 	}

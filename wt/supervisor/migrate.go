@@ -24,9 +24,10 @@ func (s *supervisor) migrateApp(a *app, port int, done <-chan struct{}) error {
 	if timeout <= 0 {
 		timeout = 5 * time.Minute
 	}
-
 	a.mu.Lock()
+
 	startup := a.cfg.startupLimit()
+
 	a.mu.Unlock()
 
 	readyBy := time.Now().Add(startup)
@@ -52,8 +53,8 @@ func (s *supervisor) migrateApp(a *app, port int, done <-chan struct{}) error {
 		response, err := client.Do(request)
 		if err == nil {
 			body, _ := io.ReadAll(io.LimitReader(response.Body, 4<<10))
-
 			_ = response.Body.Close()
+
 			switch {
 			case response.StatusCode == http.StatusNoContent || response.StatusCode == http.StatusOK:
 				return nil
@@ -62,6 +63,7 @@ func (s *supervisor) migrateApp(a *app, port int, done <-chan struct{}) error {
 				return errNoMigrateEndpoint
 			case response.StatusCode == http.StatusServiceUnavailable:
 				last = response.Status + ": " + trimMessage(body)
+
 				if time.Now().After(readyBy) {
 					return fmt.Errorf("storage unavailable: %s", last)
 				}
@@ -70,6 +72,7 @@ func (s *supervisor) migrateApp(a *app, port int, done <-chan struct{}) error {
 			}
 		} else {
 			last = err.Error()
+
 			if time.Now().After(readyBy) {
 				return fmt.Errorf("migrate endpoint: %w", err)
 			}

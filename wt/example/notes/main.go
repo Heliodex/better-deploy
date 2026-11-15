@@ -14,29 +14,41 @@ import (
 	wasihttp "github.com/heliodex/better-deploy/wt/packages/v2/wasihttp"
 )
 
-const (
-	maxNotes = 50
-	maxNoteBody = 2 << 10
-)
-
 type note struct {
 	ID string `json:"id"`
 	Body string `json:"body"`
 	CreatedAt time.Time `json:"createdAt"`
 }
 
-var (
-	mu sync.Mutex
-	store *storage.Client
-	errStorage error
+const (
+	maxNoteBody = 2 << 10
+	maxNotes = 50
 )
 
-func migrate(ctx context.Context) error {
-	return store.Migrate(ctx, 1, storage.Statement{SQL: `create table if not exists notes (
-		id text primary key,
-		body text not null,
-		created_at text not null
-	)`})
+var (
+	errStorage error
+	mu sync.Mutex
+	store *storage.Client
+)
+
+func addNote(ctx context.Context, body string) (note, error) {
+	entry := note{
+		ID: app.NewID(),
+		Body: body,
+		CreatedAt: time.Now().UTC(),
+	}
+
+	if _, err := store.Batch(ctx, storage.Statement{
+		SQL: `insert into notes (id, body, created_at) values (?, ?, ?)`,
+		Args: []any{entry.ID, entry.Body, entry.CreatedAt.UTC().Format(app.TimestampFormat)},
+	}, storage.Statement{
+		SQL: `delete from notes where id not in (select id from notes order by created_at desc, id desc limit ?)`,
+		Args: []any{maxNotes},
+	}); err != nil {
+		return note{}, err
+	}
+
+	return entry, nil
 }
 
 func loadNotes(ctx context.Context) ([]note, error) {
@@ -44,12 +56,14 @@ func loadNotes(ctx context.Context) ([]note, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	defer rows.Close()
 
 	notes := []note{}
 
 	for rows.Next() {
 		var entry note
+
 		if err := rows.Scan(&entry.ID, &entry.Body, &entry.CreatedAt); err != nil {
 			return nil, err
 		}
@@ -60,26 +74,6 @@ func loadNotes(ctx context.Context) ([]note, error) {
 	return notes, rows.Err()
 }
 
-func addNote(ctx context.Context, body string) (note, error) {
-	entry := note{ID: app.NewID(), Body: body, CreatedAt: time.Now().UTC()}
-
-	_, err := store.Batch(ctx,
-		storage.Statement{
-			SQL: `insert into notes (id, body, created_at) values (?, ?, ?)`,
-			Args: []any{entry.ID, entry.Body, entry.CreatedAt.UTC().Format(app.TimestampFormat)},
-		},
-		storage.Statement{
-			SQL: `delete from notes where id not in (select id from notes order by created_at desc, id desc limit ?)`,
-			Args: []any{maxNotes},
-		},
-	)
-	if err != nil {
-		return note{}, err
-	}
-
-	return entry, nil
-}
-
 func handle(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/" || r.URL.Path == "":
@@ -87,11 +81,11 @@ func handle(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "notes example")
 		fmt.Fprintln(w, "GET /notes")
 		fmt.Fprintln(w, "POST /notes (body is the note text)")
-
 	case r.URL.Path == "/notes" && r.Method == http.MethodGet:
 		ctx := r.Context()
 
 		mu.Lock()
+
 		defer mu.Unlock()
 
 		notes, err := loadNotes(ctx)
@@ -99,9 +93,7 @@ func handle(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "load notes: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-
 		app.WriteJSON(w, http.StatusOK, notes)
-
 	case r.URL.Path == "/notes" && r.Method == http.MethodPost:
 		body, err := io.ReadAll(io.LimitReader(r.Body, maxNoteBody))
 		if err != nil {
@@ -118,6 +110,7 @@ func handle(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 
 		mu.Lock()
+
 		defer mu.Unlock()
 
 		entry, err := addNote(ctx, text)
@@ -125,17 +118,26 @@ func handle(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "save notes: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-
 		app.WriteJSON(w, http.StatusCreated, entry)
-
 	default:
 		http.NotFound(w, r)
 	}
 }
 
+func main() {}
+
 func init() {
 	store, errStorage = storage.New(wasihttp.NewClient())
+
 	wasihttp.Handle(app.ServeStorage(errStorage, migrate, http.HandlerFunc(handle)).ServeHTTP)
 }
 
-func main() {}
+func migrate(ctx context.Context) error {
+	return store.Migrate(ctx, 1, storage.Statement{
+		SQL: `create table if not exists notes (
+		id text primary key,
+		body text not null,
+		created_at text not null
+	)`,
+	})
+}

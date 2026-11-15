@@ -12,57 +12,31 @@ import (
 	"time"
 )
 
-// encodeParam normalises a Go parameter to the JSON form the storage service accepts: bytes as $b64, times as RFC 3339, bools as 0/1 and small integers as int64.
-func encodeParam(arg any) any {
-	switch value := arg.(type) {
-	case []byte:
-		return map[string]string{"$b64": base64.StdEncoding.EncodeToString(value)}
-	case time.Time:
-		return value.Format(time.RFC3339Nano)
+// boolValue coerces a storage bool, 0/1 integer or parseable string to bool.
+func boolValue(value any) (bool, error) {
+	switch value := value.(type) {
 	case bool:
-		if value {
-			return int64(1)
+		return value, nil
+	case int64:
+		switch value {
+		case 0:
+			return false, nil
+		case 1:
+			return true, nil
+		default:
+			return false, fmt.Errorf("cannot convert %d to bool", value)
 		}
-
-		return int64(0)
-	case int:
-		return int64(value)
-	case int8:
-		return int64(value)
-	case int16:
-		return int64(value)
-	case int32:
-		return int64(value)
-	case uint:
-		return uint64(value)
-	case uint8:
-		return int64(value)
-	case uint16:
-		return int64(value)
-	case uint32:
-		return int64(value)
+	case string:
+		return strconv.ParseBool(value)
 	default:
-		return arg
+		return false, fmt.Errorf("cannot convert %T to bool", value)
 	}
-}
-
-// encodeParams applies encodeParam to every argument, returning nil for an empty list.
-func encodeParams(args []any) []any {
-	if len(args) == 0 {
-		return nil
-	}
-
-	params := make([]any, len(args))
-	for i, arg := range args {
-		params[i] = encodeParam(arg)
-	}
-
-	return params
 }
 
 // decodeBlobValue decodes the {"$b64": "..."} form used for byte parameters.
 func decodeBlobValue(raw jsontext.Value) ([]byte, error) {
 	var object map[string]string
+
 	if err := json.Unmarshal(raw, &object); err != nil {
 		return nil, errors.New("blob must be {\"$b64\": \"...\"}")
 	}
@@ -105,6 +79,7 @@ func decodeValue(raw jsontext.Value) (any, error) {
 		return false, nil
 	case '"':
 		var value string
+
 		if err := json.Unmarshal(raw, &value); err != nil {
 			return nil, err
 		}
@@ -117,28 +92,53 @@ func decodeValue(raw jsontext.Value) (any, error) {
 	}
 }
 
-// int64Value coerces a storage value to int64, rejecting fractional floats and out-of-range numbers.
-func int64Value(value any) (int64, error) {
-	switch value := value.(type) {
-	case int64:
-		return value, nil
-	case float64:
-		if value != math.Trunc(value) || value < math.MinInt64 || value > math.MaxInt64 {
-			return 0, fmt.Errorf("cannot convert %v to int64", value)
-		}
-
-		return int64(value), nil
+// encodeParam normalises a Go parameter to the JSON form the storage service accepts: bytes as $b64, times as RFC 3339, bools as 0/1 and small integers as int64.
+func encodeParam(arg any) any {
+	switch value := arg.(type) {
+	case []byte:
+		return map[string]string{"$b64": base64.StdEncoding.EncodeToString(value)}
+	case time.Time:
+		return value.Format(time.RFC3339Nano)
 	case bool:
 		if value {
-			return 1, nil
+			return int64(1)
 		}
 
-		return 0, nil
-	case string:
-		return strconv.ParseInt(value, 10, 64)
+		return int64(0)
+	case int:
+		return int64(value)
+	case int8:
+		return int64(value)
+	case int16:
+		return int64(value)
+	case int32:
+		return int64(value)
+	case uint:
+		return uint64(value)
+	case uint8:
+		return int64(value)
+	case uint16:
+		return int64(value)
+	case uint32:
+		return int64(value)
 	default:
-		return 0, fmt.Errorf("cannot convert %T to int64", value)
+		return arg
 	}
+}
+
+// encodeParams applies encodeParam to every argument, returning nil for an empty list.
+func encodeParams(args []any) []any {
+	if len(args) == 0 {
+		return nil
+	}
+
+	params := make([]any, len(args))
+
+	for i, arg := range args {
+		params[i] = encodeParam(arg)
+	}
+
+	return params
 }
 
 // float64Value coerces a storage integer, float or numeric string to float64.
@@ -155,49 +155,39 @@ func float64Value(value any) (float64, error) {
 	}
 }
 
-// boolValue coerces a storage bool, 0/1 integer or parseable string to bool.
-func boolValue(value any) (bool, error) {
+// int64Value coerces a storage value to int64, rejecting fractional floats and out-of-range numbers.
+func int64Value(value any) (int64, error) {
 	switch value := value.(type) {
 	case bool:
-		return value, nil
-	case int64:
-		switch value {
-		case 0:
-			return false, nil
-		case 1:
-			return true, nil
-		default:
-			return false, fmt.Errorf("cannot convert %d to bool", value)
+		if value {
+			return 1, nil
 		}
+
+		return 0, nil
+	case float64:
+		if value != math.Trunc(value) || value < math.MinInt64 || value > math.MaxInt64 {
+			return 0, fmt.Errorf("cannot convert %v to int64", value)
+		}
+
+		return int64(value), nil
+	case int64:
+		return value, nil
 	case string:
-		return strconv.ParseBool(value)
+		return strconv.ParseInt(value, 10, 64)
 	default:
-		return false, fmt.Errorf("cannot convert %T to bool", value)
+		return 0, fmt.Errorf("cannot convert %T to int64", value)
 	}
 }
 
 // scanValue scans a storage value into common pointer types, delegating to sql.Scanner when dest implements it.
 func scanValue(dest, value any) error {
-	if scanner, ok := dest.(interface{ Scan(dest any) error }); ok {
+	if scanner, ok := dest.(interface {
+		Scan(dest any) error
+	}); ok {
 		return scanner.Scan(value)
 	}
 
 	switch dest := dest.(type) {
-	case *any:
-		*dest = value
-	case *string:
-		switch value := value.(type) {
-		case string:
-			*dest = value
-		case []byte:
-			*dest = string(value)
-		case int64:
-			*dest = strconv.FormatInt(value, 10)
-		case float64:
-			*dest = strconv.FormatFloat(value, 'g', -1, 64)
-		default:
-			return fmt.Errorf("cannot scan %T into *string", value)
-		}
 	case *[]byte:
 		switch value := value.(type) {
 		case []byte:
@@ -207,8 +197,17 @@ func scanValue(dest, value any) error {
 		default:
 			return fmt.Errorf("cannot scan %T into *[]byte", value)
 		}
-	case *int64:
-		value, err := int64Value(value)
+	case *any:
+		*dest = value
+	case *bool:
+		value, err := boolValue(value)
+		if err != nil {
+			return err
+		}
+
+		*dest = value
+	case *float64:
+		value, err := float64Value(value)
 		if err != nil {
 			return err
 		}
@@ -225,20 +224,26 @@ func scanValue(dest, value any) error {
 		}
 
 		*dest = int(value)
-	case *float64:
-		value, err := float64Value(value)
+	case *int64:
+		value, err := int64Value(value)
 		if err != nil {
 			return err
 		}
 
 		*dest = value
-	case *bool:
-		value, err := boolValue(value)
-		if err != nil {
-			return err
+	case *string:
+		switch value := value.(type) {
+		case []byte:
+			*dest = string(value)
+		case float64:
+			*dest = strconv.FormatFloat(value, 'g', -1, 64)
+		case int64:
+			*dest = strconv.FormatInt(value, 10)
+		case string:
+			*dest = value
+		default:
+			return fmt.Errorf("cannot scan %T into *string", value)
 		}
-
-		*dest = value
 	case *time.Time:
 		text, ok := value.(string)
 		if !ok {

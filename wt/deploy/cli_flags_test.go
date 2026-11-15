@@ -7,16 +7,29 @@ import (
 	"testing"
 )
 
+func TestAppURLForHost(t *testing.T) {
+	if got := appURLForHost("http://127.0.0.1:8080", "pulse.localhost"); got != "http://pulse.localhost:8080" {
+		t.Errorf("local app URL = %q", got)
+	}
+
+	if got := appURLForHost("https://wt.example.com", "pulse.example.com"); got != "https://pulse.example.com" {
+		t.Errorf("remote app URL = %q", got)
+	}
+}
+
 func TestClientFlagsAnywhere(t *testing.T) {
 	t.Setenv("WT_DEPLOY_HOST", "")
 	t.Setenv("WT_TOKEN", "")
 
 	cfg, rest, err := clientFlags([]string{
 		"pulse",
-		testHostFlag, "http://127.0.0.1:8080",
-		"--token", "secret",
+		testHostFlag,
+		"http://127.0.0.1:8080",
+		"--token",
+		"secret",
 		"--json",
-		"--tail", "40",
+		"--tail",
+		"40",
 	}, true)
 	if err != nil {
 		t.Fatal(err)
@@ -56,6 +69,7 @@ func TestRunLogsAcceptsClientFlagsAfterApp(t *testing.T) {
 		gotAuth = r.Header.Get("Authorization")
 		_, _ = w.Write([]byte(`{"logs":[]}`))
 	}))
+
 	defer server.Close()
 
 	if err := runLogs([]string{"pulse", testHostFlag, server.URL, "--token", "secret", "--tail", "40"}); err != nil {
@@ -64,15 +78,5 @@ func TestRunLogsAcceptsClientFlagsAfterApp(t *testing.T) {
 
 	if gotPath != "/apps/pulse/logs?tail=40" || gotAuth != "Bearer secret" {
 		t.Errorf("path=%q auth=%q", gotPath, gotAuth)
-	}
-}
-
-func TestAppURLForHost(t *testing.T) {
-	if got := appURLForHost("http://127.0.0.1:8080", "pulse.localhost"); got != "http://pulse.localhost:8080" {
-		t.Errorf("local app URL = %q", got)
-	}
-
-	if got := appURLForHost("https://wt.example.com", "pulse.example.com"); got != "https://pulse.example.com" {
-		t.Errorf("remote app URL = %q", got)
 	}
 }

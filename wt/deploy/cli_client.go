@@ -22,9 +22,11 @@ type clientFlagValues struct {
 
 // extractClientFlags removes --host, --token, --config, --profile, --json and --timeout wherever they appear, leaving command flags and positionals in order.
 func extractClientFlags(args []string) (clientFlagValues, []string, error) {
-	values := clientFlagValues{timeout: defaultClientTimeout}
-
+	values := clientFlagValues{
+		timeout: defaultClientTimeout,
+	}
 	rest := make([]string, 0, len(args))
+
 	for index := 0; index < len(args); index++ {
 		arg := args[index]
 		if arg == "--" {
@@ -39,9 +41,10 @@ func extractClientFlags(args []string) (clientFlagValues, []string, error) {
 		}
 
 		switch strings.TrimLeft(key, "-") {
-		case "host", "token", "config", "profile", "timeout":
+		case "config", "host", "profile", "timeout", "token":
 			if !hasValue {
 				index++
+
 				if index >= len(args) {
 					return clientFlagValues{}, nil, fmt.Errorf("%s needs an argument", key)
 				}
@@ -99,7 +102,6 @@ func clientFlags(args []string, requireHost bool) (clientOptions, []string, erro
 	}
 
 	profileName := activeProfileName(values.profile, fileCfg)
-
 	profile, err := resolveProfile(fileCfg, profileName)
 	if err != nil {
 		return clientOptions{}, nil, err
@@ -122,39 +124,21 @@ func clientFlags(args []string, requireHost bool) (clientOptions, []string, erro
 	}, rest, nil
 }
 
-func supervisorURL(host, path string) string {
-	return baseURL(host) + path
-}
-
-// apiDo performs one API request with the client timeout and returns at most 8 MiB of the response body.
-func apiDo(cfg clientOptions, method, path string, body io.Reader, contentType string) (int, http.Header, []byte, error) {
-	req, err := http.NewRequestWithContext(context.Background(), method, supervisorURL(cfg.host, path), body)
-	if err != nil {
-		return 0, nil, nil, err
+// htmlErrorTitle pulls the title out of an HTML error page, so an outage reads as one line instead of a markup dump.
+func htmlErrorTitle(page string) string {
+	lower := strings.ToLower(page)
+	start := strings.Index(lower, "<title>")
+	if start < 0 {
+		return ""
 	}
 
-	if cfg.token != "" {
-		req.Header.Set("Authorization", "Bearer "+cfg.token)
+	title := strings.TrimSpace(page[start+len("<title>"):])
+
+	if end := strings.Index(strings.ToLower(title), "</title>"); end >= 0 {
+		title = strings.TrimSpace(title[:end])
 	}
 
-	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
-	}
-
-	client := &http.Client{Timeout: cfg.timeout}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return 0, nil, nil, err
-	}
-	defer resp.Body.Close()
-
-	data, err := io.ReadAll(io.LimitReader(resp.Body, largeResponseLimit))
-	if err != nil {
-		return resp.StatusCode, resp.Header, nil, err
-	}
-
-	return resp.StatusCode, resp.Header, data, nil
+	return title
 }
 
 // checkAPI turns a non-2xx API response into an error that includes the response body.
@@ -175,23 +159,6 @@ func checkAPI(status int, body []byte) error {
 	return fmt.Errorf("status %d: %s", status, text)
 }
 
-// htmlErrorTitle pulls the title out of an HTML error page, so an outage reads as one line instead of a markup dump.
-func htmlErrorTitle(page string) string {
-	lower := strings.ToLower(page)
-	start := strings.Index(lower, "<title>")
-
-	if start < 0 {
-		return ""
-	}
-
-	title := strings.TrimSpace(page[start+len("<title>"):])
-	if end := strings.Index(strings.ToLower(title), "</title>"); end >= 0 {
-		title = strings.TrimSpace(title[:end])
-	}
-
-	return title
-}
-
 func printRawOrJSON(cfg clientOptions, body []byte) {
 	if cfg.jsonOut {
 		fmt.Println(strings.TrimSpace(string(body)))
@@ -199,11 +166,50 @@ func printRawOrJSON(cfg clientOptions, body []byte) {
 	}
 
 	var value any
+
 	if err := json.Unmarshal(body, &value); err != nil {
 		fmt.Println(strings.TrimSpace(string(body)))
 		return
 	}
 
 	out, _ := json.Marshal(value)
+
 	fmt.Println(string(out))
+}
+
+func supervisorURL(host, path string) string {
+	return baseURL(host) + path
+}
+
+// apiDo performs one API request with the client timeout and returns at most 8 MiB of the response body.
+func apiDo(cfg clientOptions, method, path string, body io.Reader, contentType string) (int, http.Header, []byte, error) {
+	req, err := http.NewRequestWithContext(context.Background(), method, supervisorURL(cfg.host, path), body)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+
+	if cfg.token != "" {
+		req.Header.Set("Authorization", "Bearer "+cfg.token)
+	}
+
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+
+	client := &http.Client{
+		Timeout: cfg.timeout,
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, largeResponseLimit))
+	if err != nil {
+		return resp.StatusCode, resp.Header, nil, err
+	}
+
+	return resp.StatusCode, resp.Header, data, nil
 }

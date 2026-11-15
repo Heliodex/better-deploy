@@ -2,12 +2,7 @@
 
 package main
 
-import (
-	"golang.org/x/sys/unix"
-)
-
-// defaultNofileLimit leaves wasmtime room for its listener, proxy connections and storage sockets.
-const defaultNofileLimit = 1024
+import "golang.org/x/sys/unix"
 
 type rlimitSpec struct {
 	Resource int
@@ -15,11 +10,19 @@ type rlimitSpec struct {
 	Value uint64
 }
 
+// defaultNofileLimit leaves wasmtime room for its listener, proxy connections and storage sockets.
+const defaultNofileLimit = 1024
+
 // rlimitPlan derives the app's per-process hard limits. disk_mb becomes a per-file backstop through RLIMIT_FSIZE.
 func rlimitPlan(cfg appConfig) []rlimitSpec {
 	plan := []rlimitSpec{
-		{Resource: unix.RLIMIT_NOFILE, Name: "RLIMIT_NOFILE", Value: defaultNofileLimit},
+		{
+			Resource: unix.RLIMIT_NOFILE,
+			Name: "RLIMIT_NOFILE",
+			Value: defaultNofileLimit,
+		},
 	}
+
 	if cfg.DiskMB > 0 {
 		plan = append(plan, rlimitSpec{
 			Resource: unix.RLIMIT_FSIZE,
@@ -28,5 +31,9 @@ func rlimitPlan(cfg appConfig) []rlimitSpec {
 		})
 	}
 
-	return append(plan, rlimitSpec{Resource: unix.RLIMIT_CORE, Name: "RLIMIT_CORE", Value: 0})
+	return append(plan, rlimitSpec{
+		Resource: unix.RLIMIT_CORE,
+		Name: "RLIMIT_CORE",
+		Value: 0,
+	})
 }

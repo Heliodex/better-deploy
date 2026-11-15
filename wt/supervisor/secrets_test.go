@@ -8,6 +8,81 @@ import (
 	"testing"
 )
 
+func TestAppLogRedactsSecretsInAppAndSupervisorLines(t *testing.T) {
+	logs, err := newAppLog(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer logs.close()
+
+	logs.setSecrets([]string{"short", "longer-secret"})
+
+	messages := logs.subscribe()
+
+	if _, err := logs.Write([]byte("app says longer-secret and short\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	entry := <-messages
+	if strings.Contains(entry.Message, "longer-secret") || strings.Contains(entry.Message, "short") {
+		t.Errorf("streamed app line = %q", entry.Message)
+	}
+
+	if entry.Message != "app says [redacted] and [redacted]" {
+		t.Errorf("streamed app line = %q", entry.Message)
+	}
+	logs.logSupervisor("GET /?token=longer-secret 200")
+
+	entry = <-messages
+
+	if strings.Contains(entry.Message, "longer-secret") {
+		t.Errorf("streamed supervisor line = %q", entry.Message)
+	}
+
+	entries, err := logs.tail(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, entry := range entries {
+		if strings.Contains(entry.Message, "longer-secret") || strings.Contains(entry.Message, "short") {
+			t.Errorf("tail line leaked a secret: %q", entry.Message)
+		}
+	}
+
+	for _, path := range []string{logs.path(), logs.supervisorPath()} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if strings.Contains(string(data), "longer-secret") || strings.Contains(string(data), "short") {
+			t.Errorf("%s leaked a secret: %s", filepath.Base(path), data)
+		}
+	}
+}
+
+func TestSecretStoreFailsOnCorruptState(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), secretDirName)
+
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "demo.json"), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := newSecretStore(dir); err == nil {
+		t.Fatal("corrupt secret state did not fail startup")
+	}
+}
+
+func containsString(values []string, want string) bool {
+	return slices.Contains(values, want)
+}
+
 func testSecretStore(tb testing.TB) *secretStore {
 	tb.Helper()
 
@@ -19,26 +94,36 @@ func testSecretStore(tb testing.TB) *secretStore {
 	return store
 }
 
-func containsString(values []string, want string) bool {
-	return slices.Contains(values, want)
-}
+func TestSecretRotationKeepsOldValuesForRedaction(t *testing.T) {
+	store := testSecretStore(t)
 
-func secretTestSupervisor(tb testing.TB) (*supervisor, *app) {
-	tb.Helper()
+	if err := store.set("demo", "TOKEN", "old-token"); err != nil {
+		t.Fatal(err)
+	}
 
-	s := testSupervisor()
-	s.secrets = testSecretStore(tb)
-	s.cfg.stateDir = tb.TempDir()
-	dir := tb.TempDir()
-	a := &app{name: "demo", dir: dir, cfg: appConfig{Name: "demo", Host: "demo.localhost"}}
-	s.apps[a.name] = a
-	s.hosts[a.cfg.Host] = a
+	if err := store.set("demo", "TOKEN", "new-token"); err != nil {
+		t.Fatal(err)
+	}
 
-	return s, a
+	values := store.redactionValues("demo")
+	if !containsString(values, "old-token") || !containsString(values, "new-token") {
+		t.Errorf("redaction values = %v, want both rotations", values)
+	}
+
+	if err := store.delete("demo", "TOKEN"); err != nil {
+		t.Fatal(err)
+	}
+
+	values = store.redactionValues("demo")
+
+	if !containsString(values, "old-token") || !containsString(values, "new-token") {
+		t.Errorf("redaction values after delete = %v, want history", values)
+	}
 }
 
 func TestSecretStorePersistenceAndPermissions(t *testing.T) {
 	store := testSecretStore(t)
+
 	if err := store.set("demo", "API_KEY", "first-value"); err != nil {
 		t.Fatal(err)
 	}
@@ -114,6 +199,7 @@ func TestSecretStorePersistenceAndPermissions(t *testing.T) {
 
 func TestSecretStoreRejectsInvalidNamesKeysAndValues(t *testing.T) {
 	store := testSecretStore(t)
+
 	for _, key := range []string{"", "1KEY", "BAD-KEY", "has space", "A=B", strings.Repeat("A", maxSecretKeyBytes+1)} {
 		if err := store.set("demo", key, "value"); err == nil {
 			t.Errorf("key %q was accepted", key)
@@ -133,107 +219,35 @@ func TestSecretStoreRejectsInvalidNamesKeysAndValues(t *testing.T) {
 	}
 }
 
-func TestSecretStoreFailsOnCorruptState(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), secretDirName)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
+func secretTestSupervisor(tb testing.TB) (*supervisor, *app) {
+	tb.Helper()
+
+	s := testSupervisor()
+	s.secrets = testSecretStore(tb)
+	s.cfg.stateDir = tb.TempDir()
+	dir := tb.TempDir()
+	a := &app{
+		name: "demo",
+		dir: dir,
+		cfg: appConfig{
+			Name: "demo",
+			Host: "demo.localhost",
+		},
 	}
+	s.apps[a.name] = a
+	s.hosts[a.cfg.Host] = a
 
-	if err := os.WriteFile(filepath.Join(dir, "demo.json"), []byte("{not json"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := newSecretStore(dir); err == nil {
-		t.Fatal("corrupt secret state did not fail startup")
-	}
-}
-
-func TestSecretRotationKeepsOldValuesForRedaction(t *testing.T) {
-	store := testSecretStore(t)
-	if err := store.set("demo", "TOKEN", "old-token"); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := store.set("demo", "TOKEN", "new-token"); err != nil {
-		t.Fatal(err)
-	}
-
-	values := store.redactionValues("demo")
-	if !containsString(values, "old-token") || !containsString(values, "new-token") {
-		t.Errorf("redaction values = %v, want both rotations", values)
-	}
-
-	if err := store.delete("demo", "TOKEN"); err != nil {
-		t.Fatal(err)
-	}
-
-	values = store.redactionValues("demo")
-	if !containsString(values, "old-token") || !containsString(values, "new-token") {
-		t.Errorf("redaction values after delete = %v, want history", values)
-	}
-}
-
-func TestAppLogRedactsSecretsInAppAndSupervisorLines(t *testing.T) {
-	logs, err := newAppLog(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer logs.close()
-
-	logs.setSecrets([]string{"short", "longer-secret"})
-	messages := logs.subscribe()
-
-	if _, err := logs.Write([]byte("app says longer-secret and short\n")); err != nil {
-		t.Fatal(err)
-	}
-
-	entry := <-messages
-	if strings.Contains(entry.Message, "longer-secret") || strings.Contains(entry.Message, "short") {
-		t.Errorf("streamed app line = %q", entry.Message)
-	}
-
-	if entry.Message != "app says [redacted] and [redacted]" {
-		t.Errorf("streamed app line = %q", entry.Message)
-	}
-
-	logs.logSupervisor("GET /?token=longer-secret 200")
-
-	entry = <-messages
-	if strings.Contains(entry.Message, "longer-secret") {
-		t.Errorf("streamed supervisor line = %q", entry.Message)
-	}
-
-	entries, err := logs.tail(10)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for _, entry := range entries {
-		if strings.Contains(entry.Message, "longer-secret") || strings.Contains(entry.Message, "short") {
-			t.Errorf("tail line leaked a secret: %q", entry.Message)
-		}
-	}
-
-	for _, path := range []string{logs.path(), logs.supervisorPath()} {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if strings.Contains(string(data), "longer-secret") || strings.Contains(string(data), "short") {
-			t.Errorf("%s leaked a secret: %s", filepath.Base(path), data)
-		}
-	}
+	return s, a
 }
 
 func TestAppInfoRedactsLastError(t *testing.T) {
 	s, a := secretTestSupervisor(t)
+
 	if err := s.secrets.set("demo", "API_KEY", "super-secret-value"); err != nil {
 		t.Fatal(err)
 	}
 
 	a.lastError = "failed with super-secret-value"
-
 	info := s.info(a)
 	if strings.Contains(info.LastError, "super-secret-value") {
 		t.Errorf("LastError leaked a secret: %q", info.LastError)

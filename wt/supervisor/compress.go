@@ -12,7 +12,34 @@ import (
 	"sync"
 )
 
-type acceptEncodingKey struct{}
+type (
+	acceptEncodingKey struct{}
+
+	compressedBody struct {
+		*io.PipeReader
+		original io.ReadCloser
+		once sync.Once
+	}
+)
+
+func addVary(header http.Header, value string) {
+	for _, existing := range header.Values("Vary") {
+		for token := range strings.SplitSeq(existing, ",") {
+			if strings.EqualFold(strings.TrimSpace(token), value) {
+				return
+			}
+		}
+	}
+	header.Add("Vary", value)
+}
+
+func (b *compressedBody) Close() error {
+	b.once.Do(func() {
+		_ = b.PipeReader.Close()
+		_ = b.original.Close()
+	})
+	return nil
+}
 
 // compressibleMediaType reports whether a dynamic response of this type is worth gzipping. SSE stays plain, because browsers and proxies expect each event to arrive as soon as it is written.
 func compressibleMediaType(mediaType string) bool {
@@ -24,7 +51,7 @@ func compressibleMediaType(mediaType string) bool {
 	}
 
 	switch mediaType {
-	case "application/json", "application/x-ndjson", "application/jsonl", "application/javascript", "application/xml", "image/svg+xml":
+	case "application/javascript", "application/json", "application/jsonl", "application/x-ndjson", "application/xml", "image/svg+xml":
 		return true
 	}
 
@@ -35,6 +62,7 @@ func compressibleMediaType(mediaType string) bool {
 func copyCompressed(gz *gzip.Writer, src io.Reader, stream bool) error {
 	if !stream {
 		_, err := io.Copy(gz, src)
+
 		return err
 	}
 
@@ -60,6 +88,16 @@ func copyCompressed(gz *gzip.Writer, src io.Reader, stream bool) error {
 			return readErr
 		}
 	}
+}
+
+func firstError(values ...error) error {
+	for _, err := range values {
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // compressResponse gzips a buffered or streamed JSON, NDJSON or text response when the client accepts it. SSE, already encoded bodies, no-transform responses and tiny known bodies stay untouched.
@@ -97,10 +135,16 @@ func compressResponse(res *http.Response, acceptEncoding string) error {
 	stream := res.ContentLength < 0
 	reader, writer := io.Pipe()
 	gz := gzip.NewWriter(writer)
-	res.Body = &compressedBody{PipeReader: reader, original: original}
+	res.Body = &compressedBody{
+		PipeReader: reader,
+		original: original,
+	}
+
 	res.Header.Set("Content-Encoding", "gzip")
 	res.Header.Del("Content-Length")
+
 	res.ContentLength = -1
+
 	addVary(res.Header, "Accept-Encoding")
 
 	go func() {
@@ -111,42 +155,4 @@ func compressResponse(res *http.Response, acceptEncoding string) error {
 	}()
 
 	return nil
-}
-
-type compressedBody struct {
-	*io.PipeReader
-
-	original io.ReadCloser
-	once sync.Once
-}
-
-func (b *compressedBody) Close() error {
-	b.once.Do(func() {
-		_ = b.PipeReader.Close()
-		_ = b.original.Close()
-	})
-
-	return nil
-}
-
-func firstError(values ...error) error {
-	for _, err := range values {
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func addVary(header http.Header, value string) {
-	for _, existing := range header.Values("Vary") {
-		for token := range strings.SplitSeq(existing, ",") {
-			if strings.EqualFold(strings.TrimSpace(token), value) {
-				return
-			}
-		}
-	}
-
-	header.Add("Vary", value)
 }

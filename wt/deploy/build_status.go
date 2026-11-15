@@ -25,11 +25,17 @@ func buildDetail(hash string, files int) string {
 	}
 
 	unit := "files"
+
 	if files == 1 {
 		unit = "file"
 	}
 
 	return fmt.Sprintf(" (%s, %d %s)", short, files, unit)
+}
+
+// keepRunningComponent reports whether a deploy can skip the wasm payload because the supervisor already runs this digest.
+func keepRunningComponent(forceBuild bool, status buildStatus, serverDigest string) bool {
+	return !forceBuild && status.WasmDigest != "" && status.WasmDigest == serverDigest
 }
 
 // printBuildStatus writes the phase summary to stderr, keeping stdout free for JSON and bundle output.
@@ -58,9 +64,4 @@ func printBuildStatus(status buildStatus) {
 	default:
 		fmt.Fprintln(os.Stderr, "static: no build command")
 	}
-}
-
-// keepRunningComponent reports whether a deploy can skip the wasm payload because the supervisor already runs this digest.
-func keepRunningComponent(forceBuild bool, status buildStatus, serverDigest string) bool {
-	return !forceBuild && status.WasmDigest != "" && status.WasmDigest == serverDigest
 }

@@ -12,34 +12,38 @@ import (
 	"time"
 )
 
-const (
-	storageURLEnv = "WT_STORAGE_URL"
-	storageTokenEnv = "WT_STORAGE_TOKEN"
-	eventPublishPath = "/v1/publish"
+type (
+	// Event is the accepted publish result. ID is the cursor to pass to GET /v1/events?since=.
+	Event struct {
+		ID int64 `json:"id"`
+		Topic string `json:"topic"`
+		Time time.Time `json:"time"`
+	}
+
+	publishPayload struct {
+		Topic string `json:"topic"`
+		Data any `json:"data"`
+	}
 )
 
-// Event is the accepted publish result. ID is the cursor to pass to GET /v1/events?since=.
-type Event struct {
-	ID int64 `json:"id"`
-	Topic string `json:"topic"`
-	Time time.Time `json:"time"`
-}
-
-type publishPayload struct {
-	Topic string `json:"topic"`
-	Data any `json:"data"`
-}
+const (
+	eventPublishPath = "/v1/publish"
+	storageTokenEnv = "WT_STORAGE_TOKEN"
+	storageURLEnv = "WT_STORAGE_URL"
+)
 
 // eventResult decodes the publish response and turns a non-2xx status into an error.
 func eventResult(resp *http.Response) (Event, error) {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return Event{}, fmt.Errorf("event publish returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
 
 	var event Event
+
 	if err := json.Unmarshal(body, &event); err != nil {
 		return Event{}, fmt.Errorf("decode event publish: %w", err)
 	}
@@ -50,13 +54,15 @@ func eventResult(resp *http.Response) (Event, error) {
 // Publish sends one event to the current app's bus through the storage loopback service.
 func Publish(ctx context.Context, client *http.Client, topic string, data any) (Event, error) {
 	base := strings.TrimSuffix(os.Getenv(storageURLEnv), "/")
-
 	token := os.Getenv(storageTokenEnv)
 	if base == "" || token == "" {
 		return Event{}, fmt.Errorf("%s and %s are not set", storageURLEnv, storageTokenEnv)
 	}
 
-	body, err := json.Marshal(publishPayload{Topic: topic, Data: data})
+	body, err := json.Marshal(publishPayload{
+		Topic: topic,
+		Data: data,
+	})
 	if err != nil {
 		return Event{}, err
 	}
@@ -65,7 +71,6 @@ func Publish(ctx context.Context, client *http.Client, topic string, data any) (
 	if err != nil {
 		return Event{}, err
 	}
-
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 
@@ -79,7 +84,10 @@ func Publish(ctx context.Context, client *http.Client, topic string, data any) (
 
 // PublishTo sends one event to another app's bus. The target's allow_callers must name this app.
 func PublishTo(ctx context.Context, client *http.Client, target, topic string, data any) (Event, error) {
-	body, err := json.Marshal(publishPayload{Topic: topic, Data: data})
+	body, err := json.Marshal(publishPayload{
+		Topic: topic,
+		Data: data,
+	})
 	if err != nil {
 		return Event{}, err
 	}
@@ -88,7 +96,6 @@ func PublishTo(ctx context.Context, client *http.Client, target, topic string, d
 	if err != nil {
 		return Event{}, err
 	}
-
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := client.Do(req)

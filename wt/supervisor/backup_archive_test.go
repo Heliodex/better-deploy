@@ -18,6 +18,7 @@ func readArchiveEntries(t *testing.T, path string) map[string]string {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	defer file.Close()
 
 	gz, err := gzip.NewReader(file)
@@ -47,8 +48,21 @@ func readArchiveEntries(t *testing.T, path string) map[string]string {
 	}
 }
 
+func TestArchiveDataMissingSourceIsEmpty(t *testing.T) {
+	dst := filepath.Join(t.TempDir(), "data.tar.gz")
+
+	if err := archiveData(filepath.Join(t.TempDir(), "absent"), dst); err != nil {
+		t.Fatalf("archiveData() error = %v", err)
+	}
+
+	if entries := readArchiveEntries(t, dst); len(entries) != 0 {
+		t.Fatalf("archive entries = %v, want none", entries)
+	}
+}
+
 func TestArchiveDataWritesRegularFilesAndDirectories(t *testing.T) {
 	src := filepath.Join(t.TempDir(), "data")
+
 	if err := os.MkdirAll(filepath.Join(src, "nested"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -67,6 +81,7 @@ func TestArchiveDataWritesRegularFilesAndDirectories(t *testing.T) {
 	}
 
 	dst := filepath.Join(t.TempDir(), "data.tar.gz")
+
 	if err := archiveData(src, dst); err != nil {
 		t.Fatalf("archiveData() error = %v", err)
 	}
@@ -82,16 +97,5 @@ func TestArchiveDataWritesRegularFilesAndDirectories(t *testing.T) {
 
 	if _, ok := entries["link"]; ok {
 		t.Fatalf("archive entries = %v, want the symlink skipped", entries)
-	}
-}
-
-func TestArchiveDataMissingSourceIsEmpty(t *testing.T) {
-	dst := filepath.Join(t.TempDir(), "data.tar.gz")
-	if err := archiveData(filepath.Join(t.TempDir(), "absent"), dst); err != nil {
-		t.Fatalf("archiveData() error = %v", err)
-	}
-
-	if entries := readArchiveEntries(t, dst); len(entries) != 0 {
-		t.Fatalf("archive entries = %v, want none", entries)
 	}
 }

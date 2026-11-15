@@ -10,6 +10,7 @@ type appLocks struct {
 
 func (l *appLocks) get(name string) *sync.Mutex {
 	l.mu.Lock()
+
 	defer l.mu.Unlock()
 
 	if l.locks == nil {
@@ -28,7 +29,7 @@ func (l *appLocks) get(name string) *sync.Mutex {
 // lockApp serialises deploy, config, lifecycle, backup and database operations for one app.
 func (s *supervisor) lockApp(name string) func() {
 	lock := s.deployLocks.get(name)
-	lock.Lock()
 
+	lock.Lock()
 	return lock.Unlock
 }

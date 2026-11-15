@@ -8,13 +8,19 @@ import (
 
 // routeInfo is one method and path pattern in any supervisor route table.
 type routeInfo struct {
-	method string
-	path string
+	method, path string
+}
+
+func newStorageServerRoutes() *routeTable {
+	s := &storageServer{}
+
+	return s.buildStorageRoutes()
 }
 
 // normaliseRoutePath replaces every captured segment so OpenAPI templates compare equal.
 func normaliseRoutePath(path string) string {
 	segments := routeSegments(path)
+
 	for i, segment := range segments {
 		if strings.HasPrefix(segment, "{") {
 			segments[i] = "{}"
@@ -42,16 +48,14 @@ func (s *supervisor) routeEntries() []routeInfo {
 				continue
 			}
 
-			entries = append(entries, routeInfo{method: route.method, path: normaliseRoutePath("/" + strings.Join(route.pattern, "/"))})
+			entries = append(entries, routeInfo{
+				method: route.method,
+				path: normaliseRoutePath("/" + strings.Join(route.pattern, "/")),
+			})
 		}
 	}
 
 	return entries
-}
-
-func newStorageServerRoutes() *routeTable {
-	s := &storageServer{}
-	return s.buildStorageRoutes()
 }
 
 // TestOpenAPIDocumentsRoutes fails when a method or path exists in the route tables but not in openapi.yaml.
@@ -62,19 +66,20 @@ func TestOpenAPIDocumentsRoutes(t *testing.T) {
 	}
 
 	documented := map[string]struct{}{}
-	path := ""
+
+	var path string
 
 	for line := range strings.SplitSeq(string(data), "\n") {
 		trimmed := strings.TrimSpace(line)
+
 		if strings.HasPrefix(line, "  /") || strings.HasPrefix(line, "  \"/") {
 			raw := strings.Trim(strings.TrimSuffix(trimmed, ":"), "\"")
 			path = normaliseRoutePath(raw)
-
 			continue
 		}
 
 		switch trimmed {
-		case "get:", "post:", "put:", "patch:", "delete:", "head:", "options:":
+		case "delete:", "get:", "head:", "options:", "patch:", "post:", "put:":
 			if path != "" && strings.HasPrefix(line, "    ") {
 				documented[strings.ToUpper(strings.TrimSuffix(trimmed, ":"))+" "+path] = struct{}{}
 			}
@@ -83,6 +88,7 @@ func TestOpenAPIDocumentsRoutes(t *testing.T) {
 
 	for _, entry := range (&supervisor{}).routeEntries() {
 		key := strings.ToUpper(entry.method) + " " + entry.path
+
 		if _, ok := documented[key]; !ok {
 			t.Errorf("openapi.yaml is missing %s", key)
 		}

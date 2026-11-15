@@ -9,6 +9,7 @@ import (
 
 func TestRouteTableMatch(t *testing.T) {
 	rt := newRouteTable()
+
 	rt.add(http.MethodGet, "/apps/{name}", func(http.ResponseWriter, *http.Request, map[string]string) {})
 	rt.add(http.MethodPost, "/apps/{name}/jobs/{rest...}", func(http.ResponseWriter, *http.Request, map[string]string) {})
 
@@ -21,14 +22,21 @@ func TestRouteTableMatch(t *testing.T) {
 		{http.MethodGet, "/apps/demo", true, map[string]string{"name": "demo"}, ""},
 		{http.MethodGet, "/apps/demo/", true, map[string]string{"name": "demo"}, ""},
 		{http.MethodPost, "/apps/demo/jobs", true, map[string]string{"name": "demo", "rest": ""}, ""},
-		{http.MethodPost, "/apps/demo/jobs/abc/cancel", true, map[string]string{"name": "demo", "rest": "abc/cancel"}, ""},
+		{
+			http.MethodPost,
+			"/apps/demo/jobs/abc/cancel",
+			true,
+			map[string]string{"name": "demo", "rest": "abc/cancel"},
+			"",
+		},
 		{http.MethodDelete, "/apps/demo", false, nil, "GET"},
 		{http.MethodGet, "/apps/demo/jobs", false, nil, "POST"},
 		{http.MethodGet, "/unknown", false, nil, ""},
 	}
+
 	for _, tc := range cases {
 		route, params, allowed := rt.match(tc.method, tc.path)
-		if (route != nil) != tc.ok {
+		if route != nil != tc.ok {
 			t.Errorf("%s %s matched = %t, want %t", tc.method, tc.path, route != nil, tc.ok)
 			continue
 		}
@@ -51,7 +59,8 @@ func TestRouteTableMatch(t *testing.T) {
 
 func TestRouteTableServe(t *testing.T) {
 	rt := newRouteTable()
-	called := false
+
+	var called bool
 
 	rt.add(http.MethodGet, "/usage", func(w http.ResponseWriter, _ *http.Request, _ map[string]string) {
 		called = true
@@ -60,22 +69,22 @@ func TestRouteTableServe(t *testing.T) {
 	})
 
 	rec := httptest.NewRecorder()
-	rt.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/usage", nil))
 
+	rt.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/usage", nil))
 	if rec.Code != http.StatusNoContent || !called {
 		t.Fatalf("GET /usage = %d called=%t", rec.Code, called)
 	}
 
 	rec = httptest.NewRecorder()
-	rt.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/usage", nil))
 
+	rt.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/usage", nil))
 	if rec.Code != http.StatusMethodNotAllowed || rec.Header().Get("Allow") != http.MethodGet {
 		t.Errorf("POST /usage = %d Allow=%q", rec.Code, rec.Header().Get("Allow"))
 	}
 
 	rec = httptest.NewRecorder()
-	rt.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/missing", nil))
 
+	rt.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/missing", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("GET /missing = %d, want 404", rec.Code)
 	}

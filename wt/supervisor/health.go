@@ -29,93 +29,19 @@ const (
 )
 
 var healthClient = &http.Client{
-	Timeout: healthCheckTimeout,
 	Transport: &http.Transport{
-		DialContext: (&net.Dialer{Timeout: healthCheckTimeout}).DialContext,
+		DialContext: (&net.Dialer{
+			Timeout: healthCheckTimeout,
+		}).DialContext,
 		DisableKeepAlives: true,
 	},
-}
-
-// probeHealth calls an app's health path and requires a 2xx response.
-func probeHealth(port int, path string) error {
-	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d%s", port, path), nil)
-	if err != nil {
-		return err
-	}
-
-	resp, err := healthClient.Do(request)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return fmt.Errorf("%s: %s", resp.Status, trimMessage(body))
-	}
-
-	return nil
-}
-
-// trimMessage bounds a response body excerpt used in a health error.
-func trimMessage(body []byte) string {
-	text := strings.TrimSpace(string(body))
-	if len(text) > 200 {
-		text = text[:200]
-	}
-
-	return text
-}
-
-// handleReadyz reports supervisor readiness, distinct from the process liveness path /healthz.
-func (s *supervisor) handleReadyz(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.Header().Set("Allow", "GET, HEAD")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-
-	if !s.ready.Load() || s.stopping.Load() {
-		w.WriteHeader(http.StatusServiceUnavailable)
-
-		if r.Method != http.MethodHead {
-			_, _ = io.WriteString(w, "not ready\n")
-		}
-
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-
-	if r.Method != http.MethodHead {
-		_, _ = io.WriteString(w, "ok\n")
-	}
-}
-
-// handleHealthz is the liveness probe: it stays 200 while the process can serve HTTP at all.
-func (s *supervisor) handleHealthz(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	_, _ = io.WriteString(w, "ok\n")
-}
-
-// servingState reports whether static files may be served and whether component traffic should be routed.
-func (a *app) servingState() (static, ready bool) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	running := a.cmd != nil && !a.exited && !a.retired
-
-	return running, running && a.ready
+	Timeout: healthCheckTimeout,
 }
 
 // healthDue reports whether this app is due for a probe and advances its next probe time.
 func (a *app) healthDue(now time.Time) bool {
 	a.mu.Lock()
+
 	defer a.mu.Unlock()
 
 	if a.cmd == nil || a.exited || a.starting || a.retired {
@@ -134,6 +60,7 @@ func (a *app) healthDue(now time.Time) bool {
 // recordHealth folds one probe result into an app's readiness. It reports whether the visible health state changed.
 func (a *app) recordHealth(err error, now time.Time) bool {
 	a.mu.Lock()
+
 	defer a.mu.Unlock()
 
 	if a.retired || a.cmd == nil || a.exited {
@@ -154,8 +81,7 @@ func (a *app) recordHealth(err error, now time.Time) bool {
 	a.healthFailures++
 	a.lastError = err.Error()
 
-	wasReady := a.healthOK && a.ready
-	if wasReady && a.healthFailures >= a.cfg.failureLimit() {
+	if wasReady := a.healthOK && a.ready; wasReady && a.healthFailures >= a.cfg.failureLimit() {
 		a.healthOK = false
 		a.ready = false
 
@@ -163,6 +89,66 @@ func (a *app) recordHealth(err error, now time.Time) bool {
 	}
 
 	return a.healthFailures == 1
+}
+
+// servingState reports whether static files may be served and whether component traffic should be routed.
+func (a *app) servingState() (static, ready bool) {
+	a.mu.Lock()
+
+	defer a.mu.Unlock()
+
+	running := a.cmd != nil && !a.exited && !a.retired
+
+	return running, running && a.ready
+}
+
+// statusLocked renders the app's lifecycle and health state. The caller holds a.mu.
+func (a *app) statusLocked() string {
+	switch {
+	case a.retired:
+		return "stopped"
+	case a.starting || a.cmd == nil && a.timer != nil:
+		return "restarting"
+	case a.cmd != nil && !a.exited:
+		if a.ready {
+			return "running"
+		}
+
+		return "unhealthy"
+	default:
+		return "stopped"
+	}
+}
+
+// handleHealthz is the liveness probe: it stays 200 while the process can serve HTTP at all.
+func (s *supervisor) handleHealthz(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+
+	_, _ = io.WriteString(w, "ok\n")
+}
+
+// handleReadyz reports supervisor readiness, distinct from the process liveness path /healthz.
+func (s *supervisor) handleReadyz(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	if !s.ready.Load() || s.stopping.Load() {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		if r.Method != http.MethodHead {
+			_, _ = io.WriteString(w, "not ready\n")
+		}
+
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	if r.Method != http.MethodHead {
+		_, _ = io.WriteString(w, "ok\n")
+	}
 }
 
 // restartUnhealthy kills a process that failed its health checks when restart_on_unhealthy is set.
@@ -177,14 +163,16 @@ func (s *supervisor) restartUnhealthy(a *app) {
 	}
 
 	a.unhealthyRestart = true
-	a.mu.Unlock()
 
+	a.mu.Unlock()
 	log.Printf("app %s: restarting after failed health checks", a.name)
 
 	go func() {
 		defer func() {
 			a.mu.Lock()
+
 			a.unhealthyRestart = false
+
 			a.mu.Unlock()
 		}()
 
@@ -192,13 +180,45 @@ func (s *supervisor) restartUnhealthy(a *app) {
 	}()
 }
 
+// trimMessage bounds a response body excerpt used in a health error.
+func trimMessage(body []byte) string {
+	text := strings.TrimSpace(string(body))
+	if len(text) > 200 {
+		text = text[:200]
+	}
+
+	return text
+}
+
+// probeHealth calls an app's health path and requires a 2xx response.
+func probeHealth(port int, path string) error {
+	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d%s", port, path), nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := healthClient.Do(request)
+	if err != nil {
+		return err
+	}
+
+	defer resp.Body.Close()
+
+	if body, _ := io.ReadAll(io.LimitReader(resp.Body, 512)); resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("%s: %s", resp.Status, trimMessage(body))
+	}
+
+	return nil
+}
+
 // checkHealth probes one app and records the result, ignoring probes for apps that are stopped or starting.
 func (s *supervisor) checkHealth(a *app) {
 	a.mu.Lock()
-	running := a.cmd != nil && !a.exited && !a.starting && !a.retired
-	port, health := a.port, a.cfg.Health
-	a.mu.Unlock()
 
+	port, health := a.port, a.cfg.Health
+	running := a.cmd != nil && !a.exited && !a.starting && !a.retired
+
+	a.mu.Unlock()
 	if !running {
 		return
 	}
@@ -208,7 +228,6 @@ func (s *supervisor) checkHealth(a *app) {
 		if err != nil {
 			log.Printf("app %s: health check failed: %v", a.name, err)
 		}
-
 		s.broadcast()
 	}
 
@@ -227,46 +246,27 @@ func (s *supervisor) checkAllHealth() {
 		if !a.healthDue(now) {
 			continue
 		}
-
 		wg.Add(1)
+
 		go func(a *app) {
 			defer wg.Done()
 
 			s.checkHealth(a)
 		}(a)
 	}
-
 	wg.Wait()
 }
 
 // monitorHealth runs periodic health probes until shutdown.
 func (s *supervisor) monitorHealth() {
 	ticker := time.NewTicker(healthMonitorInterval)
+
 	defer ticker.Stop()
 
 	for range ticker.C {
 		if s.stopping.Load() {
 			return
 		}
-
 		s.checkAllHealth()
-	}
-}
-
-// statusLocked renders the app's lifecycle and health state. The caller holds a.mu.
-func (a *app) statusLocked() string {
-	switch {
-	case a.retired:
-		return "stopped"
-	case a.starting || (a.cmd == nil && a.timer != nil):
-		return "restarting"
-	case a.cmd != nil && !a.exited:
-		if a.ready {
-			return "running"
-		}
-
-		return "unhealthy"
-	default:
-		return "stopped"
 	}
 }

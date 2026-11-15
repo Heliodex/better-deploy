@@ -17,24 +17,75 @@ import (
 	"time"
 )
 
+type (
+	// hub fans out app snapshots to SSE subscribers. Snapshots carry full state, so a slow subscriber that misses an update converges on the next one.
+	hub struct {
+		mu sync.Mutex
+		subs map[chan []byte]struct{}
+	}
+
+	snapshotMessage struct {
+		Type string `json:"type"`
+		Apps []appInfo `json:"apps"`
+	}
+)
+
+// maxBackupRequestBytes caps the small JSON body used to change backup settings.
+const maxBackupRequestBytes = 4 << 10
+
 //go:generate sh -c "cd web && bun install --frozen-lockfile && bun run build"
 
 //go:embed all:web/build
 var adminFiles embed.FS
 
-// hub fans out app snapshots to SSE subscribers. Snapshots carry full state, so a slow subscriber that misses an update converges on the next one.
-type hub struct {
-	mu sync.Mutex
-	subs map[chan []byte]struct{}
+// adminStatic serves the embedded admin panel. SvelteKit emits root-relative URLs under the /admin base path, so the mux strips the prefix first.
+func adminStatic() http.Handler {
+	sub, err := fs.Sub(adminFiles, "web/build")
+	if err != nil {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "admin panel not built", http.StatusInternalServerError)
+		})
+	}
+
+	files := http.FileServer(http.FS(sub))
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/_app/immutable/") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			// Entry HTML must revalidate so panels pick up new bundles after a supervisor update.
+			w.Header().Set("Cache-Control", "no-cache")
+		}
+		files.ServeHTTP(w, r)
+	})
 }
 
-func newHub() *hub {
-	return &hub{subs: map[chan []byte]struct{}{}}
+func (h *hub) hasSubscribers() bool {
+	h.mu.Lock()
+
+	defer h.mu.Unlock()
+
+	return len(h.subs) > 0
+}
+
+// publish fans a snapshot out without blocking a slow subscriber.
+func (h *hub) publish(message []byte) {
+	h.mu.Lock()
+
+	defer h.mu.Unlock()
+
+	for messages := range h.subs {
+		select {
+		case messages <- message:
+		default:
+		}
+	}
 }
 
 // subscribe registers a buffered channel for snapshot broadcasts.
 func (h *hub) subscribe() chan []byte {
 	h.mu.Lock()
+
 	defer h.mu.Unlock()
 
 	messages := make(chan []byte, 4)
@@ -46,46 +97,59 @@ func (h *hub) subscribe() chan []byte {
 // unsubscribe removes a channel without closing it, so a concurrent publish cannot panic.
 func (h *hub) unsubscribe(messages chan []byte) {
 	h.mu.Lock()
+
 	defer h.mu.Unlock()
 
 	delete(h.subs, messages)
 }
 
-func (h *hub) hasSubscribers() bool {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	return len(h.subs) > 0
-}
-
-// publish fans a snapshot out without blocking a slow subscriber.
-func (h *hub) publish(message []byte) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	for messages := range h.subs {
-		select {
-		case messages <- message:
-		default:
-		}
+func newHub() *hub {
+	return &hub{
+		subs: map[chan []byte]struct{}{},
 	}
 }
 
-type snapshotMessage struct {
-	Type string `json:"type"`
-	Apps []appInfo `json:"apps"`
+// handleRestart stops an app and starts it again under the app lock.
+func (s *supervisor) handleRestart(w http.ResponseWriter, _ *http.Request, a *app) {
+	defer s.lockApp(a.name)()
+
+	if s.lookup(a.name) != a {
+		http.Error(w, "app not found", http.StatusNotFound)
+		return
+	}
+	a.mu.Lock()
+
+	name := a.name
+
+	a.mu.Unlock()
+	s.drainAndStop(a, "restart")
+	if err := s.startStopped(a); err != nil {
+		log.Printf("restart %s: %v", name, err)
+
+		status := http.StatusBadGateway
+
+		if errors.Is(err, errNoComponent) {
+			status = http.StatusInternalServerError
+		}
+		writeError(w, status, "app did not restart: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, s.info(a))
 }
 
 // snapshot returns the current app list, newest details included.
 func (s *supervisor) snapshot() []appInfo {
 	// Sampling here keeps REST and SSE snapshots current; the method throttles itself.
 	s.sampleAll()
+
 	apps := s.allApps()
+
 	sort.Slice(apps, func(i, j int) bool {
 		return apps[i].name < apps[j].name
 	})
 
 	out := make([]appInfo, 0, len(apps))
+
 	for _, a := range apps {
 		out = append(out, s.info(a))
 	}
@@ -99,11 +163,13 @@ func (s *supervisor) broadcast() {
 		return
 	}
 
-	data, err := json.Marshal(snapshotMessage{Type: "snapshot", Apps: s.snapshot()})
+	data, err := json.Marshal(snapshotMessage{
+		Type: "snapshot",
+		Apps: s.snapshot(),
+	})
 	if err != nil {
 		return
 	}
-
 	s.events.publish(data)
 }
 
@@ -122,12 +188,14 @@ func (s *supervisor) handleEvents(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
-
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
 
-	data, err := json.Marshal(snapshotMessage{Type: "snapshot", Apps: s.snapshot()})
+	data, err := json.Marshal(snapshotMessage{
+		Type: "snapshot",
+		Apps: s.snapshot(),
+	})
 	if err != nil {
 		http.Error(w, "snapshot failed", http.StatusInternalServerError)
 		return
@@ -136,13 +204,14 @@ func (s *supervisor) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
 		return
 	}
-
 	flusher.Flush()
 
 	messages := s.events.subscribe()
+
 	defer s.events.unsubscribe(messages)
 
 	ticker := time.NewTicker(20 * time.Second)
+
 	defer ticker.Stop()
 
 	for {
@@ -155,52 +224,17 @@ func (s *supervisor) handleEvents(w http.ResponseWriter, r *http.Request) {
 			if _, err := fmt.Fprintf(w, "data: %s\n\n", message); err != nil {
 				return
 			}
-
 			flusher.Flush()
 		case <-ticker.C:
 			if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
 				return
 			}
-
 			flusher.Flush()
 		case <-r.Context().Done():
 			return
 		}
 	}
 }
-
-// handleRestart stops an app and starts it again under the app lock.
-func (s *supervisor) handleRestart(w http.ResponseWriter, _ *http.Request, a *app) {
-	defer s.lockApp(a.name)()
-
-	if s.lookup(a.name) != a {
-		http.Error(w, "app not found", http.StatusNotFound)
-		return
-	}
-
-	a.mu.Lock()
-	name := a.name
-	a.mu.Unlock()
-	s.drainAndStop(a, "restart")
-
-	if err := s.startStopped(a); err != nil {
-		log.Printf("restart %s: %v", name, err)
-
-		status := http.StatusBadGateway
-		if errors.Is(err, errNoComponent) {
-			status = http.StatusInternalServerError
-		}
-
-		writeError(w, status, "app did not restart: "+err.Error())
-
-		return
-	}
-
-	writeJSON(w, http.StatusOK, s.info(a))
-}
-
-// maxBackupRequestBytes caps the small JSON body used to change backup settings.
-const maxBackupRequestBytes = 4 << 10
 
 // writeBackups returns the app's backup overview and marks a newly created snapshot.
 func (s *supervisor) writeBackups(w http.ResponseWriter, name, created string) {
@@ -211,7 +245,71 @@ func (s *supervisor) writeBackups(w http.ResponseWriter, name, created string) {
 	}
 
 	overview.Created = created
+
 	writeJSON(w, http.StatusOK, overview)
+}
+
+// handleBackupImport stores a snapshot uploaded from another installation.
+func (s *supervisor) handleBackupImport(w http.ResponseWriter, r *http.Request, name string) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+
+	if s.rejectOverBudget(w) {
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxBackupExtractBytes)
+
+	if err := r.ParseMultipartForm(16 << 20); err != nil {
+		writeError(w, http.StatusBadRequest, "parse snapshot upload: "+err.Error())
+		return
+	}
+
+	if r.MultipartForm != nil {
+		defer func() {
+			_ = r.MultipartForm.RemoveAll()
+		}()
+	}
+
+	file, _, err := r.FormFile("snapshot")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "missing snapshot field")
+		return
+	}
+
+	defer file.Close()
+
+	temp, err := os.CreateTemp(s.cfg.stateDir, ".import-*.tar.gz")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "create import file")
+		return
+	}
+
+	archive := temp.Name()
+
+	defer os.Remove(archive)
+
+	if _, err := io.Copy(temp, io.LimitReader(file, maxBackupExtractBytes)); err != nil {
+		_ = temp.Close()
+
+		writeError(w, http.StatusBadRequest, "read snapshot: "+err.Error())
+		return
+	}
+
+	if err := temp.Close(); err != nil {
+		writeError(w, http.StatusInternalServerError, "close import file")
+		return
+	}
+
+	info, err := s.backups.importSnapshot(name, archive)
+	if err != nil {
+		s.metrics.observeBackup(name, "import", "failed")
+		writeError(w, http.StatusBadRequest, "import snapshot: "+err.Error())
+		return
+	}
+	s.metrics.observeBackup(name, "import", "success")
+	s.writeBackups(w, name, info.Name)
 }
 
 func (s *supervisor) handleBackupSettings(w http.ResponseWriter, r *http.Request, name string) {
@@ -233,7 +331,6 @@ func (s *supervisor) handleBackupSettings(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
 	s.writeBackups(w, name, "")
 }
 
@@ -247,6 +344,25 @@ func writeBackupError(w http.ResponseWriter, err error) {
 	default:
 		writeError(w, http.StatusInternalServerError, err.Error())
 	}
+}
+
+// handleBackupDownload streams a portable tar.gz of one snapshot.
+func (s *supervisor) handleBackupDownload(w http.ResponseWriter, r *http.Request, name, file string) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+
+	path, err := s.backups.exportSnapshot(name, file)
+	if err != nil {
+		writeBackupError(w, err)
+		return
+	}
+
+	defer os.Remove(path)
+
+	w.Header().Set("Content-Type", "application/gzip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", file+".tar.gz"))
+	http.ServeFile(w, r, path)
 }
 
 // handleBackups lists retained snapshots or creates a new one.
@@ -263,10 +379,8 @@ func (s *supervisor) handleBackups(w http.ResponseWriter, r *http.Request, name 
 		if err != nil && !errors.Is(err, errBackupUnchanged) {
 			s.metrics.observeBackup(name, "create", "failed")
 			writeBackupError(w, err)
-
 			return
 		}
-
 		s.metrics.observeBackup(name, "create", "success")
 		s.writeBackups(w, name, info.Name)
 	default:
@@ -299,13 +413,15 @@ func (s *supervisor) restoreBackupLocked(ctx context.Context, w http.ResponseWri
 
 	// Replacing /data needs a running guest stopped; restart it after both halves are in place.
 	a := s.lookup(name)
-	running := false
+
+	var running bool
 
 	if a != nil {
 		a.mu.Lock()
-		running = a.cmd != nil && !a.exited
-		a.mu.Unlock()
 
+		running = a.cmd != nil && !a.exited
+
+		a.mu.Unlock()
 		if running {
 			s.stop(a)
 		}
@@ -325,7 +441,6 @@ func (s *supervisor) restoreBackupLocked(ctx context.Context, w http.ResponseWri
 		if err := s.startStopped(a); err != nil {
 			log.Printf("restore %s: restart: %v", name, err)
 			writeError(w, http.StatusBadGateway, "data restored but app did not restart: "+err.Error())
-
 			return false
 		}
 	}
@@ -353,7 +468,6 @@ func (s *supervisor) handleBackupRestore(w http.ResponseWriter, r *http.Request,
 		s.metrics.observeBackup(name, "restore", "failed")
 		return
 	}
-
 	s.metrics.observeBackup(name, "restore", "success")
 	s.writeBackups(w, name, "")
 }
@@ -370,6 +484,7 @@ func (s *supervisor) handleBackupRoute(w http.ResponseWriter, r *http.Request, n
 	}
 
 	rest = strings.TrimPrefix(rest, "/")
+
 	switch {
 	case rest == "":
 		s.handleBackups(w, r, name)
@@ -384,108 +499,4 @@ func (s *supervisor) handleBackupRoute(w http.ResponseWriter, r *http.Request, n
 	default:
 		http.Error(w, "unknown endpoint", http.StatusNotFound)
 	}
-}
-
-// handleBackupDownload streams a portable tar.gz of one snapshot.
-func (s *supervisor) handleBackupDownload(w http.ResponseWriter, r *http.Request, name, file string) {
-	if !requireMethod(w, r, http.MethodGet) {
-		return
-	}
-
-	path, err := s.backups.exportSnapshot(name, file)
-	if err != nil {
-		writeBackupError(w, err)
-		return
-	}
-	defer os.Remove(path)
-
-	w.Header().Set("Content-Type", "application/gzip")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", file+".tar.gz"))
-	http.ServeFile(w, r, path)
-}
-
-// handleBackupImport stores a snapshot uploaded from another installation.
-func (s *supervisor) handleBackupImport(w http.ResponseWriter, r *http.Request, name string) {
-	if !requireMethod(w, r, http.MethodPost) {
-		return
-	}
-
-	if s.rejectOverBudget(w) {
-		return
-	}
-
-	r.Body = http.MaxBytesReader(w, r.Body, maxBackupExtractBytes)
-	if err := r.ParseMultipartForm(16 << 20); err != nil {
-		writeError(w, http.StatusBadRequest, "parse snapshot upload: "+err.Error())
-		return
-	}
-
-	if r.MultipartForm != nil {
-		defer func() {
-			_ = r.MultipartForm.RemoveAll()
-		}()
-	}
-
-	file, _, err := r.FormFile("snapshot")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "missing snapshot field")
-		return
-	}
-	defer file.Close()
-
-	temp, err := os.CreateTemp(s.cfg.stateDir, ".import-*.tar.gz")
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "create import file")
-		return
-	}
-
-	archive := temp.Name()
-	defer os.Remove(archive)
-
-	if _, err := io.Copy(temp, io.LimitReader(file, maxBackupExtractBytes)); err != nil {
-		_ = temp.Close()
-
-		writeError(w, http.StatusBadRequest, "read snapshot: "+err.Error())
-
-		return
-	}
-
-	if err := temp.Close(); err != nil {
-		writeError(w, http.StatusInternalServerError, "close import file")
-		return
-	}
-
-	info, err := s.backups.importSnapshot(name, archive)
-	if err != nil {
-		s.metrics.observeBackup(name, "import", "failed")
-		writeError(w, http.StatusBadRequest, "import snapshot: "+err.Error())
-
-		return
-	}
-
-	s.metrics.observeBackup(name, "import", "success")
-	s.writeBackups(w, name, info.Name)
-}
-
-// adminStatic serves the embedded admin panel. SvelteKit emits root-relative URLs under the /admin base path, so the mux strips the prefix first.
-func adminStatic() http.Handler {
-	sub, err := fs.Sub(adminFiles, "web/build")
-	if err != nil {
-		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			http.Error(w, "admin panel not built", http.StatusInternalServerError)
-		})
-	}
-
-	files := http.FileServer(http.FS(sub))
-
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/_app/immutable/") {
-			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		} else {
-			// Entry HTML must revalidate so panels pick up new bundles after a supervisor update.
-			w.Header().Set("Cache-Control", "no-cache")
-		}
-
-		files.ServeHTTP(w, r)
-	})
 }

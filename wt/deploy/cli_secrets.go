@@ -11,36 +11,18 @@ import (
 	"strings"
 )
 
+type (
+	secretKeysResponse struct {
+		Keys []string `json:"keys"`
+	}
+
+	secretMutationResponse struct {
+		Key string `json:"key"`
+		RestartRequired bool `json:"restart_required"`
+	}
+)
+
 const maxSecretBytes = 64 << 10
-
-type secretKeysResponse struct {
-	Keys []string `json:"keys"`
-}
-
-type secretMutationResponse struct {
-	Key string `json:"key"`
-	RestartRequired bool `json:"restart_required"`
-}
-
-// validSecretKey matches the supervisor's environment-style key rules.
-func validSecretKey(key string) bool {
-	if key == "" || len(key) > 128 {
-		return false
-	}
-
-	for i, char := range key {
-		switch {
-		case char >= 'a' && char <= 'z':
-		case char >= 'A' && char <= 'Z':
-		case char == '_':
-		case char >= '0' && char <= '9' && i > 0:
-		default:
-			return false
-		}
-	}
-
-	return true
-}
 
 // readSecretValue reads a secret from a file or stdin, bounded to match the supervisor.
 func readSecretValue(file string) (string, error) {
@@ -74,6 +56,7 @@ func readSecretValue(file string) (string, error) {
 // runSecretsList prints an app's secret key names. Values are never returned by the supervisor.
 func runSecretsList(cfg clientOptions, name string, args []string) error {
 	flags := newFlagSet("secrets list")
+
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -97,6 +80,7 @@ func runSecretsList(cfg clientOptions, name string, args []string) error {
 	}
 
 	var result secretKeysResponse
+
 	if err := json.Unmarshal(body, &result); err != nil {
 		return err
 	}
@@ -113,15 +97,77 @@ func runSecretsList(cfg clientOptions, name string, args []string) error {
 	return nil
 }
 
+// validSecretKey matches the supervisor's environment-style key rules.
+func validSecretKey(key string) bool {
+	if key == "" || len(key) > 128 {
+		return false
+	}
+
+	for i, char := range key {
+		switch {
+		case char >= 'a' && char <= 'z':
+		case char >= 'A' && char <= 'Z':
+		case char == '_':
+		case char >= '0' && char <= '9' && i > 0:
+		default:
+			return false
+		}
+	}
+
+	return true
+}
+
+// runSecretsDelete removes one secret.
+func runSecretsDelete(cfg clientOptions, name string, args []string) error {
+	flags := newFlagSet("secrets delete")
+
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+
+	if flags.NArg() != 1 {
+		return errors.New("usage: wt secrets <app> delete <KEY>")
+	}
+
+	key := flags.Arg(0)
+	if !validSecretKey(key) {
+		return fmt.Errorf("invalid secret key %q", key)
+	}
+
+	status, _, body, err := apiDo(cfg, http.MethodDelete, "/apps/"+name+"/secrets/"+url.PathEscape(key), nil, "")
+	if err != nil {
+		return err
+	}
+
+	if err := checkAPI(status, body); err != nil {
+		return err
+	}
+
+	if cfg.jsonOut {
+		printRawOrJSON(cfg, body)
+		return nil
+	}
+
+	var result secretMutationResponse
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return err
+	}
+	fmt.Printf("deleted %s", result.Key)
+	if result.RestartRequired {
+		fmt.Print(" (restart required)")
+	}
+	fmt.Println()
+	return nil
+}
+
 // runSecretsSet reads a value from stdin or --file and writes one secret.
 func runSecretsSet(cfg clientOptions, name string, args []string) error {
-	var (
-		file string
-		key string
-	)
+	var file, key string
 
 	for index := 0; index < len(args); index++ {
 		arg := args[index]
+
 		switch {
 		case arg == "--file" && index+1 < len(args):
 			index++
@@ -172,64 +218,15 @@ func runSecretsSet(cfg clientOptions, name string, args []string) error {
 	}
 
 	var result secretMutationResponse
+
 	if err := json.Unmarshal(body, &result); err != nil {
 		return err
 	}
-
 	fmt.Printf("set %s", result.Key)
-
 	if result.RestartRequired {
 		fmt.Print(" (restart required)")
 	}
-
 	fmt.Println()
-
-	return nil
-}
-
-// runSecretsDelete removes one secret.
-func runSecretsDelete(cfg clientOptions, name string, args []string) error {
-	flags := newFlagSet("secrets delete")
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-
-	if flags.NArg() != 1 {
-		return errors.New("usage: wt secrets <app> delete <KEY>")
-	}
-
-	key := flags.Arg(0)
-	if !validSecretKey(key) {
-		return fmt.Errorf("invalid secret key %q", key)
-	}
-
-	status, _, body, err := apiDo(cfg, http.MethodDelete, "/apps/"+name+"/secrets/"+url.PathEscape(key), nil, "")
-	if err != nil {
-		return err
-	}
-
-	if err := checkAPI(status, body); err != nil {
-		return err
-	}
-
-	if cfg.jsonOut {
-		printRawOrJSON(cfg, body)
-		return nil
-	}
-
-	var result secretMutationResponse
-	if err := json.Unmarshal(body, &result); err != nil {
-		return err
-	}
-
-	fmt.Printf("deleted %s", result.Key)
-
-	if result.RestartRequired {
-		fmt.Print(" (restart required)")
-	}
-
-	fmt.Println()
-
 	return nil
 }
 

@@ -1,21 +1,15 @@
 package main
 
 import (
+	"__CONTRACT_IMPORT__"
 	"context"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
-	"__CONTRACT_IMPORT__"
 	"github.com/heliodex/better-deploy/wt/packages/v2/app"
 	"github.com/heliodex/better-deploy/wt/packages/v2/storage"
-)
-
-const (
-	maxBody = 16 << 10
-	defaultLimit = 50
-	maxLimit = 100
 )
 
 // notesApp owns the store and routes so handler tests can construct it without wasmtime or package globals.
@@ -24,20 +18,31 @@ type notesApp struct {
 	mux *http.ServeMux
 }
 
-// migrate creates the schema through the app's store.
-func (a *notesApp) migrate(ctx context.Context) error {
-	_, err := a.store.Exec(ctx, `create table if not exists notes (
-		id text primary key,
-		text text not null,
-		created_at text not null
-	)`)
-	if err != nil {
-		return err
+const (
+	defaultLimit = 50
+	maxBody = 16 << 10
+	maxLimit = 100
+)
+
+func main() {}
+
+func (a *notesApp) handleCreateNote(w http.ResponseWriter, r *http.Request) {
+	var request contract.CreateNoteRequest
+	if !app.ReadJSON(w, r, maxBody, "text", &request) {
+		return
 	}
 
-	_, err = a.store.Exec(ctx, `create index if not exists notes_created_idx on notes(created_at)`)
+	item := contract.Note{
+		ID: app.NewID(),
+		Text: strings.TrimSpace(request.Text),
+		CreatedAt: time.Now().UTC().Format(app.TimestampFormat),
+	}
 
-	return err
+	if _, err := a.store.Exec(r.Context(), `insert into notes (id, text, created_at) values (?, ?, ?)`, item.ID, item.Text, item.CreatedAt); err != nil {
+		app.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	app.WriteJSON(w, http.StatusCreated, item)
 }
 
 func (a *notesApp) handleListNotes(w http.ResponseWriter, r *http.Request) {
@@ -58,12 +63,14 @@ func (a *notesApp) handleListNotes(w http.ResponseWriter, r *http.Request) {
 		app.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	defer rows.Close()
 
 	out := []contract.Note{}
 
 	for rows.Next() {
 		var item contract.Note
+
 		if err := rows.Scan(&item.ID, &item.Text, &item.CreatedAt); err != nil {
 			app.WriteError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -76,29 +83,21 @@ func (a *notesApp) handleListNotes(w http.ResponseWriter, r *http.Request) {
 		app.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	app.WriteJSON(w, http.StatusOK, contract.NotesResponse{Notes: out})
+	app.WriteJSON(w, http.StatusOK, contract.NotesResponse{
+		Notes: out,
+	})
 }
 
-func (a *notesApp) handleCreateNote(w http.ResponseWriter, r *http.Request) {
-	var request contract.CreateNoteRequest
-	if !app.ReadJSON(w, r, maxBody, "text", &request) {
-		return
+// newNotesApp builds the app around one store and registers its routes.
+func newNotesApp(store *storage.Client) *notesApp {
+	a := &notesApp{
+		store: store,
+		mux: http.NewServeMux(),
 	}
 
-	item := contract.Note{
-		ID: app.NewID(),
-		Text: strings.TrimSpace(request.Text),
-		CreatedAt: time.Now().UTC().Format(app.TimestampFormat),
-	}
-
-	if _, err := a.store.Exec(r.Context(), `insert into notes (id, text, created_at) values (?, ?, ?)`,
-		item.ID, item.Text, item.CreatedAt); err != nil {
-		app.WriteError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	app.WriteJSON(w, http.StatusCreated, item)
+	a.mux.HandleFunc("GET /api/notes", a.handleListNotes)
+	a.mux.HandleFunc("POST /api/notes", a.handleCreateNote)
+	return a
 }
 
 // handler exposes the app's routes to the wasm wiring or a test.
@@ -106,13 +105,18 @@ func (a *notesApp) handler() http.Handler {
 	return a.mux
 }
 
-// newNotesApp builds the app around one store and registers its routes.
-func newNotesApp(store *storage.Client) *notesApp {
-	a := &notesApp{store: store, mux: http.NewServeMux()}
-	a.mux.HandleFunc("GET /api/notes", a.handleListNotes)
-	a.mux.HandleFunc("POST /api/notes", a.handleCreateNote)
+// migrate creates the schema through the app's store.
+func (a *notesApp) migrate(ctx context.Context) error {
+	_, err := a.store.Exec(ctx, `create table if not exists notes (
+		id text primary key,
+		text text not null,
+		created_at text not null
+	)`)
+	if err != nil {
+		return err
+	}
 
-	return a
+	_, err = a.store.Exec(ctx, `create index if not exists notes_created_idx on notes(created_at)`)
+
+	return err
 }
-
-func main() {}

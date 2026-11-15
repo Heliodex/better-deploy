@@ -18,9 +18,9 @@ func env(key, fallback string) string {
 // envBool reads a boolean opt-in/opt-out. An unknown value keeps the fallback, so a typo cannot silently disable a boundary.
 func envBool(key string, fallback bool) bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
-	case "1", "true", "on", "yes":
+	case "1", "on", "true", "yes":
 		return true
-	case "0", "false", "off", "no":
+	case "0", "false", "no", "off":
 		return false
 	default:
 		return fallback

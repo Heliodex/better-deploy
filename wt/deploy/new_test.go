@@ -12,30 +12,9 @@ import (
 	"testing"
 )
 
-func writeExampleLayout(t *testing.T, root string) {
-	t.Helper()
-
-	if err := os.MkdirAll(filepath.Join(root, "example"), privateDirMode); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := os.WriteFile(filepath.Join(root, "example", "go.mod"), []byte("module example.test\n\ngo 1.27.1\n"), privateFileMode); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := os.MkdirAll(filepath.Join(root, "packages"), privateDirMode); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := os.WriteFile(filepath.Join(root, "packages", "go.mod"), []byte("module github.com/heliodex/better-deploy/wt/packages/v2\n"), privateFileMode); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // TestNewMatchesTemplate fails if a template file is missing from the embed list in new.go, or if node_modules or bun.lock leak into the embedded set.
 func TestNewMatchesTemplate(t *testing.T) {
 	embedded := map[string]bool{}
-
 	err := fs.WalkDir(templateFS, "testdata/template", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -55,7 +34,6 @@ func TestNewMatchesTemplate(t *testing.T) {
 	}
 
 	onDisk := map[string]bool{}
-
 	err = filepath.WalkDir("testdata/template", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -67,6 +45,7 @@ func TestNewMatchesTemplate(t *testing.T) {
 		}
 
 		rel = filepath.ToSlash(rel)
+
 		if rel == "." {
 			return nil
 		}
@@ -98,6 +77,7 @@ func TestNewMatchesTemplate(t *testing.T) {
 
 		return nil
 	})
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,6 +95,78 @@ func TestNewMatchesTemplate(t *testing.T) {
 	}
 }
 
+func TestPrepareNewDirAllowsNonEmpty(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(dir, "existing.txt"), []byte("keep"), privateFileMode); err != nil {
+		t.Fatal(err)
+	}
+
+	nonEmpty, err := prepareNewDir(dir, dir)
+	if err != nil || !nonEmpty {
+		t.Errorf("prepareNewDir(non-empty) = %v, %v", nonEmpty, err)
+	}
+
+	missing := filepath.Join(t.TempDir(), "fresh")
+	nonEmpty, err = prepareNewDir(missing, missing)
+
+	if err != nil || nonEmpty {
+		t.Errorf("prepareNewDir(missing) = %v, %v", nonEmpty, err)
+	}
+
+	if info, err := os.Stat(missing); err != nil || !info.IsDir() {
+		t.Errorf("prepareNewDir did not create the directory: %v", err)
+	}
+}
+
+func TestRunContractMissingSchemas(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(`{"name":"demo"}`), privateFileMode); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runContract([]string{"--dir", dir}); err == nil || !strings.Contains(err.Error(), "no web/src/lib/contract.ts") {
+		t.Errorf("error = %v", err)
+	}
+}
+
+func TestScaffoldNewLocalSDKReplace(t *testing.T) {
+	root := t.TempDir()
+	sdk := filepath.Join(root, "packages")
+
+	if err := os.MkdirAll(sdk, privateDirMode); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(sdk, "go.mod"), []byte("module "+sdkModulePath+"\n"), privateFileMode); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := filepath.Join(t.TempDir(), "sdkapp")
+
+	if _, _, err := scaffoldNew(&newConfig{
+		dir: dir,
+		sdk: sdk,
+		contract: "valibot",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	module, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if wantReplace := "replace " + sdkModulePath + " => " + filepath.ToSlash(sdk); !strings.Contains(string(module), wantReplace) {
+		t.Errorf("go.mod has no local SDK replace %q:\n%s", wantReplace, module)
+	}
+
+	if err := validateLocalSDK(t.TempDir()); err == nil {
+		t.Error("validateLocalSDK accepted a directory without the SDK go.mod")
+	}
+}
+
 // TestTemplateHandlerUsesServeHTTP guards the wasihttp.Handle call against the template passing an http.Handler where a handler function is required.
 func TestTemplateHandlerUsesServeHTTP(t *testing.T) {
 	data, err := templateFS.ReadFile("testdata/template/wasm.go")
@@ -123,13 +175,12 @@ func TestTemplateHandlerUsesServeHTTP(t *testing.T) {
 	}
 
 	src := strings.ReplaceAll(string(data), newContractToken, "example.test/contract")
-
 	file, err := parser.ParseFile(token.NewFileSet(), "wasm.go", src, parser.AllErrors)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	found := false
+	var found bool
 
 	ast.Inspect(file, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
@@ -161,38 +212,35 @@ func TestTemplateHandlerUsesServeHTTP(t *testing.T) {
 
 		return true
 	})
-
 	if !found {
 		t.Error("template has no wasihttp.Handle call")
 	}
 }
 
-func TestPrepareNewDirAllowsNonEmpty(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "existing.txt"), []byte("keep"), privateFileMode); err != nil {
+func writeExampleLayout(t *testing.T, root string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(root, "example"), privateDirMode); err != nil {
 		t.Fatal(err)
 	}
 
-	nonEmpty, err := prepareNewDir(dir, dir)
-	if err != nil || !nonEmpty {
-		t.Errorf("prepareNewDir(non-empty) = %v, %v", nonEmpty, err)
+	if err := os.WriteFile(filepath.Join(root, "example", "go.mod"), []byte("module example.test\n\ngo 1.27.1\n"), privateFileMode); err != nil {
+		t.Fatal(err)
 	}
 
-	missing := filepath.Join(t.TempDir(), "fresh")
-
-	nonEmpty, err = prepareNewDir(missing, missing)
-	if err != nil || nonEmpty {
-		t.Errorf("prepareNewDir(missing) = %v, %v", nonEmpty, err)
+	if err := os.MkdirAll(filepath.Join(root, "packages"), privateDirMode); err != nil {
+		t.Fatal(err)
 	}
 
-	if info, err := os.Stat(missing); err != nil || !info.IsDir() {
-		t.Errorf("prepareNewDir did not create the directory: %v", err)
+	if err := os.WriteFile(filepath.Join(root, "packages", "go.mod"), []byte("module github.com/heliodex/better-deploy/wt/packages/v2\n"), privateFileMode); err != nil {
+		t.Fatal(err)
 	}
 }
 
 func TestRunNew(t *testing.T) {
 	root := t.TempDir()
+
 	writeExampleLayout(t, root)
+
 	dir := filepath.Join(root, "example", "myapp")
 
 	if err := runNew([]string{"--dir", dir}); err != nil {
@@ -238,6 +286,7 @@ func TestRunNew(t *testing.T) {
 		BuildStatic string `json:"build_static"`
 		Contract string `json:"contract"`
 	}
+
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		t.Fatal(err)
 	}
@@ -283,6 +332,7 @@ func TestRunNew(t *testing.T) {
 	}
 
 	sentinel := filepath.Join(dir, "KEEP.txt")
+
 	if err := os.WriteFile(sentinel, []byte("keep"), privateFileMode); err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +350,11 @@ func TestRunNew(t *testing.T) {
 	}
 
 	outside := filepath.Join(t.TempDir(), "elsewhere")
-	if _, _, err := scaffoldNew(&newConfig{dir: outside, contract: "valibot"}); err != nil {
+
+	if _, _, err := scaffoldNew(&newConfig{
+		dir: outside,
+		contract: "valibot",
+	}); err != nil {
 		t.Fatalf("standalone scaffold: %v", err)
 	}
 
@@ -336,45 +390,17 @@ func TestRunNew(t *testing.T) {
 	}
 }
 
-func TestScaffoldNewLocalSDKReplace(t *testing.T) {
-	root := t.TempDir()
-
-	sdk := filepath.Join(root, "packages")
-	if err := os.MkdirAll(sdk, privateDirMode); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := os.WriteFile(filepath.Join(sdk, "go.mod"), []byte("module "+sdkModulePath+"\n"), privateFileMode); err != nil {
-		t.Fatal(err)
-	}
-
-	dir := filepath.Join(t.TempDir(), "sdkapp")
-	if _, _, err := scaffoldNew(&newConfig{dir: dir, sdk: sdk, contract: "valibot"}); err != nil {
-		t.Fatal(err)
-	}
-
-	module, err := os.ReadFile(filepath.Join(dir, "go.mod"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	wantReplace := "replace " + sdkModulePath + " => " + filepath.ToSlash(sdk)
-
-	if !strings.Contains(string(module), wantReplace) {
-		t.Errorf("go.mod has no local SDK replace %q:\n%s", wantReplace, module)
-	}
-
-	if err := validateLocalSDK(t.TempDir()); err == nil {
-		t.Error("validateLocalSDK accepted a directory without the SDK go.mod")
-	}
-}
-
 func TestRunNewContractless(t *testing.T) {
 	root := t.TempDir()
+
 	writeExampleLayout(t, root)
+
 	dir := filepath.Join(root, "example", "plainnotes")
 
-	if _, _, err := scaffoldNew(&newConfig{dir: dir, contract: "none"}); err != nil {
+	if _, _, err := scaffoldNew(&newConfig{
+		dir: dir,
+		contract: "none",
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -414,16 +440,5 @@ func TestRunNewContractless(t *testing.T) {
 
 	if err := runNew([]string{"--dir", filepath.Join(root, "example", "badcontract"), "--contract", "prisma"}); err == nil {
 		t.Error("unknown contract mode was accepted")
-	}
-}
-
-func TestRunContractMissingSchemas(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(`{"name":"demo"}`), privateFileMode); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := runContract([]string{"--dir", dir}); err == nil || !strings.Contains(err.Error(), "no web/src/lib/contract.ts") {
-		t.Errorf("error = %v", err)
 	}
 }

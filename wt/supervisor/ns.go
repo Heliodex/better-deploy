@@ -18,35 +18,172 @@ import (
 	"syscall"
 )
 
-const (
-	nsInitArg = "--wt-ns-init"
-	nsPlanEnv = "WT_INTERNAL_NS_PLAN"
-	nsPIDFile = 3
-	nsGoFile = 4
-	defaultTmpfsMB = 64
-	defaultTmpfsDir = 16
+type (
+	// nsPlan is the setup the re-exec helper applies before it starts wasmtime.
+	// Paths are host paths; the helper mounts them into the new root and then pivots into it.
+	// The helper receives this as JSON in nsPlanEnv.
+	nsPlan struct {
+		Root, Hostname, AppDir, DataDir, Wasmtime, BinPath string
+		Files, LibDirs []string
+		TmpfsMB int
+		Dynamic, ClearGroups, Seccomp bool
+		Rlimits []rlimitSpec
+	}
+
+	// nsLaunch carries the helper's process attributes plus the plan.
+	nsLaunch struct {
+		plan nsPlan
+		hostID, hostGID int
+	}
 )
 
-// nsPlan is the setup the re-exec helper applies before it starts wasmtime.
-// Paths are host paths; the helper mounts them into the new root and then pivots into it.
-// The helper receives this as JSON in nsPlanEnv.
-type nsPlan struct {
-	Root, Hostname, AppDir, DataDir, Wasmtime, BinPath string
-	Files, LibDirs []string
-	TmpfsMB int
-	Dynamic, ClearGroups, Seccomp bool
-	Rlimits []rlimitSpec
+const (
+	defaultTmpfsDir = 16
+	defaultTmpfsMB = 64
+	nsGoFile = 4
+	nsInitArg = "--wt-ns-init"
+	nsPIDFile = 3
+	nsPlanEnv = "WT_INTERNAL_NS_PLAN"
+)
+
+// elfInterp reports the PT_INTERP string for a dynamic ELF binary.
+// A static binary returns an empty string. Non-ELF files report isELF false so the caller can fail closed instead of trying to exec a script in an empty root.
+func elfInterp(path string) (interp string, isELF bool, err error) {
+	if _, err := os.Stat(path); err != nil {
+		return "", false, err
+	}
+
+	file, err := elf.Open(path)
+	if err != nil {
+		return "", false, nil
+	}
+
+	defer file.Close()
+
+	for _, prog := range file.Progs {
+		if prog.Type != elf.PT_INTERP {
+			continue
+		}
+
+		data := make([]byte, prog.Filesz)
+
+		if _, err := prog.ReadAt(data, 0); err != nil {
+			return "", true, err
+		}
+
+		return strings.TrimRight(string(data), "\x00"), true, nil
+	}
+
+	return "", true, nil
 }
 
-// nsLaunch carries the helper's process attributes plus the plan.
-type nsLaunch struct {
-	plan nsPlan
-	hostID, hostGID int
+// namespaceFiles lists the host files and directories the runtime or its resolver may read.
+// Device nodes are omitted because the guest cannot open them through WASI and wasmtime uses getrandom rather than /dev/urandom.
+func namespaceFiles(dynamic bool) []string {
+	candidates := []string{"/etc/group", "/etc/hosts", "/etc/nsswitch.conf", "/etc/passwd", "/etc/resolv.conf"}
+
+	if dynamic {
+		candidates = append(candidates, "/etc/ld.so.cache")
+	}
+
+	if _, err := os.Stat("/etc/ssl/certs/ca-certificates.crt"); err == nil {
+		candidates = append(candidates, "/etc/ssl/certs/ca-certificates.crt")
+	} else if info, err := os.Stat("/etc/ssl/certs"); err == nil && info.IsDir() {
+		candidates = append(candidates, "/etc/ssl/certs")
+	}
+
+	files := make([]string, 0, len(candidates))
+
+	for _, path := range candidates {
+		if _, err := os.Stat(path); err == nil {
+			files = append(files, path)
+		}
+	}
+	sort.Strings(files)
+	return files
+}
+
+// namespaceLibDirs lists the directories a dynamically linked wasmtime needs.
+// A static musl build, which is what the runtime image carries, needs none.
+func namespaceLibDirs(interp string) []string {
+	if interp == "" {
+		return nil
+	}
+
+	candidates := []string{"/lib", "/lib64", "/usr/lib", "/usr/lib64"}
+
+	if dir := filepath.Dir(interp); dir != "." && dir != "/" {
+		candidates = append(candidates, dir)
+	}
+
+	seen := map[string]bool{}
+	dirs := make([]string, 0, len(candidates))
+
+	for _, dir := range candidates {
+		if seen[dir] {
+			continue
+		}
+
+		seen[dir] = true
+
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			dirs = append(dirs, dir)
+		}
+	}
+	sort.Strings(dirs)
+	return dirs
+}
+
+// namespaceSysProcAttr creates the user, PID, mount, IPC and UTS namespaces and maps container uid/gid 0 to the app's host uid/gid.
+// The helper stays root inside the namespace until it has finished mounting, then switches to container 0 and drops capabilities.
+func namespaceSysProcAttr(hostID, hostGID int, allowSetgroups bool) *syscall.SysProcAttr {
+	return &syscall.SysProcAttr{
+		Pdeathsig: syscall.SIGTERM,
+		Cloneflags: syscall.CLONE_NEWUSER | syscall.CLONE_NEWPID | syscall.CLONE_NEWNS | syscall.CLONE_NEWIPC | syscall.CLONE_NEWUTS,
+		UidMappings: []syscall.SysProcIDMap{
+			{
+				ContainerID: 0,
+				HostID: hostID,
+				Size: 1,
+			},
+		},
+		GidMappings: []syscall.SysProcIDMap{
+			{
+				ContainerID: 0,
+				HostID: hostGID,
+				Size: 1,
+			},
+		},
+		GidMappingsEnableSetgroups: allowSetgroups,
+	}
+}
+
+// resetNamespaceRoots removes stale roots from a previous supervisor.
+// The mounts themselves live in the dead helpers' namespaces, so the host paths are only empty directories.
+func resetNamespaceRoots(stateDir string, untrusted bool) error {
+	base := filepath.Join(stateDir, ".ns")
+
+	if err := os.RemoveAll(base); err != nil {
+		return fmt.Errorf("reset namespace roots: %w", err)
+	}
+
+	mode := os.FileMode(0o700)
+
+	if untrusted {
+		mode = 0o711
+	}
+
+	if err := os.MkdirAll(base, mode); err != nil {
+		return fmt.Errorf("create namespace roots: %w", err)
+	}
+
+	return os.Chmod(base, mode)
 }
 
 // resolveBinary turns WT_WASMTIME into an absolute path, following PATH for a bare name and resolving symlinks so the bind mount points at the real file.
 func resolveBinary(name string) (string, error) {
 	path := name
+
 	if !strings.ContainsRune(name, filepath.Separator) {
 		resolved, err := exec.LookPath(name)
 		if err != nil {
@@ -66,149 +203,6 @@ func resolveBinary(name string) (string, error) {
 	}
 
 	return abs, nil
-}
-
-// elfInterp reports the PT_INTERP string for a dynamic ELF binary.
-// A static binary returns an empty string. Non-ELF files report isELF false so the caller can fail closed instead of trying to exec a script in an empty root.
-func elfInterp(path string) (interp string, isELF bool, err error) {
-	if _, err := os.Stat(path); err != nil {
-		return "", false, err
-	}
-
-	file, err := elf.Open(path)
-	if err != nil {
-		return "", false, nil
-	}
-	defer file.Close()
-
-	for _, prog := range file.Progs {
-		if prog.Type != elf.PT_INTERP {
-			continue
-		}
-
-		data := make([]byte, prog.Filesz)
-		if _, err := prog.ReadAt(data, 0); err != nil {
-			return "", true, err
-		}
-
-		return strings.TrimRight(string(data), "\x00"), true, nil
-	}
-
-	return "", true, nil
-}
-
-// namespaceFiles lists the host files and directories the runtime or its resolver may read.
-// Device nodes are omitted because the guest cannot open them through WASI and wasmtime uses getrandom rather than /dev/urandom.
-func namespaceFiles(dynamic bool) []string {
-	candidates := []string{
-		"/etc/group",
-		"/etc/hosts",
-		"/etc/nsswitch.conf",
-		"/etc/passwd",
-		"/etc/resolv.conf",
-	}
-	if dynamic {
-		candidates = append(candidates, "/etc/ld.so.cache")
-	}
-
-	if _, err := os.Stat("/etc/ssl/certs/ca-certificates.crt"); err == nil {
-		candidates = append(candidates, "/etc/ssl/certs/ca-certificates.crt")
-	} else if info, err := os.Stat("/etc/ssl/certs"); err == nil && info.IsDir() {
-		candidates = append(candidates, "/etc/ssl/certs")
-	}
-
-	files := make([]string, 0, len(candidates))
-	for _, path := range candidates {
-		if _, err := os.Stat(path); err == nil {
-			files = append(files, path)
-		}
-	}
-
-	sort.Strings(files)
-
-	return files
-}
-
-// namespaceLibDirs lists the directories a dynamically linked wasmtime needs.
-// A static musl build, which is what the runtime image carries, needs none.
-func namespaceLibDirs(interp string) []string {
-	if interp == "" {
-		return nil
-	}
-
-	candidates := []string{"/lib", "/lib64", "/usr/lib", "/usr/lib64"}
-	if dir := filepath.Dir(interp); dir != "." && dir != "/" {
-		candidates = append(candidates, dir)
-	}
-
-	seen := map[string]bool{}
-
-	dirs := make([]string, 0, len(candidates))
-	for _, dir := range candidates {
-		if seen[dir] {
-			continue
-		}
-
-		seen[dir] = true
-		if info, err := os.Stat(dir); err == nil && info.IsDir() {
-			dirs = append(dirs, dir)
-		}
-	}
-
-	sort.Strings(dirs)
-
-	return dirs
-}
-
-// namespaceIDs picks the host uid mapped to container uid 0.
-// Untrusted apps use their allocated uid; trusted apps may use namespaces only when the supervisor is not root, because there is no per-app uid to map to otherwise.
-func (s *supervisor) namespaceIDs(iso *isolationPlan) (int, int, bool, error) {
-	if iso != nil && iso.uid > 0 {
-		if os.Geteuid() != 0 {
-			return 0, 0, false, errors.New("untrusted app namespaces need root")
-		}
-
-		return iso.uid, iso.gid, true, nil
-	}
-
-	if os.Geteuid() == 0 {
-		return 0, 0, false, errors.New("app namespaces in trusted mode need a non-root supervisor; use untrusted mode or run the supervisor as a non-root user")
-	}
-
-	return os.Geteuid(), os.Getegid(), false, nil
-}
-
-// newNamespaceRoot creates the directory that becomes the helper's tmpfs root.
-// The helper runs as the supervisor's uid until it has mounted everything, so the directory does not need the app uid's ownership.
-// The parent removes it when the process exits.
-func (s *supervisor) newNamespaceRoot(a *app) (string, error) {
-	base := filepath.Join(s.cfg.stateDir, ".ns")
-
-	mode := os.FileMode(0o700)
-	if s.cfg.untrusted() {
-		// The helper is root and needs to traverse .ns. It is not listable.
-		mode = 0o711
-	}
-
-	if err := os.MkdirAll(base, mode); err != nil {
-		return "", fmt.Errorf("namespace root: %w", err)
-	}
-
-	if err := os.Chmod(base, mode); err != nil {
-		return "", fmt.Errorf("namespace root permissions: %w", err)
-	}
-
-	root, err := os.MkdirTemp(base, a.name+"-")
-	if err != nil {
-		return "", fmt.Errorf("create namespace root: %w", err)
-	}
-
-	if err := os.Chmod(root, 0o700); err != nil {
-		_ = os.RemoveAll(root)
-		return "", fmt.Errorf("namespace root permissions: %w", err)
-	}
-
-	return root, nil
 }
 
 // buildNamespacePlan resolves the runtime binary and the files the app needs inside its minimal root.
@@ -234,6 +228,7 @@ func (s *supervisor) buildNamespacePlan(a *app, root string, clearGroups bool) (
 	}
 
 	dataDir := filepath.Join(s.cfg.stateDir, a.name)
+
 	if info, err := os.Stat(dataDir); err != nil || !info.IsDir() {
 		return nsPlan{}, fmt.Errorf("data dir %s is not a directory", dataDir)
 	}
@@ -241,10 +236,13 @@ func (s *supervisor) buildNamespacePlan(a *app, root string, clearGroups bool) (
 	dynamic := interp != ""
 
 	a.mu.Lock()
+
 	cfg := a.cfg
+
 	a.mu.Unlock()
 
 	var limits []rlimitSpec
+
 	if s.cfg.untrusted() {
 		limits = rlimitPlan(cfg)
 	}
@@ -266,36 +264,56 @@ func (s *supervisor) buildNamespacePlan(a *app, root string, clearGroups bool) (
 	}, nil
 }
 
-// namespaceSysProcAttr creates the user, PID, mount, IPC and UTS namespaces and maps container uid/gid 0 to the app's host uid/gid.
-// The helper stays root inside the namespace until it has finished mounting, then switches to container 0 and drops capabilities.
-func namespaceSysProcAttr(hostID, hostGID int, allowSetgroups bool) *syscall.SysProcAttr {
-	return &syscall.SysProcAttr{
-		Pdeathsig: syscall.SIGTERM,
-		Cloneflags: syscall.CLONE_NEWUSER | syscall.CLONE_NEWPID | syscall.CLONE_NEWNS | syscall.CLONE_NEWIPC | syscall.CLONE_NEWUTS,
-		UidMappings: []syscall.SysProcIDMap{{ContainerID: 0, HostID: hostID, Size: 1}},
-		GidMappings: []syscall.SysProcIDMap{{ContainerID: 0, HostID: hostGID, Size: 1}},
-		GidMappingsEnableSetgroups: allowSetgroups,
+// namespaceIDs picks the host uid mapped to container uid 0.
+// Untrusted apps use their allocated uid; trusted apps may use namespaces only when the supervisor is not root, because there is no per-app uid to map to otherwise.
+func (s *supervisor) namespaceIDs(iso *isolationPlan) (int, int, bool, error) {
+	if iso != nil && iso.uid > 0 {
+		if os.Geteuid() != 0 {
+			return 0, 0, false, errors.New("untrusted app namespaces need root")
+		}
+
+		return iso.uid, iso.gid, true, nil
 	}
+
+	if os.Geteuid() == 0 {
+		return 0, 0, false, errors.New("app namespaces in trusted mode need a non-root supervisor; use untrusted mode or run the supervisor as a non-root user")
+	}
+
+	return os.Geteuid(), os.Getegid(), false, nil
 }
 
-// resetNamespaceRoots removes stale roots from a previous supervisor.
-// The mounts themselves live in the dead helpers' namespaces, so the host paths are only empty directories.
-func resetNamespaceRoots(stateDir string, untrusted bool) error {
-	base := filepath.Join(stateDir, ".ns")
-	if err := os.RemoveAll(base); err != nil {
-		return fmt.Errorf("reset namespace roots: %w", err)
-	}
-
+// newNamespaceRoot creates the directory that becomes the helper's tmpfs root.
+// The helper runs as the supervisor's uid until it has mounted everything, so the directory does not need the app uid's ownership.
+// The parent removes it when the process exits.
+func (s *supervisor) newNamespaceRoot(a *app) (string, error) {
+	base := filepath.Join(s.cfg.stateDir, ".ns")
 	mode := os.FileMode(0o700)
-	if untrusted {
+
+	if s.cfg.untrusted() {
+		// The helper is root and needs to traverse .ns. It is not listable.
 		mode = 0o711
 	}
 
 	if err := os.MkdirAll(base, mode); err != nil {
-		return fmt.Errorf("create namespace roots: %w", err)
+		return "", fmt.Errorf("namespace root: %w", err)
 	}
 
-	return os.Chmod(base, mode)
+	if err := os.Chmod(base, mode); err != nil {
+		return "", fmt.Errorf("namespace root permissions: %w", err)
+	}
+
+	root, err := os.MkdirTemp(base, a.name+"-")
+	if err != nil {
+		return "", fmt.Errorf("create namespace root: %w", err)
+	}
+
+	if err := os.Chmod(root, 0o700); err != nil {
+		_ = os.RemoveAll(root)
+
+		return "", fmt.Errorf("namespace root permissions: %w", err)
+	}
+
+	return root, nil
 }
 
 // prepareNamespaces builds the namespace plan for one launch attempt.
@@ -313,8 +331,13 @@ func (s *supervisor) prepareNamespaces(a *app, iso *isolationPlan) (*nsLaunch, e
 	plan, err := s.buildNamespacePlan(a, root, allowSetgroups)
 	if err != nil {
 		_ = os.RemoveAll(root)
+
 		return nil, err
 	}
 
-	return &nsLaunch{plan: plan, hostID: hostID, hostGID: hostGID}, nil
+	return &nsLaunch{
+		plan: plan,
+		hostID: hostID,
+		hostGID: hostGID,
+	}, nil
 }

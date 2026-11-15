@@ -17,8 +17,7 @@ import (
 func appURLForHost(supervisorHost, appHost string) string {
 	scheme := "http"
 
-	parsed, err := url.Parse(baseURL(supervisorHost))
-	if err == nil {
+	if parsed, err := url.Parse(baseURL(supervisorHost)); err == nil {
 		if parsed.Scheme == "https" {
 			scheme = "https"
 		}
@@ -38,8 +37,10 @@ func runOpen(args []string) error {
 		return err
 	}
 
-	printOnly := false
-	name := ""
+	var (
+		name string
+		printOnly bool
+	)
 
 	for _, value := range rest {
 		switch {
@@ -75,6 +76,7 @@ func runOpen(args []string) error {
 	var app struct {
 		Host string `json:"host"`
 	}
+
 	if err := json.Unmarshal(body, &app); err != nil {
 		return err
 	}
@@ -84,8 +86,8 @@ func runOpen(args []string) error {
 	}
 
 	target := appURLForHost(cfg.host, app.Host)
-	fmt.Println(target)
 
+	fmt.Println(target)
 	if printOnly {
 		return nil
 	}
@@ -99,7 +101,6 @@ func runOpen(args []string) error {
 		command = "open"
 	case "windows":
 		command = "rundll32"
-
 		commandArgs = append(commandArgs, "url.dll,FileProtocolHandler")
 	default:
 		command = "xdg-open"

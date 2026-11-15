@@ -13,8 +13,16 @@ import (
 func TestMetricsEndpointRendersCountersAndGauges(t *testing.T) {
 	s := testSupervisor()
 	s.metrics = newMetrics()
-	a := &app{name: "demo", cfg: appConfig{Host: "demo.localhost"}, cmd: &exec.Cmd{}, ready: true}
+	a := &app{
+		name: "demo",
+		cfg: appConfig{
+			Host: "demo.localhost",
+		},
+		cmd: &exec.Cmd{},
+		ready: true,
+	}
 	s.apps["demo"] = a
+
 	s.metrics.beginRequest("demo")
 	s.metrics.endRequest("demo", http.MethodGet, http.StatusOK, 50*time.Millisecond)
 	s.metrics.observeStorage("demo", "read", nil, 2*time.Millisecond)
@@ -25,9 +33,9 @@ func TestMetricsEndpointRendersCountersAndGauges(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleMetrics(rec, req)
-
 	if rec.Code != http.StatusOK {
 		t.Fatalf("metrics = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -50,8 +58,8 @@ func TestMetricsEndpointRendersCountersAndGauges(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/metrics", nil)
-	s.handleMetrics(rec, req)
 
+	s.handleMetrics(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("unauthenticated metrics = %d, want 401", rec.Code)
 	}

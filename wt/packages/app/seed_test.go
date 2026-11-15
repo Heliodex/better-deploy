@@ -23,6 +23,7 @@ func TestSeedOnce(t *testing.T) {
 		{"existing rows only mark seeded", 0, 3, false},
 		{"seeded marker skips everything", 1, 0, false},
 	}
+
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var statements []string
@@ -38,7 +39,6 @@ func TestSeedOnce(t *testing.T) {
 				statements = append(statements, req.SQL)
 
 				w.Header().Set("Content-Type", "application/json")
-
 				switch {
 				case strings.Contains(req.SQL, "from meta"):
 					_, _ = fmt.Fprintf(w, `{"columns":["count"],"rows":[[%d]]}`, tc.seeded)
@@ -48,6 +48,7 @@ func TestSeedOnce(t *testing.T) {
 					_, _ = io.WriteString(w, `{"rows_affected":1}`)
 				}
 			}))
+
 			defer server.Close()
 
 			t.Setenv("WT_STORAGE_URL", server.URL)
@@ -58,12 +59,14 @@ func TestSeedOnce(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			calls := 0
+			var calls int
 
 			err = SeedOnce(context.Background(), client, "notes", func(context.Context) error {
 				calls++
+
 				return nil
 			})
+
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -72,7 +75,7 @@ func TestSeedOnce(t *testing.T) {
 				t.Errorf("seed ran = %v, want %v", got, tc.wantSeed)
 			}
 
-			marked := false
+			var marked bool
 
 			for _, statement := range statements {
 				if strings.Contains(statement, "insert or ignore into meta") {

@@ -13,11 +13,19 @@ import (
 
 // forwardedInfo is the effective public view of a request after applying only trusted forwarding headers.
 type forwardedInfo struct {
-	Host string
-	Authority string
-	Proto string
-	ClientIP string
+	Host, Authority, Proto, ClientIP string
 	Trusted bool
+}
+
+// firstForwardedProto accepts only the two schemes the supervisor can serve.
+func firstForwardedProto(value string) string {
+	value = strings.ToLower(strings.TrimSpace(strings.Split(value, ",")[0]))
+
+	if value == "http" || value == "https" {
+		return value
+	}
+
+	return ""
 }
 
 // parseTrustedProxies reads a comma- or space-separated list of IPs and CIDRs. An entry without a prefix is one host.
@@ -30,6 +38,7 @@ func parseTrustedProxies(value string) ([]netip.Prefix, error) {
 		return char == ',' || char == ' ' || char == '\t' || char == '\n'
 	}) {
 		entry = strings.TrimSpace(entry)
+
 		if entry == "" {
 			continue
 		}
@@ -63,6 +72,35 @@ func parseTrustedProxies(value string) ([]netip.Prefix, error) {
 	return prefixes, nil
 }
 
+// remoteIP returns the immediate peer address without its port.
+func remoteIP(remoteAddr string) string {
+	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		return strings.Trim(host, "[]")
+	}
+
+	return strings.Trim(remoteAddr, "[]")
+}
+
+// splitForwardedHost takes the first X-Forwarded-Host value and returns its host without a port plus the authority to forward.
+func splitForwardedHost(value string) (host, authority string, ok bool) {
+	value = strings.TrimSpace(strings.Split(value, ",")[0])
+
+	if value == "" || strings.ContainsAny(value, "/\\ \t\r\n?#@") {
+		return "", "", false
+	}
+
+	authority = strings.ToLower(strings.TrimSuffix(value, "."))
+	host = authority
+
+	if parsed, _, err := net.SplitHostPort(authority); err == nil {
+		host = parsed
+	} else if strings.HasPrefix(authority, "[") && strings.HasSuffix(authority, "]") {
+		host = strings.Trim(authority, "[]")
+	}
+
+	return host, authority, host != ""
+}
+
 func (s *supervisor) isTrustedProxy(address string) bool {
 	if address == "" {
 		return false
@@ -74,6 +112,7 @@ func (s *supervisor) isTrustedProxy(address string) bool {
 	}
 
 	parsed = parsed.Unmap()
+
 	for _, prefix := range s.cfg.trustedProxies {
 		if prefix.Contains(parsed) {
 			return true
@@ -83,35 +122,6 @@ func (s *supervisor) isTrustedProxy(address string) bool {
 	return false
 }
 
-// splitForwardedHost takes the first X-Forwarded-Host value and returns its host without a port plus the authority to forward.
-func splitForwardedHost(value string) (host, authority string, ok bool) {
-	value = strings.TrimSpace(strings.Split(value, ",")[0])
-	if value == "" || strings.ContainsAny(value, "/\\ \t\r\n?#@") {
-		return "", "", false
-	}
-
-	authority = strings.ToLower(strings.TrimSuffix(value, "."))
-
-	host = authority
-	if parsed, _, err := net.SplitHostPort(authority); err == nil {
-		host = parsed
-	} else if strings.HasPrefix(authority, "[") && strings.HasSuffix(authority, "]") {
-		host = strings.Trim(authority, "[]")
-	}
-
-	return host, authority, host != ""
-}
-
-// firstForwardedProto accepts only the two schemes the supervisor can serve.
-func firstForwardedProto(value string) string {
-	value = strings.ToLower(strings.TrimSpace(strings.Split(value, ",")[0]))
-	if value == "http" || value == "https" {
-		return value
-	}
-
-	return ""
-}
-
 // forwardedClientIP walks the X-Forwarded-For chain from the nearest hop and returns the first address that is not a trusted proxy. If every entry is trusted, the leftmost address is the origin.
 func (s *supervisor) forwardedClientIP(values []string, remote string) string {
 	var addresses []string
@@ -119,6 +129,7 @@ func (s *supervisor) forwardedClientIP(values []string, remote string) string {
 	for _, value := range values {
 		for entry := range strings.SplitSeq(value, ",") {
 			entry = strings.TrimSpace(entry)
+
 			if entry == "" {
 				continue
 			}
@@ -149,37 +160,35 @@ func (s *supervisor) forwardedClientIP(values []string, remote string) string {
 	return addresses[0]
 }
 
-// remoteIP returns the immediate peer address without its port.
-func remoteIP(remoteAddr string) string {
-	host, _, err := net.SplitHostPort(remoteAddr)
-	if err == nil {
-		return strings.Trim(host, "[]")
-	}
-
-	return strings.Trim(remoteAddr, "[]")
-}
-
 // forwardedInfo resolves the host, scheme and client address, trusting X-Forwarded-* only when the immediate peer is configured as a trusted proxy.
 func (s *supervisor) forwardedInfo(r *http.Request) forwardedInfo {
 	remote := remoteIP(r.RemoteAddr)
 	authority := strings.ToLower(strings.TrimSpace(r.Host))
-
 	host := requestHost(r)
+
 	if authority == "" {
 		authority = host
 	}
 
 	proto := "http"
+
 	if r.TLS != nil {
 		proto = "https"
 	}
 
-	info := forwardedInfo{Host: host, Authority: authority, Proto: proto, ClientIP: remote}
+	info := forwardedInfo{
+		Host: host,
+		Authority: authority,
+		Proto: proto,
+		ClientIP: remote,
+	}
+
 	if !s.isTrustedProxy(remote) {
 		return info
 	}
 
 	info.Trusted = true
+
 	if forwardedHost, forwardedAuthority, ok := splitForwardedHost(r.Header.Get("X-Forwarded-Host")); ok {
 		info.Host, info.Authority = forwardedHost, forwardedAuthority
 	}

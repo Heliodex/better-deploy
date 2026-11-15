@@ -11,18 +11,14 @@ import (
 func writeFakeClientCommand(t *testing.T, dir, name, record string, emit bool) {
 	t.Helper()
 
-	script := "#!/bin/sh\n" +
-		"{\n" +
-		"  echo \"cwd=$PWD\"\n" +
-		"  for arg in \"$@\"; do echo \"arg=$arg\"; done\n" +
-		"  echo \"out=${WT_CLIENT_OUT:-}\"\n" +
-		"} >> \"" + record + "\"\n"
+	script := "#!/bin/sh\n" + "{\n" + "  echo \"cwd=$PWD\"\n" + "  for arg in \"$@\"; do echo \"arg=$arg\"; done\n" + "  echo \"out=${WT_CLIENT_OUT:-}\"\n" + "} >> \"" + record + "\"\n"
 
 	if emit {
 		script += "printf '// generated\\n' > \"$WT_CLIENT_OUT\"\n"
 	}
 
 	path := filepath.Join(dir, name)
+
 	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -38,21 +34,19 @@ func TestGenerateRegistryOutputsResolvesRelativePaths(t *testing.T) {
 	if err := os.MkdirAll(bin, privateDirMode); err != nil {
 		t.Fatal(err)
 	}
-
 	writeTestFile(t, filepath.Join(web, "biome.json"), "{}")
 	writeTestFile(t, filepath.Join(web, "src", "lib", "contract.ts"), "export const value = 1")
 	writeTestFile(t, filepath.Join(root, "contract", "endpoints.ts"), "export const endpoints = []")
 	writeFakeClientCommand(t, bin, "bun", bunRecord, true)
 	writeFakeClientCommand(t, bin, "bunx", bunxRecord, false)
-
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Chdir(root)
-
 	if err := generateRegistryOutputs(".", "web"); err != nil {
 		t.Fatal(err)
 	}
 
 	emitted := filepath.Join(web, "src", "lib", "api.gen.ts")
+
 	if _, err := os.Stat(emitted); err != nil {
 		t.Fatalf("client not written to %s: %v", emitted, err)
 	}
@@ -70,8 +64,7 @@ func TestGenerateRegistryOutputsResolvesRelativePaths(t *testing.T) {
 		t.Errorf("WT_CLIENT_OUT = %q, want %q", bunLog, emitted)
 	}
 
-	bunxLog := readTestFile(t, bunxRecord)
-	if !strings.Contains(bunxLog, "arg=--config-path="+filepath.Join(web, "biome.json")) {
+	if bunxLog := readTestFile(t, bunxRecord); !strings.Contains(bunxLog, "arg=--config-path="+filepath.Join(web, "biome.json")) {
 		t.Errorf("biome config = %q, want %q", bunxLog, filepath.Join(web, "biome.json"))
 	}
 }

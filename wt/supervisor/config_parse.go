@@ -8,28 +8,32 @@ import (
 	"strings"
 )
 
-// bindString reads the environment default and registers the flag against the same field.
-func bindString(envName, flagName, usage string, target *string, fallback string) {
-	*target = env(envName, fallback)
-	flag.StringVar(target, flagName, *target, usage)
-}
-
 // bindBool reads the environment default and registers the flag against the same field.
 func bindBool(envName, flagName, usage string, target *bool, fallback bool) {
 	*target = envBool(envName, fallback)
+
 	flag.BoolVar(target, flagName, *target, usage)
 }
 
 // bindInt reads the environment default and registers the flag against the same field.
 func bindInt(envName, flagName, usage string, target *int, fallback int) {
 	*target = int(envInt64(envName, int64(fallback)))
+
 	flag.IntVar(target, flagName, *target, usage)
 }
 
 // bindInt64 reads the environment default and registers the flag against the same field.
 func bindInt64(envName, flagName, usage string, target *int64, fallback int64) {
 	*target = envInt64(envName, fallback)
+
 	flag.Int64Var(target, flagName, *target, usage)
+}
+
+// bindString reads the environment default and registers the flag against the same field.
+func bindString(envName, flagName, usage string, target *string, fallback string) {
+	*target = env(envName, fallback)
+
+	flag.StringVar(target, flagName, *target, usage)
 }
 
 // bindConfigFlags loads every option from its environment variable and registers the matching flag in one place.
@@ -42,7 +46,9 @@ func bindConfigFlags(cfg *config, diskBudgetMB, storageTempBudgetMB *int64) {
 	bindString("WT_CACHE_DIR", "cache-dir", "compiled cwasm cache (default WT_STATE_DIR/.cache)", &cfg.cacheDir, "")
 	bindInt64("WT_CACHE_MAX_BYTES", "cache-max-bytes", "compiled cwasm cache byte cap", &cfg.cacheMaxBytes, defaultCacheMaxBytes)
 	bindString("WT_LISTEN", "listen", "public listen address", &cfg.listen, "127.0.0.1:8080")
+
 	cfg.storageListen = env("WT_STORAGE_LISTEN", "127.0.0.1:0")
+
 	bindString("WT_APPS_DOMAIN", "domain", "default app host suffix", &cfg.domain, "localhost")
 	bindString("WT_WASMTIME", "wasmtime", "wasmtime binary", &cfg.wasmtime, "wasmtime")
 	bindString("WT_WASMTIME_COMPILER", "wasmtime-compiler", "wasmtime binary with the compile subcommand, used to rebuild stale artifacts", &cfg.wasmtimeCompiler, wasmtimeDefault)
@@ -71,97 +77,10 @@ func bindConfigFlags(cfg *config, diskBudgetMB, storageTempBudgetMB *int64) {
 	bindInt64("WT_DISK_BUDGET_MB", "disk-budget-mb", "global disk budget in MiB across apps and state (0 = unlimited)", diskBudgetMB, 0)
 
 	cfg.storageMigrationTimeout = envStorageMigrationTimeout()
+
 	flag.DurationVar(&cfg.storageMigrationTimeout, "storage-migration-timeout", cfg.storageMigrationTimeout, "timeout for one migration, between 1s and 1h (default 5m)")
 	bindString("WT_STORAGE_TMP_DIR", "storage-tmp-dir", "directory for SQLite temp files (default WT_STATE_DIR/.tmp)", &cfg.storageTmpDir, "")
 	bindInt64("WT_STORAGE_TEMP_BUDGET_MB", "storage-temp-budget-mb", "global SQLite temp directory budget in MiB (0 = unlimited)", storageTempBudgetMB, defaultStorageTempBudgetMB)
-}
-
-// warnConfig logs the trust-model warnings that do not stop startup.
-func warnConfig(cfg config) {
-	if cfg.untrusted() {
-		log.Printf("untrusted tenant mode: per-app uid, cgroup and network isolation are required (namespaces=%t seccomp=%t)", cfg.appNamespaces, cfg.appSeccomp)
-
-		if os.Geteuid() != 0 {
-			log.Printf("warning: untrusted tenant mode needs root; apps will refuse to launch")
-		}
-
-		if cfg.adminListen == "" {
-			log.Printf("warning: WT_ADMIN_LISTEN is unset; admin routes stay on the public listener behind WT_TOKEN")
-		}
-
-		if !cfg.ipv6Egress {
-			log.Printf("warning: WT_IPV6_EGRESS is off; untrusted apps have no IPv6 egress boundary")
-		}
-
-		return
-	}
-
-	if cfg.token == "" && !loopbackListen(cfg.listen) {
-		log.Fatalf("WT_TOKEN is required when listening on %s", cfg.listen)
-	}
-
-	if cfg.token == "" {
-		log.Printf("warning: WT_TOKEN is empty; admin and deploy APIs are unauthenticated on the loopback listener")
-	}
-}
-
-// applyConfigFlags validates the parsed flags and fills in the derived limits and trust settings.
-func applyConfigFlags(cfg *config, diskBudgetMB, storageTempBudgetMB int64) {
-	if cfg.storageMigrationTimeout < minStorageMigrationTimeout || cfg.storageMigrationTimeout > maxStorageMigrationTimeout {
-		log.Fatalf("storage migration timeout %s must be between %s and %s", cfg.storageMigrationTimeout, minStorageMigrationTimeout, maxStorageMigrationTimeout)
-	}
-
-	if storageTempBudgetMB < 0 {
-		log.Fatalf("storage temp budget must be 0 or greater")
-	}
-
-	cfg.storageTempBudgetBytes = storageTempBudgetMB << 20
-	if cfg.storageTempBudgetBytes > 1<<40 {
-		log.Fatalf("storage temp budget must be at most 1 TiB")
-	}
-
-	if diskBudgetMB > 0 {
-		cfg.diskBudgetBytes = diskBudgetMB << 20
-	} else {
-		cfg.diskBudgetBytes = 0
-	}
-
-	cfg.tenantMode = strings.ToLower(strings.TrimSpace(cfg.tenantMode))
-	if err := validateTenantConfig(*cfg); err != nil {
-		log.Fatalf("%v", err)
-	}
-
-	if err := validateIsolationConfig(*cfg); err != nil {
-		log.Fatalf("%v", err)
-	}
-
-	if cfg.appNamespaces && !cfg.untrusted() && os.Geteuid() == 0 {
-		log.Printf("warning: app namespaces in trusted mode need a non-root supervisor; launches will fail")
-	}
-
-	if err := validateAppFetchListen(cfg.appFetchListen); err != nil {
-		log.Fatalf("%v", err)
-	}
-
-	if cfg.accessLogEvery < 1 || cfg.accessLogEvery > 10000 {
-		log.Fatalf("access-log-every must be between 1 and 10000")
-	}
-
-	trustedProxies, err := parseTrustedProxies(cfg.trustedProxiesValue)
-	if err != nil {
-		log.Fatalf("%v", err)
-	}
-
-	cfg.trustedProxies = trustedProxies
-	if err := validateDataQuotaConfig(cfg); err != nil {
-		log.Fatalf("%v", err)
-	}
-
-	if !cfg.untrusted() && cfg.dataQuotaMode == dataQuotaSetquota {
-		log.Printf("warning: WT_DATA_QUOTA_MODE=setquota is ignored in trusted mode; disk_mb stays a report")
-	}
-
-	warnConfig(*cfg)
 }
 
 // resolveConfigPaths turns the configured directories into absolute paths and creates them.
@@ -177,6 +96,7 @@ func resolveConfigPaths(cfg *config) {
 	}
 
 	cfg.appsDir, cfg.stateDir = absoluteApps, absoluteState
+
 	if cfg.storageTmpDir == "" {
 		cfg.storageTmpDir = filepath.Join(cfg.stateDir, ".tmp")
 	} else {
@@ -220,15 +140,106 @@ func resolveConfigPaths(cfg *config) {
 	}
 }
 
+// warnConfig logs the trust-model warnings that do not stop startup.
+func warnConfig(cfg config) {
+	if cfg.untrusted() {
+		log.Printf("untrusted tenant mode: per-app uid, cgroup and network isolation are required (namespaces=%t seccomp=%t)", cfg.appNamespaces, cfg.appSeccomp)
+		if os.Geteuid() != 0 {
+			log.Printf("warning: untrusted tenant mode needs root; apps will refuse to launch")
+		}
+
+		if cfg.adminListen == "" {
+			log.Printf("warning: WT_ADMIN_LISTEN is unset; admin routes stay on the public listener behind WT_TOKEN")
+		}
+
+		if !cfg.ipv6Egress {
+			log.Printf("warning: WT_IPV6_EGRESS is off; untrusted apps have no IPv6 egress boundary")
+		}
+
+		return
+	}
+
+	if cfg.token == "" && !loopbackListen(cfg.listen) {
+		log.Fatalf("WT_TOKEN is required when listening on %s", cfg.listen)
+	}
+
+	if cfg.token == "" {
+		log.Printf("warning: WT_TOKEN is empty; admin and deploy APIs are unauthenticated on the loopback listener")
+	}
+}
+
+// applyConfigFlags validates the parsed flags and fills in the derived limits and trust settings.
+func applyConfigFlags(cfg *config, diskBudgetMB, storageTempBudgetMB int64) {
+	if cfg.storageMigrationTimeout < minStorageMigrationTimeout || cfg.storageMigrationTimeout > maxStorageMigrationTimeout {
+		log.Fatalf("storage migration timeout %s must be between %s and %s", cfg.storageMigrationTimeout, minStorageMigrationTimeout, maxStorageMigrationTimeout)
+	}
+
+	if storageTempBudgetMB < 0 {
+		log.Fatalf("storage temp budget must be 0 or greater")
+	}
+
+	cfg.storageTempBudgetBytes = storageTempBudgetMB << 20
+
+	if cfg.storageTempBudgetBytes > 1<<40 {
+		log.Fatalf("storage temp budget must be at most 1 TiB")
+	}
+
+	if diskBudgetMB > 0 {
+		cfg.diskBudgetBytes = diskBudgetMB << 20
+	} else {
+		cfg.diskBudgetBytes = 0
+	}
+
+	cfg.tenantMode = strings.ToLower(strings.TrimSpace(cfg.tenantMode))
+
+	if err := validateTenantConfig(*cfg); err != nil {
+		log.Fatalf("%v", err)
+	}
+
+	if err := validateIsolationConfig(*cfg); err != nil {
+		log.Fatalf("%v", err)
+	}
+
+	if cfg.appNamespaces && !cfg.untrusted() && os.Geteuid() == 0 {
+		log.Printf("warning: app namespaces in trusted mode need a non-root supervisor; launches will fail")
+	}
+
+	if err := validateAppFetchListen(cfg.appFetchListen); err != nil {
+		log.Fatalf("%v", err)
+	}
+
+	if cfg.accessLogEvery < 1 || cfg.accessLogEvery > 10000 {
+		log.Fatalf("access-log-every must be between 1 and 10000")
+	}
+
+	trustedProxies, err := parseTrustedProxies(cfg.trustedProxiesValue)
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
+
+	cfg.trustedProxies = trustedProxies
+
+	if err := validateDataQuotaConfig(cfg); err != nil {
+		log.Fatalf("%v", err)
+	}
+
+	if !cfg.untrusted() && cfg.dataQuotaMode == dataQuotaSetquota {
+		log.Printf("warning: WT_DATA_QUOTA_MODE=setquota is ignored in trusted mode; disk_mb stays a report")
+	}
+	warnConfig(*cfg)
+}
+
 // parseConfig reads flags and environment, then prepares the runtime directories.
 func parseConfig() config {
 	cfg := config{}
-	diskBudgetMB := int64(0)
+
+	var diskBudgetMB int64
+
 	storageTempBudgetMB := int64(defaultStorageTempBudgetMB)
+
 	bindConfigFlags(&cfg, &diskBudgetMB, &storageTempBudgetMB)
 	flag.Parse()
 	applyConfigFlags(&cfg, diskBudgetMB, storageTempBudgetMB)
 	resolveConfigPaths(&cfg)
-
 	return cfg
 }

@@ -23,84 +23,71 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// TestServer is an in-memory storage service for handler tests. It speaks the same HTTP wire format as the supervisor's storage service, backed by SQLite, and is excluded from wasm builds.
-type TestServer struct {
-	*httptest.Server
-	Token string
-	// Now is the clock for key-value TTLs; nil uses time.Now. Set it before the first request to test expiry.
-	Now func() time.Time
+type (
+	// testExecer is shared by *sql.DB and *sql.Tx.
+	testExecer interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	}
 
-	db *sql.DB
+	testKVItem struct {
+		value string
+		expires time.Time
+	}
 
-	mu sync.Mutex
-	sessions map[string]*sql.Tx
-	migrations int
-	checksums map[int]string
-	kv map[string]testKVItem
-}
+	// TestServer is an in-memory storage service for handler tests. It speaks the same HTTP wire format as the supervisor's storage service, backed by SQLite, and is excluded from wasm builds.
+	TestServer struct {
+		*httptest.Server
+		Token string
+		// Now is the clock for key-value TTLs; nil uses time.Now. Set it before the first request to test expiry.
+		Now func() time.Time
+		db *sql.DB
+		mu sync.Mutex
+		sessions map[string]*sql.Tx
+		migrations int
+		checksums map[int]string
+		kv map[string]testKVItem
+	}
 
-type testKVItem struct {
-	value string
-	expires time.Time
-}
+	// testQueryer is shared by *sql.DB and *sql.Tx.
+	testQueryer interface {
+		QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	}
+
+	testRequest struct {
+		SQL string `json:"sql"`
+		Params []any `json:"params,omitempty"`
+		MaxRows int `json:"max_rows,omitempty"`
+	}
+
+	testResponse struct {
+		Columns []string `json:"columns"`
+		Rows [][]any `json:"rows"`
+		RowsAffected int64 `json:"rows_affected,omitempty"`
+		LastInsertID int64 `json:"last_insert_id,omitempty"`
+		Truncated bool `json:"truncated,omitempty"`
+	}
+
+	testResults struct {
+		Results []testResponse `json:"results"`
+	}
+
+	testStatement struct {
+		SQL string `json:"sql"`
+		Params []any `json:"params,omitempty"`
+		Query bool `json:"query,omitempty"`
+	}
+
+	testMigration struct {
+		Version int `json:"version"`
+		Statements []testStatement `json:"statements,omitempty"`
+	}
+
+	testStatements struct {
+		Statements []testStatement `json:"statements"`
+	}
+)
 
 var testServerSequence atomic.Uint64
-
-type testStatement struct {
-	SQL string `json:"sql"`
-	Params []any `json:"params,omitempty"`
-	Query bool `json:"query,omitempty"`
-}
-
-type testRequest struct {
-	SQL string `json:"sql"`
-	Params []any `json:"params,omitempty"`
-	MaxRows int `json:"max_rows,omitempty"`
-}
-
-type testStatements struct {
-	Statements []testStatement `json:"statements"`
-}
-
-type testMigration struct {
-	Version int `json:"version"`
-	Statements []testStatement `json:"statements,omitempty"`
-}
-
-type testResponse struct {
-	Columns []string `json:"columns"`
-	Rows [][]any `json:"rows"`
-	RowsAffected int64 `json:"rows_affected,omitempty"`
-	LastInsertID int64 `json:"last_insert_id,omitempty"`
-	Truncated bool `json:"truncated,omitempty"`
-}
-
-type testResults struct {
-	Results []testResponse `json:"results"`
-}
-
-// NewTestServer starts an isolated in-memory storage service. Call Close when the test finishes.
-func NewTestServer() (*TestServer, error) {
-	dsn := fmt.Sprintf("file:storage-test-%d?mode=memory&cache=shared", testServerSequence.Add(1))
-	db, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		return nil, err
-	}
-	// A single connection keeps an in-memory database visible to sessions and serialises test traffic.
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
-	server := &TestServer{Token: "test-token", db: db, sessions: map[string]*sql.Tx{}, checksums: map[int]string{}, kv: map[string]testKVItem{}}
-	server.Server = httptest.NewServer(http.HandlerFunc(server.handle))
-	return server, nil
-}
-
-// NewClient returns a storage client pointed at this server, without touching WT_STORAGE_* variables.
-func (s *TestServer) NewClient(httpClient *http.Client) *Client {
-	if httpClient == nil {
-		httpClient = http.DefaultClient
-	}
-	return &Client{baseURL: s.URL, token: s.Token, http: httpClient}
-}
 
 // Close stops the HTTP server and rolls back any open sessions.
 func (s *TestServer) Close() {
@@ -109,127 +96,63 @@ func (s *TestServer) Close() {
 	for _, tx := range s.sessions {
 		_ = tx.Rollback()
 	}
+
 	s.sessions = nil
+
 	s.mu.Unlock()
+
 	_ = s.db.Close()
 }
 
-// handle authenticates one storage request and dispatches the same endpoint shape as the supervisor.
-func (s *TestServer) handle(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get("Authorization") != "Bearer "+s.Token {
-		writeStorageTestError(w, http.StatusUnauthorized, "unauthorized", "unauthorized")
-		return
+// NewClient returns a storage client pointed at this server, without touching WT_STORAGE_* variables.
+func (s *TestServer) NewClient(httpClient *http.Client) *Client {
+	if httpClient == nil {
+		httpClient = http.DefaultClient
 	}
-	switch {
-	case r.URL.Path == "/v1/query":
-		var request testRequest
-		if !readStorageTestJSON(w, r, &request) {
-			return
-		}
-		s.respondQuery(w, r.Context(), s.db, request, false)
-	case r.URL.Path == "/v1/write":
-		var request testRequest
-		if !readStorageTestJSON(w, r, &request) {
-			return
-		}
-		s.respondQuery(w, r.Context(), s.db, request, true)
-	case r.URL.Path == "/v1/exec":
-		var request testRequest
-		if !readStorageTestJSON(w, r, &request) {
-			return
-		}
-		s.respondExec(w, r.Context(), s.db, testStatement{SQL: request.SQL, Params: request.Params})
-	case r.URL.Path == "/v1/batch":
-		s.handleBatch(w, r)
-	case r.URL.Path == "/v1/transaction":
-		s.handleTransaction(w, r)
-	case r.URL.Path == "/v1/migrate":
-		s.handleMigration(w, r)
-	case strings.HasPrefix(r.URL.Path, "/v1/kv/"):
-		s.handleKV(w, r, strings.TrimPrefix(r.URL.Path, "/v1/kv/"))
-	case r.URL.Path == "/v1/sessions":
-		s.createSession(w, r)
-	case strings.HasPrefix(r.URL.Path, "/v1/sessions/"):
-		s.handleSession(w, r)
-	default:
-		http.NotFound(w, r)
+
+	return &Client{
+		baseURL: s.URL,
+		token: s.Token,
+		http: httpClient,
 	}
 }
 
-// respondQuery writes a query or returning-write response.
-func (s *TestServer) respondQuery(w http.ResponseWriter, ctx context.Context, q testQueryer, request testRequest, write bool) {
-	response, err := testQuery(ctx, q, request)
-	if err != nil {
-		writeStorageTestSQLError(w, err)
-		return
-	}
-	if write && response.RowsAffected == 0 {
-		response.RowsAffected = int64(len(response.Rows))
-	}
-	writeStorageTestJSON(w, http.StatusOK, response)
+// testMigrationChecksum hashes a migration's statements so a re-sent version can be compared with the one applied.
+func testMigrationChecksum(request testMigration) string {
+	data, _ := json.Marshal(request.Statements)
+	sum := sha256.Sum256(data)
+
+	return hex.EncodeToString(sum[:])
 }
 
-// respondExec writes one exec response.
-func (s *TestServer) respondExec(w http.ResponseWriter, ctx context.Context, q testExecer, statement testStatement) {
-	response, err := testExec(ctx, q, statement)
-	if err != nil {
-		writeStorageTestSQLError(w, err)
-		return
-	}
-	writeStorageTestJSON(w, http.StatusOK, response)
-}
+// testParams normalises JSON numbers and blob envelopes for database/sql.
+func testParams(values []any) []any {
+	out := make([]any, len(values))
 
-// testQueryer is shared by *sql.DB and *sql.Tx.
-type testQueryer interface {
-	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-}
+	for i, value := range values {
+		switch value := value.(type) {
+		case float64:
+			if value == math.Trunc(value) {
+				out[i] = int64(value)
+				continue
+			}
 
-// testExecer is shared by *sql.DB and *sql.Tx.
-type testExecer interface {
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
-}
+			out[i] = value
+		case map[string]any:
+			if encoded, ok := value["$b64"].(string); ok {
+				if decoded, err := base64.StdEncoding.DecodeString(encoded); err == nil {
+					out[i] = decoded
+					continue
+				}
+			}
 
-// testQuery runs one query and normalises row values for the storage wire format.
-func testQuery(ctx context.Context, q testQueryer, request testRequest) (testResponse, error) {
-	maxRows := request.MaxRows
-	if maxRows <= 0 || maxRows > 1000 {
-		maxRows = 1000
+			out[i] = value
+		default:
+			out[i] = value
+		}
 	}
-	rows, err := q.QueryContext(ctx, request.SQL, testParams(request.Params)...)
-	if err != nil {
-		return testResponse{}, err
-	}
-	defer rows.Close()
 
-	columns, err := rows.Columns()
-	if err != nil {
-		return testResponse{}, err
-	}
-	columnTypes, _ := rows.ColumnTypes()
-	out := make([][]any, 0, maxRows)
-	truncated := false
-	for rows.Next() {
-		if len(out) >= maxRows {
-			truncated = true
-			break
-		}
-		values := make([]any, len(columns))
-		targets := make([]any, len(columns))
-		for i := range values {
-			targets[i] = &values[i]
-		}
-		if err := rows.Scan(targets...); err != nil {
-			return testResponse{}, err
-		}
-		for i, value := range values {
-			values[i] = testValue(value, columnTypes, i)
-		}
-		out = append(out, values)
-	}
-	if err := rows.Err(); err != nil {
-		return testResponse{}, err
-	}
-	return testResponse{Columns: columns, Rows: out, Truncated: truncated}, nil
+	return out
 }
 
 // testExec runs one write and reports its counts.
@@ -238,9 +161,14 @@ func testExec(ctx context.Context, q testExecer, statement testStatement) (testR
 	if err != nil {
 		return testResponse{}, err
 	}
+
 	affected, _ := result.RowsAffected()
 	lastID, _ := result.LastInsertId()
-	return testResponse{RowsAffected: affected, LastInsertID: lastID}, nil
+
+	return testResponse{
+		RowsAffected: affected,
+		LastInsertID: lastID,
+	}, nil
 }
 
 // testValue normalises one driver value to a JSON scalar or the blob envelope.
@@ -250,6 +178,7 @@ func testValue(value any, columnTypes []*sql.ColumnType, index int) any {
 		if index < len(columnTypes) && strings.Contains(strings.ToUpper(columnTypes[index].DatabaseTypeName()), "BLOB") {
 			return map[string]string{"$b64": base64.StdEncoding.EncodeToString(value)}
 		}
+
 		return string(value)
 	case time.Time:
 		return value.UTC().Format(time.RFC3339Nano)
@@ -274,140 +203,98 @@ func testValue(value any, columnTypes []*sql.ColumnType, index int) any {
 	}
 }
 
-// testParams normalises JSON numbers and blob envelopes for database/sql.
-func testParams(values []any) []any {
-	out := make([]any, len(values))
-	for i, value := range values {
-		switch value := value.(type) {
-		case float64:
-			if value == math.Trunc(value) {
-				out[i] = int64(value)
-				continue
-			}
-			out[i] = value
-		case map[string]any:
-			if encoded, ok := value["$b64"].(string); ok {
-				if decoded, err := base64.StdEncoding.DecodeString(encoded); err == nil {
-					out[i] = decoded
-					continue
-				}
-			}
-			out[i] = value
-		default:
-			out[i] = value
-		}
+// testQuery runs one query and normalises row values for the storage wire format.
+func testQuery(ctx context.Context, q testQueryer, request testRequest) (testResponse, error) {
+	maxRows := request.MaxRows
+	if maxRows <= 0 || maxRows > 1000 {
+		maxRows = 1000
 	}
-	return out
-}
 
-// handleBatch runs one transaction over every write statement.
-func (s *TestServer) handleBatch(w http.ResponseWriter, r *http.Request) {
-	var request testStatements
-	if !readStorageTestJSON(w, r, &request) {
-		return
-	}
-	tx, err := s.db.BeginTx(r.Context(), nil)
+	rows, err := q.QueryContext(ctx, request.SQL, testParams(request.Params)...)
 	if err != nil {
-		writeStorageTestSQLError(w, err)
-		return
+		return testResponse{}, err
 	}
-	results := make([]testResponse, len(request.Statements))
-	for i, statement := range request.Statements {
-		results[i], err = testExec(r.Context(), tx, statement)
-		if err != nil {
-			_ = tx.Rollback()
-			writeStorageTestSQLError(w, err)
-			return
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		writeStorageTestSQLError(w, err)
-		return
-	}
-	writeStorageTestJSON(w, http.StatusOK, testResults{Results: results})
-}
 
-// handleTransaction runs reads and writes in one transaction.
-func (s *TestServer) handleTransaction(w http.ResponseWriter, r *http.Request) {
-	var request testStatements
-	if !readStorageTestJSON(w, r, &request) {
-		return
-	}
-	tx, err := s.db.BeginTx(r.Context(), nil)
+	defer rows.Close()
+
+	columns, err := rows.Columns()
 	if err != nil {
-		writeStorageTestSQLError(w, err)
-		return
+		return testResponse{}, err
 	}
-	results := make([]testResponse, len(request.Statements))
-	for i, statement := range request.Statements {
-		if statement.Query {
-			results[i], err = testQuery(r.Context(), tx, testRequest{SQL: statement.SQL, Params: statement.Params})
-		} else {
-			results[i], err = testExec(r.Context(), tx, statement)
+
+	columnTypes, _ := rows.ColumnTypes()
+	out := make([][]any, 0, maxRows)
+
+	var truncated bool
+
+	for rows.Next() {
+		if len(out) >= maxRows {
+			truncated = true
+			break
 		}
-		if err != nil {
-			_ = tx.Rollback()
-			writeStorageTestSQLError(w, err)
-			return
+
+		values := make([]any, len(columns))
+		targets := make([]any, len(columns))
+
+		for i := range values {
+			targets[i] = &values[i]
 		}
+
+		if err := rows.Scan(targets...); err != nil {
+			return testResponse{}, err
+		}
+
+		for i, value := range values {
+			values[i] = testValue(value, columnTypes, i)
+		}
+
+		out = append(out, values)
 	}
-	if err := tx.Commit(); err != nil {
-		writeStorageTestSQLError(w, err)
-		return
+
+	if err := rows.Err(); err != nil {
+		return testResponse{}, err
 	}
-	writeStorageTestJSON(w, http.StatusOK, testResults{Results: results})
+
+	return testResponse{
+		Columns: columns,
+		Rows: out,
+		Truncated: truncated,
+	}, nil
 }
 
-// handleMigration records a version and runs its statements once.
-func (s *TestServer) handleMigration(w http.ResponseWriter, r *http.Request) {
-	var request testMigration
-	if !readStorageTestJSON(w, r, &request) {
-		return
-	}
-	checksum := testMigrationChecksum(request)
-	s.mu.Lock()
-	current := s.migrations
-	stored, recorded := s.checksums[request.Version]
-	s.mu.Unlock()
-	if request.Version <= current {
-		// Like the supervisor, an applied version must be resent unchanged. Versions applied before checksums were recorded here have none to compare.
-		if recorded && stored != checksum {
-			message := fmt.Sprintf("migration checksum mismatch: version %d was already applied with different statements; leave applied versions unchanged and put new statements in version %d", request.Version, current+1)
-			writeStorageTestError(w, http.StatusConflict, message, "migration_checksum")
-			return
-		}
-		writeStorageTestJSON(w, http.StatusOK, map[string]any{"version": request.Version, "applied": false})
-		return
-	}
-	tx, err := s.db.BeginTx(r.Context(), nil)
+// writeStorageTestError writes one storage error response.
+func writeStorageTestError(w http.ResponseWriter, status int, message, code string) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+
+	data, _ := json.Marshal(map[string]string{"code": code, "error": message})
+	_, _ = w.Write(append(data, '\n'))
+}
+
+// readStorageTestJSON decodes a bounded JSON body and writes a 400 on failure.
+func readStorageTestJSON(w http.ResponseWriter, r *http.Request, out any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, 8<<20)
+	data, err := io.ReadAll(r.Body)
 	if err != nil {
-		writeStorageTestSQLError(w, err)
-		return
+		writeStorageTestError(w, http.StatusBadRequest, err.Error(), "invalid")
+		return false
 	}
-	for _, statement := range request.Statements {
-		if _, err := testExec(r.Context(), tx, statement); err != nil {
-			_ = tx.Rollback()
-			writeStorageTestSQLError(w, err)
-			return
-		}
+
+	if err := json.Unmarshal(data, out); err != nil {
+		writeStorageTestError(w, http.StatusBadRequest, err.Error(), "invalid")
+		return false
 	}
-	if err := tx.Commit(); err != nil {
-		writeStorageTestSQLError(w, err)
-		return
-	}
-	s.mu.Lock()
-	s.migrations = request.Version
-	s.checksums[request.Version] = checksum
-	s.mu.Unlock()
-	writeStorageTestJSON(w, http.StatusOK, map[string]any{"version": request.Version, "applied": true})
+
+	return true
 }
 
-// testMigrationChecksum hashes a migration's statements so a re-sent version can be compared with the one applied.
-func testMigrationChecksum(request testMigration) string {
-	data, _ := json.Marshal(request.Statements)
-	sum := sha256.Sum256(data)
+// writeStorageTestJSON writes one storage success response.
+func writeStorageTestJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
 
-	return hex.EncodeToString(sum[:])
+	data, _ := json.Marshal(value)
+	_, _ = w.Write(append(data, '\n'))
 }
 
 // handleKV serves the key-value endpoints from a map with the supervisor's TTL and fixed-window semantics.
@@ -416,60 +303,103 @@ func (s *TestServer) handleKV(w http.ResponseWriter, r *http.Request, op string)
 	if !readStorageTestJSON(w, r, &request) {
 		return
 	}
+
 	if request.Key == "" {
 		writeStorageTestError(w, http.StatusBadRequest, "key must not be empty", "invalid")
 		return
 	}
+
 	now := time.Now()
+
 	if s.Now != nil {
 		now = s.Now()
 	}
+
 	expires := time.Time{}
+
 	if request.TTLMS > 0 {
 		expires = now.Add(time.Duration(request.TTLMS) * time.Millisecond)
 	}
 	s.mu.Lock()
+
 	defer s.mu.Unlock()
+
 	item, found := s.kv[request.Key]
 	if found && !item.expires.IsZero() && !now.Before(item.expires) {
 		delete(s.kv, request.Key)
+
 		item, found = testKVItem{}, false
 	}
+
 	expiry := func(at time.Time) string {
 		if at.IsZero() {
 			return ""
 		}
+
 		return at.UTC().Format(time.RFC3339Nano)
 	}
+
 	switch op {
 	case "get":
-		writeStorageTestJSON(w, http.StatusOK, kvResponse{Found: found, Value: item.value, ExpiresAt: expiry(item.expires)})
+		writeStorageTestJSON(w, http.StatusOK, kvResponse{
+			Found: found,
+			Value: item.value,
+			ExpiresAt: expiry(item.expires),
+		})
 	case "set":
-		s.kv[request.Key] = testKVItem{value: request.Value, expires: expires}
+		s.kv[request.Key] = testKVItem{
+			value: request.Value,
+			expires: expires,
+		}
+
 		writeStorageTestJSON(w, http.StatusOK, map[string]bool{"stored": true})
 	case "delete":
 		delete(s.kv, request.Key)
 		writeStorageTestJSON(w, http.StatusOK, map[string]bool{"deleted": found})
 	case "incr":
 		var current int64
+
 		if found {
 			parsed, err := strconv.ParseInt(item.value, 10, 64)
 			if err != nil {
 				writeStorageTestError(w, http.StatusConflict, "kv value is not an integer", "not_integer")
 				return
 			}
+
 			current, expires = parsed, item.expires
 		}
+
 		by := request.By
 		if by == 0 {
 			by = 1
 		}
+
 		current += by
-		s.kv[request.Key] = testKVItem{value: strconv.FormatInt(current, 10), expires: expires}
-		writeStorageTestJSON(w, http.StatusOK, kvIncrResponse{Value: current, ExpiresAt: expiry(expires)})
+		s.kv[request.Key] = testKVItem{
+			value: strconv.FormatInt(current, 10),
+			expires: expires,
+		}
+
+		writeStorageTestJSON(w, http.StatusOK, kvIncrResponse{
+			Value: current,
+			ExpiresAt: expiry(expires),
+		})
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// writeStorageTestSQLError maps a driver error to the storage error shape.
+func writeStorageTestSQLError(w http.ResponseWriter, err error) {
+	message := err.Error()
+	status, code := http.StatusInternalServerError, "internal"
+
+	if strings.Contains(message, "UNIQUE constraint failed") {
+		status, code = http.StatusConflict, "constraint"
+	} else if strings.Contains(message, "no such table") || strings.Contains(message, "syntax error") {
+		status, code = http.StatusBadRequest, "invalid"
+	}
+	writeStorageTestError(w, status, message, code)
 }
 
 // createSession pins one transaction for WithTx.
@@ -478,35 +408,135 @@ func (s *TestServer) createSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
 	tx, err := s.db.BeginTx(context.Background(), nil)
 	if err != nil {
 		writeStorageTestSQLError(w, err)
 		return
 	}
+
 	id := fmt.Sprintf("session-%d", time.Now().UnixNano())
+
 	s.mu.Lock()
+
 	s.sessions[id] = tx
+
 	s.mu.Unlock()
 	writeStorageTestJSON(w, http.StatusOK, map[string]any{"id": id, "expiresAt": time.Now().Add(time.Minute).UTC()})
+}
+
+// handleBatch runs one transaction over every write statement.
+func (s *TestServer) handleBatch(w http.ResponseWriter, r *http.Request) {
+	var request testStatements
+	if !readStorageTestJSON(w, r, &request) {
+		return
+	}
+
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeStorageTestSQLError(w, err)
+		return
+	}
+
+	results := make([]testResponse, len(request.Statements))
+
+	for i, statement := range request.Statements {
+		results[i], err = testExec(r.Context(), tx, statement)
+
+		if err != nil {
+			_ = tx.Rollback()
+
+			writeStorageTestSQLError(w, err)
+			return
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		writeStorageTestSQLError(w, err)
+		return
+	}
+	writeStorageTestJSON(w, http.StatusOK, testResults{
+		Results: results,
+	})
+}
+
+// handleMigration records a version and runs its statements once.
+func (s *TestServer) handleMigration(w http.ResponseWriter, r *http.Request) {
+	var request testMigration
+	if !readStorageTestJSON(w, r, &request) {
+		return
+	}
+
+	checksum := testMigrationChecksum(request)
+
+	s.mu.Lock()
+
+	current := s.migrations
+	stored, recorded := s.checksums[request.Version]
+
+	s.mu.Unlock()
+	if request.Version <= current {
+		// Like the supervisor, an applied version must be resent unchanged. Versions applied before checksums were recorded here have none to compare.
+		if recorded && stored != checksum {
+			message := fmt.Sprintf("migration checksum mismatch: version %d was already applied with different statements; leave applied versions unchanged and put new statements in version %d", request.Version, current+1)
+
+			writeStorageTestError(w, http.StatusConflict, message, "migration_checksum")
+			return
+		}
+		writeStorageTestJSON(w, http.StatusOK, map[string]any{"applied": false, "version": request.Version})
+		return
+	}
+
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeStorageTestSQLError(w, err)
+		return
+	}
+
+	for _, statement := range request.Statements {
+		if _, err := testExec(r.Context(), tx, statement); err != nil {
+			_ = tx.Rollback()
+
+			writeStorageTestSQLError(w, err)
+			return
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		writeStorageTestSQLError(w, err)
+		return
+	}
+	s.mu.Lock()
+
+	s.migrations = request.Version
+	s.checksums[request.Version] = checksum
+
+	s.mu.Unlock()
+	writeStorageTestJSON(w, http.StatusOK, map[string]any{"applied": true, "version": request.Version})
 }
 
 // handleSession routes one session operation.
 func (s *TestServer) handleSession(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/v1/sessions/")
 	id, action, found := strings.Cut(rest, "/")
+
 	s.mu.Lock()
+
 	tx := s.sessions[id]
+
 	s.mu.Unlock()
 	if !found || tx == nil {
 		http.NotFound(w, r)
 		return
 	}
+
 	switch action {
 	case "query":
 		var request testRequest
 		if !readStorageTestJSON(w, r, &request) {
 			return
 		}
+
 		response, err := testQuery(r.Context(), tx, request)
 		if err != nil {
 			writeStorageTestSQLError(w, err)
@@ -518,7 +548,11 @@ func (s *TestServer) handleSession(w http.ResponseWriter, r *http.Request) {
 		if !readStorageTestJSON(w, r, &request) {
 			return
 		}
-		response, err := testExec(r.Context(), tx, testStatement{SQL: request.SQL, Params: request.Params})
+
+		response, err := testExec(r.Context(), tx, testStatement{
+			SQL: request.SQL,
+			Params: request.Params,
+		})
 		if err != nil {
 			writeStorageTestSQLError(w, err)
 			return
@@ -547,45 +581,137 @@ func (s *TestServer) handleSession(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// readStorageTestJSON decodes a bounded JSON body and writes a 400 on failure.
-func readStorageTestJSON(w http.ResponseWriter, r *http.Request, out any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, 8<<20)
-	data, err := io.ReadAll(r.Body)
+// handleTransaction runs reads and writes in one transaction.
+func (s *TestServer) handleTransaction(w http.ResponseWriter, r *http.Request) {
+	var request testStatements
+	if !readStorageTestJSON(w, r, &request) {
+		return
+	}
+
+	tx, err := s.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		writeStorageTestError(w, http.StatusBadRequest, err.Error(), "invalid")
-		return false
+		writeStorageTestSQLError(w, err)
+		return
 	}
-	if err := json.Unmarshal(data, out); err != nil {
-		writeStorageTestError(w, http.StatusBadRequest, err.Error(), "invalid")
-		return false
+
+	results := make([]testResponse, len(request.Statements))
+
+	for i, statement := range request.Statements {
+		if statement.Query {
+			results[i], err = testQuery(r.Context(), tx, testRequest{
+				SQL: statement.SQL,
+				Params: statement.Params,
+			})
+		} else {
+			results[i], err = testExec(r.Context(), tx, statement)
+		}
+
+		if err != nil {
+			_ = tx.Rollback()
+
+			writeStorageTestSQLError(w, err)
+			return
+		}
 	}
-	return true
+
+	if err := tx.Commit(); err != nil {
+		writeStorageTestSQLError(w, err)
+		return
+	}
+	writeStorageTestJSON(w, http.StatusOK, testResults{
+		Results: results,
+	})
 }
 
-// writeStorageTestSQLError maps a driver error to the storage error shape.
-func writeStorageTestSQLError(w http.ResponseWriter, err error) {
-	message := err.Error()
-	status, code := http.StatusInternalServerError, "internal"
-	if strings.Contains(message, "UNIQUE constraint failed") {
-		status, code = http.StatusConflict, "constraint"
-	} else if strings.Contains(message, "no such table") || strings.Contains(message, "syntax error") {
-		status, code = http.StatusBadRequest, "invalid"
+// respondExec writes one exec response.
+func (s *TestServer) respondExec(w http.ResponseWriter, ctx context.Context, q testExecer, statement testStatement) {
+	response, err := testExec(ctx, q, statement)
+	if err != nil {
+		writeStorageTestSQLError(w, err)
+		return
 	}
-	writeStorageTestError(w, status, message, code)
+	writeStorageTestJSON(w, http.StatusOK, response)
 }
 
-// writeStorageTestError writes one storage error response.
-func writeStorageTestError(w http.ResponseWriter, status int, message, code string) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	data, _ := json.Marshal(map[string]string{"error": message, "code": code})
-	_, _ = w.Write(append(data, '\n'))
+// respondQuery writes a query or returning-write response.
+func (s *TestServer) respondQuery(w http.ResponseWriter, ctx context.Context, q testQueryer, request testRequest, write bool) {
+	response, err := testQuery(ctx, q, request)
+	if err != nil {
+		writeStorageTestSQLError(w, err)
+		return
+	}
+
+	if write && response.RowsAffected == 0 {
+		response.RowsAffected = int64(len(response.Rows))
+	}
+	writeStorageTestJSON(w, http.StatusOK, response)
 }
 
-// writeStorageTestJSON writes one storage success response.
-func writeStorageTestJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	data, _ := json.Marshal(value)
-	_, _ = w.Write(append(data, '\n'))
+// handle authenticates one storage request and dispatches the same endpoint shape as the supervisor.
+func (s *TestServer) handle(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Authorization") != "Bearer "+s.Token {
+		writeStorageTestError(w, http.StatusUnauthorized, "unauthorized", "unauthorized")
+		return
+	}
+
+	switch {
+	case r.URL.Path == "/v1/query":
+		var request testRequest
+		if !readStorageTestJSON(w, r, &request) {
+			return
+		}
+		s.respondQuery(w, r.Context(), s.db, request, false)
+	case r.URL.Path == "/v1/write":
+		var request testRequest
+		if !readStorageTestJSON(w, r, &request) {
+			return
+		}
+		s.respondQuery(w, r.Context(), s.db, request, true)
+	case r.URL.Path == "/v1/exec":
+		var request testRequest
+		if !readStorageTestJSON(w, r, &request) {
+			return
+		}
+		s.respondExec(w, r.Context(), s.db, testStatement{
+			SQL: request.SQL,
+			Params: request.Params,
+		})
+	case r.URL.Path == "/v1/batch":
+		s.handleBatch(w, r)
+	case r.URL.Path == "/v1/transaction":
+		s.handleTransaction(w, r)
+	case r.URL.Path == "/v1/migrate":
+		s.handleMigration(w, r)
+	case strings.HasPrefix(r.URL.Path, "/v1/kv/"):
+		s.handleKV(w, r, strings.TrimPrefix(r.URL.Path, "/v1/kv/"))
+	case r.URL.Path == "/v1/sessions":
+		s.createSession(w, r)
+	case strings.HasPrefix(r.URL.Path, "/v1/sessions/"):
+		s.handleSession(w, r)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+// NewTestServer starts an isolated in-memory storage service. Call Close when the test finishes.
+func NewTestServer() (*TestServer, error) {
+	dsn := fmt.Sprintf("file:storage-test-%d?mode=memory&cache=shared", testServerSequence.Add(1))
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, err
+	}
+	// A single connection keeps an in-memory database visible to sessions and serialises test traffic.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+
+	server := &TestServer{
+		Token: "test-token",
+		db: db,
+		sessions: map[string]*sql.Tx{},
+		checksums: map[int]string{},
+		kv: map[string]testKVItem{},
+	}
+	server.Server = httptest.NewServer(http.HandlerFunc(server.handle))
+
+	return server, nil
 }

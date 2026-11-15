@@ -18,6 +18,7 @@ func TestNewFlagSetHidesLegacyUsage(t *testing.T) {
 	}
 
 	helpFlags := newFlagSet("deploy")
+
 	if err := helpFlags.Parse([]string{"-help"}); !errors.Is(err, flag.ErrHelp) {
 		t.Errorf("-help error = %v, want flag.ErrHelp", err)
 	}

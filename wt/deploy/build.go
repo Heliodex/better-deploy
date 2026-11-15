@@ -14,33 +14,22 @@ import (
 	"time"
 )
 
-// runBuildPhase runs one named app.json build phase with the app directory as its working directory.
-func runBuildPhase(cfg *deployConfig, phase, command string) error {
-	if cfg.skipBuild {
-		return nil
+type (
+	// inputHashFunc hashes one phase's inputs, such as componentInputHash or staticInputHash.
+	inputHashFunc func(dir string, m manifest, command string) (string, int, error)
+
+	// phaseInputs is one build phase's command and the input hash and file count measured for its cache.
+	phaseInputs struct {
+		cmd, hash string
+		files int
 	}
-
-	if strings.TrimSpace(command) == "" {
-		return fmt.Errorf("app.json has no %s build command; set one or pass --skip-build", phase)
-	}
-
-	cmd := exec.CommandContext(context.Background(), "sh", "-c", command)
-	cmd.Dir = cfg.dir
-	cmd.Stdout = os.Stderr
-
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s build: %w", phase, err)
-	}
-
-	return nil
-}
+)
 
 // checkStaticSvelteKit rejects server-only SvelteKit files: the production artifact is adapter-static output.
 func checkStaticSvelteKit(dir string, m manifest) error {
 	web := webDirName(m)
-
 	src := filepath.Join(dir, web, "src")
+
 	if info, err := os.Stat(src); err != nil || !info.IsDir() {
 		return nil
 	}
@@ -55,9 +44,7 @@ func checkStaticSvelteKit(dir string, m manifest) error {
 		name := entry.Name()
 		rel, _ := filepath.Rel(dir, path)
 		serverFile := strings.HasSuffix(name, ".server.ts") || strings.HasSuffix(name, ".server.js") || strings.HasSuffix(name, ".server.mjs") || strings.HasPrefix(name, "+server.")
-
-		serverDir := strings.Contains(filepath.ToSlash(rel), "/lib/server/")
-		if serverFile || serverDir {
+		if serverDir := strings.Contains(filepath.ToSlash(rel), "/lib/server/"); serverFile || serverDir {
 			found = append(found, filepath.ToSlash(rel))
 		}
 
@@ -83,16 +70,26 @@ func generateStaleContract(cfg *deployConfig, m manifest, stale bool) error {
 	return generateContract(cfg.dir, webDirName(m), m.Name)
 }
 
-// phaseInputs is one build phase's command and the input hash and file count measured for its cache.
-type phaseInputs struct {
-	cmd string
-	hash string
-	files int
+// httpRequest creates a supervisor API request, adding the bearer token and the base URL from the deploy config.
+func httpRequest(cfg *deployConfig, method, path string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(context.Background(), method, baseURL(cfg.host)+path, body)
+	if err != nil {
+		return nil, err
+	}
+
+	if cfg.token != "" {
+		req.Header.Set("Authorization", "Bearer "+cfg.token)
+	}
+
+	return req, nil
 }
 
 // measurePhase hashes a phase's inputs when it has a command, and returns an empty measurement otherwise.
 func measurePhase(dir string, m manifest, cmd string, hashFn inputHashFunc) (phaseInputs, error) {
-	in := phaseInputs{cmd: cmd}
+	in := phaseInputs{
+		cmd: cmd,
+	}
+
 	if cmd == "" {
 		return in, nil
 	}
@@ -115,11 +112,34 @@ func (in phaseInputs) remeasure(dir string, m manifest, hashFn inputHashFunc) ph
 		return in
 	}
 
-	return phaseInputs{cmd: in.cmd, hash: hash, files: files}
+	return phaseInputs{
+		cmd: in.cmd,
+		hash: hash,
+		files: files,
+	}
 }
 
-// inputHashFunc hashes one phase's inputs, such as componentInputHash or staticInputHash.
-type inputHashFunc func(dir string, m manifest, command string) (string, int, error)
+// runBuildPhase runs one named app.json build phase with the app directory as its working directory.
+func runBuildPhase(cfg *deployConfig, phase, command string) error {
+	if cfg.skipBuild {
+		return nil
+	}
+
+	if strings.TrimSpace(command) == "" {
+		return fmt.Errorf("app.json has no %s build command; set one or pass --skip-build", phase)
+	}
+
+	cmd := exec.CommandContext(context.Background(), "sh", "-c", command)
+	cmd.Dir = cfg.dir
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s build: %w", phase, err)
+	}
+
+	return nil
+}
 
 // buildComponent runs the component command, compiles the result and records the new digest and input hash.
 func buildComponent(cfg *deployConfig, m manifest, cache *buildCache, status *buildStatus, in phaseInputs) error {
@@ -143,6 +163,27 @@ func buildComponent(cfg *deployConfig, m manifest, cache *buildCache, status *bu
 	status.ComponentHash, status.ComponentFiles = in.hash, in.files
 
 	writeBuildCache(cfg.dir, *cache)
+	return nil
+}
+
+// buildStatic runs the static command, then records its new input hash and warns if the output directory is missing.
+func buildStatic(cfg *deployConfig, m manifest, cache *buildCache, status *buildStatus, in phaseInputs) error {
+	if err := runBuildPhase(cfg, "static", in.cmd); err != nil {
+		return err
+	}
+
+	status.StaticBuilt = true
+	in = in.remeasure(cfg.dir, m, staticInputHash)
+	cache.StaticHash = in.hash
+	status.StaticHash, status.StaticFiles = in.hash, in.files
+
+	writeBuildCache(cfg.dir, *cache)
+
+	staticDir := filepath.Join(cfg.dir, "static")
+
+	if info, err := os.Stat(staticDir); err != nil || !info.IsDir() {
+		fmt.Fprintf(os.Stderr, "warning: static build finished but %s is missing\n", staticDir)
+	}
 
 	return nil
 }
@@ -154,6 +195,7 @@ func runComponentPhase(cfg *deployConfig, m manifest, cache *buildCache, status 
 	}
 
 	status.ComponentHash, status.ComponentFiles = in.hash, in.files
+
 	if artifactUsable(cfg) {
 		status.ComponentReused = true
 
@@ -165,28 +207,6 @@ func runComponentPhase(cfg *deployConfig, m manifest, cache *buildCache, status 
 	}
 
 	status.ComponentRecompiled = true
-
-	return nil
-}
-
-// buildStatic runs the static command, then records its new input hash and warns if the output directory is missing.
-func buildStatic(cfg *deployConfig, m manifest, cache *buildCache, status *buildStatus, in phaseInputs) error {
-	if err := runBuildPhase(cfg, "static", in.cmd); err != nil {
-		return err
-	}
-
-	status.StaticBuilt = true
-
-	in = in.remeasure(cfg.dir, m, staticInputHash)
-	cache.StaticHash = in.hash
-	status.StaticHash, status.StaticFiles = in.hash, in.files
-
-	writeBuildCache(cfg.dir, *cache)
-
-	staticDir := filepath.Join(cfg.dir, "static")
-	if info, err := os.Stat(staticDir); err != nil || !info.IsDir() {
-		fmt.Fprintf(os.Stderr, "warning: static build finished but %s is missing\n", staticDir)
-	}
 
 	return nil
 }
@@ -209,6 +229,7 @@ func runStaticPhase(cfg *deployConfig, m manifest, cache *buildCache, status *bu
 // prepareBuilds runs each stale phase, updates the cache after each success and reports what was reused.
 func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 	var status buildStatus
+
 	if err := checkStaticSvelteKit(cfg.dir, m); err != nil {
 		return status, err
 	}
@@ -219,6 +240,7 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 	}
 
 	staticCmd := strings.TrimSpace(m.BuildStatic)
+
 	if cfg.skipStatic {
 		staticCmd = ""
 		status.StaticSkipped = true
@@ -228,6 +250,7 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 
 	if cfg.skipBuild {
 		status.BuildSkipped = true
+
 		if digest, err := fileDigest(wasmPath); err == nil {
 			status.WasmDigest = digest
 		}
@@ -237,7 +260,6 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 
 	wasmInfo, wasmErr := os.Stat(wasmPath)
 	wasmExists := wasmErr == nil && wasmInfo.Mode().IsRegular()
-
 	hasComponentBuild := componentCmd != ""
 	if !hasComponentBuild && !wasmExists {
 		return status, errors.New("app.json has no build_component and main.wasm is missing")
@@ -249,9 +271,7 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 
 	staticInfo, staticErr := os.Stat(filepath.Join(cfg.dir, "static"))
 	staticExists := staticErr == nil && staticInfo.IsDir()
-
 	cache, _ := readBuildCache(cfg.dir)
-
 	component, err := measurePhase(cfg.dir, m, componentCmd, componentInputHash)
 	if err != nil {
 		return status, err
@@ -271,6 +291,7 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 
 	// The registry outputs follow the endpoint registry, not the component hash: a registry-only change must still regenerate.
 	webDir := filepath.Join(cfg.dir, webDirName(m))
+
 	if err := generateRegistryOutputs(cfg.dir, webDir); err != nil {
 		return status, err
 	}
@@ -292,20 +313,6 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 	return status, nil
 }
 
-// httpRequest creates a supervisor API request, adding the bearer token and the base URL from the deploy config.
-func httpRequest(cfg *deployConfig, method, path string, body io.Reader) (*http.Request, error) {
-	req, err := http.NewRequestWithContext(context.Background(), method, baseURL(cfg.host)+path, body)
-	if err != nil {
-		return nil, err
-	}
-
-	if cfg.token != "" {
-		req.Header.Set("Authorization", "Bearer "+cfg.token)
-	}
-
-	return req, nil
-}
-
 // serverDigest returns the currently running component digest, or an empty string when the app does not exist.
 func serverDigest(cfg *deployConfig, name string) string {
 	req, err := httpRequest(cfg, "GET", "/apps/"+name, nil)
@@ -313,10 +320,13 @@ func serverDigest(cfg *deployConfig, name string) string {
 		return ""
 	}
 
-	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	resp, err := (&http.Client{
+		Timeout: 5 * time.Second,
+	}).Do(req)
 	if err != nil {
 		return ""
 	}
+
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -331,6 +341,7 @@ func serverDigest(cfg *deployConfig, name string) string {
 	var info struct {
 		CurrentDigest string `json:"currentDigest"`
 	}
+
 	if err := json.Unmarshal(data, &info); err != nil {
 		return ""
 	}

@@ -6,34 +6,41 @@ import (
 	"time"
 )
 
-// parseRequestTimeout validates an optional per-request deadline. Empty means no configured deadline;
-// "0" and "none" are explicit ways to disable it, which matters where untrusted mode supplies a default.
-func parseRequestTimeout(value string) (time.Duration, error) {
-	value = strings.TrimSpace(value)
-	if value == "" || value == "0" || strings.EqualFold(value, "none") {
-		return 0, nil
+func (cfg appConfig) failureLimit() int {
+	if cfg.HealthFailures > 0 {
+		return cfg.HealthFailures
 	}
 
-	timeout, err := time.ParseDuration(value)
-	if err != nil || timeout < time.Second || timeout > 24*time.Hour {
-		return 0, fmt.Errorf("request_timeout %q must be a duration between 1s and 24h, or 0/none to disable", value)
-	}
-
-	return timeout, nil
+	return defaultHealthFailures
 }
 
-// parseStartupTimeout validates how long a new process may take to answer its health path.
-func parseStartupTimeout(value string) (time.Duration, error) {
-	if strings.TrimSpace(value) == "" {
-		return defaultStartupTimeout, nil
+func (cfg appConfig) probeInterval() time.Duration {
+	if cfg.healthInterval > 0 {
+		return cfg.healthInterval
 	}
 
-	timeout, err := time.ParseDuration(value)
-	if err != nil || timeout < minStartupTimeout || timeout > maxStartupTimeout {
-		return 0, fmt.Errorf("startup_timeout %q must be a duration between %s and %s", value, minStartupTimeout, maxStartupTimeout)
+	return defaultHealthInterval
+}
+
+func (cfg appConfig) startupLimit() time.Duration {
+	if cfg.startupTimeout > 0 {
+		return cfg.startupTimeout
 	}
 
-	return timeout, nil
+	return defaultStartupTimeout
+}
+
+// parseHealthFailures validates the consecutive failure count that marks an app unready.
+func parseHealthFailures(value int) (int, error) {
+	if value == 0 {
+		return defaultHealthFailures, nil
+	}
+
+	if value < minHealthFailures || value > maxHealthFailures {
+		return 0, fmt.Errorf("health_failures must be between %d and %d", minHealthFailures, maxHealthFailures)
+	}
+
+	return value, nil
 }
 
 // parseHealthInterval validates how often a running app is probed.
@@ -50,23 +57,11 @@ func parseHealthInterval(value string) (time.Duration, error) {
 	return interval, nil
 }
 
-// parseHealthFailures validates the consecutive failure count that marks an app unready.
-func parseHealthFailures(value int) (int, error) {
-	if value == 0 {
-		return defaultHealthFailures, nil
-	}
-
-	if value < minHealthFailures || value > maxHealthFailures {
-		return 0, fmt.Errorf("health_failures must be between %d and %d", minHealthFailures, maxHealthFailures)
-	}
-
-	return value, nil
-}
-
 // parseIdleTimeout validates how long an app may go without component traffic before its process stops.
 // Empty means the default scale-to-zero delay; "0", "none" or "off" disable it.
 func parseIdleTimeout(value string) (time.Duration, error) {
 	value = strings.TrimSpace(value)
+
 	switch {
 	case value == "":
 		return defaultIdleTimeout, nil
@@ -82,28 +77,21 @@ func parseIdleTimeout(value string) (time.Duration, error) {
 	return timeout, nil
 }
 
-func (cfg appConfig) startupLimit() time.Duration {
-	if cfg.startupTimeout > 0 {
-		return cfg.startupTimeout
+// parseRequestTimeout validates an optional per-request deadline. Empty means no configured deadline;
+// "0" and "none" are explicit ways to disable it, which matters where untrusted mode supplies a default.
+func parseRequestTimeout(value string) (time.Duration, error) {
+	value = strings.TrimSpace(value)
+
+	if value == "" || value == "0" || strings.EqualFold(value, "none") {
+		return 0, nil
 	}
 
-	return defaultStartupTimeout
-}
-
-func (cfg appConfig) probeInterval() time.Duration {
-	if cfg.healthInterval > 0 {
-		return cfg.healthInterval
+	timeout, err := time.ParseDuration(value)
+	if err != nil || timeout < time.Second || timeout > 24*time.Hour {
+		return 0, fmt.Errorf("request_timeout %q must be a duration between 1s and 24h, or 0/none to disable", value)
 	}
 
-	return defaultHealthInterval
-}
-
-func (cfg appConfig) failureLimit() int {
-	if cfg.HealthFailures > 0 {
-		return cfg.HealthFailures
-	}
-
-	return defaultHealthFailures
+	return timeout, nil
 }
 
 // parseScheduleInterval validates an entry's period and reports how often it fires.
@@ -133,6 +121,20 @@ func parseScheduleTimeout(entry scheduleConfig, every time.Duration) (time.Durat
 
 	if timeout < minScheduleInterval || timeout > maxScheduleInterval {
 		return 0, fmt.Errorf("timeout %q must be between %s and %s", entry.Timeout, minScheduleInterval, maxScheduleInterval)
+	}
+
+	return timeout, nil
+}
+
+// parseStartupTimeout validates how long a new process may take to answer its health path.
+func parseStartupTimeout(value string) (time.Duration, error) {
+	if strings.TrimSpace(value) == "" {
+		return defaultStartupTimeout, nil
+	}
+
+	timeout, err := time.ParseDuration(value)
+	if err != nil || timeout < minStartupTimeout || timeout > maxStartupTimeout {
+		return 0, fmt.Errorf("startup_timeout %q must be a duration between %s and %s", value, minStartupTimeout, maxStartupTimeout)
 	}
 
 	return timeout, nil

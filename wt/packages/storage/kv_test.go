@@ -13,6 +13,7 @@ func TestKV(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	defer server.Close()
 
 	now := time.Now()
@@ -61,6 +62,7 @@ func TestRateLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	defer server.Close()
 
 	now := time.Now()
@@ -68,7 +70,11 @@ func TestRateLimit(t *testing.T) {
 		return now
 	}
 	client := server.NewClient(server.Client())
-	limit := RateLimit{Prefix: "rl:", Limit: 2, Window: time.Minute}
+	limit := RateLimit{
+		Prefix: "rl:",
+		Limit: 2,
+		Window: time.Minute,
+	}
 
 	for i := range 3 {
 		decision, err := limit.Allow(t.Context(), client, "user")

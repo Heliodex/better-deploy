@@ -15,101 +15,27 @@ import (
 	"time"
 )
 
+// statusWriter captures the status code a proxied response is written with. Unwrap hands the underlying writer's optional interfaces (Flusher, Hijacker) through.
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+const (
+	proxyExpectContinue = time.Second
+	proxyIdleConnTimeout = 90 * time.Second
+	proxyMaxIdlePerHost = 16
+	requestIDHeader = "X-Request-ID"
+	spinBasePathHeader = "Spin-Base-Path"
+	spinClientAddrHeader = "Spin-Client-Addr"
+	spinFullURLHeader = "Spin-Full-Url"
+	spinPathInfoHeader = "Spin-Path-Info"
+)
+
 var (
 	proxyDialTimeout = 5 * time.Second
 	proxyResponseHeaderTimeout = 30 * time.Second
 )
-
-const (
-	proxyIdleConnTimeout = 90 * time.Second
-	proxyMaxIdlePerHost = 16
-	proxyExpectContinue = time.Second
-
-	requestIDHeader = "X-Request-ID"
-	spinFullURLHeader = "Spin-Full-Url"
-	spinClientAddrHeader = "Spin-Client-Addr"
-	spinBasePathHeader = "Spin-Base-Path"
-	spinPathInfoHeader = "Spin-Path-Info"
-)
-
-// newRequestID returns a short random identifier that ties a proxy, app and storage request together.
-func newRequestID() string {
-	var value [16]byte
-	if _, err := rand.Read(value[:]); err != nil {
-		return strconv.FormatInt(time.Now().UnixNano(), 10)
-	}
-
-	return hex.EncodeToString(value[:])
-}
-
-// newProxy builds the per-app reverse proxy that rewrites forwarded headers and compresses dynamic text responses.
-func (s *supervisor) newProxy(a *app) *httputil.ReverseProxy {
-	target := &url.URL{Scheme: "http", Host: fmt.Sprintf("127.0.0.1:%d", a.port)}
-	proxy := &httputil.ReverseProxy{
-		// A server-selected page can be filled from the static directory before the supervisor compresses the remaining text responses.
-		ModifyResponse: func(res *http.Response) error {
-			served, err := a.serveStaticPageResponse(res)
-			if err != nil || served {
-				return err
-			}
-
-			accept, _ := res.Request.Context().Value(acceptEncodingKey{}).(string)
-
-			return compressResponse(res, accept)
-		},
-		// A hung app must not hold client connections forever: header and dial deadlines bound the wait before the response starts.
-		Transport: &http.Transport{
-			DialContext: (&net.Dialer{Timeout: proxyDialTimeout, KeepAlive: 30 * time.Second}).DialContext,
-			ResponseHeaderTimeout: proxyResponseHeaderTimeout,
-			IdleConnTimeout: proxyIdleConnTimeout,
-			MaxIdleConnsPerHost: proxyMaxIdlePerHost,
-			ExpectContinueTimeout: proxyExpectContinue,
-		},
-		Rewrite: func(r *httputil.ProxyRequest) {
-			info := s.forwardedInfo(r.In)
-			r.SetURL(target)
-			// Replace the whole inbound chain, so a client cannot prepend a spoofed address. When a trusted proxy supplied X-Forwarded-For, the first entry is the resolved client and the last is the immediate proxy.
-			chain := info.ClientIP
-			if remote := remoteIP(r.In.RemoteAddr); info.Trusted && remote != "" && remote != info.ClientIP {
-				chain += ", " + remote
-			}
-
-			r.Out.Header.Set("X-Forwarded-For", chain)
-			r.Out.Header.Set("X-Real-IP", info.ClientIP)
-			r.Out.Header.Set("X-Forwarded-Host", info.Authority)
-			r.Out.Header.Set("X-Forwarded-Proto", info.Proto)
-			r.Out.Header.Del("Forwarded")
-			r.Out.Header.Del(staticPageHeader)
-			r.Out.Host = info.Authority
-			r.Out = r.Out.WithContext(context.WithValue(r.Out.Context(), acceptEncodingKey{}, r.In.Header.Get("Accept-Encoding")))
-			r.Out.Header.Set("Accept-Encoding", "identity")
-			// The Spin host headers give the component the standard net/http view of the original request.
-			r.Out.Header.Set(spinFullURLHeader, info.Proto+"://"+info.Authority+r.In.URL.RequestURI())
-			r.Out.Header.Set(spinClientAddrHeader, info.ClientIP)
-			r.Out.Header.Set(spinPathInfoHeader, r.In.URL.RequestURI())
-			r.Out.Header.Set(spinBasePathHeader, "")
-
-			if requestID := r.In.Header.Get(requestIDHeader); requestID != "" {
-				r.Out.Header.Set(requestIDHeader, requestID)
-			}
-		},
-		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
-			log.Printf("app %s: proxy: %v", a.name, err)
-			http.Error(w, "app unavailable", http.StatusBadGateway)
-		},
-	}
-
-	return proxy
-}
-
-func (w *statusWriter) WriteHeader(status int) {
-	w.status = status
-	w.ResponseWriter.WriteHeader(status)
-}
-
-func (w *statusWriter) Unwrap() http.ResponseWriter {
-	return w.ResponseWriter
-}
 
 // formatProxyDuration renders a request duration compactly for the access log.
 func formatProxyDuration(d time.Duration) string {
@@ -127,6 +53,7 @@ func formatProxyDuration(d time.Duration) string {
 // formatAccessLog renders a supervisor access line as METHOD status duration path, with a request id when one is available.
 func formatAccessLog(method string, status int, duration time.Duration, uri, requestID string) string {
 	line := fmt.Sprintf("%s %d %s %s", method, status, formatProxyDuration(duration), uri)
+
 	if requestID != "" {
 		line += " request=" + requestID
 	}
@@ -134,9 +61,21 @@ func formatAccessLog(method string, status int, duration time.Duration, uri, req
 	return line
 }
 
+// newRequestID returns a short random identifier that ties a proxy, app and storage request together.
+func newRequestID() string {
+	var value [16]byte
+
+	if _, err := rand.Read(value[:]); err != nil {
+		return strconv.FormatInt(time.Now().UnixNano(), 10)
+	}
+
+	return hex.EncodeToString(value[:])
+}
+
 // requestHost is the lower-case request host without a port, as used for app routing.
 func requestHost(r *http.Request) string {
 	host := strings.ToLower(r.Host)
+
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		return h
 	}
@@ -144,9 +83,30 @@ func requestHost(r *http.Request) string {
 	return host
 }
 
+func (w *statusWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
+func (w *statusWriter) WriteHeader(status int) {
+	w.status = status
+
+	w.ResponseWriter.WriteHeader(status)
+}
+
+// adminHandler serves admin/API routes on the separate admin listener.
+func (s *supervisor) adminHandler() http.Handler {
+	return s.adminRoutes()
+}
+
+// adminMux holds the supervisor's own routes and never proxies app hosts.
+func (s *supervisor) adminMux() http.Handler {
+	return s.adminRoutes()
+}
+
 // appForHost finds an exact host first, then a single-label wildcard such as *.apps.example.com.
 func (s *supervisor) appForHost(host string) *app {
 	s.mu.RLock()
+
 	defer s.mu.RUnlock()
 
 	if a := s.hosts[host]; a != nil {
@@ -161,101 +121,90 @@ func (s *supervisor) appForHost(host string) *app {
 	return s.hosts["*."+strings.Join(labels[1:], ".")]
 }
 
-// handleProxy resolves the app host and dispatches maintenance, events, identity and blob traffic before proxying.
-func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
-	host := s.effectiveHost(r)
-
-	a := s.appForHost(host)
-	if a == nil {
-		http.Error(w, "no app for this host", http.StatusNotFound)
-		return
-	}
-
-	a.mu.Lock()
-	identityMode := a.cfg.Identity == identityModePlatform
-	maintenance := a.cfg.Maintenance
-	a.mu.Unlock()
-
-	if maintenance {
-		s.serveMaintenance(w, r, a)
-		return
-	}
-
-	if appEventPath(r.URL.Path) {
-		s.handleAppEvents(w, r, a)
-		return
-	}
-
-	if identityMode && s.serveIdentityApp(w, r) {
-		return
-	}
-
-	s.identityProxyHeaders(r, a.name, identityMode)
-	// Blob traffic belongs to the supervisor, not the wasm component, so large bodies never take an app slot.
-	if r.URL.Path == blobPrefix || strings.HasPrefix(r.URL.Path, blobPrefix+"/") {
-		s.handleBlobs(w, r, a)
-		return
-	}
-
-	s.serveApp(w, r, a)
+// isAppHost reports whether host belongs to an app, which owns every path on its host.
+func (s *supervisor) isAppHost(host string) bool {
+	return s.appForHost(host) != nil
 }
 
-// logAccess writes one proxied request line when sampling allows it.
-func (s *supervisor) logAccess(a *app, r *http.Request, started time.Time, requestID string, status int) {
-	if a.logs == nil || !s.shouldLogAccess(a, status) {
-		return
+// newProxy builds the per-app reverse proxy that rewrites forwarded headers and compresses dynamic text responses.
+func (s *supervisor) newProxy(a *app) *httputil.ReverseProxy {
+	target := &url.URL{
+		Scheme: "http",
+		Host: fmt.Sprintf("127.0.0.1:%d", a.port),
+	}
+	proxy := &httputil.ReverseProxy{
+		// A server-selected page can be filled from the static directory before the supervisor compresses the remaining text responses.
+		ModifyResponse: func(res *http.Response) error {
+			if served, err := a.serveStaticPageResponse(res); err != nil || served {
+				return err
+			}
+
+			accept, _ := res.Request.Context().Value(acceptEncodingKey{}).(string)
+
+			return compressResponse(res, accept)
+		},
+		// A hung app must not hold client connections forever: header and dial deadlines bound the wait before the response starts.
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout: proxyDialTimeout,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			MaxIdleConnsPerHost: proxyMaxIdlePerHost,
+			IdleConnTimeout: proxyIdleConnTimeout,
+			ResponseHeaderTimeout: proxyResponseHeaderTimeout,
+			ExpectContinueTimeout: proxyExpectContinue,
+		},
+		Rewrite: func(r *httputil.ProxyRequest) {
+			info := s.forwardedInfo(r.In)
+
+			r.SetURL(target)
+			// Replace the whole inbound chain, so a client cannot prepend a spoofed address. When a trusted proxy supplied X-Forwarded-For, the first entry is the resolved client and the last is the immediate proxy.
+			chain := info.ClientIP
+
+			if remote := remoteIP(r.In.RemoteAddr); info.Trusted && remote != "" && remote != info.ClientIP {
+				chain += ", " + remote
+			}
+			r.Out.Header.Set("X-Forwarded-For", chain)
+			r.Out.Header.Set("X-Real-IP", info.ClientIP)
+			r.Out.Header.Set("X-Forwarded-Host", info.Authority)
+			r.Out.Header.Set("X-Forwarded-Proto", info.Proto)
+			r.Out.Header.Del("Forwarded")
+			r.Out.Header.Del(staticPageHeader)
+
+			r.Out.Host = info.Authority
+			r.Out = r.Out.WithContext(context.WithValue(r.Out.Context(), acceptEncodingKey{}, r.In.Header.Get("Accept-Encoding")))
+
+			r.Out.Header.Set("Accept-Encoding", "identity")
+			// The Spin host headers give the component the standard net/http view of the original request.
+			r.Out.Header.Set(spinFullURLHeader, info.Proto+"://"+info.Authority+r.In.URL.RequestURI())
+			r.Out.Header.Set(spinClientAddrHeader, info.ClientIP)
+			r.Out.Header.Set(spinPathInfoHeader, r.In.URL.RequestURI())
+			r.Out.Header.Set(spinBasePathHeader, "")
+			if requestID := r.In.Header.Get(requestIDHeader); requestID != "" {
+				r.Out.Header.Set(requestIDHeader, requestID)
+			}
+		},
+		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
+			log.Printf("app %s: proxy: %v", a.name, err)
+			http.Error(w, "app unavailable", http.StatusBadGateway)
+		},
 	}
 
-	a.logs.logSupervisor(formatAccessLog(r.Method, status, time.Since(started), r.URL.RequestURI(), requestID))
-}
-
-// startAccess ensures the request has an ID header and returns it.
-func (s *supervisor) startAccess(w http.ResponseWriter, r *http.Request) string {
-	requestID := r.Header.Get(requestIDHeader)
-	if requestID == "" {
-		requestID = newRequestID()
-		r.Header.Set(requestIDHeader, requestID)
-	}
-
-	w.Header().Set(requestIDHeader, requestID)
-
-	return requestID
-}
-
-// requireDependencies serves a 503 while any declared dependency is not ready.
-func (s *supervisor) requireDependencies(w http.ResponseWriter, a *app) bool {
-	ready, waiting := s.dependenciesReady(a)
-	if ready {
-		return true
-	}
-
-	w.Header().Set("Retry-After", "1")
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(http.StatusServiceUnavailable)
-	_, _ = fmt.Fprintf(w, "waiting for dependencies: %s\n", strings.Join(waiting, ", "))
-
-	return false
-}
-
-// writeUnavailable serves a 503 with Retry-After and records the access line.
-func (s *supervisor) writeUnavailable(w http.ResponseWriter, r *http.Request, a *app, started time.Time, requestID, message string) {
-	w.Header().Set("Retry-After", "1")
-	http.Error(w, message, http.StatusServiceUnavailable)
-	s.logAccess(a, r, started, requestID, http.StatusServiceUnavailable)
+	return proxy
 }
 
 // proxyRequest forwards the request within the app's concurrency and timeout limits.
 func (s *supervisor) proxyRequest(w http.ResponseWriter, r *http.Request, a *app) bool {
 	a.mu.Lock()
+
+	proxy := a.proxy
 	slots := a.slots
 	timeout := a.cfg.requestTimeout
-	proxy := a.proxy
-	a.mu.Unlock()
 
+	a.mu.Unlock()
 	if proxy == nil {
 		w.Header().Set("Retry-After", "1")
 		http.Error(w, "app is not ready", http.StatusServiceUnavailable)
-
 		return false
 	}
 
@@ -273,14 +222,73 @@ func (s *supervisor) proxyRequest(w http.ResponseWriter, r *http.Request, a *app
 
 	if timeout > 0 {
 		ctx, cancel := context.WithTimeout(r.Context(), timeout)
+
 		defer cancel()
 
 		r = r.WithContext(ctx)
 	}
-
 	proxy.ServeHTTP(w, r)
-
 	return true
+}
+
+// requireDependencies serves a 503 while any declared dependency is not ready.
+func (s *supervisor) requireDependencies(w http.ResponseWriter, a *app) bool {
+	ready, waiting := s.dependenciesReady(a)
+	if ready {
+		return true
+	}
+	w.Header().Set("Retry-After", "1")
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusServiceUnavailable)
+
+	_, _ = fmt.Fprintf(w, "waiting for dependencies: %s\n", strings.Join(waiting, ", "))
+
+	return false
+}
+
+// shouldLogAccess samples successful access lines while always recording server errors. WT_ACCESS_LOG=off disables the sampled lines but keeps 5xx visible.
+func (s *supervisor) shouldLogAccess(a *app, status int) bool {
+	if status >= http.StatusInternalServerError {
+		return true
+	}
+
+	if !s.cfg.accessLog && s.cfg.accessLogEvery != 0 {
+		return false
+	}
+
+	every := s.cfg.accessLogEvery
+	if every <= 1 {
+		return true
+	}
+
+	return a.accessLines.Add(1)%uint64(every) == 0
+}
+
+// logAccess writes one proxied request line when sampling allows it.
+func (s *supervisor) logAccess(a *app, r *http.Request, started time.Time, requestID string, status int) {
+	if a.logs == nil || !s.shouldLogAccess(a, status) {
+		return
+	}
+	a.logs.logSupervisor(formatAccessLog(r.Method, status, time.Since(started), r.URL.RequestURI(), requestID))
+}
+
+// startAccess ensures the request has an ID header and returns it.
+func (s *supervisor) startAccess(w http.ResponseWriter, r *http.Request) string {
+	requestID := r.Header.Get(requestIDHeader)
+	if requestID == "" {
+		requestID = newRequestID()
+
+		r.Header.Set(requestIDHeader, requestID)
+	}
+	w.Header().Set(requestIDHeader, requestID)
+	return requestID
+}
+
+// writeUnavailable serves a 503 with Retry-After and records the access line.
+func (s *supervisor) writeUnavailable(w http.ResponseWriter, r *http.Request, a *app, started time.Time, requestID, message string) {
+	w.Header().Set("Retry-After", "1")
+	http.Error(w, message, http.StatusServiceUnavailable)
+	s.logAccess(a, r, started, requestID, http.StatusServiceUnavailable)
 }
 
 // serveApp proxies one request to a resolved app. The public host proxy and the internal app fetch share it, so both get concurrency limits, readiness, static files and access logs.
@@ -290,13 +298,15 @@ func (s *supervisor) serveApp(w http.ResponseWriter, r *http.Request, a *app) {
 	}
 
 	requestID := s.startAccess(w, r)
-
 	started := time.Now()
-
-	wrapped := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+	wrapped := &statusWriter{
+		ResponseWriter: w,
+		status: http.StatusOK,
+	}
 
 	if s.metrics != nil {
 		s.metrics.beginRequest(a.name)
+
 		defer func() {
 			s.metrics.endRequest(a.name, r.Method, wrapped.status, time.Since(started))
 		}()
@@ -314,7 +324,6 @@ func (s *supervisor) serveApp(w http.ResponseWriter, r *http.Request, a *app) {
 		if err := s.wakeIdleApp(a); err != nil {
 			log.Printf("app %s: wake after idle: %v", a.name, err)
 			s.writeUnavailable(w, r, a, started, requestID, "app did not start: "+err.Error())
-
 			return
 		}
 
@@ -349,37 +358,51 @@ func (s *supervisor) serveApp(w http.ResponseWriter, r *http.Request, a *app) {
 	}
 }
 
-// shouldLogAccess samples successful access lines while always recording server errors. WT_ACCESS_LOG=off disables the sampled lines but keeps 5xx visible.
-func (s *supervisor) shouldLogAccess(a *app, status int) bool {
-	if status >= http.StatusInternalServerError {
-		return true
+// handleProxy resolves the app host and dispatches maintenance, events, identity and blob traffic before proxying.
+func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
+	host := s.effectiveHost(r)
+	a := s.appForHost(host)
+	if a == nil {
+		http.Error(w, "no app for this host", http.StatusNotFound)
+		return
+	}
+	a.mu.Lock()
+
+	identityMode := a.cfg.Identity == identityModePlatform
+	maintenance := a.cfg.Maintenance
+
+	a.mu.Unlock()
+	if maintenance {
+		s.serveMaintenance(w, r, a)
+		return
 	}
 
-	if !s.cfg.accessLog && s.cfg.accessLogEvery != 0 {
-		return false
+	if appEventPath(r.URL.Path) {
+		s.handleAppEvents(w, r, a)
+		return
 	}
 
-	every := s.cfg.accessLogEvery
-	if every <= 1 {
-		return true
+	if identityMode && s.serveIdentityApp(w, r) {
+		return
 	}
-
-	return a.accessLines.Add(1)%uint64(every) == 0
+	s.identityProxyHeaders(r, a.name, identityMode)
+	// Blob traffic belongs to the supervisor, not the wasm component, so large bodies never take an app slot.
+	if r.URL.Path == blobPrefix || strings.HasPrefix(r.URL.Path, blobPrefix+"/") {
+		s.handleBlobs(w, r, a)
+		return
+	}
+	s.serveApp(w, r, a)
 }
 
-// isAppHost reports whether host belongs to an app, which owns every path on its host.
-func (s *supervisor) isAppHost(host string) bool {
-	return s.appForHost(host) != nil
-}
-
-// adminMux holds the supervisor's own routes and never proxies app hosts.
-func (s *supervisor) adminMux() http.Handler {
-	return s.adminRoutes()
-}
-
-// adminHandler serves admin/API routes on the separate admin listener.
-func (s *supervisor) adminHandler() http.Handler {
-	return s.adminRoutes()
+func (s *supervisor) handler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := s.effectiveHost(r)
+		if !s.reservedHost(host) && s.isAppHost(host) {
+			s.handleProxy(w, r)
+			return
+		}
+		s.serveAdminOrProxy(w, r)
+	})
 }
 
 // publicHandler serves app hosts and the health check only. Admin routes live on the separate listener.
@@ -390,26 +413,6 @@ func (s *supervisor) publicHandler() http.Handler {
 			s.handleProxy(w, r)
 			return
 		}
-
 		s.publicRoutes().ServeHTTP(w, r)
 	})
-}
-
-func (s *supervisor) handler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		host := s.effectiveHost(r)
-		if !s.reservedHost(host) && s.isAppHost(host) {
-			s.handleProxy(w, r)
-			return
-		}
-
-		s.serveAdminOrProxy(w, r)
-	})
-}
-
-// statusWriter captures the status code a proxied response is written with. Unwrap hands the underlying writer's optional interfaces (Flusher, Hijacker) through.
-type statusWriter struct {
-	http.ResponseWriter
-
-	status int
 }

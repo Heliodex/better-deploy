@@ -16,8 +16,137 @@ import (
 	"time"
 )
 
+func TestCheckStaticSvelteKit(t *testing.T) {
+	appDir := t.TempDir()
+	routes := filepath.Join(appDir, "web", "src", "routes")
+
+	if err := os.MkdirAll(filepath.Join(routes, "about"), privateDirMode); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(routes, "+page.svelte"), []byte("<h1>ok</h1>"), privateFileMode); err != nil {
+		t.Fatal(err)
+	}
+
+	m := manifest{
+		Name: testAppName,
+	}
+
+	if err := checkStaticSvelteKit(appDir, m); err != nil {
+		t.Fatalf("prerenderable route rejected: %v", err)
+	}
+
+	for _, name := range []string{"+page.server.ts", "about/+layout.server.js", "+server.ts"} {
+		path := filepath.Join(routes, name)
+
+		if err := os.WriteFile(path, []byte("export {}"), privateFileMode); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := checkStaticSvelteKit(appDir, m); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	src := filepath.Join(appDir, "web", "src")
+	extra := []string{"hooks.server.ts", "lib/server/db.ts"}
+
+	for _, name := range extra {
+		path := filepath.Join(src, name)
+
+		if err := os.MkdirAll(filepath.Dir(path), privateDirMode); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := os.WriteFile(path, []byte("export {}"), privateFileMode); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := checkStaticSvelteKit(appDir, m); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestComponentSourceState(t *testing.T) {
+	root := t.TempDir()
+	files := []string{
+		"app.json",
+		"main.go",
+		"contract/contract.gen.go",
+		"web/src/App.svelte",
+		"web/src/lib/contract.ts",
+		"static/style.css",
+	}
+
+	for _, name := range files {
+		path := filepath.Join(root, name)
+
+		if err := os.MkdirAll(filepath.Dir(path), privateDirMode); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := os.WriteFile(path, []byte("x"), privateFileMode); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	state, err := componentSourceState(root, []string{"web/src/lib/contract.ts"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	has := func(name string) bool {
+		_, ok := state[filepath.Join(root, name)]
+
+		return ok
+	}
+
+	for _, name := range []string{"app.json", "main.go", "web/src/lib/contract.ts"} {
+		if !has(name) {
+			t.Errorf("%s was not watched", name)
+		}
+	}
+
+	for _, name := range []string{"contract/contract.gen.go", "web/src/App.svelte", "static/style.css"} {
+		if has(name) {
+			t.Errorf("%s was watched", name)
+		}
+	}
+}
+
+func TestDevWorkDirIsolatesPorts(t *testing.T) {
+	dir := t.TempDir()
+
+	writeTestFile(t, filepath.Join(dir, "app.json"), `{"name":"demo"}`)
+
+	first := devWorkDir(&devConfig{
+		port: 8080,
+	}, []string{dir})
+	if second := devWorkDir(&devConfig{
+		port: 8090,
+	}, []string{dir}); first == second {
+		t.Errorf("same work dir %q for two ports", first)
+	}
+
+	if devWorkDir(&devConfig{
+		port: 8080,
+	}, []string{dir}) != first {
+		t.Error("same port should reuse its state dir")
+	}
+}
+
 func TestNormaliseDevConfig(t *testing.T) {
 	dev := &appDevConfig{}
+
 	if err := normaliseDevConfig(dev); err != nil {
 		t.Fatal(err)
 	}
@@ -37,22 +166,43 @@ func TestNormaliseDevConfig(t *testing.T) {
 	}
 
 	for name, bad := range map[string]*appDevConfig{
-		"absolute web": {Web: "/tmp/web"},
-		"parent web": {Web: "../web"},
-		"absolute watch": {Watch: []string{"/tmp/file"}},
-		"parent watch": {Watch: []string{"../file"}},
-		"relative proxy": {Proxy: []string{"api"}},
-		"parent proxy": {Proxy: []string{"/../api"}},
-		"relative supervisor proxy": {SupervisorProxy: []string{"v1/events"}},
-		"parent supervisor proxy": {SupervisorProxy: []string{"/../events"}},
-		"large port": {Port: 70000},
+		"absolute watch": {
+			Watch: []string{"/tmp/file"},
+		},
+		"absolute web": {
+			Web: "/tmp/web",
+		},
+		"large port": {
+			Port: 70000,
+		},
+		"parent proxy": {
+			Proxy: []string{"/../api"},
+		},
+		"parent supervisor proxy": {
+			SupervisorProxy: []string{"/../events"},
+		},
+		"parent watch": {
+			Watch: []string{"../file"},
+		},
+		"parent web": {
+			Web: "../web",
+		},
+		"relative proxy": {
+			Proxy: []string{"api"},
+		},
+		"relative supervisor proxy": {
+			SupervisorProxy: []string{"v1/events"},
+		},
 	} {
 		if err := normaliseDevConfig(bad); err == nil {
 			t.Errorf("%s was accepted", name)
 		}
 	}
 
-	empty := &appDevConfig{SupervisorProxy: []string{}}
+	empty := &appDevConfig{
+		SupervisorProxy: []string{},
+	}
+
 	if err := normaliseDevConfig(empty); err != nil {
 		t.Fatal(err)
 	}
@@ -62,10 +212,87 @@ func TestNormaliseDevConfig(t *testing.T) {
 	}
 }
 
+func TestOverlayDevEnvOverridesManifestKeys(t *testing.T) {
+	m := manifest{
+		Env: map[string]string{"KEEP": "manifest", "SECRET": "secret://NAME", "SWITCH": "manifest"},
+	}
+
+	t.Setenv("SWITCH", "client")
+	t.Setenv("SECRET", "plaintext")
+	t.Setenv("INJECTED", "client")
+	overlayDevEnv(&m)
+	if m.Env["SWITCH"] != "client" {
+		t.Errorf("SWITCH = %q, want the client value", m.Env["SWITCH"])
+	}
+
+	if m.Env["KEEP"] != "manifest" {
+		t.Errorf("KEEP = %q, want the manifest value", m.Env["KEEP"])
+	}
+
+	if m.Env["SECRET"] != "plaintext" {
+		t.Errorf("SECRET = %q, want the explicit client value over the secret reference", m.Env["SECRET"])
+	}
+
+	if _, ok := m.Env["INJECTED"]; ok {
+		t.Error("unknown keys must not enter the manifest")
+	}
+}
+
+func TestViteDevConfigCanDisableSupervisorProxy(t *testing.T) {
+	appDir := t.TempDir()
+	webDir := filepath.Join(appDir, "web")
+
+	if err := os.MkdirAll(webDir, privateDirMode); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(webDir, "package.json"), []byte(`{}`), privateFileMode); err != nil {
+		t.Fatal(err)
+	}
+
+	m := manifest{
+		Name: testAppName,
+		Dev: &appDevConfig{
+			SupervisorProxy: []string{},
+			Port: 5199,
+		},
+	}
+
+	if err := normaliseDevConfig(m.Dev); err != nil {
+		t.Fatal(err)
+	}
+
+	vite, ok, err := resolveViteDev(appDir, m, "demo.localhost")
+	if err != nil || !ok {
+		t.Fatalf("resolveViteDev = %v, %t, %v", vite, ok, err)
+	}
+
+	if err := writeViteDevConfig(vite, 18080); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(vite.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	config := string(data)
+
+	for _, unexpected := range defaultSupervisorProxy {
+		if strings.Contains(config, strconv.Quote(unexpected)) {
+			t.Errorf("config still contains %q:\n%s", unexpected, config)
+		}
+	}
+
+	if !strings.Contains(config, `"/api"`) {
+		t.Errorf("config is missing the app proxy:\n%s", config)
+	}
+}
+
 func TestViteDevConfigIncludesProxy(t *testing.T) {
 	appDir := t.TempDir()
-
 	webDir := filepath.Join(appDir, "web")
+
 	if err := os.MkdirAll(filepath.Join(webDir, "src"), privateDirMode); err != nil {
 		t.Fatal(err)
 	}
@@ -80,8 +307,12 @@ func TestViteDevConfigIncludesProxy(t *testing.T) {
 
 	m := manifest{
 		Name: testAppName,
-		Dev: &appDevConfig{Port: 5199, Proxy: []string{"/api", "/v1"}},
+		Dev: &appDevConfig{
+			Proxy: []string{"/api", "/v1"},
+			Port: 5199,
+		},
 	}
+
 	if err := normaliseDevConfig(m.Dev); err != nil {
 		t.Fatal(err)
 	}
@@ -109,6 +340,7 @@ func TestViteDevConfigIncludesProxy(t *testing.T) {
 	}
 
 	config := string(data)
+
 	for _, want := range []string{
 		`import base from "./vite.config.ts"`,
 		`target: "http://127.0.0.1:18080"`,
@@ -127,53 +359,10 @@ func TestViteDevConfigIncludesProxy(t *testing.T) {
 	}
 }
 
-func TestViteDevConfigCanDisableSupervisorProxy(t *testing.T) {
-	appDir := t.TempDir()
-
-	webDir := filepath.Join(appDir, "web")
-	if err := os.MkdirAll(webDir, privateDirMode); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := os.WriteFile(filepath.Join(webDir, "package.json"), []byte(`{}`), privateFileMode); err != nil {
-		t.Fatal(err)
-	}
-
-	m := manifest{Name: testAppName, Dev: &appDevConfig{Port: 5199, SupervisorProxy: []string{}}}
-	if err := normaliseDevConfig(m.Dev); err != nil {
-		t.Fatal(err)
-	}
-
-	vite, ok, err := resolveViteDev(appDir, m, "demo.localhost")
-	if err != nil || !ok {
-		t.Fatalf("resolveViteDev = %v, %t, %v", vite, ok, err)
-	}
-
-	if err := writeViteDevConfig(vite, 18080); err != nil {
-		t.Fatal(err)
-	}
-
-	data, err := os.ReadFile(vite.configPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	config := string(data)
-	for _, unexpected := range defaultSupervisorProxy {
-		if strings.Contains(config, strconv.Quote(unexpected)) {
-			t.Errorf("config still contains %q:\n%s", unexpected, config)
-		}
-	}
-
-	if !strings.Contains(config, `"/api"`) {
-		t.Errorf("config is missing the app proxy:\n%s", config)
-	}
-}
-
 func TestViteDevConfigWithoutBase(t *testing.T) {
 	appDir := t.TempDir()
-
 	webDir := filepath.Join(appDir, "web")
+
 	if err := os.MkdirAll(webDir, privateDirMode); err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +371,9 @@ func TestViteDevConfigWithoutBase(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	vite, ok, err := resolveViteDev(appDir, manifest{Name: testAppName}, "demo.localhost")
+	vite, ok, err := resolveViteDev(appDir, manifest{
+		Name: testAppName,
+	}, "demo.localhost")
 	if err != nil || !ok {
 		t.Fatalf("resolveViteDev = %v, %t, %v", vite, ok, err)
 	}
@@ -198,50 +389,6 @@ func TestViteDevConfigWithoutBase(t *testing.T) {
 
 	if !strings.Contains(string(data), "const base: any = {}") {
 		t.Errorf("config has no base fallback:\n%s", data)
-	}
-}
-
-func TestComponentSourceState(t *testing.T) {
-	root := t.TempDir()
-
-	files := []string{
-		"app.json",
-		"main.go",
-		"contract/contract.gen.go",
-		"web/src/App.svelte",
-		"web/src/lib/contract.ts",
-		"static/style.css",
-	}
-	for _, name := range files {
-		path := filepath.Join(root, name)
-		if err := os.MkdirAll(filepath.Dir(path), privateDirMode); err != nil {
-			t.Fatal(err)
-		}
-
-		if err := os.WriteFile(path, []byte("x"), privateFileMode); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	state, err := componentSourceState(root, []string{"web/src/lib/contract.ts"})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	has := func(name string) bool {
-		_, ok := state[filepath.Join(root, name)]
-		return ok
-	}
-	for _, name := range []string{"app.json", "main.go", "web/src/lib/contract.ts"} {
-		if !has(name) {
-			t.Errorf("%s was not watched", name)
-		}
-	}
-
-	for _, name := range []string{"contract/contract.gen.go", "web/src/App.svelte", "static/style.css"} {
-		if has(name) {
-			t.Errorf("%s was watched", name)
-		}
 	}
 }
 
@@ -264,7 +411,6 @@ func TestViteDevProxy(t *testing.T) {
 	}
 
 	hostSeen := make(chan string, 1)
-
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
 		case hostSeen <- r.Host:
@@ -276,16 +422,19 @@ func TestViteDevProxy(t *testing.T) {
 			w.Header().Set("Content-Type", "text/event-stream")
 
 			_, _ = w.Write([]byte("data: hello\n\n"))
+
 			if flusher, ok := w.(http.Flusher); ok {
 				flusher.Flush()
 			}
 		case "/_wt/blobs/test":
 			w.Header().Set("Content-Type", "application/octet-stream")
+
 			_, _ = w.Write([]byte("blob"))
 		default:
 			w.WriteHeader(http.StatusOK)
 		}
 	}))
+
 	defer target.Close()
 
 	parsed, err := url.Parse(target.URL)
@@ -298,7 +447,13 @@ func TestViteDevProxy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := manifest{Name: "guestbook", Dev: &appDevConfig{Proxy: []string{"/api"}}}
+	m := manifest{
+		Name: "guestbook",
+		Dev: &appDevConfig{
+			Proxy: []string{"/api"},
+		},
+	}
+
 	if err := normaliseDevConfig(m.Dev); err != nil {
 		t.Fatal(err)
 	}
@@ -311,6 +466,7 @@ func TestViteDevProxy(t *testing.T) {
 	if err := writeViteDevConfig(vite, targetPort); err != nil {
 		t.Fatal(err)
 	}
+
 	defer os.Remove(vite.configPath)
 
 	cmd, err := startVite(vite)
@@ -337,7 +493,9 @@ func TestViteDevProxy(t *testing.T) {
 		}
 	}()
 
-	client := &http.Client{Timeout: 2 * time.Second}
+	client := &http.Client{
+		Timeout: 2 * time.Second,
+	}
 	base := "http://127.0.0.1:" + strconv.Itoa(vite.port)
 	deadline := time.Now().Add(20 * time.Second)
 
@@ -351,7 +509,6 @@ func TestViteDevProxy(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatalf("vite did not start: %v", err)
 		}
-
 		time.Sleep(100 * time.Millisecond)
 	}
 
@@ -359,21 +516,20 @@ func TestViteDevProxy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	response.Body.Close()
-
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("proxied API status = %d", response.StatusCode)
 	}
 
 	response, err = client.Get(base + "/v1/events?topic=checks")
+
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	eventBody, err := io.ReadAll(response.Body)
-	response.Body.Close()
 
+	response.Body.Close()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -383,13 +539,14 @@ func TestViteDevProxy(t *testing.T) {
 	}
 
 	response, err = client.Get(base + "/_wt/blobs/test")
+
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	blobBody, err := io.ReadAll(response.Body)
-	response.Body.Close()
 
+	response.Body.Close()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -405,102 +562,5 @@ func TestViteDevProxy(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("proxy target did not receive the request")
-	}
-}
-
-func TestCheckStaticSvelteKit(t *testing.T) {
-	appDir := t.TempDir()
-
-	routes := filepath.Join(appDir, "web", "src", "routes")
-	if err := os.MkdirAll(filepath.Join(routes, "about"), privateDirMode); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := os.WriteFile(filepath.Join(routes, "+page.svelte"), []byte("<h1>ok</h1>"), privateFileMode); err != nil {
-		t.Fatal(err)
-	}
-
-	m := manifest{Name: testAppName}
-	if err := checkStaticSvelteKit(appDir, m); err != nil {
-		t.Fatalf("prerenderable route rejected: %v", err)
-	}
-
-	for _, name := range []string{"+page.server.ts", "about/+layout.server.js", "+server.ts"} {
-		path := filepath.Join(routes, name)
-		if err := os.WriteFile(path, []byte("export {}"), privateFileMode); err != nil {
-			t.Fatal(err)
-		}
-
-		if err := checkStaticSvelteKit(appDir, m); err == nil {
-			t.Errorf("%s was accepted", name)
-		}
-
-		if err := os.Remove(path); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	src := filepath.Join(appDir, "web", "src")
-
-	extra := []string{"hooks.server.ts", "lib/server/db.ts"}
-	for _, name := range extra {
-		path := filepath.Join(src, name)
-		if err := os.MkdirAll(filepath.Dir(path), privateDirMode); err != nil {
-			t.Fatal(err)
-		}
-
-		if err := os.WriteFile(path, []byte("export {}"), privateFileMode); err != nil {
-			t.Fatal(err)
-		}
-
-		if err := checkStaticSvelteKit(appDir, m); err == nil {
-			t.Errorf("%s was accepted", name)
-		}
-
-		if err := os.Remove(path); err != nil {
-			t.Fatal(err)
-		}
-	}
-}
-
-func TestOverlayDevEnvOverridesManifestKeys(t *testing.T) {
-	m := manifest{Env: map[string]string{"KEEP": "manifest", "SWITCH": "manifest", "SECRET": "secret://NAME"}}
-
-	t.Setenv("SWITCH", "client")
-	t.Setenv("SECRET", "plaintext")
-	t.Setenv("INJECTED", "client")
-
-	overlayDevEnv(&m)
-
-	if m.Env["SWITCH"] != "client" {
-		t.Errorf("SWITCH = %q, want the client value", m.Env["SWITCH"])
-	}
-
-	if m.Env["KEEP"] != "manifest" {
-		t.Errorf("KEEP = %q, want the manifest value", m.Env["KEEP"])
-	}
-
-	if m.Env["SECRET"] != "plaintext" {
-		t.Errorf("SECRET = %q, want the explicit client value over the secret reference", m.Env["SECRET"])
-	}
-
-	if _, ok := m.Env["INJECTED"]; ok {
-		t.Error("unknown keys must not enter the manifest")
-	}
-}
-
-func TestDevWorkDirIsolatesPorts(t *testing.T) {
-	dir := t.TempDir()
-	writeTestFile(t, filepath.Join(dir, "app.json"), `{"name":"demo"}`)
-
-	first := devWorkDir(&devConfig{port: 8080}, []string{dir})
-	second := devWorkDir(&devConfig{port: 8090}, []string{dir})
-
-	if first == second {
-		t.Errorf("same work dir %q for two ports", first)
-	}
-
-	if devWorkDir(&devConfig{port: 8080}, []string{dir}) != first {
-		t.Error("same port should reuse its state dir")
 	}
 }

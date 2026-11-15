@@ -15,6 +15,20 @@ type configSetOptions struct {
 	data, file, ifMatch string
 }
 
+// configSetData resolves a --file patch into the request body.
+func configSetData(opts configSetOptions) (string, error) {
+	if opts.data != "" || opts.file == "" {
+		return opts.data, nil
+	}
+
+	raw, err := os.ReadFile(opts.file)
+	if err != nil {
+		return "", err
+	}
+
+	return string(raw), nil
+}
+
 func parseConfigSetOptions(rest []string) (configSetOptions, error) {
 	var opts configSetOptions
 
@@ -43,29 +57,13 @@ func parseConfigSetOptions(rest []string) (configSetOptions, error) {
 	return opts, nil
 }
 
-// configSetData resolves a --file patch into the request body.
-func configSetData(opts configSetOptions) (string, error) {
-	if opts.data != "" || opts.file == "" {
-		return opts.data, nil
-	}
-
-	raw, err := os.ReadFile(opts.file)
-	if err != nil {
-		return "", err
-	}
-
-	return string(raw), nil
-}
-
 // patchConfig sends one config patch and prints the result.
 func patchConfig(cfg clientOptions, name, data, ifMatch string) error {
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPatch, supervisorURL(cfg.host, "/apps/"+name+"/config"), strings.NewReader(data))
 	if err != nil {
 		return err
 	}
-
 	req.Header.Set("Content-Type", "application/json")
-
 	if cfg.token != "" {
 		req.Header.Set("Authorization", "Bearer "+cfg.token)
 	}
@@ -74,44 +72,21 @@ func patchConfig(cfg clientOptions, name, data, ifMatch string) error {
 		req.Header.Set("If-Match", ifMatch)
 	}
 
-	resp, err := (&http.Client{Timeout: cfg.timeout}).Do(req)
+	resp, err := (&http.Client{
+		Timeout: cfg.timeout,
+	}).Do(req)
 	if err != nil {
 		return err
 	}
+
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
+
 	if err := checkAPI(resp.StatusCode, body); err != nil {
 		return err
 	}
-
 	printRawOrJSON(cfg, body)
-
-	return nil
-}
-
-// runConfigShow prints one app config and its ETag.
-func runConfigShow(cfg clientOptions, name string) error {
-	status, header, body, err := apiDo(cfg, http.MethodGet, "/apps/"+name+"/config", nil, "")
-	if err != nil {
-		return err
-	}
-
-	if err := checkAPI(status, body); err != nil {
-		return err
-	}
-
-	if cfg.jsonOut {
-		printRawOrJSON(cfg, body)
-		return nil
-	}
-
-	if etag := header.Get("ETag"); etag != "" {
-		fmt.Fprintln(os.Stderr, "ETag:", etag)
-	}
-
-	printRawOrJSON(cfg, body)
-
 	return nil
 }
 
@@ -134,6 +109,29 @@ func runConfigSet(cfg clientOptions, name string, rest []string) error {
 	return patchConfig(cfg, name, data, opts.ifMatch)
 }
 
+// runConfigShow prints one app config and its ETag.
+func runConfigShow(cfg clientOptions, name string) error {
+	status, header, body, err := apiDo(cfg, http.MethodGet, "/apps/"+name+"/config", nil, "")
+	if err != nil {
+		return err
+	}
+
+	if err := checkAPI(status, body); err != nil {
+		return err
+	}
+
+	if cfg.jsonOut {
+		printRawOrJSON(cfg, body)
+		return nil
+	}
+
+	if etag := header.Get("ETag"); etag != "" {
+		fmt.Fprintln(os.Stderr, "ETag:", etag)
+	}
+	printRawOrJSON(cfg, body)
+	return nil
+}
+
 func runConfig(args []string) error {
 	cfg, rest, err := clientFlags(args, true)
 	if err != nil {
@@ -145,6 +143,7 @@ func runConfig(args []string) error {
 	}
 
 	action, name := rest[0], rest[1]
+
 	switch action {
 	case "show":
 		return runConfigShow(cfg, name)

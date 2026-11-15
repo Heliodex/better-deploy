@@ -6,8 +6,6 @@ import (
 	"time"
 )
 
-var errTxDone = errors.New("storage: transaction is closed")
-
 // Tx is a storage session pinned to one connection and one open SQLite transaction.
 type Tx struct {
 	client *Client
@@ -16,71 +14,23 @@ type Tx struct {
 	done bool
 }
 
-// BeginTx opens a transaction session. Call Commit or Rollback, or use WithTx to run a callback and commit it.
-func (c *Client) BeginTx(ctx context.Context) (*Tx, error) {
-	var resp sessionResponse
-	if err := c.post(ctx, "/v1/sessions", struct{}{}, &resp); err != nil {
-		return nil, err
-	}
+var errTxDone = errors.New("storage: transaction is closed")
 
-	if resp.ID == "" {
-		return nil, errors.New("storage: session response has no id")
-	}
-
-	return &Tx{client: c, id: resp.ID, expiresAt: resp.ExpiresAt}, nil
-}
-
-// WithTx runs fn in one storage session and commits if it returns nil. A returned error rolls the transaction back.
-func (c *Client) WithTx(ctx context.Context, fn func(*Tx) error) (err error) {
-	tx, err := c.BeginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if !tx.done {
-			_ = tx.Rollback(context.WithoutCancel(ctx))
-		}
-	}()
-
-	if err := fn(tx); err != nil {
-		return err
-	}
-
-	return tx.Commit(ctx)
-}
-
-// ExpiresAt is when the server will roll back an idle session.
-func (tx *Tx) ExpiresAt() time.Time {
-	return tx.expiresAt
-}
-
-// Query runs one statement inside the session and returns its rows.
-func (tx *Tx) Query(ctx context.Context, query string, args ...any) (*Rows, error) {
+// Commit writes the session's changes and releases its connection.
+func (tx *Tx) Commit(ctx context.Context) error {
 	if tx.done {
-		return nil, errTxDone
+		return errTxDone
 	}
 
-	var resp response
-	if err := tx.client.post(ctx, "/v1/sessions/"+tx.id+"/query", request{SQL: query, Params: encodeParams(args)}, &resp); err != nil {
-		return nil, err
+	var resp sessionCloseResponse
+
+	if err := tx.client.post(ctx, "/v1/sessions/"+tx.id+"/commit", struct{}{}, &resp); err != nil {
+		return err
 	}
 
-	rows, err := decodeResponseRows(resp)
-	if err != nil {
-		return nil, err
-	}
+	tx.done = true
 
-	return &Rows{Columns: resp.Columns, Truncated: resp.Truncated, rows: rows}, nil
-}
-
-// QueryRow runs a query expected to return at most one row.
-func (tx *Tx) QueryRow(ctx context.Context, query string, args ...any) *Row {
-	rows, err := tx.Query(ctx, query, args...)
-	if err != nil {
-		return &Row{rows: &Rows{err: err}}
-	}
-
-	return &Row{rows: rows}
+	return nil
 }
 
 // Exec runs one statement inside the session and returns its write counts.
@@ -90,27 +40,85 @@ func (tx *Tx) Exec(ctx context.Context, query string, args ...any) (Result, erro
 	}
 
 	var resp response
-	if err := tx.client.post(ctx, "/v1/sessions/"+tx.id+"/exec", request{SQL: query, Params: encodeParams(args)}, &resp); err != nil {
+
+	if err := tx.client.post(ctx, "/v1/sessions/"+tx.id+"/exec", request{
+		SQL: query,
+		Params: encodeParams(args),
+	}, &resp); err != nil {
 		return Result{}, err
 	}
 
-	return Result{RowsAffected: resp.RowsAffected, LastInsertID: resp.LastInsertID}, nil
+	return Result{
+		RowsAffected: resp.RowsAffected,
+		LastInsertID: resp.LastInsertID,
+	}, nil
 }
 
-// Commit writes the session's changes and releases its connection.
-func (tx *Tx) Commit(ctx context.Context) error {
+// ExpiresAt is when the server will roll back an idle session.
+func (tx *Tx) ExpiresAt() time.Time {
+	return tx.expiresAt
+}
+
+// BeginTx opens a transaction session. Call Commit or Rollback, or use WithTx to run a callback and commit it.
+func (c *Client) BeginTx(ctx context.Context) (*Tx, error) {
+	var resp sessionResponse
+
+	if err := c.post(ctx, "/v1/sessions", struct{}{}, &resp); err != nil {
+		return nil, err
+	}
+
+	if resp.ID == "" {
+		return nil, errors.New("storage: session response has no id")
+	}
+
+	return &Tx{
+		client: c,
+		id: resp.ID,
+		expiresAt: resp.ExpiresAt,
+	}, nil
+}
+
+// Query runs one statement inside the session and returns its rows.
+func (tx *Tx) Query(ctx context.Context, query string, args ...any) (*Rows, error) {
 	if tx.done {
-		return errTxDone
+		return nil, errTxDone
 	}
 
-	var resp sessionCloseResponse
-	if err := tx.client.post(ctx, "/v1/sessions/"+tx.id+"/commit", struct{}{}, &resp); err != nil {
-		return err
+	var resp response
+
+	if err := tx.client.post(ctx, "/v1/sessions/"+tx.id+"/query", request{
+		SQL: query,
+		Params: encodeParams(args),
+	}, &resp); err != nil {
+		return nil, err
 	}
 
-	tx.done = true
+	rows, err := decodeResponseRows(resp)
+	if err != nil {
+		return nil, err
+	}
 
-	return nil
+	return &Rows{
+		Columns: resp.Columns,
+		Truncated: resp.Truncated,
+		rows: rows,
+	}, nil
+}
+
+// QueryRow runs a query expected to return at most one row.
+func (tx *Tx) QueryRow(ctx context.Context, query string, args ...any) *Row {
+	rows, err := tx.Query(ctx, query, args...)
+	if err != nil {
+		return &Row{
+			rows: &Rows{
+				err: err,
+			},
+		}
+	}
+
+	return &Row{
+		rows: rows,
+	}
 }
 
 // Rollback discards the session's changes and releases its connection.
@@ -124,4 +132,24 @@ func (tx *Tx) Rollback(ctx context.Context) error {
 	var resp sessionCloseResponse
 
 	return tx.client.post(ctx, "/v1/sessions/"+tx.id+"/rollback", struct{}{}, &resp)
+}
+
+// WithTx runs fn in one storage session and commits if it returns nil. A returned error rolls the transaction back.
+func (c *Client) WithTx(ctx context.Context, fn func(*Tx) error) (err error) {
+	tx, err := c.BeginTx(ctx)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		if !tx.done {
+			_ = tx.Rollback(context.WithoutCancel(ctx))
+		}
+	}()
+
+	if err := fn(tx); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
 }

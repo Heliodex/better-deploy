@@ -10,6 +10,14 @@ import (
 	"strings"
 )
 
+// User is the platform user the supervisor attached to this request.
+type User struct {
+	ID string `json:"id"`
+	Email string `json:"email"`
+	Name string `json:"name"`
+	Groups []string `json:"groups"`
+}
+
 const (
 	// IdentityPrefix is the reserved app-host path for platform login, logout, me and password.
 	IdentityPrefix = "/_wt/identity"
@@ -20,14 +28,6 @@ const (
 	identityUserGroupsHeader = "X-WT-User-Groups"
 	identityUserSignatureHeader = "X-WT-User-Signature"
 )
-
-// User is the platform user the supervisor attached to this request.
-type User struct {
-	ID string `json:"id"`
-	Email string `json:"email"`
-	Name string `json:"name"`
-	Groups []string `json:"groups"`
-}
 
 // identitySignature computes the supervisor's HMAC over the identity headers. The field order and separators must match the supervisor.
 func identitySignature(secret, id, email, name, groups string) string {
@@ -49,7 +49,6 @@ func UserFromRequest(r *http.Request) (User, bool) {
 	email := r.Header.Get(identityUserEmailHeader)
 	name := r.Header.Get(identityUserNameHeader)
 	groupsHeader := r.Header.Get(identityUserGroupsHeader)
-
 	signature := r.Header.Get(identityUserSignatureHeader)
 	if id == "" || len(signature) != sha256.Size*2 {
 		return User{}, false
@@ -69,10 +68,16 @@ func UserFromRequest(r *http.Request) (User, bool) {
 
 	for group := range strings.SplitSeq(groupsHeader, ",") {
 		group = strings.TrimSpace(group)
+
 		if group != "" {
 			groups = append(groups, group)
 		}
 	}
 
-	return User{ID: id, Email: email, Name: name, Groups: groups}, true
+	return User{
+		ID: id,
+		Email: email,
+		Name: name,
+		Groups: groups,
+	}, true
 }

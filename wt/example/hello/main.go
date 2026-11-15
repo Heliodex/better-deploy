@@ -13,7 +13,6 @@ func init() {
 			for { //nolint:revive,staticcheck // The spin endpoint intentionally burns CPU for the timeout test.
 			}
 		}
-
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		fmt.Fprintf(w, "hello from wt\nmethod=%s\npath=%s\n", r.Method, r.URL.Path) //nolint:gosec // The values are request metadata written as plain text.
 	})

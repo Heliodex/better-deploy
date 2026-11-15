@@ -16,6 +16,92 @@ type storageQueryResponse struct {
 	Truncated bool `json:"truncated"`
 }
 
+func formatDBValue(value any) string {
+	if value == nil {
+		return "NULL"
+	}
+
+	switch typed := value.(type) {
+	case bool:
+		if typed {
+			return "true"
+		}
+
+		return "false"
+	case float64:
+		return fmt.Sprintf("%v", typed)
+	case string:
+		return typed
+	default:
+		data, err := json.Marshal(typed)
+		if err != nil {
+			return fmt.Sprint(typed)
+		}
+
+		return string(data)
+	}
+}
+
+// runDBExec runs one write SQL statement on an app's remote database.
+func runDBExec(cfg clientOptions, name string, args []string) error {
+	flags := newFlagSet("db exec")
+	sqlText := flags.String("sql", "", "SQL statement to run")
+	paramsJSON := flags.String("params", "", "JSON array of bound parameters")
+
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+
+	statement := strings.TrimSpace(*sqlText)
+	if statement == "" && flags.NArg() > 0 {
+		statement = strings.Join(flags.Args(), " ")
+	}
+
+	if statement == "" {
+		return errors.New("usage: wt db <app> exec <sql> [--params '[]']")
+	}
+
+	payload := map[string]any{"sql": statement}
+
+	if strings.TrimSpace(*paramsJSON) != "" {
+		var params []any
+
+		if err := json.Unmarshal([]byte(*paramsJSON), &params); err != nil {
+			return fmt.Errorf("parse --params: %w", err)
+		}
+
+		payload["params"] = params
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	status, _, body, err := apiDo(cfg, http.MethodPost, "/apps/"+name+"/database/exec", strings.NewReader(string(data)), "application/json")
+	if err != nil {
+		return err
+	}
+
+	if err := checkAPI(status, body); err != nil {
+		return err
+	}
+
+	if cfg.jsonOut {
+		printRawOrJSON(cfg, body)
+		return nil
+	}
+
+	var result storageQueryResponse
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		printRawOrJSON(cfg, body)
+		return nil
+	}
+	fmt.Printf("rows_affected=%d last_insert_id=%d\n", result.RowsAffected, result.LastInsertID)
+	return nil
+}
+
 // runDBQuery runs one read-only SQL statement on an app's remote database.
 func runDBQuery(cfg clientOptions, name string, args []string) error {
 	flags := newFlagSet("db query")
@@ -40,6 +126,7 @@ func runDBQuery(cfg clientOptions, name string, args []string) error {
 
 	if strings.TrimSpace(*paramsJSON) != "" {
 		var params []any
+
 		if err := json.Unmarshal([]byte(*paramsJSON), &params); err != nil {
 			return fmt.Errorf("parse --params: %w", err)
 		}
@@ -71,6 +158,7 @@ func runDBQuery(cfg clientOptions, name string, args []string) error {
 	}
 
 	var result storageQueryResponse
+
 	if err := json.Unmarshal(body, &result); err != nil {
 		printRawOrJSON(cfg, body)
 		return nil
@@ -80,15 +168,13 @@ func runDBQuery(cfg clientOptions, name string, args []string) error {
 		fmt.Println("(no rows)")
 		return nil
 	}
-
 	fmt.Println(strings.Join(result.Columns, "\t"))
-
 	for _, row := range result.Rows {
 		cells := make([]string, 0, len(row))
+
 		for _, value := range row {
 			cells = append(cells, formatDBValue(value))
 		}
-
 		fmt.Println(strings.Join(cells, "\t"))
 	}
 
@@ -97,92 +183,6 @@ func runDBQuery(cfg clientOptions, name string, args []string) error {
 	}
 
 	return nil
-}
-
-// runDBExec runs one write SQL statement on an app's remote database.
-func runDBExec(cfg clientOptions, name string, args []string) error {
-	flags := newFlagSet("db exec")
-	sqlText := flags.String("sql", "", "SQL statement to run")
-	paramsJSON := flags.String("params", "", "JSON array of bound parameters")
-
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-
-	statement := strings.TrimSpace(*sqlText)
-	if statement == "" && flags.NArg() > 0 {
-		statement = strings.Join(flags.Args(), " ")
-	}
-
-	if statement == "" {
-		return errors.New("usage: wt db <app> exec <sql> [--params '[]']")
-	}
-
-	payload := map[string]any{"sql": statement}
-
-	if strings.TrimSpace(*paramsJSON) != "" {
-		var params []any
-		if err := json.Unmarshal([]byte(*paramsJSON), &params); err != nil {
-			return fmt.Errorf("parse --params: %w", err)
-		}
-
-		payload["params"] = params
-	}
-
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-
-	status, _, body, err := apiDo(cfg, http.MethodPost, "/apps/"+name+"/database/exec", strings.NewReader(string(data)), "application/json")
-	if err != nil {
-		return err
-	}
-
-	if err := checkAPI(status, body); err != nil {
-		return err
-	}
-
-	if cfg.jsonOut {
-		printRawOrJSON(cfg, body)
-		return nil
-	}
-
-	var result storageQueryResponse
-	if err := json.Unmarshal(body, &result); err != nil {
-		printRawOrJSON(cfg, body)
-		return nil
-	}
-
-	fmt.Printf("rows_affected=%d last_insert_id=%d\n", result.RowsAffected, result.LastInsertID)
-
-	return nil
-}
-
-func formatDBValue(value any) string {
-	if value == nil {
-		return "NULL"
-	}
-
-	switch typed := value.(type) {
-	case string:
-		return typed
-	case bool:
-		if typed {
-			return "true"
-		}
-
-		return "false"
-	case float64:
-		return fmt.Sprintf("%v", typed)
-	default:
-		data, err := json.Marshal(typed)
-		if err != nil {
-			return fmt.Sprint(typed)
-		}
-
-		return string(data)
-	}
 }
 
 // runDB dispatches wt db <app> <query|exec>.

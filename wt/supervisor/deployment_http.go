@@ -5,6 +5,31 @@ import (
 	"os"
 )
 
+// handleDeploymentInfo serves one retained history entry.
+func (s *supervisor) handleDeploymentInfo(w http.ResponseWriter, _ *http.Request, name, id string) {
+	if s.deployments == nil {
+		writeError(w, http.StatusServiceUnavailable, "deployment history unavailable")
+		return
+	}
+
+	info, err := s.deployments.info(name, id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	if a := s.lookup(name); a != nil && (info.Status == "" || info.Status == deploymentStatusOK) {
+		a.mu.Lock()
+
+		running := a.digest
+
+		a.mu.Unlock()
+
+		info.Current = running != "" && info.Digest == running
+	}
+	writeJSON(w, http.StatusOK, info)
+}
+
 func (s *supervisor) handleDeployments(w http.ResponseWriter, _ *http.Request, name string) {
 	if s.lookup(name) == nil {
 		if s.deployments == nil || !existsPath(s.deployments.appDir(name)) {
@@ -29,11 +54,13 @@ func (s *supervisor) handleDeployments(w http.ResponseWriter, _ *http.Request, n
 		return
 	}
 
-	running := ""
+	var running string
 
 	if a := s.lookup(name); a != nil {
 		a.mu.Lock()
+
 		running = a.digest
+
 		a.mu.Unlock()
 	}
 	// list is newest first, so the first successful record matching the running digest is the current one.
@@ -47,35 +74,9 @@ func (s *supervisor) handleDeployments(w http.ResponseWriter, _ *http.Request, n
 		}
 
 		list[i].Current = true
-
 		break
 	}
-
 	writeJSON(w, http.StatusOK, list)
-}
-
-// handleDeploymentInfo serves one retained history entry.
-func (s *supervisor) handleDeploymentInfo(w http.ResponseWriter, _ *http.Request, name, id string) {
-	if s.deployments == nil {
-		writeError(w, http.StatusServiceUnavailable, "deployment history unavailable")
-		return
-	}
-
-	info, err := s.deployments.info(name, id)
-	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
-		return
-	}
-
-	if a := s.lookup(name); a != nil && (info.Status == "" || info.Status == deploymentStatusOK) {
-		a.mu.Lock()
-		running := a.digest
-		a.mu.Unlock()
-
-		info.Current = running != "" && info.Digest == running
-	}
-
-	writeJSON(w, http.StatusOK, info)
 }
 
 func (s *supervisor) handleRollback(w http.ResponseWriter, r *http.Request, name, id string) {
@@ -101,6 +102,7 @@ func (s *supervisor) handleRollback(w http.ResponseWriter, r *http.Request, name
 		writeError(w, http.StatusInternalServerError, "create rollback directory")
 		return
 	}
+
 	defer os.RemoveAll(dir)
 
 	if err := copyBundle(bundle, dir); err != nil {
@@ -115,6 +117,7 @@ func (s *supervisor) handleRollback(w http.ResponseWriter, r *http.Request, name
 	}
 
 	cfg.Name = name
+
 	if err := s.hostConflictError(cfg, name); err != nil {
 		writeError(w, http.StatusConflict, err.Error())
 		return
@@ -130,22 +133,17 @@ func (s *supervisor) handleRollback(w http.ResponseWriter, r *http.Request, name
 		if next == nil {
 			return
 		}
-
 		writeJSON(w, http.StatusOK, s.info(next))
-
 		return
 	}
 
 	digest := sourceDigest(dir)
-
 	next, mode, err := s.installBundle(w, name, cfg, dir, digest, "rolled back")
 	if err != nil {
 		s.metrics.observeDeploy(name, "rollback-failed")
 		s.recordDeploymentFailure(name, digest, err)
-
 		return
 	}
-
 	s.metrics.observeDeploy(name, "rollback")
 	s.recordDeployment(name, next.dir)
 	w.Header().Set("X-Wt-Wasm-Digest", next.digest)

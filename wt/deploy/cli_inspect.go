@@ -12,29 +12,63 @@ import (
 	"time"
 )
 
-type inspectDeployment struct {
-	ID string `json:"id"`
-	DeployedAt time.Time `json:"deployedAt"`
-	Mode string `json:"mode"`
-	Digest string `json:"digest"`
-	Runtime string `json:"runtime"`
-	Target string `json:"target"`
+type (
+	inspectDeployment struct {
+		ID string `json:"id"`
+		DeployedAt time.Time `json:"deployedAt"`
+		Mode string `json:"mode"`
+		Digest string `json:"digest"`
+		Runtime string `json:"runtime"`
+		Target string `json:"target"`
+	}
+
+	manifestComparison struct {
+		Path string `json:"path"`
+		Differences []string `json:"differences,omitempty"`
+	}
+
+	// inspectReport is the machine-readable view printed by --json.
+	inspectReport struct {
+		Supervisor supervisorCapabilities `json:"supervisor"`
+		App routeAppInfo `json:"app"`
+		URL string `json:"url"`
+		Route routeReport `json:"route"`
+		Config map[string]any `json:"config"`
+		Deployment *inspectDeployment `json:"deployment,omitempty"`
+		Manifest *manifestComparison `json:"manifest,omitempty"`
+	}
+)
+
+// envKeys extracts sorted keys from a local app.json env object.
+func envKeys(value any) []string {
+	env, ok := value.(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	keys := make([]string, 0, len(env))
+
+	for key := range env {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
-// inspectReport is the machine-readable view printed by --json.
-type inspectReport struct {
-	Supervisor supervisorCapabilities `json:"supervisor"`
-	App routeAppInfo `json:"app"`
-	URL string `json:"url"`
-	Route routeReport `json:"route"`
-	Config map[string]any `json:"config"`
-	Deployment *inspectDeployment `json:"deployment,omitempty"`
-	Manifest *manifestComparison `json:"manifest,omitempty"`
-}
+// idleTimeoutValue parses a manifest or runtime idle_timeout, using fallback for an empty value and reporting false for an invalid duration.
+func idleTimeoutValue(value string, fallback time.Duration) (time.Duration, bool) {
+	value = strings.TrimSpace(value)
 
-type manifestComparison struct {
-	Path string `json:"path"`
-	Differences []string `json:"differences,omitempty"`
+	switch {
+	case value == "":
+		return fallback, true
+	case value == "0", strings.EqualFold(value, "none"), strings.EqualFold(value, "off"):
+		return 0, true
+	}
+
+	timeout, err := time.ParseDuration(value)
+
+	return timeout, err == nil
 }
 
 // inspectConfig fetches an app's runtime config as an untyped document so new fields stay visible.
@@ -49,6 +83,7 @@ func inspectConfig(cfg clientOptions, name string) (map[string]any, error) {
 	}
 
 	config := map[string]any{}
+
 	if err := json.Unmarshal(body, &config); err != nil {
 		return nil, err
 	}
@@ -68,6 +103,7 @@ func inspectLatestDeployment(cfg clientOptions, name string) (inspectDeployment,
 	}
 
 	var entries []inspectDeployment
+
 	if err := json.Unmarshal(body, &entries); err != nil {
 		return inspectDeployment{}, false, err
 	}
@@ -104,49 +140,160 @@ func valueText(value any) string {
 	return string(data)
 }
 
-// envKeys extracts sorted keys from a local app.json env object.
-func envKeys(value any) []string {
-	env, ok := value.(map[string]any)
-	if !ok {
-		return nil
+// joinValues renders a JSON array of strings.
+func joinValues(values []any) string {
+	out := make([]string, 0, len(values))
+
+	for _, value := range values {
+		out = append(out, valueText(value))
 	}
 
-	keys := make([]string, 0, len(env))
-	for key := range env {
-		keys = append(keys, key)
+	if len(out) == 0 {
+		return "(none)"
 	}
 
-	sort.Strings(keys)
+	return strings.Join(out, ", ")
+}
 
-	return keys
+// printInspect prints the effective app view.
+func printInspect(report inspectReport) {
+	fmt.Printf("supervisor: %s\n", report.Supervisor.displayVersion())
+	if report.Supervisor.Wasmtime != "" {
+		fmt.Printf("wasmtime: %s\n", report.Supervisor.Wasmtime)
+	}
+
+	if report.Supervisor.WasmtimeTarget != "" {
+		fmt.Printf("target: %s\n", report.Supervisor.WasmtimeTarget)
+	}
+	fmt.Printf("compiler: %v\n", report.Supervisor.Compiler)
+	fmt.Printf("app: %s\n", report.App.Name)
+	fmt.Printf("host: %s\n", report.App.Host)
+	fmt.Printf("url: %s\n", report.URL)
+	fmt.Printf("status: %s (ready %v)\n", report.App.Status, report.App.Ready)
+	if report.App.CurrentDigest != "" {
+		digest := report.App.CurrentDigest
+		if len(digest) > shortHashLength {
+			digest = digest[:shortHashLength]
+		}
+		fmt.Printf("digest: %s\n", digest)
+	}
+
+	if report.Deployment != nil {
+		fmt.Printf("deployment: %s (%s, %s)\n", jobTime(report.Deployment.DeployedAt), report.Deployment.Mode, report.Deployment.Runtime)
+		if report.Deployment.Target != "" {
+			fmt.Printf("deployed target: %s\n", report.Deployment.Target)
+		}
+	}
+
+	configKeys := []string{
+		"health",
+		"memory_mb",
+		"disk_mb",
+		"max_concurrency",
+		"job_concurrency",
+		"request_timeout",
+		"startup_timeout",
+		"idle_timeout",
+		"network",
+		"identity",
+		"maintenance",
+		"allow_callers",
+		"depends_on",
+		"server_paths",
+		"egress",
+		"schedule",
+		"restart_required",
+	}
+
+	fmt.Println("config:")
+	for _, key := range configKeys {
+		if value, ok := report.Config[key]; ok {
+			fmt.Printf("  %s: %s\n", key, valueText(value))
+		}
+	}
+
+	if keys, ok := report.Config["env_keys"].([]any); ok {
+		fmt.Printf("  env_keys: %s\n", joinValues(keys))
+	}
+
+	if keys, ok := report.Config["secret_keys"].([]any); ok {
+		fmt.Printf("  secret_keys: %s\n", joinValues(keys))
+	}
+	fmt.Printf("route: routed %v (HTTP %d)\n", report.Route.Routed, report.Route.HTTPStatus)
+	if report.Manifest != nil {
+		if len(report.Manifest.Differences) == 0 {
+			fmt.Printf("manifest: %s (matches compared fields)\n", report.Manifest.Path)
+		} else {
+			fmt.Printf("manifest: %s (%d difference(s))\n", report.Manifest.Path, len(report.Manifest.Differences))
+			for _, difference := range report.Manifest.Differences {
+				fmt.Printf("  %s\n", difference)
+			}
+		}
+	}
+}
+
+// sameIdleTimeout compares two idle_timeout values by duration, so "15m" and "900s" match and disabled spellings agree.
+// An empty value means the supervisor default, except for a scheduled app, which never sleeps.
+func sameIdleTimeout(local, runtime any, scheduled bool) bool {
+	fallback := defaultIdleTimeout
+
+	if scheduled {
+		fallback = 0
+	}
+
+	left, leftOK := idleTimeoutValue(valueText(local), fallback)
+	right, rightOK := idleTimeoutValue(valueText(runtime), fallback)
+
+	return leftOK && rightOK && left == right
 }
 
 // compareManifest reports the local app.json fields that differ from the effective runtime config.
 func compareManifest(dir, name string, config map[string]any) *manifestComparison {
 	path := filepath.Join(dir, "app.json")
-
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}
 
 	var local map[string]any
+
 	if err := json.Unmarshal(data, &local); err != nil {
-		return &manifestComparison{Path: path, Differences: []string{"cannot parse app.json: " + err.Error()}}
+		return &manifestComparison{
+			Path: path,
+			Differences: []string{"cannot parse app.json: " + err.Error()},
+		}
 	}
 
 	if manifestName := valueText(local["name"]); manifestName != "" && manifestName != name {
-		return &manifestComparison{Path: path, Differences: []string{fmt.Sprintf("name: manifest %s, inspected %s", manifestName, name)}}
+		return &manifestComparison{
+			Path: path,
+			Differences: []string{fmt.Sprintf("name: manifest %s, inspected %s", manifestName, name)},
+		}
 	}
 
-	comparison := &manifestComparison{Path: path}
+	comparison := &manifestComparison{
+		Path: path,
+	}
 
-	scheduled := false
+	var scheduled bool
+
 	if entries, ok := config["schedule"].([]any); ok {
 		scheduled = len(entries) > 0
 	}
 
-	for _, key := range []string{"host", "health", "memory_mb", "disk_mb", "max_concurrency", "request_timeout", "idle_timeout", "network", "identity", "server_paths", "server_pages"} {
+	for _, key := range []string{
+		"host",
+		"health",
+		"memory_mb",
+		"disk_mb",
+		"max_concurrency",
+		"request_timeout",
+		"idle_timeout",
+		"network",
+		"identity",
+		"server_paths",
+		"server_pages",
+	} {
 		localValue, ok := local[key]
 		if !ok {
 			continue
@@ -165,15 +312,17 @@ func compareManifest(dir, name string, config map[string]any) *manifestCompariso
 
 	if env, ok := local["env"]; ok {
 		localKeys := strings.Join(envKeys(env), ",")
-		configKeys := ""
+
+		var configKeys string
 
 		if keys, ok := config["env_keys"].([]any); ok {
 			values := make([]string, 0, len(keys))
+
 			for _, key := range keys {
 				values = append(values, valueText(key))
 			}
-
 			sort.Strings(values)
+
 			configKeys = strings.Join(values, ",")
 		}
 
@@ -185,121 +334,6 @@ func compareManifest(dir, name string, config map[string]any) *manifestCompariso
 	return comparison
 }
 
-// sameIdleTimeout compares two idle_timeout values by duration, so "15m" and "900s" match and disabled spellings agree.
-// An empty value means the supervisor default, except for a scheduled app, which never sleeps.
-func sameIdleTimeout(local, runtime any, scheduled bool) bool {
-	fallback := defaultIdleTimeout
-	if scheduled {
-		fallback = 0
-	}
-
-	left, leftOK := idleTimeoutValue(valueText(local), fallback)
-	right, rightOK := idleTimeoutValue(valueText(runtime), fallback)
-
-	return leftOK && rightOK && left == right
-}
-
-// idleTimeoutValue parses a manifest or runtime idle_timeout, using fallback for an empty value and reporting false for an invalid duration.
-func idleTimeoutValue(value string, fallback time.Duration) (time.Duration, bool) {
-	value = strings.TrimSpace(value)
-	switch {
-	case value == "":
-		return fallback, true
-	case value == "0", strings.EqualFold(value, "none"), strings.EqualFold(value, "off"):
-		return 0, true
-	}
-
-	timeout, err := time.ParseDuration(value)
-
-	return timeout, err == nil
-}
-
-// printInspect prints the effective app view.
-func printInspect(report inspectReport) {
-	fmt.Printf("supervisor: %s\n", report.Supervisor.displayVersion())
-
-	if report.Supervisor.Wasmtime != "" {
-		fmt.Printf("wasmtime: %s\n", report.Supervisor.Wasmtime)
-	}
-
-	if report.Supervisor.WasmtimeTarget != "" {
-		fmt.Printf("target: %s\n", report.Supervisor.WasmtimeTarget)
-	}
-
-	fmt.Printf("compiler: %v\n", report.Supervisor.Compiler)
-	fmt.Printf("app: %s\n", report.App.Name)
-	fmt.Printf("host: %s\n", report.App.Host)
-	fmt.Printf("url: %s\n", report.URL)
-	fmt.Printf("status: %s (ready %v)\n", report.App.Status, report.App.Ready)
-
-	if report.App.CurrentDigest != "" {
-		digest := report.App.CurrentDigest
-		if len(digest) > shortHashLength {
-			digest = digest[:shortHashLength]
-		}
-
-		fmt.Printf("digest: %s\n", digest)
-	}
-
-	if report.Deployment != nil {
-		fmt.Printf("deployment: %s (%s, %s)\n", jobTime(report.Deployment.DeployedAt), report.Deployment.Mode, report.Deployment.Runtime)
-
-		if report.Deployment.Target != "" {
-			fmt.Printf("deployed target: %s\n", report.Deployment.Target)
-		}
-	}
-
-	configKeys := []string{
-		"health", "memory_mb", "disk_mb", "max_concurrency", "job_concurrency",
-		"request_timeout", "startup_timeout", "idle_timeout", "network", "identity", "maintenance",
-		"allow_callers", "depends_on", "server_paths", "egress", "schedule", "restart_required",
-	}
-
-	fmt.Println("config:")
-
-	for _, key := range configKeys {
-		if value, ok := report.Config[key]; ok {
-			fmt.Printf("  %s: %s\n", key, valueText(value))
-		}
-	}
-
-	if keys, ok := report.Config["env_keys"].([]any); ok {
-		fmt.Printf("  env_keys: %s\n", joinValues(keys))
-	}
-
-	if keys, ok := report.Config["secret_keys"].([]any); ok {
-		fmt.Printf("  secret_keys: %s\n", joinValues(keys))
-	}
-
-	fmt.Printf("route: routed %v (HTTP %d)\n", report.Route.Routed, report.Route.HTTPStatus)
-
-	if report.Manifest != nil {
-		if len(report.Manifest.Differences) == 0 {
-			fmt.Printf("manifest: %s (matches compared fields)\n", report.Manifest.Path)
-		} else {
-			fmt.Printf("manifest: %s (%d difference(s))\n", report.Manifest.Path, len(report.Manifest.Differences))
-
-			for _, difference := range report.Manifest.Differences {
-				fmt.Printf("  %s\n", difference)
-			}
-		}
-	}
-}
-
-// joinValues renders a JSON array of strings.
-func joinValues(values []any) string {
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		out = append(out, valueText(value))
-	}
-
-	if len(out) == 0 {
-		return "(none)"
-	}
-
-	return strings.Join(out, ", ")
-}
-
 // runInspect prints the effective configuration, route, deployment and optional local manifest comparison.
 func runInspect(args []string) error {
 	cfg, rest, err := clientFlags(args, true)
@@ -308,10 +342,12 @@ func runInspect(args []string) error {
 	}
 
 	dir := "."
-	name := ""
+
+	var name string
 
 	for index := 0; index < len(rest); index++ {
 		arg := rest[index]
+
 		switch {
 		case arg == "--dir" && index+1 < len(rest):
 			index++
@@ -347,7 +383,11 @@ func runInspect(args []string) error {
 		return err
 	}
 
-	caps, err := fetchCapabilities(clientOptions{host: cfg.host, token: cfg.token, timeout: 10 * time.Second})
+	caps, err := fetchCapabilities(clientOptions{
+		host: cfg.host,
+		token: cfg.token,
+		timeout: 10 * time.Second,
+	})
 	if err != nil {
 		return err
 	}
@@ -358,13 +398,13 @@ func runInspect(args []string) error {
 	}
 
 	var reportDeployment *inspectDeployment
+
 	if hasDeployment {
 		reportDeployment = &deployment
 	}
 
 	route := probeRoute(cfg.host, info.Host, defaultRoutePath, 8*time.Second)
 	route.App = info.Name
-
 	report := inspectReport{
 		Supervisor: caps,
 		App: info,
@@ -377,11 +417,8 @@ func runInspect(args []string) error {
 
 	if cfg.jsonOut {
 		printRawOrJSONJSON(report)
-
 		return nil
 	}
-
 	printInspect(report)
-
 	return nil
 }

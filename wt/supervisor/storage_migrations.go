@@ -10,39 +10,48 @@ import (
 	"time"
 )
 
+type (
+	storageMigrationRecord struct {
+		Version int `json:"version"`
+		Checksum string `json:"checksum"`
+		AppliedAt string `json:"appliedAt"`
+	}
+
+	storageMigrationRequest struct {
+		Version int `json:"version"`
+		Statements []storageStatement `json:"statements,omitempty"`
+	}
+
+	storageMigrationResponse struct {
+		Version int `json:"version"`
+		Applied bool `json:"applied"`
+	}
+)
+
 const (
 	maxStorageMigrationVersion = 1_000_000_000
 	// storageMigrationsTable is reserved for the supervisor's migration bookkeeping. Apps cannot read it through the schema listing or write it through SQL.
 	storageMigrationsTable = "wt_migrations"
 )
 
-type storageMigrationRecord struct {
-	Version int `json:"version"`
-	Checksum string `json:"checksum"`
-	AppliedAt string `json:"appliedAt"`
-}
+// ensureStorageMigrationsTable creates the reserved bookkeeping table inside the migration transaction, before any app statement runs.
+func ensureStorageMigrationsTable(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx, `create table if not exists wt_migrations (version integer primary key, checksum text not null, applied_at text not null)`)
 
-type storageMigrationRequest struct {
-	Version int `json:"version"`
-	Statements []storageStatement `json:"statements,omitempty"`
-}
-
-type storageMigrationResponse struct {
-	Version int `json:"version"`
-	Applied bool `json:"applied"`
+	return err
 }
 
 // storageMigrationChecksum hashes the version, each statement's SQL and its raw JSON parameters. Length prefixes keep statement boundaries unambiguous.
 func storageMigrationChecksum(version int, statements []storageStatement) string {
 	hash := sha256.New()
 	_, _ = fmt.Fprintf(hash, "version:%d\n", version)
-
 	_, _ = fmt.Fprintf(hash, "statements:%d\n", len(statements))
+
 	for _, statement := range statements {
 		_, _ = fmt.Fprintf(hash, "sql:%d:", len(statement.SQL))
 		_, _ = hash.Write([]byte(statement.SQL))
-
 		_, _ = fmt.Fprintf(hash, "\nparams:%d\n", len(statement.Params))
+
 		for _, param := range statement.Params {
 			_, _ = fmt.Fprintf(hash, "param:%d:", len(param))
 			_, _ = hash.Write(param)
@@ -51,25 +60,6 @@ func storageMigrationChecksum(version int, statements []storageStatement) string
 	}
 
 	return hex.EncodeToString(hash.Sum(nil))
-}
-
-// ensureStorageMigrationsTable creates the reserved bookkeeping table inside the migration transaction, before any app statement runs.
-func ensureStorageMigrationsTable(ctx context.Context, tx *sql.Tx) error {
-	_, err := tx.ExecContext(ctx, `create table if not exists wt_migrations (version integer primary key, checksum text not null, applied_at text not null)`)
-	return err
-}
-
-// storedMigrationChecksum returns the checksum recorded for a version. ok is false when the version has no bookkeeping row.
-func storedMigrationChecksum(ctx context.Context, tx *sql.Tx, version int) (checksum string, ok bool, err error) {
-	err = tx.QueryRowContext(ctx, "select checksum from "+quoteSQLiteIdentifier(storageMigrationsTable)+" where version = ?", version).Scan(&checksum)
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		return "", false, nil
-	case err != nil:
-		return "", false, err
-	default:
-		return checksum, true, nil
-	}
 }
 
 // prepareMigration validates the version and statements and computes the migration checksum.
@@ -86,12 +76,27 @@ func prepareMigration(version int, statements []storageStatement) ([][]any, stri
 	return params, storageMigrationChecksum(version, statements), nil
 }
 
+// storedMigrationChecksum returns the checksum recorded for a version. ok is false when the version has no bookkeeping row.
+func storedMigrationChecksum(ctx context.Context, tx *sql.Tx, version int) (checksum string, ok bool, err error) {
+	err = tx.QueryRowContext(ctx, "select checksum from "+quoteSQLiteIdentifier(storageMigrationsTable)+" where version = ?", version).Scan(&checksum)
+
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return "", false, nil
+	case err != nil:
+		return "", false, err
+	default:
+		return checksum, true, nil
+	}
+}
+
 // applyMigration runs one version in a transaction and reports whether it was newly applied.
 func applyMigration(ctx context.Context, conn *sql.Conn, version int, statements []storageStatement, params [][]any, checksum string) (bool, error) {
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return false, err
 	}
+
 	defer func() {
 		_ = tx.Rollback()
 	}()
@@ -101,6 +106,7 @@ func applyMigration(ctx context.Context, conn *sql.Conn, version int, statements
 	}
 
 	var current int
+
 	if err := tx.QueryRowContext(ctx, "pragma user_version").Scan(&current); err != nil {
 		return false, err
 	}
@@ -126,6 +132,7 @@ func applyMigration(ctx context.Context, conn *sql.Conn, version int, statements
 	if err != nil {
 		return false, err
 	}
+
 	defer func() {
 		_ = unregister()
 	}()
@@ -140,9 +147,12 @@ func applyMigration(ctx context.Context, conn *sql.Conn, version int, statements
 		return false, err
 	}
 
-	if _, err := tx.ExecContext(ctx,
+	if _, err := tx.ExecContext(
+		ctx,
 		"insert into "+quoteSQLiteIdentifier(storageMigrationsTable)+" (version, checksum, applied_at) values (?, ?, ?)", //nolint:gosec // The table name is a quoted identifier.
-		version, checksum, time.Now().UTC().Format(time.RFC3339Nano),
+		version,
+		checksum,
+		time.Now().UTC().Format(time.RFC3339Nano),
 	); err != nil {
 		return false, err
 	}
@@ -161,7 +171,7 @@ func (s *storageServer) migrate(ctx context.Context, app string, version int, st
 		return storageMigrationResponse{}, err
 	}
 
-	applied := false
+	var applied bool
 
 	err = s.withConn(ctx, app, func(conn *sql.Conn) error {
 		var err error
@@ -170,9 +180,13 @@ func (s *storageServer) migrate(ctx context.Context, app string, version int, st
 
 		return err
 	})
+
 	if err != nil {
 		return storageMigrationResponse{}, err
 	}
 
-	return storageMigrationResponse{Version: version, Applied: applied}, nil
+	return storageMigrationResponse{
+		Version: version,
+		Applied: applied,
+	}, nil
 }

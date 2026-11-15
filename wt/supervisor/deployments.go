@@ -13,6 +13,46 @@ import (
 	"time"
 )
 
+type (
+	// deploymentInfo describes one retained bundle. Failed deploy attempts are retained as metadata only, without a bundle to roll back to.
+	deploymentInfo struct {
+		ID string `json:"id"`
+		DeployedAt time.Time `json:"deployedAt"`
+		QueuedAt time.Time `json:"queuedAt"`
+		StartedAt time.Time `json:"startedAt"`
+		FinishedAt time.Time `json:"finishedAt"`
+		Mode string `json:"mode,omitempty"`
+		Digest string `json:"digest"`
+		Size int64 `json:"size"`
+		WasmDigest string `json:"wasmDigest,omitempty"`
+		WasmBytes int64 `json:"wasmBytes,omitempty"`
+		Runtime string `json:"runtime,omitempty"`
+		Target string `json:"target,omitempty"`
+		Rebuildable bool `json:"rebuildable"`
+		Bytes int64 `json:"bytes"`
+		Blobs map[string]string `json:"blobs,omitempty"`
+		Static map[string]string `json:"static,omitempty"`
+		Status string `json:"status,omitempty"`
+		Error string `json:"error,omitempty"`
+		Current bool `json:"current,omitempty"`
+	}
+
+	// deploymentManager keeps a bounded history of app bundles under the state directory.
+	deploymentManager struct {
+		dir string
+		mu sync.Mutex
+	}
+
+	// deploymentReplayFile is the on-disk form of one app's idempotency responses.
+	deploymentReplayFile struct {
+		Entries map[string]deployReplayEntry `json:"entries"`
+	}
+
+	fileKey struct {
+		device, inode uint64
+	}
+)
+
 const (
 	deploymentKeep = 10
 	deploymentTimeLayout = "20060102T150405.000000000Z"
@@ -34,48 +74,11 @@ const (
 	deploymentLogBytes = 1 << 20
 )
 
-// deploymentMaxBytes bounds one app's retained history. Identical artifacts are shared, so this is generous.
-var deploymentMaxBytes int64 = 1 << 30
-
-var errDeploymentNotFound = errors.New("deployment not found")
-
-// deploymentInfo describes one retained bundle. Failed deploy attempts are retained as metadata only, without a bundle to roll back to.
-type deploymentInfo struct {
-	ID string `json:"id"`
-	DeployedAt time.Time `json:"deployedAt"`
-	QueuedAt time.Time `json:"queuedAt"`
-	StartedAt time.Time `json:"startedAt"`
-	FinishedAt time.Time `json:"finishedAt"`
-	Mode string `json:"mode,omitempty"`
-	Digest string `json:"digest"`
-	Size int64 `json:"size"`
-	WasmDigest string `json:"wasmDigest,omitempty"`
-	WasmBytes int64 `json:"wasmBytes,omitempty"`
-	Runtime string `json:"runtime,omitempty"`
-	Target string `json:"target,omitempty"`
-	Rebuildable bool `json:"rebuildable"`
-	Bytes int64 `json:"bytes"`
-	Blobs map[string]string `json:"blobs,omitempty"`
-	Static map[string]string `json:"static,omitempty"`
-	Status string `json:"status,omitempty"`
-	Error string `json:"error,omitempty"`
-	Current bool `json:"current,omitempty"`
-}
-
-// deploymentReplayFile is the on-disk form of one app's idempotency responses.
-type deploymentReplayFile struct {
-	Entries map[string]deployReplayEntry `json:"entries"`
-}
-
-// deploymentManager keeps a bounded history of app bundles under the state directory.
-type deploymentManager struct {
-	dir string
-	mu sync.Mutex
-}
-
-func newDeploymentManager(dir string) *deploymentManager {
-	return &deploymentManager{dir: dir}
-}
+var (
+	// deploymentMaxBytes bounds one app's retained history. Identical artifacts are shared, so this is generous.
+	deploymentMaxBytes int64 = 1 << 30
+	errDeploymentNotFound = errors.New("deployment not found")
+)
 
 func (m *deploymentManager) appDir(app string) string {
 	return filepath.Join(m.dir, app)
@@ -85,17 +88,30 @@ func (m *deploymentManager) blobDir(app string) string {
 	return filepath.Join(m.appDir(app), deploymentBlobDir)
 }
 
-// validDeploymentID reports whether id is a single deployment timestamp.
-func validDeploymentID(id string) error {
-	if id == "" || filepath.Base(id) != id {
-		return errDeploymentNotFound
+// content returns the app's content-addressed store.
+func (m *deploymentManager) content(app string) *contentStore {
+	return newContentStore(m.blobDir(app), m.blobDir(app))
+}
+
+func (m *deploymentManager) logPath(app, id string) string {
+	return filepath.Join(m.appDir(app), id, deploymentLogName)
+}
+
+// appendLog keeps a deployment's log bounded and never lets logging fail the install.
+func (m *deploymentManager) appendLog(app, id string, data []byte) {
+	path := m.logPath(app, id)
+	info, err := os.Stat(path)
+	if err == nil && info.Size()+int64(len(data)) > deploymentLogBytes {
+		return
 	}
 
-	if _, err := time.Parse(deploymentTimeLayout, id); err != nil {
-		return errDeploymentNotFound
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
 	}
 
-	return nil
+	_, _ = file.Write(data)
+	_ = file.Close()
 }
 
 // newID reserves an unused timestamp id for a new history entry.
@@ -105,8 +121,8 @@ func (m *deploymentManager) newID(app string) (string, time.Time, error) {
 	}
 
 	now := time.Now().UTC()
-
 	id := now.Format(deploymentTimeLayout)
+
 	for exists(m.appDir(app), id) {
 		now = now.Add(time.Nanosecond)
 		id = now.Format(deploymentTimeLayout)
@@ -115,9 +131,61 @@ func (m *deploymentManager) newID(app string) (string, time.Time, error) {
 	return id, now, nil
 }
 
+// createRun reserves a deployment id before the install starts, so a caller can follow status and logs by URL.
+func (m *deploymentManager) createRun(app, digest string) (deploymentInfo, error) {
+	id, now, err := m.newID(app)
+	if err != nil {
+		return deploymentInfo{}, err
+	}
+
+	dir := filepath.Join(m.appDir(app), id)
+
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		return deploymentInfo{}, err
+	}
+
+	info := deploymentInfo{
+		ID: id,
+		DeployedAt: now,
+		QueuedAt: now,
+		Digest: digest,
+		Status: deploymentStatusQueued,
+	}
+	data, err := json.Marshal(info)
+	if err != nil {
+		_ = os.RemoveAll(dir)
+
+		return deploymentInfo{}, err
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, deploymentMetaName), append(data, '\n'), 0o644); err != nil {
+		_ = os.RemoveAll(dir)
+
+		return deploymentInfo{}, err
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, deploymentLogName), nil, 0o644); err != nil {
+		_ = os.RemoveAll(dir)
+
+		return deploymentInfo{}, err
+	}
+
+	return info, nil
+}
+
 // replayPath is the idempotency file beside the app's deployment history.
 func (m *deploymentManager) replayPath(app string) string {
 	return filepath.Join(m.appDir(app), deploymentReplayName)
+}
+
+// clearReplay drops the app's replay cache.
+func (m *deploymentManager) clearReplay(app string) error {
+	err := os.Remove(m.replayPath(app))
+	if os.IsNotExist(err) {
+		return nil
+	}
+
+	return err
 }
 
 // readReplayFile loads the replay cache, returning the OS error when it does not exist.
@@ -159,6 +227,13 @@ func (m *deploymentManager) replay(app, key string, now time.Time) (deployReplay
 	return entry, true
 }
 
+// storeBlob puts a file in the content-addressed store and returns its digest and size.
+func (m *deploymentManager) storeBlob(app, source string) (string, int64, error) {
+	digest, size, _, err := m.content(app).putFile(source)
+
+	return digest, size, err
+}
+
 // storeReplay records an idempotency key, pruning expired and over-limit entries.
 func (m *deploymentManager) storeReplay(app, key string, entry deployReplayEntry) error {
 	if key == "" {
@@ -167,7 +242,9 @@ func (m *deploymentManager) storeReplay(app, key string, entry deployReplayEntry
 
 	file, err := m.readReplayFile(app)
 	if err != nil {
-		file = deploymentReplayFile{Entries: map[string]deployReplayEntry{}}
+		file = deploymentReplayFile{
+			Entries: map[string]deployReplayEntry{},
+		}
 	}
 
 	if file.Entries == nil {
@@ -175,6 +252,7 @@ func (m *deploymentManager) storeReplay(app, key string, entry deployReplayEntry
 	}
 
 	now := time.Now()
+
 	for name, existing := range file.Entries {
 		if now.Sub(existing.At) > deploymentReplayTTL {
 			delete(file.Entries, name)
@@ -182,21 +260,23 @@ func (m *deploymentManager) storeReplay(app, key string, entry deployReplayEntry
 	}
 
 	file.Entries[key] = entry
+
 	if len(file.Entries) > deploymentReplayKeep {
 		type agedEntry struct {
 			key string
 			at time.Time
 		}
-
 		aged := make([]agedEntry, 0, len(file.Entries))
-		for name, existing := range file.Entries {
-			aged = append(aged, agedEntry{key: name, at: existing.At})
-		}
 
+		for name, existing := range file.Entries {
+			aged = append(aged, agedEntry{
+				key: name,
+				at: existing.At,
+			})
+		}
 		sort.Slice(aged, func(i, j int) bool {
 			return aged[i].at.Before(aged[j].at)
 		})
-
 		for _, item := range aged[:len(aged)-deploymentReplayKeep] {
 			delete(file.Entries, item.key)
 		}
@@ -214,185 +294,69 @@ func (m *deploymentManager) storeReplay(app, key string, entry deployReplayEntry
 	return writeFileAtomicMode(m.replayPath(app), append(data, '\n'), 0o600)
 }
 
-// clearReplay drops the app's replay cache.
-func (m *deploymentManager) clearReplay(app string) error {
-	err := os.Remove(m.replayPath(app))
-	if os.IsNotExist(err) {
-		return nil
-	}
+// usage counts the bytes stored for one app, following hardlinks only once.
+func (m *deploymentManager) usage(app string) (int64, error) {
+	var total int64
 
-	return err
-}
-
-// ids lists deployment ids in oldest-first timestamp order.
-func (m *deploymentManager) ids(app string) ([]string, error) {
-	entries, err := os.ReadDir(m.appDir(app))
-	if os.IsNotExist(err) {
-		return []string{}, nil
-	}
-
-	if err != nil {
-		return nil, err
-	}
-
-	ids := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if !entry.IsDir() || validDeploymentID(entry.Name()) != nil {
-			continue
-		}
-
-		ids = append(ids, entry.Name())
-	}
-
-	sort.Strings(ids)
-
-	return ids, nil
-}
-
-// list returns deployment records newest first, skipping unreadable entries.
-func (m *deploymentManager) list(app string) ([]deploymentInfo, error) {
-	ids, err := m.ids(app)
-	if err != nil {
-		return nil, err
-	}
-
-	out := make([]deploymentInfo, 0, len(ids))
-	for _, id := range ids {
-		data, err := os.ReadFile(filepath.Join(m.appDir(app), id, deploymentMetaName))
+	seen := map[fileKey]struct{}{}
+	err := filepath.WalkDir(m.appDir(app), func(_ string, entry fs.DirEntry, err error) error {
 		if err != nil {
-			continue
+			if os.IsNotExist(err) {
+				return nil
+			}
+
+			return err
 		}
 
-		var info deploymentInfo
-		if err := json.Unmarshal(data, &info); err != nil {
-			continue
+		if entry.IsDir() {
+			return nil
 		}
 
-		out = append(out, info)
-	}
-	// ids are oldest first; return newest first.
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].ID > out[j].ID
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+
+		if stat, ok := info.Sys().(*syscall.Stat_t); ok {
+			key := fileKey{
+				device: uint64(stat.Dev),
+				inode: stat.Ino,
+			} //nolint:unconvert // Stat_t.Dev is not uint64 on every platform.
+			if _, ok := seen[key]; ok {
+				return nil
+			}
+
+			seen[key] = struct{}{}
+		}
+
+		total += info.Size()
+
+		return nil
 	})
-
-	return out, nil
-}
-
-func (m *deploymentManager) info(app, id string) (deploymentInfo, error) {
-	if err := validDeploymentID(id); err != nil {
-		return deploymentInfo{}, err
-	}
-
-	data, err := os.ReadFile(filepath.Join(m.appDir(app), id, deploymentMetaName))
-	if err != nil {
-		return deploymentInfo{}, errDeploymentNotFound
-	}
-
-	var info deploymentInfo
-	if err := json.Unmarshal(data, &info); err != nil {
-		return deploymentInfo{}, errDeploymentNotFound
-	}
-
-	return info, nil
-}
-
-// createRun reserves a deployment id before the install starts, so a caller can follow status and logs by URL.
-func (m *deploymentManager) createRun(app, digest string) (deploymentInfo, error) {
-	id, now, err := m.newID(app)
-	if err != nil {
-		return deploymentInfo{}, err
-	}
-
-	dir := filepath.Join(m.appDir(app), id)
-	if err := os.Mkdir(dir, 0o755); err != nil {
-		return deploymentInfo{}, err
-	}
-
-	info := deploymentInfo{
-		ID: id,
-		DeployedAt: now,
-		QueuedAt: now,
-		Digest: digest,
-		Status: deploymentStatusQueued,
-	}
-
-	data, err := json.Marshal(info)
-	if err != nil {
-		_ = os.RemoveAll(dir)
-		return deploymentInfo{}, err
-	}
-
-	if err := os.WriteFile(filepath.Join(dir, deploymentMetaName), append(data, '\n'), 0o644); err != nil {
-		_ = os.RemoveAll(dir)
-		return deploymentInfo{}, err
-	}
-
-	if err := os.WriteFile(filepath.Join(dir, deploymentLogName), nil, 0o644); err != nil {
-		_ = os.RemoveAll(dir)
-		return deploymentInfo{}, err
-	}
-
-	return info, nil
-}
-
-// updateRun mutates one run's metadata atomically. The runner and a cancel request may both update it.
-func (m *deploymentManager) updateRun(app, id string, update func(*deploymentInfo)) (deploymentInfo, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	info, err := m.info(app, id)
-	if err != nil {
-		return deploymentInfo{}, err
-	}
-
-	update(&info)
-
-	data, err := json.Marshal(info)
-	if err != nil {
-		return deploymentInfo{}, err
-	}
-
-	path := filepath.Join(m.appDir(app), id, deploymentMetaName)
-	if err := writeFileAtomicMode(path, append(data, '\n'), 0o644); err != nil {
-		return deploymentInfo{}, err
-	}
-
-	return info, nil
-}
-
-func (m *deploymentManager) logPath(app, id string) string {
-	return filepath.Join(m.appDir(app), id, deploymentLogName)
-}
-
-// appendLog keeps a deployment's log bounded and never lets logging fail the install.
-func (m *deploymentManager) appendLog(app, id string, data []byte) {
-	path := m.logPath(app, id)
-
-	info, err := os.Stat(path)
-	if err == nil && info.Size()+int64(len(data)) > deploymentLogBytes {
-		return
-	}
-
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return
-	}
-
-	_, _ = file.Write(data)
-	_ = file.Close()
-}
-
-func (m *deploymentManager) readLog(app, id string) ([]byte, error) {
-	if err := validDeploymentID(id); err != nil {
-		return nil, errDeploymentNotFound
-	}
-
-	data, err := os.ReadFile(m.logPath(app, id))
 	if os.IsNotExist(err) {
-		return nil, errDeploymentNotFound
+		return 0, nil
 	}
 
-	return data, err
+	return total, err
+}
+
+func newDeploymentManager(dir string) *deploymentManager {
+	return &deploymentManager{
+		dir: dir,
+	}
+}
+
+// validDeploymentID reports whether id is a single deployment timestamp.
+func validDeploymentID(id string) error {
+	if id == "" || filepath.Base(id) != id {
+		return errDeploymentNotFound
+	}
+
+	if _, err := time.Parse(deploymentTimeLayout, id); err != nil {
+		return errDeploymentNotFound
+	}
+
+	return nil
 }
 
 // bundle returns the retained directory for a successful deployment that has a component.
@@ -402,6 +366,7 @@ func (m *deploymentManager) bundle(app, id string) (string, error) {
 	}
 
 	dir := filepath.Join(m.appDir(app), id)
+
 	if data, err := os.ReadFile(filepath.Join(dir, deploymentMetaName)); err == nil {
 		var info deploymentInfo
 		if json.Unmarshal(data, &info) == nil && info.Status != "" && info.Status != deploymentStatusOK {
@@ -422,15 +387,47 @@ func (m *deploymentManager) bundle(app, id string) (string, error) {
 	return "", errDeploymentNotFound
 }
 
-// content returns the app's content-addressed store.
-func (m *deploymentManager) content(app string) *contentStore {
-	return newContentStore(m.blobDir(app), m.blobDir(app))
+// ids lists deployment ids in oldest-first timestamp order.
+func (m *deploymentManager) ids(app string) ([]string, error) {
+	entries, err := os.ReadDir(m.appDir(app))
+	if os.IsNotExist(err) {
+		return []string{}, nil
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	ids := make([]string, 0, len(entries))
+
+	for _, entry := range entries {
+		if !entry.IsDir() || validDeploymentID(entry.Name()) != nil {
+			continue
+		}
+
+		ids = append(ids, entry.Name())
+	}
+	sort.Strings(ids)
+	return ids, nil
 }
 
-// storeBlob puts a file in the content-addressed store and returns its digest and size.
-func (m *deploymentManager) storeBlob(app, source string) (string, int64, error) {
-	digest, size, _, err := m.content(app).putFile(source)
-	return digest, size, err
+func (m *deploymentManager) info(app, id string) (deploymentInfo, error) {
+	if err := validDeploymentID(id); err != nil {
+		return deploymentInfo{}, err
+	}
+
+	data, err := os.ReadFile(filepath.Join(m.appDir(app), id, deploymentMetaName))
+	if err != nil {
+		return deploymentInfo{}, errDeploymentNotFound
+	}
+
+	var info deploymentInfo
+
+	if err := json.Unmarshal(data, &info); err != nil {
+		return deploymentInfo{}, errDeploymentNotFound
+	}
+
+	return info, nil
 }
 
 // gcBlobs removes stored artifacts no retained bundle references.
@@ -449,6 +446,7 @@ func (m *deploymentManager) gcBlobs(app string) error {
 		}
 
 		var info deploymentInfo
+
 		if err := json.Unmarshal(data, &info); err != nil {
 			continue
 		}
@@ -463,54 +461,6 @@ func (m *deploymentManager) gcBlobs(app string) error {
 	}
 
 	return m.content(app).prune(referenced)
-}
-
-type fileKey struct {
-	device, inode uint64
-}
-
-// usage counts the bytes stored for one app, following hardlinks only once.
-func (m *deploymentManager) usage(app string) (int64, error) {
-	var total int64
-
-	seen := map[fileKey]struct{}{}
-
-	err := filepath.WalkDir(m.appDir(app), func(_ string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			if os.IsNotExist(err) {
-				return nil
-			}
-
-			return err
-		}
-
-		if entry.IsDir() {
-			return nil
-		}
-
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-
-		if stat, ok := info.Sys().(*syscall.Stat_t); ok {
-			key := fileKey{device: uint64(stat.Dev), inode: stat.Ino} //nolint:unconvert // Stat_t.Dev is not uint64 on every platform.
-			if _, ok := seen[key]; ok {
-				return nil
-			}
-
-			seen[key] = struct{}{}
-		}
-
-		total += info.Size()
-
-		return nil
-	})
-	if os.IsNotExist(err) {
-		return 0, nil
-	}
-
-	return total, err
 }
 
 // prune keeps the newest bundles within both the count and byte limits, then drops unreferenced blobs.
@@ -542,6 +492,7 @@ func (m *deploymentManager) prune(app string) error {
 
 		return false, nil
 	}
+
 	for len(ids) > deploymentKeep {
 		removed, err := removeOldest()
 		if err != nil {
@@ -578,4 +529,73 @@ func (m *deploymentManager) prune(app string) error {
 	}
 
 	return m.gcBlobs(app)
+}
+
+// list returns deployment records newest first, skipping unreadable entries.
+func (m *deploymentManager) list(app string) ([]deploymentInfo, error) {
+	ids, err := m.ids(app)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]deploymentInfo, 0, len(ids))
+
+	for _, id := range ids {
+		data, err := os.ReadFile(filepath.Join(m.appDir(app), id, deploymentMetaName))
+		if err != nil {
+			continue
+		}
+
+		var info deploymentInfo
+
+		if err := json.Unmarshal(data, &info); err != nil {
+			continue
+		}
+
+		out = append(out, info)
+	}
+	// ids are oldest first; return newest first.
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].ID > out[j].ID
+	})
+	return out, nil
+}
+
+func (m *deploymentManager) readLog(app, id string) ([]byte, error) {
+	if err := validDeploymentID(id); err != nil {
+		return nil, errDeploymentNotFound
+	}
+
+	data, err := os.ReadFile(m.logPath(app, id))
+	if os.IsNotExist(err) {
+		return nil, errDeploymentNotFound
+	}
+
+	return data, err
+}
+
+// updateRun mutates one run's metadata atomically. The runner and a cancel request may both update it.
+func (m *deploymentManager) updateRun(app, id string, update func(*deploymentInfo)) (deploymentInfo, error) {
+	m.mu.Lock()
+
+	defer m.mu.Unlock()
+
+	info, err := m.info(app, id)
+	if err != nil {
+		return deploymentInfo{}, err
+	}
+	update(&info)
+
+	data, err := json.Marshal(info)
+	if err != nil {
+		return deploymentInfo{}, err
+	}
+
+	path := filepath.Join(m.appDir(app), id, deploymentMetaName)
+
+	if err := writeFileAtomicMode(path, append(data, '\n'), 0o644); err != nil {
+		return deploymentInfo{}, err
+	}
+
+	return info, nil
 }

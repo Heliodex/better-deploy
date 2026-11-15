@@ -12,13 +12,16 @@ func TestLogFilterAndExport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	defer log.close()
 
 	if _, err := log.Write([]byte("INFO hello world\nWARN danger zone\n")); err != nil {
 		t.Fatal(err)
 	}
 
-	filtered, err := log.tailFiltered(10, logFilter{level: "warn"})
+	filtered, err := log.tailFiltered(10, logFilter{
+		level: "warn",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,13 +31,16 @@ func TestLogFilterAndExport(t *testing.T) {
 	}
 
 	s := testSupervisor()
-	a := &app{name: "demo", logs: log}
+	a := &app{
+		name: "demo",
+		logs: log,
+	}
 	s.apps["demo"] = a
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/apps/demo/logs?level=warn&q=anger", nil)
+
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleApp(rec, req)
-
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "danger zone") {
 		t.Fatalf("filtered logs = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -45,9 +51,9 @@ func TestLogFilterAndExport(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/apps/demo/logs/export?format=jsonl&level=info", nil)
+
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleApp(rec, req)
-
 	if rec.Code != http.StatusOK {
 		t.Fatalf("export = %d: %s", rec.Code, rec.Body.String())
 	}

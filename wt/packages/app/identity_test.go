@@ -17,6 +17,7 @@ func TestUserFromRequest(t *testing.T) {
 
 	groups := "admins,beta"
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
+
 	req.Header.Set(identityUserIDHeader, "usr_1")
 	req.Header.Set(identityUserEmailHeader, "ada@example.com")
 	req.Header.Set(identityUserNameHeader, "Ada")
@@ -31,15 +32,11 @@ func TestUserFromRequest(t *testing.T) {
 	if len(user.Groups) != 2 || user.Groups[0] != "admins" || user.Groups[1] != "beta" {
 		t.Errorf("groups = %v", user.Groups)
 	}
-
 	req.Header.Set(identityUserNameHeader, "Mallory")
-
 	if _, ok := UserFromRequest(req); ok {
 		t.Error("modified header was accepted")
 	}
-
 	req.Header.Del(identityUserIDHeader)
-
 	if _, ok := UserFromRequest(req); ok {
 		t.Error("missing id was accepted")
 	}
@@ -47,7 +44,6 @@ func TestUserFromRequest(t *testing.T) {
 
 func TestUserFromRequestWithoutSecret(t *testing.T) {
 	t.Setenv(identitySecretEnv, "")
-
 	if _, ok := UserFromRequest(httptest.NewRequest(http.MethodGet, "/", nil)); ok {
 		t.Error("request without a secret was accepted")
 	}

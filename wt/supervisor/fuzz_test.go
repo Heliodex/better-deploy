@@ -10,6 +10,26 @@ import (
 	"testing"
 )
 
+func FuzzDecodeStorageValue(f *testing.F) {
+	for _, seed := range []string{
+		`null`,
+		`true`,
+		`false`,
+		`"text"`,
+		`42`,
+		`-1.5e3`,
+		`{"$b64":"AAEC"}`,
+		`{"other":"value"}`,
+		`{`,
+		`[]`,
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(_ *testing.T, value string) {
+		_, _ = decodeStorageValue(jsontext.Value(value))
+	})
+}
+
 func FuzzValidateStorageSQL(f *testing.F) {
 	for _, seed := range []string{
 		`select 1`,
@@ -23,22 +43,8 @@ func FuzzValidateStorageSQL(f *testing.F) {
 	} {
 		f.Add(seed)
 	}
-
 	f.Fuzz(func(_ *testing.T, query string) {
 		_ = validateStorageSQL(query)
-	})
-}
-
-func FuzzDecodeStorageValue(f *testing.F) {
-	for _, seed := range []string{
-		`null`, `true`, `false`, `"text"`, `42`, `-1.5e3`,
-		`{"$b64":"AAEC"}`, `{"other":"value"}`, `{`, `[]`,
-	} {
-		f.Add(seed)
-	}
-
-	f.Fuzz(func(_ *testing.T, value string) {
-		_, _ = decodeStorageValue(jsontext.Value(value))
 	})
 }
 
@@ -48,8 +54,8 @@ func fuzzTarGz(tb testing.TB) []byte {
 	var buf bytes.Buffer
 
 	gz := gzip.NewWriter(&buf)
-
 	tw := tar.NewWriter(gz)
+
 	for _, entry := range []struct {
 		name, body string
 	}{
@@ -57,7 +63,11 @@ func fuzzTarGz(tb testing.TB) []byte {
 		{"main.wasm", "wasm"},
 		{"../escape", "nope"},
 	} {
-		if err := tw.WriteHeader(&tar.Header{Name: entry.name, Mode: 0o644, Size: int64(len(entry.body))}); err != nil {
+		if err := tw.WriteHeader(&tar.Header{
+			Name: entry.name,
+			Mode: 0o644,
+			Size: int64(len(entry.body)),
+		}); err != nil {
 			tb.Fatal(err)
 		}
 
@@ -75,6 +85,32 @@ func fuzzTarGz(tb testing.TB) []byte {
 	}
 
 	return buf.Bytes()
+}
+
+func FuzzBackupArchive(f *testing.F) {
+	f.Add(fuzzTarGz(f))
+	f.Add([]byte("not a backup"))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		src, err := os.CreateTemp(t.TempDir(), "backup-*.tar.gz")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := src.Write(data); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := src.Close(); err != nil {
+			t.Fatal(err)
+		}
+
+		dst := t.TempDir()
+		_ = extractTarGzLimited(src.Name(), dst, maxBackupExtractBytes, maxBackupTarFiles)
+
+		if _, err := os.Stat(filepath.Join(filepath.Dir(dst), "escape")); err == nil {
+			t.Error("backup entry escaped the destination")
+		}
+	})
 }
 
 func FuzzExtractTarGz(f *testing.F) {
@@ -97,34 +133,9 @@ func FuzzExtractTarGz(f *testing.F) {
 		dst := t.TempDir()
 		// Extraction may reject arbitrary bytes, but it must not panic or write outside dst.
 		_ = extractTarGzLimited(src.Name(), dst, 1<<20, 100)
+
 		if _, err := os.Stat(filepath.Join(filepath.Dir(dst), "escape")); err == nil {
 			t.Error("archive entry escaped the destination")
-		}
-	})
-}
-
-func FuzzBackupArchive(f *testing.F) {
-	f.Add(fuzzTarGz(f))
-	f.Add([]byte("not a backup"))
-	f.Fuzz(func(t *testing.T, data []byte) {
-		src, err := os.CreateTemp(t.TempDir(), "backup-*.tar.gz")
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if _, err := src.Write(data); err != nil {
-			t.Fatal(err)
-		}
-
-		if err := src.Close(); err != nil {
-			t.Fatal(err)
-		}
-
-		dst := t.TempDir()
-
-		_ = extractTarGzLimited(src.Name(), dst, maxBackupExtractBytes, maxBackupTarFiles)
-		if _, err := os.Stat(filepath.Join(filepath.Dir(dst), "escape")); err == nil {
-			t.Error("backup entry escaped the destination")
 		}
 	})
 }

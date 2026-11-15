@@ -11,11 +11,32 @@ import (
 	"path/filepath"
 )
 
+// componentRecord describes the component files stored for one deployment.
+type componentRecord struct {
+	files map[string]string
+	cwasmDigest, wasmDigest string
+	cwasmSize, wasmSize, bytes int64
+}
+
+// digest returns the preferred artifact digest, preferring the portable wasm over the cwasm.
+func (r componentRecord) digest() (digest string, size int64, ok bool) {
+	if r.wasmDigest != "" {
+		return r.wasmDigest, r.wasmSize, true
+	}
+
+	if r.cwasmDigest != "" {
+		return r.cwasmDigest, r.cwasmSize, true
+	}
+
+	return "", 0, false
+}
+
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
+
 	defer in.Close()
 
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
@@ -49,6 +70,7 @@ func copyOptional(src, dst, name string) error {
 // copyStatic copies the bundle's static/ directory when it exists.
 func copyStatic(src, dst string) error {
 	root := filepath.Join(src, "static")
+
 	if info, err := os.Stat(root); err != nil || !info.IsDir() {
 		return nil
 	}
@@ -72,6 +94,7 @@ func copyStatic(src, dst string) error {
 		}
 
 		target := filepath.Join(dst, rel)
+
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return err
 		}
@@ -95,25 +118,44 @@ func copyBundle(src, dst string) error {
 	return copyStatic(src, dst)
 }
 
-func fileDigest(path string) (string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-
-	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return "", err
+// storeComponent stores and links main.cwasm and main.wasm into the deployment directory.
+func (m *deploymentManager) storeComponent(app, source, temp string) (componentRecord, error) {
+	record := componentRecord{
+		files: map[string]string{},
 	}
 
-	return hex.EncodeToString(hash.Sum(nil)), nil
+	for _, name := range []string{"main.cwasm", "main.wasm"} {
+		info, err := os.Stat(filepath.Join(source, name))
+		if err != nil {
+			continue
+		}
+
+		stored, size, err := m.storeBlob(app, filepath.Join(source, name))
+		if err != nil {
+			return record, fmt.Errorf("store %s: %w", name, err)
+		}
+
+		if err := m.content(app).link(stored, filepath.Join(temp, name)); err != nil {
+			return record, fmt.Errorf("link %s: %w", name, err)
+		}
+
+		record.files[name] = stored
+		record.bytes += size
+
+		switch name {
+		case "main.cwasm":
+			record.cwasmDigest, record.cwasmSize = stored, info.Size()
+		case "main.wasm":
+			record.wasmDigest, record.wasmSize = stored, info.Size()
+		}
+	}
+
+	return record, nil
 }
 
 // storeStatic content-addresses every regular file under source/static and hardlinks it into dst/static at the same relative path. It returns the path-to-digest map and the unique bytes stored.
 func (m *deploymentManager) storeStatic(app, source, dst string) (map[string]string, int64, error) {
 	root := filepath.Join(source, "static")
-
 	info, err := os.Stat(root)
 	if os.IsNotExist(err) {
 		return nil, 0, nil
@@ -152,6 +194,7 @@ func (m *deploymentManager) storeStatic(app, source, dst string) (map[string]str
 		}
 
 		target := filepath.Join(dst, "static", rel)
+
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return err
 		}
@@ -161,6 +204,7 @@ func (m *deploymentManager) storeStatic(app, source, dst string) (map[string]str
 		}
 
 		files[filepath.ToSlash(rel)] = stored
+
 		if _, ok := seen[stored]; !ok {
 			seen[stored] = struct{}{}
 			total += size
@@ -168,65 +212,12 @@ func (m *deploymentManager) storeStatic(app, source, dst string) (map[string]str
 
 		return nil
 	})
+
 	if err != nil {
 		return nil, 0, err
 	}
 
 	return files, total, nil
-}
-
-// componentRecord describes the component files stored for one deployment.
-type componentRecord struct {
-	files map[string]string
-	cwasmDigest, wasmDigest string
-	cwasmSize, wasmSize int64
-	bytes int64
-}
-
-// digest returns the preferred artifact digest, preferring the portable wasm over the cwasm.
-func (r componentRecord) digest() (digest string, size int64, ok bool) {
-	if r.wasmDigest != "" {
-		return r.wasmDigest, r.wasmSize, true
-	}
-
-	if r.cwasmDigest != "" {
-		return r.cwasmDigest, r.cwasmSize, true
-	}
-
-	return "", 0, false
-}
-
-// storeComponent stores and links main.cwasm and main.wasm into the deployment directory.
-func (m *deploymentManager) storeComponent(app, source, temp string) (componentRecord, error) {
-	record := componentRecord{files: map[string]string{}}
-
-	for _, name := range []string{"main.cwasm", "main.wasm"} {
-		info, err := os.Stat(filepath.Join(source, name))
-		if err != nil {
-			continue
-		}
-
-		stored, size, err := m.storeBlob(app, filepath.Join(source, name))
-		if err != nil {
-			return record, fmt.Errorf("store %s: %w", name, err)
-		}
-
-		if err := m.content(app).link(stored, filepath.Join(temp, name)); err != nil {
-			return record, fmt.Errorf("link %s: %w", name, err)
-		}
-
-		record.files[name] = stored
-		record.bytes += size
-
-		switch name {
-		case "main.cwasm":
-			record.cwasmDigest, record.cwasmSize = stored, info.Size()
-		case "main.wasm":
-			record.wasmDigest, record.wasmSize = stored, info.Size()
-		}
-	}
-
-	return record, nil
 }
 
 // stageDeployment copies the manifest, artifact metadata, static files and previous log into the staging directory.
@@ -266,6 +257,23 @@ func (m *deploymentManager) stageDeployment(app, id, source, temp string) (compo
 	}
 
 	return record, static, total, nil
+}
+
+func fileDigest(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+
+	defer file.Close()
+
+	hash := sha256.New()
+
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 // writeDeploymentMeta writes the entry beside the staged bundle.

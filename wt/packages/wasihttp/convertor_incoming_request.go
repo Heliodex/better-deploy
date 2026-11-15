@@ -15,24 +15,24 @@ import (
 // methodToString maps a standard wasi:http method to its HTTP name and rejects the "other" variant.
 func methodToString(m wasi.Method) (string, error) {
 	switch m.Tag() {
-	case wasi.MethodConnect:
-		return "CONNECT", nil
-	case wasi.MethodDelete:
-		return "DELETE", nil
 	case wasi.MethodGet:
 		return "GET", nil
 	case wasi.MethodHead:
 		return "HEAD", nil
-	case wasi.MethodOptions:
-		return "OPTIONS", nil
-	case wasi.MethodPatch:
-		return "PATCH", nil
 	case wasi.MethodPost:
 		return "POST", nil
 	case wasi.MethodPut:
 		return "PUT", nil
+	case wasi.MethodDelete:
+		return "DELETE", nil
+	case wasi.MethodConnect:
+		return "CONNECT", nil
+	case wasi.MethodOptions:
+		return "OPTIONS", nil
 	case wasi.MethodTrace:
 		return "TRACE", nil
+	case wasi.MethodPatch:
+		return "PATCH", nil
 	case wasi.MethodOther:
 		return m.Other(), errors.New("unknown http method 'other'")
 	default:
@@ -45,6 +45,7 @@ func toHTTPHeader(src []wit.Tuple2[string, []uint8], dest *http.Header) {
 	for _, pair := range src {
 		key := pair.F0
 		value := string(pair.F1)
+
 		dest.Add(key, value)
 	}
 }
@@ -58,23 +59,24 @@ func newHTTPRequest(ctx context.Context, ir *wasi.Request) (*http.Request, error
 		return nil, err
 	}
 
-	pathWithQuery := ""
+	var pathWithQuery string
+
 	if value := ir.GetPathWithQuery(); value.IsSome() {
 		pathWithQuery = value.Some()
 	}
 
 	headerResource := ir.GetHeaders()
 	rawHeaders := headerResource.CopyAll()
+
 	headerResource.Drop()
 
 	headers := make(http.Header, len(rawHeaders))
+
 	toHTTPHeader(rawHeaders, &headers)
 
 	rx, trailers := wasi.RequestConsumeBody(ir, unitFuture())
 	body := newReader(rx, trailers)
-
 	scheme, host, requestPath, remote := httpmeta.IncomingTarget(pathWithQuery, headers)
-
 	rawURL := requestPath
 	if rawURL == "" {
 		rawURL = "/"
@@ -87,13 +89,15 @@ func newHTTPRequest(ctx context.Context, ir *wasi.Request) (*http.Request, error
 	}
 
 	req.Header = headers
+
 	req.Header.Del("Host")
+
 	req.URL.Scheme = scheme
 	req.URL.Host = host
 	req.Host = host
 	req.RequestURI = req.URL.RequestURI()
-
 	req.RemoteAddr = remote
+
 	if value := req.Header.Get("Content-Length"); value != "" {
 		if length, err := strconv.ParseInt(value, 10, 64); err == nil {
 			req.ContentLength = length

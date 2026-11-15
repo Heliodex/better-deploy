@@ -10,6 +10,51 @@ import (
 	"time"
 )
 
+// recordFailure keeps a failed deploy attempt in history as metadata only. It has no bundle, so it can never be rolled back to, but the panel can show why the deploy did not replace the running version.
+func (m *deploymentManager) recordFailure(app, digest, message string) (deploymentInfo, error) {
+	if len(message) > deploymentErrorBytes {
+		message = message[:deploymentErrorBytes] + "…"
+	}
+
+	id, now, err := m.newID(app)
+	if err != nil {
+		return deploymentInfo{}, err
+	}
+
+	temp, err := os.MkdirTemp(m.appDir(app), ".failure-")
+	if err != nil {
+		return deploymentInfo{}, err
+	}
+
+	defer os.RemoveAll(temp)
+
+	recorded := deploymentInfo{
+		ID: id,
+		DeployedAt: now,
+		Digest: digest,
+		Status: deploymentStatusFail,
+		Error: message,
+	}
+	meta, err := json.Marshal(recorded)
+	if err != nil {
+		return deploymentInfo{}, err
+	}
+
+	if err := os.WriteFile(filepath.Join(temp, deploymentMetaName), append(meta, '\n'), 0o644); err != nil {
+		return deploymentInfo{}, err
+	}
+
+	if err := os.Rename(temp, filepath.Join(m.appDir(app), id)); err != nil {
+		return deploymentInfo{}, err
+	}
+
+	if err := m.prune(app); err != nil {
+		log.Printf("deploy history %s: prune: %v", app, err)
+	}
+
+	return recorded, nil
+}
+
 // deploymentMetadata fills the history entry for a successful bundle.
 func deploymentMetadata(previous deploymentInfo, id string, now time.Time, record componentRecord, static map[string]string, total int64, artifact artifactInfo) deploymentInfo {
 	digest, size, _ := record.digest()
@@ -51,18 +96,18 @@ func (m *deploymentManager) recordAt(app, id string, previous deploymentInfo, so
 	if err != nil {
 		return deploymentInfo{}, err
 	}
+
 	defer os.RemoveAll(temp)
 
 	artifact, _ := readArtifact(source)
-
 	record, static, total, err := m.stageDeployment(app, id, source, temp)
 	if err != nil {
 		return deploymentInfo{}, err
 	}
 
 	now := time.Now().UTC()
-
 	recorded := deploymentMetadata(previous, id, now, record, static, total, artifact)
+
 	if err := writeDeploymentMeta(temp, recorded); err != nil {
 		return deploymentInfo{}, err
 	}
@@ -85,52 +130,9 @@ func (m *deploymentManager) record(app, source string) (deploymentInfo, error) {
 		return deploymentInfo{}, err
 	}
 
-	return m.recordAt(app, id, deploymentInfo{QueuedAt: now}, source)
-}
-
-// recordFailure keeps a failed deploy attempt in history as metadata only. It has no bundle, so it can never be rolled back to, but the panel can show why the deploy did not replace the running version.
-func (m *deploymentManager) recordFailure(app, digest, message string) (deploymentInfo, error) {
-	if len(message) > deploymentErrorBytes {
-		message = message[:deploymentErrorBytes] + "…"
-	}
-
-	id, now, err := m.newID(app)
-	if err != nil {
-		return deploymentInfo{}, err
-	}
-
-	temp, err := os.MkdirTemp(m.appDir(app), ".failure-")
-	if err != nil {
-		return deploymentInfo{}, err
-	}
-	defer os.RemoveAll(temp)
-
-	recorded := deploymentInfo{
-		ID: id,
-		DeployedAt: now,
-		Digest: digest,
-		Status: deploymentStatusFail,
-		Error: message,
-	}
-
-	meta, err := json.Marshal(recorded)
-	if err != nil {
-		return deploymentInfo{}, err
-	}
-
-	if err := os.WriteFile(filepath.Join(temp, deploymentMetaName), append(meta, '\n'), 0o644); err != nil {
-		return deploymentInfo{}, err
-	}
-
-	if err := os.Rename(temp, filepath.Join(m.appDir(app), id)); err != nil {
-		return deploymentInfo{}, err
-	}
-
-	if err := m.prune(app); err != nil {
-		log.Printf("deploy history %s: prune: %v", app, err)
-	}
-
-	return recorded, nil
+	return m.recordAt(app, id, deploymentInfo{
+		QueuedAt: now,
+	}, source)
 }
 
 // historyBytes returns cached on-disk deployment history size, counting shared artifacts once.
@@ -144,8 +146,8 @@ func (s *supervisor) historyBytes(a *app) int64 {
 	a.history.mu.Lock()
 	if !a.history.at.IsZero() && now.Sub(a.history.at) < diskUsageInterval {
 		bytes := a.history.bytes
-		a.history.mu.Unlock()
 
+		a.history.mu.Unlock()
 		return bytes
 	}
 	a.history.mu.Unlock()
@@ -154,12 +156,12 @@ func (s *supervisor) historyBytes(a *app) int64 {
 	if err != nil {
 		log.Printf("app %s: deployment history usage: %v", a.name, err)
 	}
-
 	a.history.mu.Lock()
+
 	a.history.bytes = bytes
 	a.history.at = now
-	a.history.mu.Unlock()
 
+	a.history.mu.Unlock()
 	return bytes
 }
 
@@ -167,7 +169,9 @@ func (s *supervisor) historyBytes(a *app) int64 {
 func (s *supervisor) resetHistoryUsage(name string) {
 	if a := s.lookup(name); a != nil {
 		a.history.mu.Lock()
+
 		a.history.at = time.Time{}
+
 		a.history.mu.Unlock()
 	}
 }
@@ -181,7 +185,6 @@ func (s *supervisor) recordDeployment(name, dir string) {
 	if _, err := s.deployments.record(name, dir); err != nil {
 		log.Printf("deploy history %s: %v", name, err)
 	}
-
 	s.resetHistoryUsage(name)
 }
 
@@ -192,9 +195,9 @@ func (s *supervisor) recordDeploymentFailure(name, digest string, cause error) {
 	}
 
 	message := s.redactAppText(name, cause.Error())
+
 	if _, err := s.deployments.recordFailure(name, digest, message); err != nil {
 		log.Printf("deploy history %s: %v", name, err)
 	}
-
 	s.resetHistoryUsage(name)
 }

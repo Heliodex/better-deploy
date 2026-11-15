@@ -19,43 +19,123 @@ import (
 	"time"
 )
 
-const (
-	defaultRequestTimeout = 10 * time.Second
-	metadataTTL = 10 * time.Minute
-	clockSkew = 60 * time.Second
+type (
+	// Config describes one OAuth client. HTTPClient must be a wasi:http client in a component; tests can pass a normal client.
+	Config struct {
+		Issuer, ClientID, ClientSecret string
+		Scopes []string
+		HTTPClient *http.Client
+		Timeout time.Duration
+	}
+
+	// Identity is the user information from an ID token or UserInfo response.
+	Identity struct {
+		Subject, Name, Email, Username, Picture, Zoneinfo, Issuer string
+		Audience []string
+		ExpiresAt, IssuedAt time.Time
+	}
+
+	// Provider is the subset of the discovery document the client uses.
+	Provider struct {
+		Issuer string `json:"issuer"`
+		// AuthorisationEndpoint keeps the protocol's US-spelled JSON key.
+		AuthorisationEndpoint string `json:"authorization_endpoint"`
+		TokenEndpoint string `json:"token_endpoint"`
+		UserinfoEndpoint string `json:"userinfo_endpoint"`
+		EndSessionEndpoint string `json:"end_session_endpoint"`
+		JWKSUri string `json:"jwks_uri"`
+	}
+
+	// Client caches discovery metadata and signing keys between requests.
+	Client struct {
+		cfg Config
+		httpClient *http.Client
+		mu sync.Mutex
+		provider Provider
+		providerExpiry time.Time
+		keysMu sync.Mutex
+		keys map[string]*rsa.PublicKey
+		keysExpiry time.Time
+	}
+
+	// Tokens is the token endpoint response.
+	Tokens struct {
+		AccessToken, RefreshToken, IDToken, TokenType, Scope string
+		ExpiresIn int64
+		Error, ErrorDescription string
+	}
+
+	// cancelOnClose releases the request deadline when the body is closed.
+	cancelOnClose struct {
+		io.ReadCloser
+		cancel context.CancelFunc
+	}
+
+	// claims is the common claim set from an ID token or UserInfo response.
+	claims struct {
+		Issuer string `json:"iss"`
+		Audience any `json:"aud"`
+		Expires int64 `json:"exp"`
+		Issued int64 `json:"iat"`
+		Nonce string `json:"nonce"`
+		Subject string `json:"sub"`
+		Name string `json:"name"`
+		Email string `json:"email"`
+		PreferredUsername string `json:"preferred_username"`
+		Picture string `json:"picture"`
+		Zoneinfo string `json:"zoneinfo"`
+	}
 )
 
-// Config describes one OAuth client. HTTPClient must be a wasi:http client in a component; tests can pass a normal client.
-type Config struct {
-	Issuer, ClientID, ClientSecret string
-	Scopes []string
-	HTTPClient *http.Client
-	Timeout time.Duration
+const (
+	clockSkew = 60 * time.Second
+	defaultRequestTimeout = 10 * time.Second
+	metadataTTL = 10 * time.Minute
+)
+
+// Config returns a copy of the client configuration.
+func (c *Client) Config() Config {
+	cfg := c.cfg
+	cfg.Scopes = append([]string(nil), c.cfg.Scopes...)
+
+	return cfg
 }
 
-// Provider is the subset of the discovery document the client uses.
-type Provider struct {
-	Issuer string `json:"issuer"`
-	// AuthorisationEndpoint keeps the protocol's US-spelled JSON key.
-	AuthorisationEndpoint string `json:"authorization_endpoint"`
-	TokenEndpoint string `json:"token_endpoint"`
-	UserinfoEndpoint string `json:"userinfo_endpoint"`
-	EndSessionEndpoint string `json:"end_session_endpoint"`
-	JWKSUri string `json:"jwks_uri"`
+// requestAuth is request with optional HTTP Basic client authentication.
+func (c *Client) requestAuth(ctx context.Context, method, target string, body io.Reader, contentType, username, password string) (*http.Response, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.cfg.Timeout)
+	req, err := http.NewRequestWithContext(ctx, method, target, body)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "wt-oauth/1")
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+
+	if username != "" {
+		req.SetBasicAuth(username, password)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+
+	resp.Body = cancelOnClose{
+		ReadCloser: resp.Body,
+		cancel: cancel,
+	}
+
+	return resp, nil
 }
 
-// Tokens is the token endpoint response.
-type Tokens struct {
-	AccessToken, RefreshToken, IDToken, TokenType, Scope string
-	ExpiresIn int64
-	Error, ErrorDescription string
-}
-
-// Identity is the user information from an ID token or UserInfo response.
-type Identity struct {
-	Subject, Name, Email, Username, Picture, Zoneinfo, Issuer string
-	Audience []string
-	ExpiresAt, IssuedAt time.Time
+// request runs one back-channel request with the configured timeout.
+func (c *Client) request(ctx context.Context, method, target string, body io.Reader, contentType string) (*http.Response, error) {
+	return c.requestAuth(ctx, method, target, body, contentType, "", "")
 }
 
 // Merge fills missing profile fields from a UserInfo response. A different subject is an error.
@@ -99,96 +179,6 @@ func (i *Identity) Merge(other Identity) error {
 	return nil
 }
 
-// claims is the common claim set from an ID token or UserInfo response.
-type claims struct {
-	Issuer string `json:"iss"`
-	Audience any `json:"aud"`
-	Expires int64 `json:"exp"`
-	Issued int64 `json:"iat"`
-	Nonce string `json:"nonce"`
-	Subject string `json:"sub"`
-	Name string `json:"name"`
-	Email string `json:"email"`
-	PreferredUsername string `json:"preferred_username"`
-	Picture string `json:"picture"`
-	Zoneinfo string `json:"zoneinfo"`
-}
-
-// identity converts claims into the shared profile shape and fills the username from the email when needed.
-func (c claims) identity() Identity {
-	username := strings.TrimSpace(c.PreferredUsername)
-	if username == "" {
-		username = strings.TrimSpace(c.Email)
-		if local, _, ok := strings.Cut(username, "@"); ok {
-			username = local
-		}
-	}
-
-	name := strings.TrimSpace(c.Name)
-	if name == "" {
-		name = username
-	}
-
-	identity := Identity{
-		Subject: strings.TrimSpace(c.Subject),
-		Name: name,
-		Email: strings.TrimSpace(c.Email),
-		Username: username,
-		Picture: strings.TrimSpace(c.Picture),
-		Zoneinfo: strings.TrimSpace(c.Zoneinfo),
-		Issuer: strings.TrimSpace(c.Issuer),
-		Audience: audienceStrings(c.Audience),
-		ExpiresAt: unixTime(c.Expires),
-		IssuedAt: unixTime(c.Issued),
-	}
-
-	return identity
-}
-
-// audienceStrings normalises an aud claim, which may be one string or an array.
-func audienceStrings(value any) []string {
-	switch typed := value.(type) {
-	case string:
-		return []string{typed}
-	case []string:
-		return append([]string(nil), typed...)
-	case []any:
-		out := make([]string, 0, len(typed))
-		for _, item := range typed {
-			if name, ok := item.(string); ok {
-				out = append(out, name)
-			}
-		}
-
-		return out
-	}
-
-	return nil
-}
-
-// unixTime converts a numeric claim to a time, leaving the zero value for 0.
-func unixTime(seconds int64) time.Time {
-	if seconds == 0 {
-		return time.Time{}
-	}
-
-	return time.Unix(seconds, 0).UTC()
-}
-
-// Client caches discovery metadata and signing keys between requests.
-type Client struct {
-	cfg Config
-	httpClient *http.Client
-
-	mu sync.Mutex
-	provider Provider
-	providerExpiry time.Time
-
-	keysMu sync.Mutex
-	keys map[string]*rsa.PublicKey
-	keysExpiry time.Time
-}
-
 // New validates a config and returns a client.
 func New(cfg Config) (*Client, error) {
 	cfg.Issuer = strings.TrimRight(strings.TrimSpace(cfg.Issuer), "/")
@@ -208,7 +198,9 @@ func New(cfg Config) (*Client, error) {
 	}
 
 	cfg.Scopes = append([]string(nil), cfg.Scopes...)
+
 	slices.Sort(cfg.Scopes)
+
 	cfg.Scopes = slices.Compact(cfg.Scopes)
 
 	if cfg.HTTPClient == nil {
@@ -219,20 +211,27 @@ func New(cfg Config) (*Client, error) {
 		cfg.Timeout = defaultRequestTimeout
 	}
 
-	return &Client{cfg: cfg, httpClient: cfg.HTTPClient}, nil
+	return &Client{
+		cfg: cfg,
+		httpClient: cfg.HTTPClient,
+	}, nil
 }
 
-// Config returns a copy of the client configuration.
-func (c *Client) Config() Config {
-	cfg := c.cfg
-	cfg.Scopes = append([]string(nil), c.cfg.Scopes...)
+// NewNonce returns a random state or nonce value.
+func NewNonce() (string, error) {
+	buf := make([]byte, 32)
 
-	return cfg
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+
+	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
 // NewPKCE returns a verifier and its S256 challenge.
 func NewPKCE() (verifier, challenge string, err error) {
 	buf := make([]byte, 32)
+
 	if _, err := rand.Read(buf); err != nil {
 		return "", "", err
 	}
@@ -243,66 +242,32 @@ func NewPKCE() (verifier, challenge string, err error) {
 	return verifier, base64.RawURLEncoding.EncodeToString(sum[:]), nil
 }
 
-// NewNonce returns a random state or nonce value.
-func NewNonce() (string, error) {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
+// audienceStrings normalises an aud claim, which may be one string or an array.
+func audienceStrings(value any) []string {
+	switch typed := value.(type) {
+	case []any:
+		out := make([]string, 0, len(typed))
+
+		for _, item := range typed {
+			if name, ok := item.(string); ok {
+				out = append(out, name)
+			}
+		}
+
+		return out
+	case []string:
+		return append([]string(nil), typed...)
+	case string:
+		return []string{typed}
 	}
 
-	return base64.RawURLEncoding.EncodeToString(buf), nil
-}
-
-// request runs one back-channel request with the configured timeout.
-func (c *Client) request(ctx context.Context, method, target string, body io.Reader, contentType string) (*http.Response, error) {
-	return c.requestAuth(ctx, method, target, body, contentType, "", "")
-}
-
-// requestAuth is request with optional HTTP Basic client authentication.
-func (c *Client) requestAuth(ctx context.Context, method, target string, body io.Reader, contentType, username, password string) (*http.Response, error) {
-	ctx, cancel := context.WithTimeout(ctx, c.cfg.Timeout)
-
-	req, err := http.NewRequestWithContext(ctx, method, target, body)
-	if err != nil {
-		cancel()
-
-		return nil, err
-	}
-
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "wt-oauth/1")
-
-	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
-	}
-
-	if username != "" {
-		req.SetBasicAuth(username, password)
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		cancel()
-
-		return nil, err
-	}
-
-	resp.Body = cancelOnClose{ReadCloser: resp.Body, cancel: cancel}
-
-	return resp, nil
-}
-
-// cancelOnClose releases the request deadline when the body is closed.
-type cancelOnClose struct {
-	io.ReadCloser
-
-	cancel context.CancelFunc
+	return nil
 }
 
 func (c cancelOnClose) Close() error {
 	err := c.ReadCloser.Close()
-	c.cancel()
 
+	c.cancel()
 	return err
 }
 
@@ -344,8 +309,8 @@ func (c *Client) Discover(ctx context.Context) (Provider, error) {
 	c.mu.Lock()
 	if c.provider.AuthorisationEndpoint != "" && time.Now().Before(c.providerExpiry) {
 		provider := c.provider
-		c.mu.Unlock()
 
+		c.mu.Unlock()
 		return provider, nil
 	}
 	c.mu.Unlock()
@@ -360,6 +325,7 @@ func (c *Client) Discover(ctx context.Context) (Provider, error) {
 	}
 
 	var provider Provider
+
 	if err := decodeJSON(resp, &provider); err != nil {
 		return Provider{}, err
 	}
@@ -371,12 +337,12 @@ func (c *Client) Discover(ctx context.Context) (Provider, error) {
 	if provider.AuthorisationEndpoint == "" || provider.TokenEndpoint == "" {
 		return Provider{}, errors.New("discovery document is missing an authorisation or token endpoint")
 	}
-
 	c.mu.Lock()
+
 	c.provider = provider
 	c.providerExpiry = time.Now().Add(metadataTTL)
-	c.mu.Unlock()
 
+	c.mu.Unlock()
 	return provider, nil
 }
 
@@ -401,6 +367,32 @@ func (c *Client) AuthoriseURL(ctx context.Context, redirectURI, state, nonce, co
 	return provider.AuthorisationEndpoint + "?" + params.Encode(), nil
 }
 
+// EndSessionURL returns the provider's RP-initiated logout URL.
+func (c *Client) EndSessionURL(ctx context.Context, idToken, postLogoutRedirectURI string) (string, error) {
+	provider, err := c.Discover(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	if provider.EndSessionEndpoint == "" {
+		return "", errors.New("provider has no end-session endpoint")
+	}
+
+	params := url.Values{
+		"client_id": {c.cfg.ClientID},
+	}
+
+	if idToken != "" {
+		params.Set("id_token_hint", idToken)
+	}
+
+	if postLogoutRedirectURI != "" {
+		params.Set("post_logout_redirect_uri", postLogoutRedirectURI)
+	}
+
+	return provider.EndSessionEndpoint + "?" + params.Encode(), nil
+}
+
 // Exchange redeems an authorisation code for tokens.
 func (c *Client) Exchange(ctx context.Context, code, redirectURI, verifier string) (Tokens, error) {
 	provider, err := c.Discover(ctx)
@@ -415,8 +407,8 @@ func (c *Client) Exchange(ctx context.Context, code, redirectURI, verifier strin
 		"grant_type": {"authorization_code"},
 		"redirect_uri": {redirectURI},
 	}
-
 	username, password := "", ""
+
 	if c.cfg.ClientSecret != "" {
 		username, password = c.cfg.ClientID, c.cfg.ClientSecret
 	}
@@ -440,6 +432,7 @@ func (c *Client) Exchange(ctx context.Context, code, redirectURI, verifier strin
 		Error string `json:"error"`
 		ErrorDescription string `json:"error_description"`
 	}
+
 	if err := decodeJSON(resp, &raw); err != nil {
 		return Tokens{}, err
 	}
@@ -464,6 +457,47 @@ func (c *Client) Exchange(ctx context.Context, code, redirectURI, verifier strin
 	}, nil
 }
 
+// unixTime converts a numeric claim to a time, leaving the zero value for 0.
+func unixTime(seconds int64) time.Time {
+	if seconds == 0 {
+		return time.Time{}
+	}
+
+	return time.Unix(seconds, 0).UTC()
+}
+
+// identity converts claims into the shared profile shape and fills the username from the email when needed.
+func (c claims) identity() Identity {
+	username := strings.TrimSpace(c.PreferredUsername)
+	if username == "" {
+		username = strings.TrimSpace(c.Email)
+
+		if local, _, ok := strings.Cut(username, "@"); ok {
+			username = local
+		}
+	}
+
+	name := strings.TrimSpace(c.Name)
+	if name == "" {
+		name = username
+	}
+
+	identity := Identity{
+		Subject: strings.TrimSpace(c.Subject),
+		Name: name,
+		Email: strings.TrimSpace(c.Email),
+		Username: username,
+		Picture: strings.TrimSpace(c.Picture),
+		Zoneinfo: strings.TrimSpace(c.Zoneinfo),
+		Issuer: strings.TrimSpace(c.Issuer),
+		Audience: audienceStrings(c.Audience),
+		ExpiresAt: unixTime(c.Expires),
+		IssuedAt: unixTime(c.Issued),
+	}
+
+	return identity
+}
+
 // Userinfo calls the protected UserInfo endpoint with the access token.
 func (c *Client) Userinfo(ctx context.Context, accessToken string) (Identity, error) {
 	provider, err := c.Discover(ctx)
@@ -476,13 +510,13 @@ func (c *Client) Userinfo(ctx context.Context, accessToken string) (Identity, er
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, c.cfg.Timeout)
+
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, provider.UserinfoEndpoint, nil)
 	if err != nil {
 		return Identity{}, err
 	}
-
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("User-Agent", "wt-oauth/1")
@@ -497,32 +531,10 @@ func (c *Client) Userinfo(ctx context.Context, accessToken string) (Identity, er
 	}
 
 	var claims claims
+
 	if err := decodeJSON(resp, &claims); err != nil {
 		return Identity{}, err
 	}
 
 	return claims.identity(), nil
-}
-
-// EndSessionURL returns the provider's RP-initiated logout URL.
-func (c *Client) EndSessionURL(ctx context.Context, idToken, postLogoutRedirectURI string) (string, error) {
-	provider, err := c.Discover(ctx)
-	if err != nil {
-		return "", err
-	}
-
-	if provider.EndSessionEndpoint == "" {
-		return "", errors.New("provider has no end-session endpoint")
-	}
-
-	params := url.Values{"client_id": {c.cfg.ClientID}}
-	if idToken != "" {
-		params.Set("id_token_hint", idToken)
-	}
-
-	if postLogoutRedirectURI != "" {
-		params.Set("post_logout_redirect_uri", postLogoutRedirectURI)
-	}
-
-	return provider.EndSessionEndpoint + "?" + params.Encode(), nil
 }

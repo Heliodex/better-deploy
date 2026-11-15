@@ -5,9 +5,7 @@ import "fmt"
 // runContract regenerates or checks the app's JSON Schema and Go contract from the Valibot registries.
 func runContract(args []string) error {
 	flags := newFlagSet("contract")
-
 	dir := flags.String("dir", ".", "app directory containing app.json")
-
 	check := flags.Bool("check", false, "verify the generated files without writing them")
 	compat := flags.Bool("compat", false, "report breaking schema changes against the contract source at a git ref without writing them")
 	compatRef := flags.String("compat-ref", "HEAD", "git ref the compat check compares against")
@@ -34,7 +32,6 @@ func runContract(args []string) error {
 		if err := checkContract(*dir, webDirName(m), m.Name); err != nil {
 			return err
 		}
-
 		fmt.Println("contract: up to date")
 	}
 
@@ -49,8 +46,6 @@ func runContract(args []string) error {
 	if err := generateContract(*dir, webDirName(m), m.Name); err != nil {
 		return err
 	}
-
 	fmt.Println("contract: generated")
-
 	return nil
 }

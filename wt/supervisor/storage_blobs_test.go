@@ -11,16 +11,17 @@ import (
 
 func TestStorageBlobDelete(t *testing.T) {
 	s, _ := testBlobSupervisor(t)
-	storage := &storageServer{blobs: s.blobs}
-
+	storage := &storageServer{
+		blobs: s.blobs,
+	}
 	info, _, err := s.blobs.store("demo", "text/plain", strings.NewReader("hello"), 16)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	rec := httptest.NewRecorder()
-	storage.storageRoutes().serve(rec, httptest.NewRequest(http.MethodDelete, "/v1/blobs/"+info.Digest, nil), "demo")
 
+	storage.storageRoutes().serve(rec, httptest.NewRequest(http.MethodDelete, "/v1/blobs/"+info.Digest, nil), "demo")
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("delete = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -30,8 +31,8 @@ func TestStorageBlobDelete(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	storage.storageRoutes().serve(rec, httptest.NewRequest(http.MethodDelete, "/v1/blobs/"+info.Digest, nil), "demo")
 
+	storage.storageRoutes().serve(rec, httptest.NewRequest(http.MethodDelete, "/v1/blobs/"+info.Digest, nil), "demo")
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("second delete = %d, want 404", rec.Code)
 	}

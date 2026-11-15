@@ -13,6 +13,16 @@ import (
 	"time"
 )
 
+// Signer computes and verifies timestamped webhook signatures.
+//
+// The signed value is timestamp + "." + deliveryID + "." + body, where timestamp is Unix seconds.
+// Callers that need replay protection must store delivery IDs and reject duplicates.
+type Signer struct {
+	Secret []byte
+	Window time.Duration
+	Now func() time.Time
+}
+
 // DefaultWindow is the accepted clock skew for a timestamped signature.
 const DefaultWindow = 5 * time.Minute
 
@@ -25,21 +35,20 @@ var (
 	ErrBadSignature = errors.New("sign: signature does not match")
 )
 
-// Signer computes and verifies timestamped webhook signatures.
-//
-// The signed value is timestamp + "." + deliveryID + "." + body, where timestamp is Unix seconds.
-// Callers that need replay protection must store delivery IDs and reject duplicates.
-type Signer struct {
-	Secret []byte
-	Window time.Duration
-	Now func() time.Time
-}
+// SignFields signs each part with an 8-byte big-endian length prefix, so different splits of the same bytes produce different signatures.
+func (s Signer) SignFields(parts ...[]byte) string {
+	mac := hmac.New(sha256.New, s.Secret)
 
-// Sign signs body for deliveryID and returns the timestamp and lowercase hex signature.
-func (s Signer) Sign(deliveryID string, body []byte) (timestamp, signature string) {
-	timestamp = strconv.FormatInt(s.now().Unix(), 10)
+	for _, part := range parts {
+		var length [8]byte
 
-	return timestamp, s.SignMessage(timestamp, deliveryID, body)
+		binary.BigEndian.PutUint64(length[:], uint64(len(part)))
+
+		_, _ = mac.Write(length[:])
+		_, _ = mac.Write(part)
+	}
+
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 // SignMessage signs an explicit timestamp and delivery ID, which is useful for tests and replays.
@@ -54,51 +63,13 @@ func (s Signer) SignMessage(timestamp, deliveryID string, body []byte) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-// Verify checks a timestamped signature and its clock window.
-func (s Signer) Verify(timestamp, deliveryID, signature string, body []byte) error {
-	stamp := strings.TrimSpace(timestamp)
-
-	seconds, err := strconv.ParseInt(stamp, 10, 64)
-	if err != nil || seconds < 0 {
-		return ErrInvalidTimestamp
-	}
-
-	now := s.now()
-	if skew := now.Sub(time.Unix(seconds, 0)); skew > s.window() || skew < -s.window() {
-		return ErrStaleTimestamp
-	}
-
-	if !s.VerifyMessage(stamp, deliveryID, signature, body) {
-		return ErrBadSignature
-	}
-
-	return nil
-}
-
-// VerifyMessage checks a signature over an explicit timestamp and delivery ID.
-func (s Signer) VerifyMessage(timestamp, deliveryID, signature string, body []byte) bool {
-	expected, err := hex.DecodeString(s.SignMessage(timestamp, deliveryID, body))
-	if err != nil {
-		return false
-	}
-
-	actual, err := hex.DecodeString(strings.TrimSpace(signature))
-	if err != nil {
-		return false
-	}
-
-	return hmac.Equal(expected, actual)
-}
-
-// SignFields signs each part with an 8-byte big-endian length prefix, so different splits of the same bytes produce different signatures.
-func (s Signer) SignFields(parts ...[]byte) string {
+// SignParts signs concatenated parts without separators.
+//
+// Deprecated: the parts are concatenated with no boundaries, so different splits of the same bytes share a signature. Use SignFields, and keep this only for clients that already send the concatenated form.
+func (s Signer) SignParts(parts ...[]byte) string {
 	mac := hmac.New(sha256.New, s.Secret)
 
 	for _, part := range parts {
-		var length [8]byte
-
-		binary.BigEndian.PutUint64(length[:], uint64(len(part)))
-		_, _ = mac.Write(length[:])
 		_, _ = mac.Write(part)
 	}
 
@@ -120,16 +91,19 @@ func (s Signer) VerifyFields(signature string, parts ...[]byte) bool {
 	return hmac.Equal(expected, actual)
 }
 
-// SignParts signs concatenated parts without separators.
-//
-// Deprecated: the parts are concatenated with no boundaries, so different splits of the same bytes share a signature. Use SignFields, and keep this only for clients that already send the concatenated form.
-func (s Signer) SignParts(parts ...[]byte) string {
-	mac := hmac.New(sha256.New, s.Secret)
-	for _, part := range parts {
-		_, _ = mac.Write(part)
+// VerifyMessage checks a signature over an explicit timestamp and delivery ID.
+func (s Signer) VerifyMessage(timestamp, deliveryID, signature string, body []byte) bool {
+	expected, err := hex.DecodeString(s.SignMessage(timestamp, deliveryID, body))
+	if err != nil {
+		return false
 	}
 
-	return hex.EncodeToString(mac.Sum(nil))
+	actual, err := hex.DecodeString(strings.TrimSpace(signature))
+	if err != nil {
+		return false
+	}
+
+	return hmac.Equal(expected, actual)
 }
 
 // VerifyParts checks a signature over concatenated parts.
@@ -158,6 +132,13 @@ func (s Signer) now() time.Time {
 	return time.Now().UTC()
 }
 
+// Sign signs body for deliveryID and returns the timestamp and lowercase hex signature.
+func (s Signer) Sign(deliveryID string, body []byte) (timestamp, signature string) {
+	timestamp = strconv.FormatInt(s.now().Unix(), 10)
+
+	return timestamp, s.SignMessage(timestamp, deliveryID, body)
+}
+
 // window returns the configured window, or DefaultWindow when it is unset.
 func (s Signer) window() time.Duration {
 	if s.Window > 0 {
@@ -165,4 +146,25 @@ func (s Signer) window() time.Duration {
 	}
 
 	return DefaultWindow
+}
+
+// Verify checks a timestamped signature and its clock window.
+func (s Signer) Verify(timestamp, deliveryID, signature string, body []byte) error {
+	stamp := strings.TrimSpace(timestamp)
+	seconds, err := strconv.ParseInt(stamp, 10, 64)
+	if err != nil || seconds < 0 {
+		return ErrInvalidTimestamp
+	}
+
+	now := s.now()
+
+	if skew := now.Sub(time.Unix(seconds, 0)); skew > s.window() || skew < -s.window() {
+		return ErrStaleTimestamp
+	}
+
+	if !s.VerifyMessage(stamp, deliveryID, signature, body) {
+		return ErrBadSignature
+	}
+
+	return nil
 }

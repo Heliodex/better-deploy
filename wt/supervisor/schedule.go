@@ -23,6 +23,63 @@ type scheduleRun struct {
 	NextRun time.Time `json:"nextRun,omitzero"`
 }
 
+// recordScheduleRun stores an entry's latest call, carrying the failure streak forward.
+func (a *app) recordScheduleRun(run scheduleRun, failed bool) {
+	a.mu.Lock()
+
+	defer a.mu.Unlock()
+
+	if a.scheduleRuns == nil {
+		a.scheduleRuns = map[string]scheduleRun{}
+	}
+
+	if failed {
+		run.Failures = a.scheduleRuns[run.Name].Failures + 1
+	}
+
+	a.scheduleRuns[run.Name] = run
+}
+
+// callSchedule makes one scheduled call and describes its outcome. Only a cancelled context returns ok false.
+func callSchedule(ctx context.Context, client *http.Client, method, target, label string) (run scheduleRun, failed, ok bool) {
+	run = scheduleRun{
+		Name: label,
+		LastRun: time.Now().UTC(),
+	}
+	request, err := http.NewRequestWithContext(ctx, method, target, nil)
+	if err != nil {
+		run.Error = err.Error()
+
+		return run, true, true
+	}
+	request.Header.Set(scheduleHeader, label)
+
+	response, err := client.Do(request)
+	run.Duration = time.Since(run.LastRun).Round(time.Millisecond).String()
+
+	if err != nil {
+		if ctx.Err() != nil {
+			return run, false, false
+		}
+
+		run.Error = err.Error()
+
+		return run, true, true
+	}
+
+	_, _ = io.Copy(io.Discard, response.Body)
+	_ = response.Body.Close()
+	run.Status = response.StatusCode
+
+	if response.StatusCode >= http.StatusBadRequest {
+		run.Error = response.Status
+
+		return run, true, true
+	}
+
+	return run, false, true
+}
+
 // scheduleLabels names each entry: its name, or its method and path. Repeated default labels get a #n suffix, so every entry keeps its own status.
 func scheduleLabels(entries []scheduleConfig) []string {
 	labels := make([]string, len(entries))
@@ -40,6 +97,7 @@ func scheduleLabels(entries []scheduleConfig) []string {
 		}
 
 		seen[label]++
+
 		if seen[label] > 1 {
 			label += "#" + strconv.Itoa(seen[label])
 		}
@@ -62,7 +120,9 @@ func (a *app) scheduleRunsLocked() []scheduleRun {
 	for i, label := range labels {
 		run, ok := a.scheduleRuns[label]
 		if !ok {
-			run = scheduleRun{Name: label}
+			run = scheduleRun{
+				Name: label,
+			}
 		}
 
 		run.Every = a.cfg.Schedule[i].Every
@@ -70,59 +130,6 @@ func (a *app) scheduleRunsLocked() []scheduleRun {
 	}
 
 	return runs
-}
-
-// recordScheduleRun stores an entry's latest call, carrying the failure streak forward.
-func (a *app) recordScheduleRun(run scheduleRun, failed bool) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	if a.scheduleRuns == nil {
-		a.scheduleRuns = map[string]scheduleRun{}
-	}
-
-	if failed {
-		run.Failures = a.scheduleRuns[run.Name].Failures + 1
-	}
-
-	a.scheduleRuns[run.Name] = run
-}
-
-// callSchedule makes one scheduled call and describes its outcome. Only a cancelled context returns ok false.
-func callSchedule(ctx context.Context, client *http.Client, method, target, label string) (run scheduleRun, failed, ok bool) {
-	run = scheduleRun{Name: label, LastRun: time.Now().UTC()}
-
-	request, err := http.NewRequestWithContext(ctx, method, target, nil)
-	if err != nil {
-		run.Error = err.Error()
-		return run, true, true
-	}
-
-	request.Header.Set(scheduleHeader, label)
-
-	response, err := client.Do(request)
-	run.Duration = time.Since(run.LastRun).Round(time.Millisecond).String()
-
-	if err != nil {
-		if ctx.Err() != nil {
-			return run, false, false
-		}
-
-		run.Error = err.Error()
-
-		return run, true, true
-	}
-
-	_, _ = io.Copy(io.Discard, response.Body)
-	_ = response.Body.Close()
-
-	run.Status = response.StatusCode
-	if response.StatusCode >= http.StatusBadRequest {
-		run.Error = response.Status
-		return run, true, true
-	}
-
-	return run, false, true
 }
 
 // runSchedule calls one endpoint on its interval. Calls are sequential, so a slow endpoint delays the next tick instead of letting requests pile up.
@@ -145,14 +152,18 @@ func (s *supervisor) runSchedule(ctx context.Context, a *app, entry scheduleConf
 		method = defaultScheduleMethod
 	}
 
-	client := &http.Client{Timeout: timeout}
+	client := &http.Client{
+		Timeout: timeout,
+	}
 	target := fmt.Sprintf("http://127.0.0.1:%d%s", a.port, entry.Path)
-
 	ticker := time.NewTicker(every)
+
 	defer ticker.Stop()
 
-	a.recordScheduleRun(scheduleRun{Name: label, NextRun: time.Now().Add(every).UTC()}, false)
-
+	a.recordScheduleRun(scheduleRun{
+		Name: label,
+		NextRun: time.Now().Add(every).UTC(),
+	}, false)
 	for {
 		select {
 		case <-ctx.Done():
@@ -170,32 +181,21 @@ func (s *supervisor) runSchedule(ctx context.Context, a *app, entry scheduleConf
 		}
 
 		run.NextRun = time.Now().Add(every).UTC()
-		a.recordScheduleRun(run, failed)
 
+		a.recordScheduleRun(run, failed)
 		if failed {
 			log.Printf("app %s: schedule %s: %s", a.name, label, run.Error)
 		}
 	}
 }
 
-// stopSchedule cancels the app's scheduled calls, if any.
-func (s *supervisor) stopSchedule(a *app) {
-	a.mu.Lock()
-	cancel := a.scheduleCancel
-	a.scheduleCancel = nil
-	a.mu.Unlock()
-
-	if cancel != nil {
-		cancel()
-	}
-}
-
 // startSchedule launches one goroutine per scheduled endpoint. It runs once the app is serving, and is cancelled when the app stops or is replaced.
 func (s *supervisor) startSchedule(a *app) {
 	a.mu.Lock()
-	entries := append([]scheduleConfig(nil), a.cfg.Schedule...)
-	a.mu.Unlock()
 
+	entries := append([]scheduleConfig(nil), a.cfg.Schedule...)
+
+	a.mu.Unlock()
 	if len(entries) == 0 {
 		return
 	}
@@ -203,11 +203,25 @@ func (s *supervisor) startSchedule(a *app) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	a.mu.Lock()
+
 	a.scheduleCancel = cancel
 	a.scheduleRuns = map[string]scheduleRun{}
-	a.mu.Unlock()
 
+	a.mu.Unlock()
 	for i, label := range scheduleLabels(entries) {
 		go s.runSchedule(ctx, a, entries[i], label)
+	}
+}
+
+// stopSchedule cancels the app's scheduled calls, if any.
+func (s *supervisor) stopSchedule(a *app) {
+	a.mu.Lock()
+
+	cancel := a.scheduleCancel
+	a.scheduleCancel = nil
+
+	a.mu.Unlock()
+	if cancel != nil {
+		cancel()
 	}
 }

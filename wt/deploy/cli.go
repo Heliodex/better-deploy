@@ -10,13 +10,13 @@ import (
 	"time"
 )
 
-const defaultClientTimeout = 30 * time.Second
-
 type clientOptions struct {
 	host, token, profile, appDomain string
 	jsonOut bool
 	timeout time.Duration
 }
+
+const defaultClientTimeout = 30 * time.Second
 
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
@@ -39,7 +39,12 @@ func runApps(args []string) error {
 	}
 
 	if !cfg.jsonOut {
-		capClient := clientOptions{host: cfg.host, token: cfg.token, timeout: 5 * time.Second}
+		capClient := clientOptions{
+			host: cfg.host,
+			token: cfg.token,
+			timeout: 5 * time.Second,
+		}
+
 		if caps, err := fetchCapabilities(capClient); err == nil {
 			fmt.Fprintln(os.Stderr, caps.summary())
 		}
@@ -69,6 +74,7 @@ func runApps(args []string) error {
 		CPUPercent float64 `json:"cpuPercent"`
 		MemoryBytes int64 `json:"memoryBytes"`
 	}
+
 	if err := json.Unmarshal(body, &apps); err != nil {
 		return err
 	}
@@ -77,15 +83,12 @@ func runApps(args []string) error {
 		fmt.Println("no apps")
 		return nil
 	}
-
 	fmt.Printf("%-24s %-32s %-10s %-6s %-7s %s\n", "NAME", "HOST", "STATUS", "READY", "PID", "DIGEST")
-
 	for _, app := range apps {
 		digest := app.CurrentDigest
 		if len(digest) > shortHashLength {
 			digest = digest[:shortHashLength]
 		}
-
 		fmt.Printf("%-24s %-32s %-10s %-6v %-7d %s\n", app.Name, app.Host, app.Status, app.Ready, app.PID, digest)
 	}
 
@@ -102,13 +105,12 @@ func runRollback(args []string) error {
 		return errors.New("usage: wt rollback <app> <deployment-id> [--backup SNAPSHOT]")
 	}
 
-	backup := ""
+	var backup string
 
 	for index := 2; index < len(rest); index++ {
 		if rest[index] == "--backup" && index+1 < len(rest) {
 			index++
 			backup = rest[index]
-
 			continue
 		}
 
@@ -121,6 +123,7 @@ func runRollback(args []string) error {
 	}
 
 	path := "/apps/" + rest[0] + "/rollback/" + rest[1]
+
 	if backup != "" {
 		path += "?backup=" + backup
 	}
@@ -133,8 +136,6 @@ func runRollback(args []string) error {
 	if err := checkAPI(status, body); err != nil {
 		return err
 	}
-
 	printRawOrJSON(cfg, body)
-
 	return nil
 }

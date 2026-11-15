@@ -13,45 +13,45 @@ import (
 	"time"
 )
 
+type (
+	storageSessionCloseResponse struct {
+		Committed bool `json:"committed"`
+		RolledBack bool `json:"rolled_back"`
+	}
+
+	storageSessionResponse struct {
+		ID string `json:"id"`
+		ExpiresAt time.Time `json:"expiresAt"`
+	}
+
+	storageSessionWrite struct {
+		statement storageStatement
+		result storageResult
+		start, end int
+	}
+
+	// storageSession pins one connection and an open transaction across several requests, so apps can read, decide and write atomically.
+	storageSession struct {
+		id, app string
+		conn *sql.Conn
+		tx *sql.Tx
+		collector *rowChangeCollector
+		hook, authoriser bool
+		writes []storageSessionWrite
+		mu sync.Mutex
+		closed bool
+		expiresAt time.Time // protected by storageServer.sessionMu
+	}
+)
+
 var (
 	errSessionNotFound = errors.New("storage session not found")
 	errSessionClosed = errors.New("storage session is closed")
 )
 
-// storageSession pins one connection and an open transaction across several requests, so apps can read, decide and write atomically.
-type storageSession struct {
-	id, app string
-	conn *sql.Conn
-	tx *sql.Tx
-	collector *rowChangeCollector
-	hook bool
-	authoriser bool
-	writes []storageSessionWrite
-
-	mu sync.Mutex
-	closed bool
-	expiresAt time.Time // protected by storageServer.sessionMu
-}
-
-type storageSessionWrite struct {
-	statement storageStatement
-	result storageResult
-	start int
-	end int
-}
-
-type storageSessionResponse struct {
-	ID string `json:"id"`
-	ExpiresAt time.Time `json:"expiresAt"`
-}
-
-type storageSessionCloseResponse struct {
-	Committed bool `json:"committed"`
-	RolledBack bool `json:"rolled_back"`
-}
-
 func newSessionID() (string, error) {
 	var b [16]byte
+
 	if _, err := rand.Read(b[:]); err != nil {
 		return "", err
 	}
@@ -59,10 +59,94 @@ func newSessionID() (string, error) {
 	return hex.EncodeToString(b[:]), nil
 }
 
+// openSession opens one pinned write connection and starts its transaction.
+func (s *storageServer) openSession(ctx context.Context, w http.ResponseWriter, app string) (*storageSession, bool) {
+	db, err := s.dbFor(app)
+	if err != nil {
+		writeStorageError(w, fmt.Errorf("%w: %w", errStorageUnavailable, err))
+		return nil, false
+	}
+
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		writeStorageError(w, fmt.Errorf("%w: %w", errStorageUnavailable, err))
+		return nil, false
+	}
+
+	if err := configureStorageConn(ctx, conn); err != nil {
+		_ = conn.Close()
+
+		writeStorageError(w, fmt.Errorf("%w: %w", errStorageUnavailable, err))
+		return nil, false
+	}
+
+	collector := &rowChangeCollector{}
+	hook := true
+
+	if err := registerRowHook(conn, collector); err != nil {
+		log.Printf("storage %s: session pre-update hook: %v", app, err)
+
+		hook = false
+	}
+
+	tx, err := conn.BeginTx(context.Background(), nil)
+	if err != nil {
+		if hook {
+			_ = unregisterRowHook(conn)
+		}
+
+		_ = conn.Close()
+
+		writeStorageError(w, err)
+		return nil, false
+	}
+
+	if _, err := requireStorageAuthoriser(conn, false); err != nil {
+		_ = tx.Rollback()
+
+		if hook {
+			_ = unregisterRowHook(conn)
+		}
+
+		_ = conn.Close()
+
+		writeStorageError(w, err)
+		return nil, false
+	}
+
+	id, err := newSessionID()
+	if err != nil {
+		_ = unregisterStorageAuthoriser(conn)
+		_ = tx.Rollback()
+
+		if hook {
+			_ = unregisterRowHook(conn)
+		}
+
+		_ = conn.Close()
+
+		writeError(w, http.StatusInternalServerError, "create session id")
+		return nil, false
+	}
+
+	return &storageSession{
+		id: id,
+		app: app,
+		conn: conn,
+		tx: tx,
+		collector: collector,
+		hook: hook,
+		authoriser: true,
+		expiresAt: time.Now().Add(storageSessionLease),
+	}, true
+}
+
 // pauseSessions blocks new sessions while a database file is replaced, then closeSessionsForPaused rolls back the open ones.
 func (s *storageServer) pauseSessions() {
 	s.sessionMu.Lock()
+
 	s.sessionsPaused++
+
 	s.sessionMu.Unlock()
 }
 
@@ -71,141 +155,42 @@ func (s *storageServer) resumeSessions() {
 	s.sessionMu.Lock()
 
 	s.sessionsPaused--
+
 	if s.sessionsPaused <= 0 {
 		s.sessionsPaused = 0
+
 		s.sessionCond.Broadcast()
 	}
 	s.sessionMu.Unlock()
 }
 
-// closeSessionsForPaused rolls back and removes sessions, optionally limited to one app; new sessions must already be paused.
-func (s *storageServer) closeSessionsForPaused(app string) {
-	s.sessionMu.Lock()
+// changes builds change-log entries for the writes recorded during the session.
+func (session *storageSession) changes() []storageChange {
+	out := make([]storageChange, 0, len(session.writes))
 
-	var closing []*storageSession
-
-	for id, session := range s.sessions {
-		if app != "" && session.app != app {
-			continue
+	for _, write := range session.writes {
+		var rows []rowChange
+		if write.start <= write.end && write.end <= len(session.collector.rows) {
+			rows = session.collector.rows[write.start:write.end]
 		}
 
-		delete(s.sessions, id)
-
-		closing = append(closing, session)
-	}
-	s.sessionMu.Unlock()
-
-	for _, session := range closing {
-		_ = s.finishSession(context.Background(), session, false)
-	}
-}
-
-// closeSessionsFor pauses the session map, closes matching sessions and resumes.
-func (s *storageServer) closeSessionsFor(app string) {
-	s.pauseSessions()
-	defer s.resumeSessions()
-
-	s.closeSessionsForPaused(app)
-}
-
-// sessionLoop expires idle sessions once a second until shutdown.
-func (s *storageServer) sessionLoop() {
-	defer close(s.sessionDone)
-
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-s.sessionStop:
-			return
-		case now := <-ticker.C:
-			s.expireSessions(now)
-		}
-	}
-}
-
-// expireSessions rolls back sessions whose lease has elapsed.
-func (s *storageServer) expireSessions(now time.Time) {
-	s.sessionMu.Lock()
-
-	var expired []*storageSession
-
-	for id, session := range s.sessions {
-		if now.Before(session.expiresAt) {
-			continue
-		}
-
-		delete(s.sessions, id)
-
-		expired = append(expired, session)
-	}
-	s.sessionMu.Unlock()
-
-	for _, session := range expired {
-		_ = s.finishSession(context.Background(), session, false)
-	}
-}
-
-// withSession looks up a live session, renews its lease and holds its lock while fn runs.
-func (s *storageServer) withSession(id, app string, fn func(*storageSession) error) error {
-	now := time.Now()
-
-	s.sessionMu.Lock()
-
-	session := s.sessions[id]
-	if session == nil || session.app != app {
-		s.sessionMu.Unlock()
-		return errSessionNotFound
+		out = append(out, storageChange{
+			Time: time.Now().UTC(),
+			SQL: write.statement.SQL,
+			Params: write.statement.Params,
+			RowsAffected: write.result.RowsAffected,
+			Rows: rows,
+			RowsTruncated: session.collector.omitted > 0,
+		})
 	}
 
-	if !now.Before(session.expiresAt) {
-		delete(s.sessions, id)
-		s.sessionMu.Unlock()
-		_ = s.finishSession(context.Background(), session, false)
-
-		return errSessionNotFound
-	}
-
-	session.expiresAt = now.Add(storageSessionLease)
-	s.sessionMu.Unlock()
-
-	session.mu.Lock()
-	defer session.mu.Unlock()
-
-	if session.closed {
-		return errSessionClosed
-	}
-
-	return fn(session)
-}
-
-// closeSession removes and finishes a session, treating an expired lease as not found.
-func (s *storageServer) closeSession(ctx context.Context, id, app string, commit bool) error {
-	s.sessionMu.Lock()
-
-	session := s.sessions[id]
-	if session == nil || session.app != app {
-		s.sessionMu.Unlock()
-		return errSessionNotFound
-	}
-
-	expired := !time.Now().Before(session.expiresAt)
-
-	delete(s.sessions, id)
-	s.sessionMu.Unlock()
-
-	if expired {
-		_ = s.finishSession(context.Background(), session, false)
-		return errSessionNotFound
-	}
-
-	return s.finishSession(ctx, session, commit)
+	return out
 }
 
 // finishSession commits or rolls back the pinned transaction, logs committed writes and releases the connection.
 func (s *storageServer) finishSession(ctx context.Context, session *storageSession, commit bool) error {
 	session.mu.Lock()
+
 	defer session.mu.Unlock()
 
 	if session.closed {
@@ -247,26 +232,188 @@ func (s *storageServer) finishSession(ctx context.Context, session *storageSessi
 	return err
 }
 
-// changes builds change-log entries for the writes recorded during the session.
-func (session *storageSession) changes() []storageChange {
-	out := make([]storageChange, 0, len(session.writes))
-	for _, write := range session.writes {
-		var rows []rowChange
-		if write.start <= write.end && write.end <= len(session.collector.rows) {
-			rows = session.collector.rows[write.start:write.end]
-		}
+// closeSession removes and finishes a session, treating an expired lease as not found.
+func (s *storageServer) closeSession(ctx context.Context, id, app string, commit bool) error {
+	s.sessionMu.Lock()
 
-		out = append(out, storageChange{
-			Time: time.Now().UTC(),
-			SQL: write.statement.SQL,
-			Params: write.statement.Params,
-			RowsAffected: write.result.RowsAffected,
-			Rows: rows,
-			RowsTruncated: session.collector.omitted > 0,
-		})
+	session := s.sessions[id]
+	if session == nil || session.app != app {
+		s.sessionMu.Unlock()
+		return errSessionNotFound
 	}
 
-	return out
+	expired := !time.Now().Before(session.expiresAt)
+
+	delete(s.sessions, id)
+	s.sessionMu.Unlock()
+	if expired {
+		_ = s.finishSession(context.Background(), session, false)
+
+		return errSessionNotFound
+	}
+
+	return s.finishSession(ctx, session, commit)
+}
+
+// closeSessionsForPaused rolls back and removes sessions, optionally limited to one app; new sessions must already be paused.
+func (s *storageServer) closeSessionsForPaused(app string) {
+	s.sessionMu.Lock()
+
+	var closing []*storageSession
+
+	for id, session := range s.sessions {
+		if app != "" && session.app != app {
+			continue
+		}
+		delete(s.sessions, id)
+
+		closing = append(closing, session)
+	}
+	s.sessionMu.Unlock()
+	for _, session := range closing {
+		_ = s.finishSession(context.Background(), session, false)
+	}
+}
+
+// closeSessionsFor pauses the session map, closes matching sessions and resumes.
+func (s *storageServer) closeSessionsFor(app string) {
+	s.pauseSessions()
+
+	defer s.resumeSessions()
+
+	s.closeSessionsForPaused(app)
+}
+
+// expireSessions rolls back sessions whose lease has elapsed.
+func (s *storageServer) expireSessions(now time.Time) {
+	s.sessionMu.Lock()
+
+	var expired []*storageSession
+
+	for id, session := range s.sessions {
+		if now.Before(session.expiresAt) {
+			continue
+		}
+		delete(s.sessions, id)
+
+		expired = append(expired, session)
+	}
+	s.sessionMu.Unlock()
+	for _, session := range expired {
+		_ = s.finishSession(context.Background(), session, false)
+	}
+}
+
+// registerSession enforces the per-app lease limit and adds the session to the live map.
+func (s *storageServer) registerSession(w http.ResponseWriter, session *storageSession) bool {
+	s.sessionMu.Lock()
+	for s.sessionsPaused > 0 && !s.sessionClosed {
+		s.sessionCond.Wait()
+	}
+
+	if s.sessionClosed {
+		s.sessionMu.Unlock()
+
+		_ = s.finishSession(context.Background(), session, false)
+
+		writeError(w, http.StatusServiceUnavailable, "storage is shutting down")
+		return false
+	}
+
+	var appSessions int
+
+	for _, other := range s.sessions {
+		if other.app == session.app {
+			appSessions++
+		}
+	}
+
+	if !countBudget(maxStorageSessions).allows(int64(appSessions)) {
+		s.sessionMu.Unlock()
+
+		_ = s.finishSession(context.Background(), session, false)
+
+		writeError(w, http.StatusTooManyRequests, "too many storage sessions")
+		return false
+	}
+
+	s.sessions[session.id] = session
+
+	s.sessionMu.Unlock()
+	return true
+}
+
+// createSession opens and registers a new pinned transaction.
+func (s *storageServer) createSession(w http.ResponseWriter, r *http.Request, app string) {
+	ctx, cancel := context.WithTimeout(r.Context(), storageTimeout)
+
+	defer cancel()
+
+	session, ok := s.openSession(ctx, w, app)
+	if !ok {
+		return
+	}
+
+	if !s.registerSession(w, session) {
+		return
+	}
+	writeJSON(w, http.StatusOK, storageSessionResponse{
+		ID: session.id,
+		ExpiresAt: session.expiresAt,
+	})
+}
+
+// sessionLoop expires idle sessions once a second until shutdown.
+func (s *storageServer) sessionLoop() {
+	defer close(s.sessionDone)
+
+	ticker := time.NewTicker(time.Second)
+
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.sessionStop:
+			return
+		case now := <-ticker.C:
+			s.expireSessions(now)
+		}
+	}
+}
+
+// withSession looks up a live session, renews its lease and holds its lock while fn runs.
+func (s *storageServer) withSession(id, app string, fn func(*storageSession) error) error {
+	now := time.Now()
+
+	s.sessionMu.Lock()
+
+	session := s.sessions[id]
+	if session == nil || session.app != app {
+		s.sessionMu.Unlock()
+		return errSessionNotFound
+	}
+
+	if !now.Before(session.expiresAt) {
+		delete(s.sessions, id)
+		s.sessionMu.Unlock()
+
+		_ = s.finishSession(context.Background(), session, false)
+
+		return errSessionNotFound
+	}
+
+	session.expiresAt = now.Add(storageSessionLease)
+
+	s.sessionMu.Unlock()
+	session.mu.Lock()
+
+	defer session.mu.Unlock()
+
+	if session.closed {
+		return errSessionClosed
+	}
+
+	return fn(session)
 }
 
 // writeSessionError maps session errors to their HTTP statuses.
@@ -281,146 +428,76 @@ func writeSessionError(w http.ResponseWriter, err error) {
 	}
 }
 
-// openSession opens one pinned write connection and starts its transaction.
-func (s *storageServer) openSession(ctx context.Context, w http.ResponseWriter, app string) (*storageSession, bool) {
-	db, err := s.dbFor(app)
-	if err != nil {
-		writeStorageError(w, fmt.Errorf("%w: %w", errStorageUnavailable, err))
-		return nil, false
-	}
-
-	conn, err := db.Conn(ctx)
-	if err != nil {
-		writeStorageError(w, fmt.Errorf("%w: %w", errStorageUnavailable, err))
-		return nil, false
-	}
-
-	if err := configureStorageConn(ctx, conn); err != nil {
-		_ = conn.Close()
-
-		writeStorageError(w, fmt.Errorf("%w: %w", errStorageUnavailable, err))
-
-		return nil, false
-	}
-
-	collector := &rowChangeCollector{}
-	hook := true
-
-	if err := registerRowHook(conn, collector); err != nil {
-		log.Printf("storage %s: session pre-update hook: %v", app, err)
-
-		hook = false
-	}
-
-	tx, err := conn.BeginTx(context.Background(), nil)
-	if err != nil {
-		if hook {
-			_ = unregisterRowHook(conn)
-		}
-
-		_ = conn.Close()
-
-		writeStorageError(w, err)
-
-		return nil, false
-	}
-
-	if _, err := requireStorageAuthoriser(conn, false); err != nil {
-		_ = tx.Rollback()
-
-		if hook {
-			_ = unregisterRowHook(conn)
-		}
-
-		_ = conn.Close()
-
-		writeStorageError(w, err)
-
-		return nil, false
-	}
-
-	id, err := newSessionID()
-	if err != nil {
-		_ = unregisterStorageAuthoriser(conn)
-		_ = tx.Rollback()
-
-		if hook {
-			_ = unregisterRowHook(conn)
-		}
-
-		_ = conn.Close()
-
-		writeError(w, http.StatusInternalServerError, "create session id")
-
-		return nil, false
-	}
-
-	return &storageSession{
-		id: id,
-		app: app,
-		conn: conn,
-		tx: tx,
-		collector: collector,
-		hook: hook,
-		authoriser: true,
-		expiresAt: time.Now().Add(storageSessionLease),
-	}, true
-}
-
-// registerSession enforces the per-app lease limit and adds the session to the live map.
-func (s *storageServer) registerSession(w http.ResponseWriter, session *storageSession) bool {
-	s.sessionMu.Lock()
-	for s.sessionsPaused > 0 && !s.sessionClosed {
-		s.sessionCond.Wait()
-	}
-
-	if s.sessionClosed {
-		s.sessionMu.Unlock()
-		_ = s.finishSession(context.Background(), session, false)
-
-		writeError(w, http.StatusServiceUnavailable, "storage is shutting down")
-
-		return false
-	}
-
-	appSessions := 0
-
-	for _, other := range s.sessions {
-		if other.app == session.app {
-			appSessions++
-		}
-	}
-
-	if !countBudget(maxStorageSessions).allows(int64(appSessions)) {
-		s.sessionMu.Unlock()
-		_ = s.finishSession(context.Background(), session, false)
-
-		writeError(w, http.StatusTooManyRequests, "too many storage sessions")
-
-		return false
-	}
-
-	s.sessions[session.id] = session
-	s.sessionMu.Unlock()
-
-	return true
-}
-
-// createSession opens and registers a new pinned transaction.
-func (s *storageServer) createSession(w http.ResponseWriter, r *http.Request, app string) {
+// closeSessionRequest commits or rolls back the session and reports which happened.
+func (s *storageServer) closeSessionRequest(w http.ResponseWriter, r *http.Request, app, id string, commit bool) {
 	ctx, cancel := context.WithTimeout(r.Context(), storageTimeout)
+
 	defer cancel()
 
-	session, ok := s.openSession(ctx, w, app)
-	if !ok {
+	if err := s.closeSession(ctx, id, app, commit); err != nil {
+		writeSessionError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, storageSessionCloseResponse{
+		Committed: commit,
+		RolledBack: !commit,
+	})
+}
+
+// sessionExec runs a write inside the session transaction and records it for the change log.
+func (s *storageServer) sessionExec(w http.ResponseWriter, r *http.Request, app, id string) {
+	var req storageRequest
+	if !readStorageJSON(w, r, &req) {
 		return
 	}
 
-	if !s.registerSession(w, session) {
+	if err := validateStorageSQL(req.SQL); err != nil {
+		writeStorageError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, storageSessionResponse{ID: session.id, ExpiresAt: session.expiresAt})
+	params, err := decodeStorageParams(req.Params)
+	if err != nil {
+		writeStorageError(w, err)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), storageTimeout)
+
+	defer cancel()
+
+	var result storageResult
+
+	err = s.withSession(id, app, func(session *storageSession) error {
+		start := len(session.collector.rows)
+		res, err := session.tx.ExecContext(ctx, req.SQL, params...)
+		if err != nil {
+			session.collector.rows = session.collector.rows[:start]
+
+			return err
+		}
+
+		end := len(session.collector.rows)
+		result.RowsAffected, _ = res.RowsAffected()
+		result.LastInsertID, _ = res.LastInsertId()
+		session.writes = append(session.writes, storageSessionWrite{
+			statement: storageStatement{
+				SQL: req.SQL,
+				Params: req.Params,
+			},
+			result: result,
+			start: start,
+			end: end,
+		})
+
+		return nil
+	})
+
+	if err != nil {
+		writeSessionError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 // sessionQuery runs a query inside the session transaction and records any rows it changes.
@@ -447,29 +524,39 @@ func (s *storageServer) sessionQuery(w http.ResponseWriter, r *http.Request, app
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), storageTimeout)
+
 	defer cancel()
 
-	result := storageResult{Columns: []string{}, Rows: [][]any{}}
-
+	result := storageResult{
+		Columns: []string{},
+		Rows: [][]any{},
+	}
 	err = s.withSession(id, app, func(session *storageSession) error {
 		start := len(session.collector.rows)
-
 		rows, err := session.tx.QueryContext(ctx, req.SQL, params...)
 		if err != nil {
 			session.collector.rows = session.collector.rows[:start]
+
 			return err
 		}
+
 		defer rows.Close()
 
 		result.Columns, result.Rows, result.Truncated, err = readStorageRows(rows, maxRows)
+
 		if err != nil {
 			session.collector.rows = session.collector.rows[:start]
+
 			return err
 		}
 
 		if end := len(session.collector.rows); end > start {
 			session.writes = append(session.writes, storageSessionWrite{
-				statement: storageStatement{SQL: req.SQL, Params: req.Params, Query: true},
+				statement: storageStatement{
+					SQL: req.SQL,
+					Params: req.Params,
+					Query: true,
+				},
 				start: start,
 				end: end,
 			})
@@ -477,75 +564,10 @@ func (s *storageServer) sessionQuery(w http.ResponseWriter, r *http.Request, app
 
 		return nil
 	})
+
 	if err != nil {
 		writeSessionError(w, err)
 		return
 	}
-
 	writeJSON(w, http.StatusOK, result)
-}
-
-// sessionExec runs a write inside the session transaction and records it for the change log.
-func (s *storageServer) sessionExec(w http.ResponseWriter, r *http.Request, app, id string) {
-	var req storageRequest
-	if !readStorageJSON(w, r, &req) {
-		return
-	}
-
-	if err := validateStorageSQL(req.SQL); err != nil {
-		writeStorageError(w, err)
-		return
-	}
-
-	params, err := decodeStorageParams(req.Params)
-	if err != nil {
-		writeStorageError(w, err)
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), storageTimeout)
-	defer cancel()
-
-	var result storageResult
-
-	err = s.withSession(id, app, func(session *storageSession) error {
-		start := len(session.collector.rows)
-
-		res, err := session.tx.ExecContext(ctx, req.SQL, params...)
-		if err != nil {
-			session.collector.rows = session.collector.rows[:start]
-			return err
-		}
-
-		end := len(session.collector.rows)
-		result.RowsAffected, _ = res.RowsAffected()
-		result.LastInsertID, _ = res.LastInsertId()
-		session.writes = append(session.writes, storageSessionWrite{
-			statement: storageStatement{SQL: req.SQL, Params: req.Params},
-			result: result,
-			start: start,
-			end: end,
-		})
-
-		return nil
-	})
-	if err != nil {
-		writeSessionError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, result)
-}
-
-// closeSessionRequest commits or rolls back the session and reports which happened.
-func (s *storageServer) closeSessionRequest(w http.ResponseWriter, r *http.Request, app, id string, commit bool) {
-	ctx, cancel := context.WithTimeout(r.Context(), storageTimeout)
-	defer cancel()
-
-	if err := s.closeSession(ctx, id, app, commit); err != nil {
-		writeSessionError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, storageSessionCloseResponse{Committed: commit, RolledBack: !commit})
 }

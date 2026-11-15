@@ -12,32 +12,95 @@ import (
 	"syscall"
 )
 
+type (
+	cgroupManager struct {
+		root string
+	}
+
+	// missingControllersError reports which controllers a cgroup directory does not expose.
+	missingControllersError struct {
+		dir string
+		missing []string
+	}
+)
+
 const (
 	cgroupCPUPeriod = 100000
 	// requiredControllers are the limits the untrusted mode relies on. Missing ones fail the launch.
 	requiredControllers = "cpu memory pids io"
 )
 
-type cgroupManager struct {
-	root string
-}
-
-func newCgroupManager(root string) *cgroupManager {
-	return &cgroupManager{root: root}
-}
-
 func (m *cgroupManager) path(name string) string {
 	return filepath.Join(m.root, name)
 }
 
-// missingControllersError reports which controllers a cgroup directory does not expose.
-type missingControllersError struct {
-	dir string
-	missing []string
+// addPID places the started process in the app's cgroup.
+func (m *cgroupManager) addPID(name string, pid int) error {
+	path := filepath.Join(m.path(name), "cgroup.procs")
+
+	if err := os.WriteFile(path, []byte(strconv.Itoa(pid)+"\n"), 0o600); err != nil {
+		return fmt.Errorf("add pid %d to %s: %w", pid, path, err)
+	}
+
+	return nil
 }
 
-func (e *missingControllersError) Error() string {
-	return fmt.Sprintf("cgroup controllers %s are not available under %s", strings.Join(e.missing, ", "), e.dir)
+// remove kills any stray processes left in the app cgroup, then deletes it.
+func (m *cgroupManager) remove(name string) error {
+	path := m.path(name)
+
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+
+		return fmt.Errorf("stat cgroup %s: %w", path, err)
+	}
+
+	kill := filepath.Join(path, "cgroup.kill")
+
+	if _, err := os.Stat(kill); err == nil {
+		if err := os.WriteFile(kill, []byte("1"), 0o600); err != nil {
+			return fmt.Errorf("kill cgroup %s: %w", path, err)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat %s: %w", kill, err)
+	}
+
+	err := os.Remove(path)
+
+	switch {
+	case err == nil:
+		return nil
+	case os.IsNotExist(err):
+		return nil
+	case errors.Is(err, syscall.ENOTEMPTY):
+		// A filesystem-backed test root keeps its limit files; a real cgroup directory does not.
+		return os.RemoveAll(path)
+	default:
+		return fmt.Errorf("remove cgroup %s: %w", path, err)
+	}
+}
+
+// close removes every app cgroup under the root, leaving the root itself in place.
+func (m *cgroupManager) close() {
+	entries, err := os.ReadDir(m.root)
+	if err != nil {
+		return
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			_ = m.remove(entry.Name())
+		}
+	}
+}
+
+// cpuMax renders cpu.max for a millicore quota over a 100 ms period (1000 millicores means one core).
+func cpuMax(millicores int) string {
+	quota := max(int64(millicores)*cgroupCPUPeriod/1000, 1000)
+
+	return fmt.Sprintf("%d %d", quota, cgroupCPUPeriod)
 }
 
 // enableControllersAt enables required controllers for that directory's children.
@@ -48,6 +111,7 @@ func enableControllersAt(dir string, required []string) error {
 	}
 
 	available := map[string]bool{}
+
 	for name := range strings.FieldsSeq(string(controllers)) {
 		available[strings.TrimPrefix(name, "+")] = true
 	}
@@ -61,11 +125,13 @@ func enableControllersAt(dir string, required []string) error {
 	}
 
 	if len(missing) > 0 {
-		return &missingControllersError{dir: dir, missing: missing}
+		return &missingControllersError{
+			dir: dir,
+			missing: missing,
+		}
 	}
 
 	subtreePath := filepath.Join(dir, "cgroup.subtree_control")
-
 	existing, err := os.ReadFile(subtreePath)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("read %s: %w", subtreePath, err)
@@ -80,7 +146,7 @@ func enableControllersAt(dir string, required []string) error {
 		tokens = append(tokens, "+"+name)
 	}
 
-	changed := false
+	var changed bool
 
 	for _, name := range required {
 		if !enabled[name] {
@@ -112,7 +178,6 @@ func (m *cgroupManager) enableControllers() error {
 	}
 
 	required := strings.Fields(requiredControllers)
-
 	err := enableControllersAt(m.root, required)
 	if err == nil {
 		return nil
@@ -142,12 +207,6 @@ func (m *cgroupManager) enableControllers() error {
 	return nil
 }
 
-// cpuMax renders cpu.max for a millicore quota over a 100 ms period (1000 millicores means one core).
-func cpuMax(millicores int) string {
-	quota := max(int64(millicores)*cgroupCPUPeriod/1000, 1000)
-	return fmt.Sprintf("%d %d", quota, cgroupCPUPeriod)
-}
-
 // memoryMax renders cgroup v2 memory.max, or "max" when no limit is set.
 func memoryMax(memoryMB int) string {
 	if memoryMB <= 0 {
@@ -164,6 +223,7 @@ func (m *cgroupManager) create(name string, cfg appConfig) (string, error) {
 	}
 
 	path := m.path(name)
+
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		return "", fmt.Errorf("create cgroup %s: %w", path, err)
 	}
@@ -183,16 +243,20 @@ func (m *cgroupManager) create(name string, cfg appConfig) (string, error) {
 		ioWeight = defaultIOWeight
 	}
 
-	files := []struct{ name, value string }{
+	files := []struct {
+		name, value string
+	}{
 		{"cpu.max", cpuMax(cpu)},
 		{"memory.max", memoryMax(cfg.MemoryMB)},
 		{"memory.swap.max", "0"},
 		{"pids.max", strconv.Itoa(pids)},
 		{"io.weight", fmt.Sprintf("default %d", ioWeight)},
 	}
+
 	for _, file := range files {
 		if err := os.WriteFile(filepath.Join(path, file.name), []byte(file.value+"\n"), 0o600); err != nil {
 			_ = os.RemoveAll(path)
+
 			return "", fmt.Errorf("write %s in %s: %w", file.name, path, err)
 		}
 	}
@@ -200,60 +264,12 @@ func (m *cgroupManager) create(name string, cfg appConfig) (string, error) {
 	return path, nil
 }
 
-// addPID places the started process in the app's cgroup.
-func (m *cgroupManager) addPID(name string, pid int) error {
-	path := filepath.Join(m.path(name), "cgroup.procs")
-	if err := os.WriteFile(path, []byte(strconv.Itoa(pid)+"\n"), 0o600); err != nil {
-		return fmt.Errorf("add pid %d to %s: %w", pid, path, err)
-	}
-
-	return nil
+func (e *missingControllersError) Error() string {
+	return fmt.Sprintf("cgroup controllers %s are not available under %s", strings.Join(e.missing, ", "), e.dir)
 }
 
-// remove kills any stray processes left in the app cgroup, then deletes it.
-func (m *cgroupManager) remove(name string) error {
-	path := m.path(name)
-	if _, err := os.Stat(path); err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-
-		return fmt.Errorf("stat cgroup %s: %w", path, err)
-	}
-
-	kill := filepath.Join(path, "cgroup.kill")
-	if _, err := os.Stat(kill); err == nil {
-		if err := os.WriteFile(kill, []byte("1"), 0o600); err != nil {
-			return fmt.Errorf("kill cgroup %s: %w", path, err)
-		}
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("stat %s: %w", kill, err)
-	}
-
-	err := os.Remove(path)
-	switch {
-	case err == nil:
-		return nil
-	case os.IsNotExist(err):
-		return nil
-	case errors.Is(err, syscall.ENOTEMPTY):
-		// A filesystem-backed test root keeps its limit files; a real cgroup directory does not.
-		return os.RemoveAll(path)
-	default:
-		return fmt.Errorf("remove cgroup %s: %w", path, err)
-	}
-}
-
-// close removes every app cgroup under the root, leaving the root itself in place.
-func (m *cgroupManager) close() {
-	entries, err := os.ReadDir(m.root)
-	if err != nil {
-		return
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			_ = m.remove(entry.Name())
-		}
+func newCgroupManager(root string) *cgroupManager {
+	return &cgroupManager{
+		root: root,
 	}
 }

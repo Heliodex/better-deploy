@@ -7,13 +7,10 @@ import (
 )
 
 func TestRlimitPlan(t *testing.T) {
-	plan := rlimitPlan(appConfig{DiskMB: 256})
-
-	want := map[int]uint64{
-		unix.RLIMIT_NOFILE: 1024,
-		unix.RLIMIT_FSIZE: 256 << 20,
-		unix.RLIMIT_CORE: 0,
-	}
+	plan := rlimitPlan(appConfig{
+		DiskMB: 256,
+	})
+	want := map[int]uint64{unix.RLIMIT_NOFILE: 1024, unix.RLIMIT_FSIZE: 256 << 20, unix.RLIMIT_CORE: 0}
 	if len(plan) != len(want) {
 		t.Fatalf("plan has %d entries, want %d: %+v", len(plan), len(want), plan)
 	}
@@ -33,6 +30,7 @@ func TestRlimitPlan(t *testing.T) {
 
 func TestRlimitPlanWithoutDiskLimit(t *testing.T) {
 	plan := rlimitPlan(appConfig{})
+
 	for _, spec := range plan {
 		if spec.Resource == unix.RLIMIT_FSIZE {
 			t.Errorf("unexpected RLIMIT_FSIZE without disk_mb: %+v", spec)

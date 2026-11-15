@@ -15,117 +15,50 @@ import (
 	"time"
 )
 
-func testSupervisor() *supervisor {
-	return &supervisor{
-		cfg: config{token: "secret"},
-		events: newHub(),
-		apps: map[string]*app{},
-		hosts: map[string]*app{},
-	}
+// safeRecorder is a ResponseWriter that can be read while a streaming handler writes.
+type safeRecorder struct {
+	mu sync.Mutex
+	header http.Header
+	body strings.Builder
+	status int
+	wrote chan struct{}
+	once sync.Once
 }
 
-func TestHandleAppsRequiresAuth(t *testing.T) {
-	s := testSupervisor()
-	req := httptest.NewRequest(http.MethodGet, "/apps", nil)
-	rec := httptest.NewRecorder()
-	s.handleApps(rec, req)
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", rec.Code)
-	}
-
-	req = httptest.NewRequest(http.MethodGet, "/apps", nil)
-	req.Header.Set("Authorization", "Bearer secret")
-
-	rec = httptest.NewRecorder()
-	s.handleApps(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", rec.Code)
-	}
-}
-
-func TestHandleUnknownApp(t *testing.T) {
-	s := testSupervisor()
-
-	for _, target := range []string{"/apps/nope", "/apps/nope/logs", "/apps/nope/resources", "/apps/nope/restart"} {
-		method := http.MethodGet
-		if strings.HasSuffix(target, "restart") {
-			method = http.MethodPost
-		}
-
-		req := httptest.NewRequest(method, target, nil)
-		req.Header.Set("Authorization", "Bearer secret")
-
-		rec := httptest.NewRecorder()
-		s.handleApp(rec, req)
-
-		if rec.Code != http.StatusNotFound {
-			t.Errorf("GET %s = %d, want 404", target, rec.Code)
-		}
-	}
-}
-
-func TestHandleAppMethods(t *testing.T) {
-	s := testSupervisor()
-
-	cases := []struct {
-		method, target, allow string
-	}{
-		{http.MethodPatch, "/apps/nope", "GET, DELETE"},
-		{http.MethodDelete, "/apps/nope", ""},
-		{http.MethodPut, "/apps/nope/config", "GET, PATCH"},
-		{http.MethodGet, "/apps/nope/stop", http.MethodPost},
-		{http.MethodGet, "/apps/nope/start", http.MethodPost},
-		{http.MethodPost, "/apps/nope/logs", http.MethodGet},
-		{http.MethodPost, "/apps/nope/resources", http.MethodGet},
-		{http.MethodGet, "/apps/nope/restart", http.MethodPost},
-		{http.MethodGet, "/apps/nope/rollback/x", http.MethodPost},
-		{http.MethodGet, "/apps/nope/deployments", ""},
-		{http.MethodPut, "/apps/nope/unknown", ""},
-	}
-	for _, tc := range cases {
-		req := httptest.NewRequest(tc.method, tc.target, nil)
-		req.Header.Set("Authorization", "Bearer secret")
-
-		rec := httptest.NewRecorder()
-		s.handleApp(rec, req)
-
-		if tc.allow == "" {
-			if rec.Code != http.StatusNotFound {
-				t.Errorf("%s %s = %d, want 404", tc.method, tc.target, rec.Code)
-			}
-
-			continue
-		}
-
-		if rec.Code != http.StatusMethodNotAllowed {
-			t.Errorf("%s %s = %d, want 405", tc.method, tc.target, rec.Code)
-		}
-
-		if got := rec.Header().Get("Allow"); got != tc.allow {
-			t.Errorf("%s %s Allow = %q, want %q", tc.method, tc.target, got, tc.allow)
-		}
-	}
-}
-
-func TestHandleLogsValidation(t *testing.T) {
-	s := testSupervisor()
-
+func TestAppLogRecordsLevels(t *testing.T) {
 	logs, err := newAppLog(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	a := &app{name: "test", logs: logs}
+	if _, err := io.WriteString(logs, "WARN careful\nplain line\n"); err != nil {
+		t.Fatal(err)
+	}
 
-	for _, query := range []string{"?tail=0", "?tail=-1", "?tail=abc", "?tail=99999"} {
-		req := httptest.NewRequest(http.MethodGet, "/apps/test/logs"+query, nil)
-		rec := httptest.NewRecorder()
-		s.handleLogs(rec, req, a)
+	entries, err := logs.tail(10)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("tail %s = %d, want 400", query, rec.Code)
+	want := []logEntry{
+		{
+			Time: entries[0].Time,
+			Level: "warn",
+			Message: "careful",
+		},
+		{
+			Time: entries[1].Time,
+			Level: "info",
+			Message: "plain line",
+		},
+	}
+	if len(entries) != len(want) {
+		t.Fatalf("got %d entries: %+v", len(entries), entries)
+	}
+
+	for i := range want {
+		if entries[i].Level != want[i].Level || entries[i].Message != want[i].Message {
+			t.Errorf("entry %d = %+v, want %+v", i, entries[i], want[i])
 		}
 	}
 }
@@ -137,6 +70,7 @@ func TestAppLogRotation(t *testing.T) {
 	}
 
 	line := strings.Repeat("x", 100) + "\n"
+
 	for i := range maxLogBytes/100 + 100 {
 		if _, err := fmt.Fprintf(logs, "line %d %s", i, line); err != nil {
 			t.Fatal(err)
@@ -167,12 +101,64 @@ func TestAppLogRotation(t *testing.T) {
 	}
 
 	got, err = logs.tail(1 << 20)
+
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	if len(got) == 0 {
 		t.Error("tail returned no lines")
+	}
+}
+
+func TestAppLogSeparatesSupervisorLines(t *testing.T) {
+	logs, err := newAppLog(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := io.WriteString(logs, "WARN careful\n"); err != nil {
+		t.Fatal(err)
+	}
+	logs.logSupervisor("GET 200 1.5ms /hello")
+	if _, err := io.WriteString(logs, "plain line\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := logs.tail(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []logEntry{
+		{
+			Level: "warn",
+			Source: "app",
+			Message: "careful",
+		},
+		{
+			Level: "info",
+			Source: "supervisor",
+			Message: "GET 200 1.5ms /hello",
+		},
+		{
+			Level: "info",
+			Source: "app",
+			Message: "plain line",
+		},
+	}
+	if len(entries) != len(want) {
+		t.Fatalf("got %d entries: %+v", len(entries), entries)
+	}
+
+	for i := range want {
+		if entries[i].Level != want[i].Level || entries[i].Source != want[i].Source || entries[i].Message != want[i].Message {
+			t.Errorf("entry %d = %+v, want %+v", i, entries[i], want[i])
+		}
+
+		if entries[i].Time == "" {
+			t.Errorf("entry %d has no timestamp", i)
+		}
 	}
 }
 
@@ -214,277 +200,6 @@ func TestAppLogStampsCompleteLines(t *testing.T) {
 	}
 }
 
-func TestParseLogLineToleratesLegacyLines(t *testing.T) {
-	legacy := parseLogLine("Serving HTTP on http://127.0.0.1:8080/")
-	if legacy.Time != "" || legacy.Message != "Serving HTTP on http://127.0.0.1:8080/" {
-		t.Errorf("legacy line parsed as %+v", legacy)
-	}
-
-	appStamp := parseLogLine("2026/10/28 14:20:11 app says hi")
-	if appStamp.Time != "" || appStamp.Message != "2026/10/28 14:20:11 app says hi" {
-		t.Errorf("app-stamped line parsed as %+v", appStamp)
-	}
-
-	stamped := parseLogLine("2026-10-28T18:20:11.5Z hello world")
-	if stamped.Time != "2026-10-28T18:20:11.5Z" || stamped.Message != "hello world" {
-		t.Errorf("stamped line parsed as %+v", stamped)
-	}
-}
-
-func TestAuthorisedAcceptsCookie(t *testing.T) {
-	s := testSupervisor()
-	req := httptest.NewRequest(http.MethodGet, "/apps", nil)
-	req.AddCookie(&http.Cookie{Name: "wt_token", Value: "secret"})
-
-	if !s.authorised(req) {
-		t.Error("cookie token should authorise")
-	}
-
-	req = httptest.NewRequest(http.MethodGet, "/apps", nil)
-	req.AddCookie(&http.Cookie{Name: "wt_token", Value: "wrong"})
-
-	if s.authorised(req) {
-		t.Error("wrong cookie token should not authorise")
-	}
-}
-
-func TestAdminStaticCacheHeaders(t *testing.T) {
-	if _, err := fs.Stat(adminFiles, "web/build/index.html"); err != nil {
-		t.Skip("admin panel not built")
-	}
-
-	nodes, err := fs.Glob(adminFiles, "web/build/_app/immutable/nodes/*.js")
-	if err != nil || len(nodes) == 0 {
-		t.Skip("admin panel has no built node bundles")
-	}
-
-	for _, tc := range []struct{ path, want string }{
-		{"/", "no-cache"},
-		{"/_app/immutable/nodes/" + filepath.Base(nodes[0]), "public, max-age=31536000, immutable"},
-	} {
-		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
-		rec := httptest.NewRecorder()
-		adminStatic().ServeHTTP(rec, req)
-
-		if got := rec.Header().Get("Cache-Control"); got != tc.want {
-			t.Errorf("GET %s Cache-Control = %q, want %q", tc.path, got, tc.want)
-		}
-	}
-}
-
-func TestHubBroadcast(t *testing.T) {
-	h := newHub()
-	first := h.subscribe()
-	second := h.subscribe()
-	h.publish([]byte("hello"))
-
-	for _, ch := range []chan []byte{first, second} {
-		select {
-		case got := <-ch:
-			if string(got) != "hello" {
-				t.Errorf("got %q, want hello", got)
-			}
-		default:
-			t.Error("subscriber did not receive broadcast")
-		}
-	}
-
-	h.unsubscribe(first)
-	h.publish([]byte("again"))
-
-	select {
-	case <-first:
-		t.Error("unsubscribed channel received a broadcast")
-	default:
-	}
-
-	select {
-	case got := <-second:
-		if string(got) != "again" {
-			t.Errorf("got %q, want again", got)
-		}
-	default:
-		t.Error("remaining subscriber did not receive broadcast")
-	}
-}
-
-// safeRecorder is a ResponseWriter that can be read while a streaming handler writes.
-type safeRecorder struct {
-	mu sync.Mutex
-	header http.Header
-	body strings.Builder
-	status int
-	wrote chan struct{}
-	once sync.Once
-}
-
-func newSafeRecorder() *safeRecorder {
-	return &safeRecorder{header: http.Header{}, wrote: make(chan struct{})}
-}
-
-func (r *safeRecorder) Header() http.Header {
-	return r.header
-}
-
-func (r *safeRecorder) WriteHeader(status int) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if r.status == 0 {
-		r.status = status
-	}
-}
-
-func (r *safeRecorder) Write(p []byte) (int, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if r.status == 0 {
-		r.status = http.StatusOK
-	}
-
-	n, err := r.body.Write(p)
-	r.once.Do(func() {
-		close(r.wrote)
-	})
-
-	return n, err
-}
-
-func (r *safeRecorder) Flush() {}
-
-func (r *safeRecorder) Body() string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	return r.body.String()
-}
-
-func TestHandleEventsStreamsSnapshot(t *testing.T) {
-	s := testSupervisor()
-	s.apps["demo"] = &app{name: "demo", cfg: appConfig{Host: "demo.example"}}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	req := httptest.NewRequest(http.MethodGet, "/events", nil).WithContext(ctx)
-	req.Header.Set("Authorization", "Bearer secret")
-
-	rec := newSafeRecorder()
-
-	finished := make(chan struct{})
-	go func() {
-		defer close(finished)
-
-		s.handleEvents(rec, req)
-	}()
-
-	select {
-	case <-rec.wrote:
-	case <-time.After(5 * time.Second):
-		cancel()
-		<-finished
-		t.Fatal("timed out waiting for snapshot")
-	}
-
-	cancel()
-	<-finished
-
-	if got := rec.Header().Get("Content-Type"); got != "text/event-stream" {
-		t.Errorf("Content-Type = %q, want text/event-stream", got)
-	}
-
-	if body := rec.Body(); !strings.Contains(body, `"name":"demo"`) {
-		t.Errorf("snapshot missing app: %s", body)
-	}
-}
-
-func TestHandleEventsRequiresAuth(t *testing.T) {
-	s := testSupervisor()
-	req := httptest.NewRequest(http.MethodGet, "/events", nil)
-	rec := httptest.NewRecorder()
-	s.handleEvents(rec, req)
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", rec.Code)
-	}
-}
-
-func TestHandleLogStreamBacklogAndLines(t *testing.T) {
-	logs, err := newAppLog(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := io.WriteString(logs, "existing line\n"); err != nil {
-		t.Fatal(err)
-	}
-
-	s := testSupervisor()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	req := httptest.NewRequest(http.MethodGet, "/apps/demo/logs/stream?tail=10", nil).WithContext(ctx)
-	req.Header.Set("Authorization", "Bearer secret")
-
-	rec := newSafeRecorder()
-
-	finished := make(chan struct{})
-	go func() {
-		defer close(finished)
-
-		s.handleLogStream(rec, req, &app{name: "demo", logs: logs})
-	}()
-
-	waitFor := func(want string) {
-		t.Helper()
-
-		deadline := time.After(5 * time.Second)
-
-		for !strings.Contains(rec.Body(), want) {
-			select {
-			case <-deadline:
-				cancel()
-				<-finished
-				t.Fatalf("timed out waiting for %q in %s", want, rec.Body())
-			case <-time.After(10 * time.Millisecond):
-			}
-		}
-	}
-
-	waitFor(`"type":"backlog"`)
-
-	if body := rec.Body(); !strings.Contains(body, `"message":"existing line"`) {
-		t.Errorf("backlog missing existing line: %s", body)
-	}
-
-	if _, err := io.WriteString(logs, "fresh line\n"); err != nil {
-		t.Fatal(err)
-	}
-
-	waitFor(`"type":"line"`)
-	waitFor(`"message":"fresh line"`)
-
-	cancel()
-	<-finished
-
-	if got := rec.Header().Get("Content-Type"); got != "text/event-stream" {
-		t.Errorf("Content-Type = %q, want text/event-stream", got)
-	}
-}
-
-func TestHandleLogStreamRequiresAuth(t *testing.T) {
-	s := testSupervisor()
-	req := httptest.NewRequest(http.MethodGet, "/apps/demo/logs/stream", nil)
-	rec := httptest.NewRecorder()
-	s.handleLogStream(rec, req, &app{name: "demo"})
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", rec.Code)
-	}
-}
-
 func TestAppLogStripsGuestPrefix(t *testing.T) {
 	logs, err := newAppLog(t.TempDir())
 	if err != nil {
@@ -505,8 +220,68 @@ func TestAppLogStripsGuestPrefix(t *testing.T) {
 	}
 }
 
+func TestHubBroadcast(t *testing.T) {
+	h := newHub()
+	first := h.subscribe()
+	second := h.subscribe()
+
+	h.publish([]byte("hello"))
+	for _, ch := range []chan []byte{first, second} {
+		select {
+		case got := <-ch:
+			if string(got) != "hello" {
+				t.Errorf("got %q, want hello", got)
+			}
+		default:
+			t.Error("subscriber did not receive broadcast")
+		}
+	}
+	h.unsubscribe(first)
+	h.publish([]byte("again"))
+	select {
+	case <-first:
+		t.Error("unsubscribed channel received a broadcast")
+	default:
+	}
+
+	select {
+	case got := <-second:
+		if string(got) != "again" {
+			t.Errorf("got %q, want again", got)
+		}
+	default:
+		t.Error("remaining subscriber did not receive broadcast")
+	}
+}
+
+func TestParseLogLineReadsLegacyLinesAsInfo(t *testing.T) {
+	if legacy := parseLogLine("2026-10-28T21:00:00Z Serving HTTP on http://127.0.0.1:8080/"); legacy.Level != "info" || legacy.Source != "app" || legacy.Message != "Serving HTTP on http://127.0.0.1:8080/" {
+		t.Errorf("legacy line parsed as %+v", legacy)
+	}
+
+	if stamped := parseLogLine("2026-10-28T21:00:00Z ERROR broke"); stamped.Level != "error" || stamped.Source != "app" || stamped.Message != "broke" {
+		t.Errorf("leveled line parsed as %+v", stamped)
+	}
+}
+
+func TestParseLogLineToleratesLegacyLines(t *testing.T) {
+	if legacy := parseLogLine("Serving HTTP on http://127.0.0.1:8080/"); legacy.Time != "" || legacy.Message != "Serving HTTP on http://127.0.0.1:8080/" {
+		t.Errorf("legacy line parsed as %+v", legacy)
+	}
+
+	if appStamp := parseLogLine("2026/10/28 14:20:11 app says hi"); appStamp.Time != "" || appStamp.Message != "2026/10/28 14:20:11 app says hi" {
+		t.Errorf("app-stamped line parsed as %+v", appStamp)
+	}
+
+	if stamped := parseLogLine("2026-10-28T18:20:11.5Z hello world"); stamped.Time != "2026-10-28T18:20:11.5Z" || stamped.Message != "hello world" {
+		t.Errorf("stamped line parsed as %+v", stamped)
+	}
+}
+
 func TestSplitLevelPrefix(t *testing.T) {
-	cases := []struct{ line, level, message string }{
+	cases := []struct {
+		line, level, message string
+	}{
 		{"WARN storage slow", "WARN", "storage slow"},
 		{"error boom", "ERROR", "boom"},
 		{"TRACE deep", "TRACE", "deep"},
@@ -515,93 +290,363 @@ func TestSplitLevelPrefix(t *testing.T) {
 		{"WARNING not a level", "INFO", "WARNING not a level"},
 		{"INFO", "INFO", "INFO"},
 	}
+
 	for _, tc := range cases {
-		level, message := splitLevelPrefix(tc.line)
-		if level != tc.level || message != tc.message {
+		if level, message := splitLevelPrefix(tc.line); level != tc.level || message != tc.message {
 			t.Errorf("splitLevelPrefix(%q) = %q, %q; want %q, %q", tc.line, level, message, tc.level, tc.message)
 		}
 	}
 }
 
-func TestAppLogRecordsLevels(t *testing.T) {
+func (r *safeRecorder) Body() string {
+	r.mu.Lock()
+
+	defer r.mu.Unlock()
+
+	return r.body.String()
+}
+
+func (r *safeRecorder) Flush() {}
+
+func (r *safeRecorder) Header() http.Header {
+	return r.header
+}
+
+func TestAdminStaticCacheHeaders(t *testing.T) {
+	if _, err := fs.Stat(adminFiles, "web/build/index.html"); err != nil {
+		t.Skip("admin panel not built")
+	}
+
+	nodes, err := fs.Glob(adminFiles, "web/build/_app/immutable/nodes/*.js")
+	if err != nil || len(nodes) == 0 {
+		t.Skip("admin panel has no built node bundles")
+	}
+
+	for _, tc := range []struct {
+		path, want string
+	}{
+		{"/", "no-cache"},
+		{"/_app/immutable/nodes/" + filepath.Base(nodes[0]), "public, max-age=31536000, immutable"},
+	} {
+		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		rec := httptest.NewRecorder()
+
+		adminStatic().ServeHTTP(rec, req)
+		if got := rec.Header().Get("Cache-Control"); got != tc.want {
+			t.Errorf("GET %s Cache-Control = %q, want %q", tc.path, got, tc.want)
+		}
+	}
+}
+
+func newSafeRecorder() *safeRecorder {
+	return &safeRecorder{
+		header: http.Header{},
+		wrote: make(chan struct{}),
+	}
+}
+
+func (r *safeRecorder) Write(p []byte) (int, error) {
+	r.mu.Lock()
+
+	defer r.mu.Unlock()
+
+	if r.status == 0 {
+		r.status = http.StatusOK
+	}
+
+	n, err := r.body.Write(p)
+
+	r.once.Do(func() {
+		close(r.wrote)
+	})
+	return n, err
+}
+
+func (r *safeRecorder) WriteHeader(status int) {
+	r.mu.Lock()
+
+	defer r.mu.Unlock()
+
+	if r.status == 0 {
+		r.status = status
+	}
+}
+
+func testSupervisor() *supervisor {
+	return &supervisor{
+		cfg: config{
+			token: "secret",
+		},
+		events: newHub(),
+		apps: map[string]*app{},
+		hosts: map[string]*app{},
+	}
+}
+
+func TestAuthorisedAcceptsCookie(t *testing.T) {
+	s := testSupervisor()
+	req := httptest.NewRequest(http.MethodGet, "/apps", nil)
+
+	req.AddCookie(&http.Cookie{
+		Name: "wt_token",
+		Value: "secret",
+	})
+	if !s.authorised(req) {
+		t.Error("cookie token should authorise")
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/apps", nil)
+
+	req.AddCookie(&http.Cookie{
+		Name: "wt_token",
+		Value: "wrong",
+	})
+	if s.authorised(req) {
+		t.Error("wrong cookie token should not authorise")
+	}
+}
+
+func TestHandleAppMethods(t *testing.T) {
+	s := testSupervisor()
+	cases := []struct {
+		method, target, allow string
+	}{
+		{http.MethodPatch, "/apps/nope", "GET, DELETE"},
+		{http.MethodDelete, "/apps/nope", ""},
+		{http.MethodPut, "/apps/nope/config", "GET, PATCH"},
+		{http.MethodGet, "/apps/nope/stop", http.MethodPost},
+		{http.MethodGet, "/apps/nope/start", http.MethodPost},
+		{http.MethodPost, "/apps/nope/logs", http.MethodGet},
+		{http.MethodPost, "/apps/nope/resources", http.MethodGet},
+		{http.MethodGet, "/apps/nope/restart", http.MethodPost},
+		{http.MethodGet, "/apps/nope/rollback/x", http.MethodPost},
+		{http.MethodGet, "/apps/nope/deployments", ""},
+		{http.MethodPut, "/apps/nope/unknown", ""},
+	}
+
+	for _, tc := range cases {
+		req := httptest.NewRequest(tc.method, tc.target, nil)
+
+		req.Header.Set("Authorization", "Bearer secret")
+
+		rec := httptest.NewRecorder()
+
+		s.handleApp(rec, req)
+		if tc.allow == "" {
+			if rec.Code != http.StatusNotFound {
+				t.Errorf("%s %s = %d, want 404", tc.method, tc.target, rec.Code)
+			}
+
+			continue
+		}
+
+		if rec.Code != http.StatusMethodNotAllowed {
+			t.Errorf("%s %s = %d, want 405", tc.method, tc.target, rec.Code)
+		}
+
+		if got := rec.Header().Get("Allow"); got != tc.allow {
+			t.Errorf("%s %s Allow = %q, want %q", tc.method, tc.target, got, tc.allow)
+		}
+	}
+}
+
+func TestHandleAppsRequiresAuth(t *testing.T) {
+	s := testSupervisor()
+	req := httptest.NewRequest(http.MethodGet, "/apps", nil)
+	rec := httptest.NewRecorder()
+
+	s.handleApps(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rec.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/apps", nil)
+
+	req.Header.Set("Authorization", "Bearer secret")
+
+	rec = httptest.NewRecorder()
+
+	s.handleApps(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rec.Code)
+	}
+}
+
+func TestHandleEventsRequiresAuth(t *testing.T) {
+	s := testSupervisor()
+	req := httptest.NewRequest(http.MethodGet, "/events", nil)
+	rec := httptest.NewRecorder()
+
+	s.handleEvents(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rec.Code)
+	}
+}
+
+func TestHandleEventsStreamsSnapshot(t *testing.T) {
+	s := testSupervisor()
+	s.apps["demo"] = &app{
+		name: "demo",
+		cfg: appConfig{
+			Host: "demo.example",
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+
+	defer cancel()
+
+	req := httptest.NewRequest(http.MethodGet, "/events", nil).WithContext(ctx)
+
+	req.Header.Set("Authorization", "Bearer secret")
+
+	rec := newSafeRecorder()
+	finished := make(chan struct{})
+
+	go func() {
+		defer close(finished)
+
+		s.handleEvents(rec, req)
+	}()
+
+	select {
+	case <-rec.wrote:
+	case <-time.After(5 * time.Second):
+		cancel()
+		<-finished
+		t.Fatal("timed out waiting for snapshot")
+	}
+	cancel()
+	<-finished
+
+	if got := rec.Header().Get("Content-Type"); got != "text/event-stream" {
+		t.Errorf("Content-Type = %q, want text/event-stream", got)
+	}
+
+	if body := rec.Body(); !strings.Contains(body, `"name":"demo"`) {
+		t.Errorf("snapshot missing app: %s", body)
+	}
+}
+
+func TestHandleLogStreamBacklogAndLines(t *testing.T) {
 	logs, err := newAppLog(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := io.WriteString(logs, "WARN careful\nplain line\n"); err != nil {
+	if _, err := io.WriteString(logs, "existing line\n"); err != nil {
 		t.Fatal(err)
 	}
 
-	entries, err := logs.tail(10)
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := testSupervisor()
+	ctx, cancel := context.WithCancel(context.Background())
 
-	want := []logEntry{
-		{Time: entries[0].Time, Level: "warn", Message: "careful"},
-		{Time: entries[1].Time, Level: "info", Message: "plain line"},
-	}
-	if len(entries) != len(want) {
-		t.Fatalf("got %d entries: %+v", len(entries), entries)
-	}
+	defer cancel()
 
-	for i := range want {
-		if entries[i].Level != want[i].Level || entries[i].Message != want[i].Message {
-			t.Errorf("entry %d = %+v, want %+v", i, entries[i], want[i])
+	req := httptest.NewRequest(http.MethodGet, "/apps/demo/logs/stream?tail=10", nil).WithContext(ctx)
+
+	req.Header.Set("Authorization", "Bearer secret")
+
+	rec := newSafeRecorder()
+	finished := make(chan struct{})
+
+	go func() {
+		defer close(finished)
+
+		s.handleLogStream(rec, req, &app{
+			name: "demo",
+			logs: logs,
+		})
+	}()
+
+	waitFor := func(want string) {
+		t.Helper()
+
+		deadline := time.After(5 * time.Second)
+
+		for !strings.Contains(rec.Body(), want) {
+			select {
+			case <-deadline:
+				cancel()
+				<-finished
+				t.Fatalf("timed out waiting for %q in %s", want, rec.Body())
+			case <-time.After(10 * time.Millisecond):
+			}
 		}
+	}
+
+	waitFor(`"type":"backlog"`)
+	if body := rec.Body(); !strings.Contains(body, `"message":"existing line"`) {
+		t.Errorf("backlog missing existing line: %s", body)
+	}
+
+	if _, err := io.WriteString(logs, "fresh line\n"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(`"type":"line"`)
+	waitFor(`"message":"fresh line"`)
+	cancel()
+	<-finished
+
+	if got := rec.Header().Get("Content-Type"); got != "text/event-stream" {
+		t.Errorf("Content-Type = %q, want text/event-stream", got)
 	}
 }
 
-func TestAppLogSeparatesSupervisorLines(t *testing.T) {
+func TestHandleLogStreamRequiresAuth(t *testing.T) {
+	s := testSupervisor()
+	req := httptest.NewRequest(http.MethodGet, "/apps/demo/logs/stream", nil)
+	rec := httptest.NewRecorder()
+
+	s.handleLogStream(rec, req, &app{
+		name: "demo",
+	})
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rec.Code)
+	}
+}
+
+func TestHandleLogsValidation(t *testing.T) {
+	s := testSupervisor()
 	logs, err := newAppLog(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := io.WriteString(logs, "WARN careful\n"); err != nil {
-		t.Fatal(err)
+	a := &app{
+		name: "test",
+		logs: logs,
 	}
 
-	logs.logSupervisor("GET 200 1.5ms /hello")
+	for _, query := range []string{"?tail=0", "?tail=-1", "?tail=abc", "?tail=99999"} {
+		req := httptest.NewRequest(http.MethodGet, "/apps/test/logs"+query, nil)
+		rec := httptest.NewRecorder()
 
-	if _, err := io.WriteString(logs, "plain line\n"); err != nil {
-		t.Fatal(err)
-	}
-
-	entries, err := logs.tail(10)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	want := []logEntry{
-		{Level: "warn", Source: "app", Message: "careful"},
-		{Level: "info", Source: "supervisor", Message: "GET 200 1.5ms /hello"},
-		{Level: "info", Source: "app", Message: "plain line"},
-	}
-	if len(entries) != len(want) {
-		t.Fatalf("got %d entries: %+v", len(entries), entries)
-	}
-
-	for i := range want {
-		if entries[i].Level != want[i].Level || entries[i].Source != want[i].Source || entries[i].Message != want[i].Message {
-			t.Errorf("entry %d = %+v, want %+v", i, entries[i], want[i])
-		}
-
-		if entries[i].Time == "" {
-			t.Errorf("entry %d has no timestamp", i)
+		s.handleLogs(rec, req, a)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("tail %s = %d, want 400", query, rec.Code)
 		}
 	}
 }
 
-func TestParseLogLineReadsLegacyLinesAsInfo(t *testing.T) {
-	legacy := parseLogLine("2026-10-28T21:00:00Z Serving HTTP on http://127.0.0.1:8080/")
-	if legacy.Level != "info" || legacy.Source != "app" || legacy.Message != "Serving HTTP on http://127.0.0.1:8080/" {
-		t.Errorf("legacy line parsed as %+v", legacy)
-	}
+func TestHandleUnknownApp(t *testing.T) {
+	s := testSupervisor()
 
-	stamped := parseLogLine("2026-10-28T21:00:00Z ERROR broke")
-	if stamped.Level != "error" || stamped.Source != "app" || stamped.Message != "broke" {
-		t.Errorf("leveled line parsed as %+v", stamped)
+	for _, target := range []string{"/apps/nope", "/apps/nope/logs", "/apps/nope/resources", "/apps/nope/restart"} {
+		method := http.MethodGet
+
+		if strings.HasSuffix(target, "restart") {
+			method = http.MethodPost
+		}
+
+		req := httptest.NewRequest(method, target, nil)
+
+		req.Header.Set("Authorization", "Bearer secret")
+
+		rec := httptest.NewRecorder()
+
+		s.handleApp(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("GET %s = %d, want 404", target, rec.Code)
+		}
 	}
 }

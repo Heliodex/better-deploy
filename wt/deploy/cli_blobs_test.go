@@ -8,21 +8,25 @@ import (
 	"testing"
 )
 
-func TestRunBlobsList(t *testing.T) {
-	var gotPath string
+func TestRunBlobsDelete(t *testing.T) {
+	var gotMethod, gotPath string
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.RequestURI()
-		_, _ = w.Write([]byte(`{"blobs":[{"digest":"` + strings.Repeat("a", 64) + `","size":3,"contentType":"text/plain"}]}`))
+		gotMethod, gotPath = r.Method, r.URL.Path
+
+		w.WriteHeader(http.StatusNoContent)
 	}))
+
 	defer server.Close()
 
-	if err := runBlobs([]string{"blobbox", "list", testHostFlag, server.URL, "--token", "secret"}); err != nil {
+	digest := strings.Repeat("a", 64)
+
+	if err := runBlobs([]string{"blobbox", "delete", digest, testHostFlag, server.URL}); err != nil {
 		t.Fatal(err)
 	}
 
-	if gotPath != "/apps/blobbox/blobs" {
-		t.Errorf("path = %q", gotPath)
+	if gotMethod != http.MethodDelete || gotPath != "/apps/blobbox/blobs/"+digest {
+		t.Errorf("method=%q path=%q", gotMethod, gotPath)
 	}
 }
 
@@ -34,23 +38,29 @@ func TestRunBlobsGC(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
-
 		gotAuth = r.Header.Get("Authorization")
+
 		if err := json.UnmarshalRead(r.Body, &got); err != nil {
 			t.Errorf("body: %v", err)
 		}
 
 		_, _ = w.Write([]byte(`{"deleted":["` + strings.Repeat("a", 64) + `"],"dryRun":true,"olderThan":"24h"}`))
 	}))
+
 	defer server.Close()
 
 	if err := runBlobs([]string{
-		"blobbox", "gc",
-		"--older-than", "24h",
+		"blobbox",
+		"gc",
+		"--older-than",
+		"24h",
 		"--dry-run",
-		"--keep", strings.Repeat("b", 64),
-		testHostFlag, server.URL,
-		"--token", "secret",
+		"--keep",
+		strings.Repeat("b", 64),
+		testHostFlag,
+		server.URL,
+		"--token",
+		"secret",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -63,29 +73,26 @@ func TestRunBlobsGC(t *testing.T) {
 		t.Errorf("payload = %+v", got)
 	}
 
-	keep, ok := got["keep"].([]any)
-	if !ok || len(keep) != 1 || keep[0] != strings.Repeat("b", 64) {
+	if keep, ok := got["keep"].([]any); !ok || len(keep) != 1 || keep[0] != strings.Repeat("b", 64) {
 		t.Errorf("keep = %+v", got["keep"])
 	}
 }
 
-func TestRunBlobsDelete(t *testing.T) {
-	var gotMethod, gotPath string
+func TestRunBlobsList(t *testing.T) {
+	var gotPath string
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotMethod, gotPath = r.Method, r.URL.Path
-
-		w.WriteHeader(http.StatusNoContent)
+		gotPath = r.URL.RequestURI()
+		_, _ = w.Write([]byte(`{"blobs":[{"digest":"` + strings.Repeat("a", 64) + `","size":3,"contentType":"text/plain"}]}`))
 	}))
+
 	defer server.Close()
 
-	digest := strings.Repeat("a", 64)
-
-	if err := runBlobs([]string{"blobbox", "delete", digest, testHostFlag, server.URL}); err != nil {
+	if err := runBlobs([]string{"blobbox", "list", testHostFlag, server.URL, "--token", "secret"}); err != nil {
 		t.Fatal(err)
 	}
 
-	if gotMethod != http.MethodDelete || gotPath != "/apps/blobbox/blobs/"+digest {
-		t.Errorf("method=%q path=%q", gotMethod, gotPath)
+	if gotPath != "/apps/blobbox/blobs" {
+		t.Errorf("path = %q", gotPath)
 	}
 }

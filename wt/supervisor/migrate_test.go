@@ -16,6 +16,7 @@ func migrateTestTarget(t *testing.T, handler http.Handler) (*supervisor, *app, i
 	t.Helper()
 
 	server := httptest.NewServer(handler)
+
 	t.Cleanup(server.Close)
 
 	parsed, err := url.Parse(server.URL)
@@ -30,29 +31,23 @@ func migrateTestTarget(t *testing.T, handler http.Handler) (*supervisor, *app, i
 
 	s := testSupervisor()
 	s.cfg.storageMigrationTimeout = 500 * time.Millisecond
-	a := &app{name: "demo", cfg: appConfig{startupTimeout: time.Second}}
+	a := &app{
+		name: "demo",
+		cfg: appConfig{
+			startupTimeout: time.Second,
+		},
+	}
 
 	return s, a, port
 }
 
-func TestMigrateAppSuccess(t *testing.T) {
-	var calls atomic.Int64
-
-	s, a, port := migrateTestTarget(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-
-		if r.Method != http.MethodPost || r.URL.Path != migratePath {
-			t.Errorf("request = %s %s", r.Method, r.URL.Path)
-		}
-
-		w.WriteHeader(http.StatusNoContent)
+func TestMigrateAppFailure(t *testing.T) {
+	s, a, port := migrateTestTarget(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "schema is broken", http.StatusInternalServerError)
 	}))
-	if err := s.migrateApp(a, port, make(chan struct{})); err != nil {
-		t.Fatal(err)
-	}
 
-	if got := calls.Load(); got != 1 {
-		t.Errorf("calls = %d, want 1", got)
+	if err := s.migrateApp(a, port, make(chan struct{})); err == nil || !strings.Contains(err.Error(), "schema is broken") {
+		t.Fatalf("error = %v, want the migration failure", err)
 	}
 }
 
@@ -61,9 +56,21 @@ func TestMigrateAppNoEndpoint(t *testing.T) {
 		http.Error(w, "not found", http.StatusNotFound)
 	}))
 
-	err := s.migrateApp(a, port, make(chan struct{}))
-	if !errors.Is(err, errNoMigrateEndpoint) {
+	if err := s.migrateApp(a, port, make(chan struct{})); !errors.Is(err, errNoMigrateEndpoint) {
 		t.Fatalf("error = %v, want errNoMigrateEndpoint", err)
+	}
+}
+
+func TestMigrateAppOutlivesStartupTimeout(t *testing.T) {
+	s, a, port := migrateTestTarget(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	a.cfg.startupTimeout = 10 * time.Millisecond
+	s.cfg.storageMigrationTimeout = 500 * time.Millisecond
+
+	if err := s.migrateApp(a, port, make(chan struct{})); err != nil {
+		t.Fatalf("slow migration failed although it was within the storage migration timeout: %v", err)
 	}
 }
 
@@ -72,20 +79,8 @@ func TestMigrateAppRedirectFallsBack(t *testing.T) {
 		http.Redirect(w, r, migratePath+"/", http.StatusMovedPermanently)
 	}))
 
-	err := s.migrateApp(a, port, make(chan struct{}))
-	if !errors.Is(err, errNoMigrateEndpoint) {
+	if err := s.migrateApp(a, port, make(chan struct{})); !errors.Is(err, errNoMigrateEndpoint) {
 		t.Fatalf("error = %v, want errNoMigrateEndpoint for a router redirect", err)
-	}
-}
-
-func TestMigrateAppFailure(t *testing.T) {
-	s, a, port := migrateTestTarget(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "schema is broken", http.StatusInternalServerError)
-	}))
-
-	err := s.migrateApp(a, port, make(chan struct{}))
-	if err == nil || !strings.Contains(err.Error(), "schema is broken") {
-		t.Fatalf("error = %v, want the migration failure", err)
 	}
 }
 
@@ -97,9 +92,9 @@ func TestMigrateAppRetriesUnavailable(t *testing.T) {
 			http.Error(w, "storage is starting", http.StatusServiceUnavailable)
 			return
 		}
-
 		w.WriteHeader(http.StatusNoContent)
 	}))
+
 	if err := s.migrateApp(a, port, make(chan struct{})); err != nil {
 		t.Fatal(err)
 	}
@@ -109,15 +104,22 @@ func TestMigrateAppRetriesUnavailable(t *testing.T) {
 	}
 }
 
-func TestMigrateAppOutlivesStartupTimeout(t *testing.T) {
-	s, a, port := migrateTestTarget(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		time.Sleep(100 * time.Millisecond)
+func TestMigrateAppSuccess(t *testing.T) {
+	var calls atomic.Int64
+
+	s, a, port := migrateTestTarget(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.Method != http.MethodPost || r.URL.Path != migratePath {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
-	a.cfg.startupTimeout = 10 * time.Millisecond
 
-	s.cfg.storageMigrationTimeout = 500 * time.Millisecond
 	if err := s.migrateApp(a, port, make(chan struct{})); err != nil {
-		t.Fatalf("slow migration failed although it was within the storage migration timeout: %v", err)
+		t.Fatal(err)
+	}
+
+	if got := calls.Load(); got != 1 {
+		t.Errorf("calls = %d, want 1", got)
 	}
 }

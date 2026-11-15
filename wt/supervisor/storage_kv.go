@@ -12,6 +12,49 @@ import (
 	"time"
 )
 
+type (
+	kvIncrResponse struct {
+		Value int64 `json:"value"`
+		ExpiresAt string `json:"expires_at,omitempty"`
+		TTLMS int64 `json:"ttl_ms,omitempty"`
+	}
+
+	kvItem struct {
+		value string
+		expires time.Time
+	}
+
+	// kvBucket is one app's keys. Expired keys are dropped when read and swept on writes.
+	kvBucket struct {
+		mu sync.Mutex
+		items map[string]kvItem
+		bytes int
+		lastSweep time.Time
+	}
+
+	kvRequest struct {
+		Key string `json:"key"`
+		Value string `json:"value,omitempty"`
+		TTLMS int64 `json:"ttl_ms,omitempty"`
+		By int64 `json:"by,omitempty"`
+	}
+
+	kvResponse struct {
+		Found bool `json:"found"`
+		Value string `json:"value,omitempty"`
+		// ExpiresAt is the RFC 3339 expiry, empty for a key that never expires.
+		ExpiresAt string `json:"expires_at,omitempty"`
+		TTLMS int64 `json:"ttl_ms,omitempty"`
+	}
+
+	// kvStore holds every app's bucket. It lives in supervisor memory, so it is shared by all of an app's component instances and lost when the supervisor restarts.
+	kvStore struct {
+		mu sync.Mutex
+		buckets map[string]*kvBucket
+		now func() time.Time
+	}
+)
+
 const (
 	maxKVKeyBytes = 512
 	maxKVValueBytes = 64 << 10
@@ -28,14 +71,17 @@ var (
 	errKVNotInt = errors.New("kv value is not an integer")
 )
 
-type kvItem struct {
-	value string
-	expires time.Time
-}
+// kvExpiry turns a TTL in milliseconds into an absolute expiry. Zero means no expiry.
+func kvExpiry(now time.Time, ttlMS int64) (time.Time, error) {
+	if ttlMS < 0 || ttlMS > maxKVTTL.Milliseconds() {
+		return time.Time{}, fmt.Errorf("%w: ttl_ms must be between 0 and %d", errKVInvalid, maxKVTTL.Milliseconds())
+	}
 
-// size is the bytes an item counts against its app's budget.
-func (item kvItem) size(key string) int {
-	return len(key) + len(item.value)
+	if ttlMS == 0 {
+		return time.Time{}, nil
+	}
+
+	return now.Add(time.Duration(ttlMS) * time.Millisecond), nil
 }
 
 // live reports whether the item has not expired at now. A zero expiry never expires.
@@ -43,12 +89,9 @@ func (item kvItem) live(now time.Time) bool {
 	return item.expires.IsZero() || now.Before(item.expires)
 }
 
-// kvBucket is one app's keys. Expired keys are dropped when read and swept on writes.
-type kvBucket struct {
-	mu sync.Mutex
-	items map[string]kvItem
-	bytes int
-	lastSweep time.Time
+// size is the bytes an item counts against its app's budget.
+func (item kvItem) size(key string) int {
+	return len(key) + len(item.value)
 }
 
 func (b *kvBucket) removeLocked(key string) {
@@ -58,17 +101,8 @@ func (b *kvBucket) removeLocked(key string) {
 	}
 
 	b.bytes -= item.size(key)
+
 	delete(b.items, key)
-}
-
-func (b *kvBucket) sweepLocked(now time.Time) {
-	b.lastSweep = now
-
-	for key, item := range b.items {
-		if !item.live(now) {
-			b.removeLocked(key)
-		}
-	}
 }
 
 // getLocked returns a live item, dropping it when it has expired.
@@ -86,6 +120,16 @@ func (b *kvBucket) getLocked(key string, now time.Time) (kvItem, bool) {
 	return item, true
 }
 
+func (b *kvBucket) sweepLocked(now time.Time) {
+	b.lastSweep = now
+
+	for key, item := range b.items {
+		if !item.live(now) {
+			b.removeLocked(key)
+		}
+	}
+}
+
 // putLocked stores item, sweeping expired keys first when the budget would be exceeded.
 func (b *kvBucket) putLocked(key string, item kvItem, now time.Time) error {
 	if now.Sub(b.lastSweep) >= kvSweepInterval {
@@ -93,9 +137,9 @@ func (b *kvBucket) putLocked(key string, item kvItem, now time.Time) error {
 	}
 
 	previous, exists := b.items[key]
-
 	fits := func() bool {
 		count, size := len(b.items), b.bytes+item.size(key)
+
 		if exists {
 			size -= previous.size(key)
 		} else {
@@ -104,9 +148,9 @@ func (b *kvBucket) putLocked(key string, item kvItem, now time.Time) error {
 
 		return count <= maxKVKeysPerApp && size <= maxKVBytesPerApp
 	}
-
 	if !fits() {
 		b.sweepLocked(now)
+
 		previous, exists = b.items[key]
 	}
 
@@ -124,24 +168,16 @@ func (b *kvBucket) putLocked(key string, item kvItem, now time.Time) error {
 	return nil
 }
 
-// kvStore holds every app's bucket. It lives in supervisor memory, so it is shared by all of an app's component instances and lost when the supervisor restarts.
-type kvStore struct {
-	mu sync.Mutex
-	buckets map[string]*kvBucket
-	now func() time.Time
-}
-
-func newKVStore() *kvStore {
-	return &kvStore{buckets: map[string]*kvBucket{}, now: time.Now}
-}
-
 func (s *kvStore) bucket(app string) *kvBucket {
 	s.mu.Lock()
+
 	defer s.mu.Unlock()
 
 	b := s.buckets[app]
 	if b == nil {
-		b = &kvBucket{items: map[string]kvItem{}}
+		b = &kvBucket{
+			items: map[string]kvItem{},
+		}
 		s.buckets[app] = b
 	}
 
@@ -153,52 +189,46 @@ func (s *kvStore) drop(app string) {
 	if s == nil {
 		return
 	}
-
 	s.mu.Lock()
 	delete(s.buckets, app)
 	s.mu.Unlock()
 }
 
-func validateKVKey(key string) error {
-	if key == "" || len(key) > maxKVKeyBytes {
-		return fmt.Errorf("%w: key must be 1 to %d bytes", errKVInvalid, maxKVKeyBytes)
+func (s *kvStore) remove(app, key string) bool {
+	b := s.bucket(app)
+	now := s.now()
+
+	b.mu.Lock()
+
+	defer b.mu.Unlock()
+
+	_, ok := b.getLocked(key, now)
+
+	b.removeLocked(key)
+	return ok
+}
+
+func (s *kvStore) set(app string, req kvRequest) error {
+	if len(req.Value) > maxKVValueBytes {
+		return fmt.Errorf("%w: value is larger than %d bytes", errKVInvalid, maxKVValueBytes)
 	}
 
-	return nil
-}
-
-// kvExpiry turns a TTL in milliseconds into an absolute expiry. Zero means no expiry.
-func kvExpiry(now time.Time, ttlMS int64) (time.Time, error) {
-	if ttlMS < 0 || ttlMS > maxKVTTL.Milliseconds() {
-		return time.Time{}, fmt.Errorf("%w: ttl_ms must be between 0 and %d", errKVInvalid, maxKVTTL.Milliseconds())
+	now := s.now()
+	expires, err := kvExpiry(now, req.TTLMS)
+	if err != nil {
+		return err
 	}
 
-	if ttlMS == 0 {
-		return time.Time{}, nil
-	}
+	b := s.bucket(app)
 
-	return now.Add(time.Duration(ttlMS) * time.Millisecond), nil
-}
+	b.mu.Lock()
 
-type kvRequest struct {
-	Key string `json:"key"`
-	Value string `json:"value,omitempty"`
-	TTLMS int64 `json:"ttl_ms,omitempty"`
-	By int64 `json:"by,omitempty"`
-}
+	defer b.mu.Unlock()
 
-type kvResponse struct {
-	Found bool `json:"found"`
-	Value string `json:"value,omitempty"`
-	// ExpiresAt is the RFC 3339 expiry, empty for a key that never expires.
-	ExpiresAt string `json:"expires_at,omitempty"`
-	TTLMS int64 `json:"ttl_ms,omitempty"`
-}
-
-type kvIncrResponse struct {
-	Value int64 `json:"value"`
-	ExpiresAt string `json:"expires_at,omitempty"`
-	TTLMS int64 `json:"ttl_ms,omitempty"`
+	return b.putLocked(req.Key, kvItem{
+		value: req.Value,
+		expires: expires,
+	}, now)
 }
 
 // kvTTL describes an item's expiry for a response.
@@ -215,6 +245,7 @@ func (s *kvStore) get(app, key string) kvResponse {
 	now := s.now()
 
 	b.mu.Lock()
+
 	defer b.mu.Unlock()
 
 	item, ok := b.getLocked(key, now)
@@ -224,46 +255,17 @@ func (s *kvStore) get(app, key string) kvResponse {
 
 	expiresAt, ttl := kvTTL(item, now)
 
-	return kvResponse{Found: true, Value: item.value, ExpiresAt: expiresAt, TTLMS: ttl}
-}
-
-func (s *kvStore) set(app string, req kvRequest) error {
-	if len(req.Value) > maxKVValueBytes {
-		return fmt.Errorf("%w: value is larger than %d bytes", errKVInvalid, maxKVValueBytes)
+	return kvResponse{
+		Found: true,
+		Value: item.value,
+		ExpiresAt: expiresAt,
+		TTLMS: ttl,
 	}
-
-	now := s.now()
-
-	expires, err := kvExpiry(now, req.TTLMS)
-	if err != nil {
-		return err
-	}
-
-	b := s.bucket(app)
-
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	return b.putLocked(req.Key, kvItem{value: req.Value, expires: expires}, now)
-}
-
-func (s *kvStore) remove(app, key string) bool {
-	b := s.bucket(app)
-	now := s.now()
-
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	_, ok := b.getLocked(key, now)
-	b.removeLocked(key)
-
-	return ok
 }
 
 // incr adds by to an integer key, creating it at zero first. The TTL applies only when the key is created, so a counter is a fixed window that resets when it expires.
 func (s *kvStore) incr(app string, req kvRequest) (kvIncrResponse, error) {
 	now := s.now()
-
 	expires, err := kvExpiry(now, req.TTLMS)
 	if err != nil {
 		return kvIncrResponse{}, err
@@ -277,13 +279,14 @@ func (s *kvStore) incr(app string, req kvRequest) (kvIncrResponse, error) {
 	b := s.bucket(app)
 
 	b.mu.Lock()
+
 	defer b.mu.Unlock()
 
 	var current int64
 
-	item, ok := b.getLocked(req.Key, now)
-	if ok {
+	if item, ok := b.getLocked(req.Key, now); ok {
 		current, err = strconv.ParseInt(item.value, 10, 64)
+
 		if err != nil {
 			return kvIncrResponse{}, fmt.Errorf("%w: %q", errKVNotInt, req.Key)
 		}
@@ -291,30 +294,61 @@ func (s *kvStore) incr(app string, req kvRequest) (kvIncrResponse, error) {
 		expires = item.expires
 	}
 
-	if (by > 0 && current > math.MaxInt64-by) || (by < 0 && current < math.MinInt64-by) {
+	if by > 0 && current > math.MaxInt64-by || by < 0 && current < math.MinInt64-by {
 		return kvIncrResponse{}, fmt.Errorf("%w: %q would overflow", errKVNotInt, req.Key)
 	}
 
 	current += by
+	next := kvItem{
+		value: strconv.FormatInt(current, 10),
+		expires: expires,
+	}
 
-	next := kvItem{value: strconv.FormatInt(current, 10), expires: expires}
 	if err := b.putLocked(req.Key, next, now); err != nil {
 		return kvIncrResponse{}, err
 	}
 
 	expiresAt, ttl := kvTTL(next, now)
 
-	return kvIncrResponse{Value: current, ExpiresAt: expiresAt, TTLMS: ttl}, nil
+	return kvIncrResponse{
+		Value: current,
+		ExpiresAt: expiresAt,
+		TTLMS: ttl,
+	}, nil
+}
+
+func newKVStore() *kvStore {
+	return &kvStore{
+		buckets: map[string]*kvBucket{},
+		now: time.Now,
+	}
+}
+
+func validateKVKey(key string) error {
+	if key == "" || len(key) > maxKVKeyBytes {
+		return fmt.Errorf("%w: key must be 1 to %d bytes", errKVInvalid, maxKVKeyBytes)
+	}
+
+	return nil
 }
 
 func writeKVError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, errKVInvalid):
-		writeJSON(w, http.StatusBadRequest, storageErrorResponse{Error: err.Error(), Code: "invalid"})
+		writeJSON(w, http.StatusBadRequest, storageErrorResponse{
+			Error: err.Error(),
+			Code: "invalid",
+		})
 	case errors.Is(err, errKVNotInt):
-		writeJSON(w, http.StatusConflict, storageErrorResponse{Error: err.Error(), Code: "not_integer"})
+		writeJSON(w, http.StatusConflict, storageErrorResponse{
+			Error: err.Error(),
+			Code: "not_integer",
+		})
 	case errors.Is(err, errKVFull):
-		writeJSON(w, http.StatusInsufficientStorage, storageErrorResponse{Error: err.Error(), Code: "kv_full"})
+		writeJSON(w, http.StatusInsufficientStorage, storageErrorResponse{
+			Error: err.Error(),
+			Code: "kv_full",
+		})
 	default:
 		writeStorageError(w, err)
 	}
@@ -351,7 +385,6 @@ func (s *storageServer) kvHandler(op string) func(http.ResponseWriter, *http.Req
 				writeKVError(w, err)
 				return
 			}
-
 			writeJSON(w, http.StatusOK, map[string]bool{"stored": true})
 		case "delete":
 			writeJSON(w, http.StatusOK, map[string]bool{"deleted": s.kv.remove(app, req.Key)})
@@ -361,7 +394,6 @@ func (s *storageServer) kvHandler(op string) func(http.ResponseWriter, *http.Req
 				writeKVError(w, err)
 				return
 			}
-
 			writeJSON(w, http.StatusOK, resp)
 		}
 	}

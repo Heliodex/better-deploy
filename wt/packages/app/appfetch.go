@@ -27,7 +27,6 @@ const (
 	AppBodyHashHeader = "X-WT-App-Body-SHA256"
 	// RequestIDHeader carries a request identifier across proxied and outgoing requests.
 	RequestIDHeader = "X-Request-Id"
-
 	appFetchURLEnv = "WT_APP_FETCH_URL"
 	appNameEnv = "WT_APP_NAME"
 	appTokenEnv = "WT_APP_TOKEN" //nolint:gosec // Environment variable name, not a credential.
@@ -49,6 +48,83 @@ func AppToken() string {
 	}
 
 	return os.Getenv("WT_STORAGE_TOKEN")
+}
+
+func appBodySHA256(body []byte) string {
+	sum := sha256.Sum256(body)
+
+	return hex.EncodeToString(sum[:])
+}
+
+// appCallSignatureV2 computes the v2 HMAC over newline-separated fields. It must stay byte-for-byte compatible with the supervisor verifier.
+func appCallSignatureV2(key, caller, method, path, timestamp, bodyHash string) string {
+	mac := hmac.New(sha256.New, []byte(key))
+	_, _ = io.WriteString(mac, caller+"\n"+method+"\n"+path+"\n"+timestamp+"\n"+bodyHash)
+
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// Caller verifies the supervisor's signature and returns the calling app. It rejects missing, stale or tampered identity headers.
+// The request body is read to verify the v2 body digest and then restored for the handler, so call it before reading the body.
+func Caller(r *http.Request) (string, bool) {
+	caller := r.Header.Get(AppCallerHeader)
+	timestamp := r.Header.Get(AppTimestampHeader)
+	v2 := r.Header.Get(AppSignatureV2Header)
+	if caller == "" || timestamp == "" || v2 == "" {
+		return "", false
+	}
+
+	stamp, err := time.Parse(time.RFC3339Nano, timestamp)
+	if err != nil {
+		return "", false
+	}
+
+	if skew := time.Since(stamp); skew > appCallMaxSkew || skew < -appCallMaxSkew {
+		return "", false
+	}
+
+	key := AppToken()
+	if key == "" {
+		return "", false
+	}
+
+	var body []byte
+
+	if r.Body != nil {
+		body, err = io.ReadAll(io.LimitReader(r.Body, maxAppCallBody+1))
+
+		if err != nil || len(body) > maxAppCallBody {
+			return "", false
+		}
+
+		r.Body = io.NopCloser(bytes.NewReader(body))
+	}
+
+	bodyHash := appBodySHA256(body)
+	if !hmac.Equal([]byte(r.Header.Get(AppBodyHashHeader)), []byte(bodyHash)) {
+		return "", false
+	}
+
+	expected := appCallSignatureV2(key, caller, r.Method, r.URL.RequestURI(), timestamp, bodyHash)
+
+	return caller, hmac.Equal([]byte(v2), []byte(expected))
+}
+
+// appURLEnvName maps an app name to WT_APP_URL_<NAME>, replacing non-alphanumeric characters with underscores.
+func appURLEnvName(name string) string {
+	var key strings.Builder
+
+	key.WriteString(appURLEnvPrefix)
+	for _, char := range strings.ToUpper(name) {
+		switch {
+		case char >= 'A' && char <= 'Z', char >= '0' && char <= '9':
+			key.WriteRune(char)
+		default:
+			key.WriteByte('_')
+		}
+	}
+
+	return key.String()
 }
 
 // AppURL returns the internal base URL for another app. Known apps get WT_APP_URL_<NAME>; later apps can use WT_APP_FETCH_URL.
@@ -80,83 +156,6 @@ func NewAppRequest(ctx context.Context, method, target, path string, body io.Rea
 	if err != nil {
 		return nil, err
 	}
-
 	req.Header.Set("Authorization", "Bearer "+AppToken())
-
 	return req, nil
-}
-
-// Caller verifies the supervisor's signature and returns the calling app. It rejects missing, stale or tampered identity headers.
-// The request body is read to verify the v2 body digest and then restored for the handler, so call it before reading the body.
-func Caller(r *http.Request) (string, bool) {
-	caller := r.Header.Get(AppCallerHeader)
-	timestamp := r.Header.Get(AppTimestampHeader)
-
-	v2 := r.Header.Get(AppSignatureV2Header)
-	if caller == "" || timestamp == "" || v2 == "" {
-		return "", false
-	}
-
-	stamp, err := time.Parse(time.RFC3339Nano, timestamp)
-	if err != nil {
-		return "", false
-	}
-
-	if skew := time.Since(stamp); skew > appCallMaxSkew || skew < -appCallMaxSkew {
-		return "", false
-	}
-
-	key := AppToken()
-	if key == "" {
-		return "", false
-	}
-
-	var body []byte
-	if r.Body != nil {
-		body, err = io.ReadAll(io.LimitReader(r.Body, maxAppCallBody+1))
-		if err != nil || len(body) > maxAppCallBody {
-			return "", false
-		}
-
-		r.Body = io.NopCloser(bytes.NewReader(body))
-	}
-
-	bodyHash := appBodySHA256(body)
-	if !hmac.Equal([]byte(r.Header.Get(AppBodyHashHeader)), []byte(bodyHash)) {
-		return "", false
-	}
-
-	expected := appCallSignatureV2(key, caller, r.Method, r.URL.RequestURI(), timestamp, bodyHash)
-
-	return caller, hmac.Equal([]byte(v2), []byte(expected))
-}
-
-// appCallSignatureV2 computes the v2 HMAC over newline-separated fields. It must stay byte-for-byte compatible with the supervisor verifier.
-func appCallSignatureV2(key, caller, method, path, timestamp, bodyHash string) string {
-	mac := hmac.New(sha256.New, []byte(key))
-	_, _ = io.WriteString(mac, caller+"\n"+method+"\n"+path+"\n"+timestamp+"\n"+bodyHash)
-
-	return hex.EncodeToString(mac.Sum(nil))
-}
-
-func appBodySHA256(body []byte) string {
-	sum := sha256.Sum256(body)
-	return hex.EncodeToString(sum[:])
-}
-
-// appURLEnvName maps an app name to WT_APP_URL_<NAME>, replacing non-alphanumeric characters with underscores.
-func appURLEnvName(name string) string {
-	var key strings.Builder
-	key.WriteString(appURLEnvPrefix)
-
-	for _, char := range strings.ToUpper(name) {
-		switch {
-		case char >= 'A' && char <= 'Z', char >= '0' && char <= '9':
-			key.WriteRune(char)
-		default:
-			key.WriteByte('_')
-		}
-	}
-
-	return key.String()
 }

@@ -8,7 +8,6 @@ import (
 func TestLockAppIsPerApp(t *testing.T) {
 	s := testSupervisor()
 	unlockA := s.lockApp("a")
-
 	done := make(chan struct{})
 
 	go func() {
@@ -23,14 +22,12 @@ func TestLockAppIsPerApp(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("app b was blocked by app a")
 	}
-
 	unlockA()
 }
 
 func TestLockAppSerialisesSameApp(t *testing.T) {
 	s := testSupervisor()
 	unlockFirst := s.lockApp("a")
-
 	done := make(chan struct{})
 
 	go func() {
@@ -45,9 +42,7 @@ func TestLockAppSerialisesSameApp(t *testing.T) {
 		t.Fatal("the same app lock was acquired twice")
 	case <-time.After(50 * time.Millisecond):
 	}
-
 	unlockFirst()
-
 	select {
 	case <-done:
 	case <-time.After(time.Second):

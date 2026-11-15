@@ -10,32 +10,6 @@ import (
 	"strings"
 )
 
-// parseAdminListen accepts a TCP address ("127.0.0.1:8081") or "unix:/path/to.sock".
-func parseAdminListen(value string) (network, address string, err error) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return "", "", errors.New("empty address")
-	}
-
-	if path, ok := strings.CutPrefix(value, "unix:"); ok {
-		if strings.TrimSpace(path) == "" {
-			return "", "", errors.New("unix admin listener needs a path")
-		}
-
-		return "unix", path, nil
-	}
-
-	if address, ok := strings.CutPrefix(value, "tcp:"); ok {
-		if strings.TrimSpace(address) == "" {
-			return "", "", errors.New("tcp admin listener needs an address")
-		}
-
-		return "tcp", address, nil
-	}
-
-	return "tcp", value, nil
-}
-
 // listenAdmin binds the separate admin listener. A Unix socket is created 0600 after removing a stale socket, and cleanup removes it.
 func listenAdmin(network, address string) (net.Listener, func(), error) {
 	if network != "unix" {
@@ -87,4 +61,31 @@ func listenAdmin(network, address string) (net.Listener, func(), error) {
 	}
 
 	return listener, cleanup, nil
+}
+
+// parseAdminListen accepts a TCP address ("127.0.0.1:8081") or "unix:/path/to.sock".
+func parseAdminListen(value string) (network, address string, err error) {
+	value = strings.TrimSpace(value)
+
+	if value == "" {
+		return "", "", errors.New("empty address")
+	}
+
+	if path, ok := strings.CutPrefix(value, "unix:"); ok {
+		if strings.TrimSpace(path) == "" {
+			return "", "", errors.New("unix admin listener needs a path")
+		}
+
+		return "unix", path, nil
+	}
+
+	if address, ok := strings.CutPrefix(value, "tcp:"); ok {
+		if strings.TrimSpace(address) == "" {
+			return "", "", errors.New("tcp admin listener needs an address")
+		}
+
+		return "tcp", address, nil
+	}
+
+	return "tcp", value, nil
 }

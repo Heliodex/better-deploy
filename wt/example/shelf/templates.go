@@ -11,13 +11,25 @@ import (
 	"github.com/heliodex/better-deploy/wt/packages/v2/app"
 )
 
-//go:embed templates/*.html
-var templateFiles embed.FS
-
 var (
+	//go:embed templates/*.html
+	templateFiles embed.FS
 	indexTmpl = parseTemplate("index", "templates/base.html", "templates/index.html")
 	detailTmpl = parseTemplate("detail", "templates/base.html", "templates/detail.html")
 )
+
+func render(w http.ResponseWriter, status int, tmpl *template.Template, data any) {
+	var buf bytes.Buffer
+
+	if err := tmpl.Execute(&buf, data); err != nil {
+		http.Error(w, "render page: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+
+	_, _ = w.Write(buf.Bytes())
+}
 
 func templateFuncs() template.FuncMap {
 	return template.FuncMap{
@@ -52,21 +64,8 @@ func parseTemplate(name string, files ...string) *template.Template {
 		if err != nil {
 			panic(err)
 		}
-
 		content.Write(data)
 	}
 
 	return template.Must(template.New(name).Funcs(templateFuncs()).Parse(content.String()))
-}
-
-func render(w http.ResponseWriter, status int, tmpl *template.Template, data any) {
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		http.Error(w, "render page: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(status)
-	_, _ = w.Write(buf.Bytes())
 }

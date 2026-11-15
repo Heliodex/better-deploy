@@ -20,75 +20,145 @@ import (
 	"wt.example/passport/contract"
 )
 
-// errNoSession distinguishes a missing cookie from a storage failure when loading a session.
-var errNoSession = errors.New("no session")
+type (
+	// callbackFlow is the stored half of one login attempt.
+	callbackFlow struct {
+		verifier, nonce, redirectURI string
+	}
+
+	// passportApp owns the store, OAuth client and routes so handler tests can build one without wasmtime.
+	passportApp struct {
+		store *storage.Client
+		mux *http.ServeMux
+		oauth *oauth.Client
+		providerName string
+		sessions session.Manager
+	}
+
+	// userSession is one signed-in browser, loaded from the hashed cookie token on each request.
+	userSession struct {
+		identity oauth.Identity
+		expiresAt time.Time
+		idToken string
+	}
+)
 
 const (
-	maxMessage = 280
-	maxBody = 4 << 10
 	defaultLimit = 50
-	maxLimit = 100
-	sessionTTL = 8 * time.Hour
 	flowTTL = 10 * time.Minute
+	maxBody = 4 << 10
+	maxLimit = 100
+	maxMessage = 280
 	sessionCookie = "passport_session"
+	sessionTTL = 8 * time.Hour
 	stateCookie = "passport_oauth_state"
 )
 
-// passportApp owns the store, OAuth client and routes so handler tests can build one without wasmtime.
-type passportApp struct {
-	store *storage.Client
-	mux *http.ServeMux
-	oauth *oauth.Client
-	providerName string
-	sessions session.Manager
+// errNoSession distinguishes a missing cookie from a storage failure when loading a session.
+var errNoSession = errors.New("no session")
+
+// callbackStateMatches reports whether the state from the callback body is the one this browser started the login with.
+func callbackStateMatches(r *http.Request, state string) bool {
+	cookie, err := r.Cookie(stateCookie)
+
+	return err == nil && cookie.Value != "" && state != "" && session.Equal(cookie.Value, state)
 }
 
-// userSession is one signed-in browser, loaded from the hashed cookie token on each request.
-type userSession struct {
-	identity oauth.Identity
-	expiresAt time.Time
-	idToken string
-}
-
-// sessionResponse builds the public session response, with empty user fields when signed out.
-func (a *passportApp) sessionResponse(sess *userSession) contract.SessionResponse {
-	cfg := a.oauth.Config()
-	response := contract.SessionResponse{
-		Authenticated: sess != nil,
-		ClientID: cfg.ClientID,
-		ProviderIssuer: cfg.Issuer,
-		ProviderName: a.providerName,
-		Scopes: cfg.Scopes,
+// envDefault returns a trimmed environment value or a fallback.
+func envDefault(key, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		return value
 	}
 
-	if sess == nil {
-		return response
-	}
-
-	response.ExpiresAt = sess.expiresAt.UTC().Format(time.RFC3339)
-	response.UserEmail = sess.identity.Email
-	response.UserName = sess.identity.Name
-	response.UserPicture = sess.identity.Picture
-	response.UserSub = sess.identity.Subject
-	response.UserUsername = sess.identity.Username
-	response.UserZoneinfo = sess.identity.Zoneinfo
-
-	return response
+	return fallback
 }
+
+func main() {}
 
 // noStore keeps tokens and session state out of browser and intermediary caches.
 func noStore(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-store")
 }
 
-// redirect sends the browser to a path on this app.
-func redirect(w http.ResponseWriter, r *http.Request, location string) {
-	http.Redirect(w, r, location, http.StatusSeeOther)
+// completeLogin exchanges the authorisation code and verifies the ID token. It writes the error response and reports false on failure.
+func (a *passportApp) completeLogin(w http.ResponseWriter, r *http.Request, flow callbackFlow, code string) (oauth.Identity, oauth.Tokens, bool) {
+	tokens, err := a.oauth.Exchange(r.Context(), code, flow.redirectURI, flow.verifier)
+	if err != nil {
+		log.Printf("oauth token exchange: %v", err)
+		app.WriteErrorCode(w, http.StatusBadGateway, "exchange", "the identity provider rejected the code exchange")
+		return oauth.Identity{}, oauth.Tokens{}, false
+	}
+
+	identity, err := a.oauth.VerifyIDToken(r.Context(), tokens.IDToken, flow.nonce)
+	if err != nil {
+		log.Printf("verify id token: %v", err)
+		app.WriteErrorCode(w, http.StatusBadGateway, "token", "the identity token could not be verified")
+		return oauth.Identity{}, oauth.Tokens{}, false
+	}
+
+	// Userinfo enriches the profile but is optional: the verified ID token alone is enough to sign in.
+	if userinfo, err := a.oauth.Userinfo(r.Context(), tokens.AccessToken); err == nil {
+		if err := identity.Merge(userinfo); err != nil {
+			log.Printf("oauth userinfo: %v", err)
+		}
+	} else {
+		log.Printf("oauth userinfo: %v", err)
+	}
+
+	if identity.Subject == "" {
+		app.WriteErrorCode(w, http.StatusBadGateway, "token", "the identity token has no subject")
+		return oauth.Identity{}, oauth.Tokens{}, false
+	}
+
+	return identity, tokens, true
 }
 
-// authFailed sends the browser back to the frontend with a short reason the page can explain.
-func authFailed(w http.ResponseWriter, r *http.Request, reason string) {
-	redirect(w, r, "/?auth="+url.QueryEscape(reason))
+// endSessionURL builds the RP-initiated logout redirect, or an empty string when the provider cannot be reached.
+func (a *passportApp) endSessionURL(r *http.Request, sess *userSession) string {
+	var redirectURI string
+
+	if base := app.PublicURL(r); base != "" {
+		redirectURI = base + "/"
+	}
+
+	endSession, err := a.oauth.EndSessionURL(r.Context(), sess.idToken, redirectURI)
+	if err != nil {
+		log.Printf("oauth end session: %v", err)
+		return ""
+	}
+
+	return endSession
+}
+
+// handler exposes the app's routes to the wasm wiring or a test.
+func (a *passportApp) handler() http.Handler {
+	return a.mux
+}
+
+// listCheckins returns the newest entries and marks the ones the current user wrote.
+func (a *passportApp) listCheckins(ctx context.Context, sess *userSession, limit int) ([]contract.Checkin, error) {
+	rows, err := a.store.Query(ctx, `select id, message, author_sub, author_name, author_picture, created_at
+		from checkins order by created_at desc, id desc limit ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	checkins := make([]contract.Checkin, 0, limit)
+
+	for rows.Next() {
+		var entry contract.Checkin
+
+		if err := rows.Scan(&entry.ID, &entry.Message, &entry.AuthorSub, &entry.AuthorName, &entry.AuthorPicture, &entry.CreatedAt); err != nil {
+			return nil, err
+		}
+
+		entry.Mine = sess != nil && entry.AuthorSub == sess.identity.Subject
+		checkins = append(checkins, entry)
+	}
+
+	return checkins, rows.Err()
 }
 
 // loadSession looks up the session cookie, returning nil for no session or an expired one.
@@ -104,9 +174,7 @@ func (a *passportApp) loadSession(ctx context.Context, r *http.Request) (*userSe
 	)
 
 	err := a.store.QueryRow(ctx, `select user_sub, user_name, user_email, user_username, user_picture, user_zoneinfo, id_token, expires_at
-		from sessions where id = ? and expires_at > ?`, session.Hash(token), time.Now().UTC().Format(app.TimestampFormat)).
-		Scan(&sess.identity.Subject, &sess.identity.Name, &sess.identity.Email, &sess.identity.Username,
-			&sess.identity.Picture, &sess.identity.Zoneinfo, &sess.idToken, &expiresAt)
+		from sessions where id = ? and expires_at > ?`, session.Hash(token), time.Now().UTC().Format(app.TimestampFormat)).Scan(&sess.identity.Subject, &sess.identity.Name, &sess.identity.Email, &sess.identity.Username, &sess.identity.Picture, &sess.identity.Zoneinfo, &sess.idToken, &expiresAt)
 	if errors.Is(err, storage.ErrNoRows) {
 		return nil, errNoSession
 	}
@@ -123,62 +191,6 @@ func (a *passportApp) loadSession(ctx context.Context, r *http.Request) (*userSe
 	sess.expiresAt = parsed
 
 	return &sess, nil
-}
-
-// requireSession loads the session or writes a 401 and returns nil.
-func (a *passportApp) requireSession(w http.ResponseWriter, r *http.Request) *userSession {
-	sess, err := a.loadSession(r.Context(), r)
-	if errors.Is(err, errNoSession) {
-		app.WriteErrorCode(w, http.StatusUnauthorized, "unauthorized", "sign in first")
-		return nil
-	}
-
-	if err != nil {
-		app.WriteError(w, http.StatusInternalServerError, "could not load the session")
-		return nil
-	}
-
-	return sess
-}
-
-func (a *passportApp) handleSession(w http.ResponseWriter, r *http.Request) {
-	noStore(w)
-
-	sess, err := a.loadSession(r.Context(), r)
-	if err != nil && !errors.Is(err, errNoSession) {
-		app.WriteError(w, http.StatusInternalServerError, "could not load the session")
-		return
-	}
-
-	if errors.Is(err, errNoSession) {
-		sess = nil
-	}
-
-	app.WriteJSON(w, http.StatusOK, a.sessionResponse(sess))
-}
-
-// listCheckins returns the newest entries and marks the ones the current user wrote.
-func (a *passportApp) listCheckins(ctx context.Context, sess *userSession, limit int) ([]contract.Checkin, error) {
-	rows, err := a.store.Query(ctx, `select id, message, author_sub, author_name, author_picture, created_at
-		from checkins order by created_at desc, id desc limit ?`, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	checkins := make([]contract.Checkin, 0, limit)
-
-	for rows.Next() {
-		var entry contract.Checkin
-		if err := rows.Scan(&entry.ID, &entry.Message, &entry.AuthorSub, &entry.AuthorName, &entry.AuthorPicture, &entry.CreatedAt); err != nil {
-			return nil, err
-		}
-
-		entry.Mine = sess != nil && entry.AuthorSub == sess.identity.Subject
-		checkins = append(checkins, entry)
-	}
-
-	return checkins, rows.Err()
 }
 
 func (a *passportApp) handleListCheckins(w http.ResponseWriter, r *http.Request) {
@@ -209,8 +221,333 @@ func (a *passportApp) handleListCheckins(w http.ResponseWriter, r *http.Request)
 		app.WriteError(w, http.StatusInternalServerError, "could not load check-ins")
 		return
 	}
+	app.WriteJSON(w, http.StatusOK, contract.CheckinsResponse{
+		Checkins: checkins,
+	})
+}
 
-	app.WriteJSON(w, http.StatusOK, contract.CheckinsResponse{Checkins: checkins})
+func (a *passportApp) handleLogout(w http.ResponseWriter, r *http.Request) {
+	noStore(w)
+	if !session.SameOrigin(r) {
+		app.WriteErrorCode(w, http.StatusForbidden, "forbidden", "cross-site request rejected")
+		return
+	}
+
+	response := contract.LogoutResponse{}
+	token, hasToken := a.sessions.Token(r)
+
+	var sess *userSession
+
+	if hasToken {
+		var err error
+
+		sess, err = a.loadSession(r.Context(), r)
+
+		if err != nil && !errors.Is(err, errNoSession) {
+			app.WriteError(w, http.StatusInternalServerError, "could not load the session")
+			return
+		}
+
+		if _, err := a.store.Exec(r.Context(), `delete from sessions where id = ?`, session.Hash(token)); err != nil {
+			app.WriteError(w, http.StatusInternalServerError, "could not sign out")
+			return
+		}
+	}
+	a.sessions.Clear(w, r)
+	if sess != nil {
+		response.EndSessionURL = a.endSessionURL(r, sess)
+	}
+	app.WriteJSON(w, http.StatusOK, response)
+}
+
+// migrate creates the login-flow, session and check-in tables.
+func (a *passportApp) migrate(ctx context.Context) error {
+	return a.store.Migrate(ctx, 1, storage.Statement{
+		SQL: `create table if not exists login_flows (
+			state text primary key,
+			verifier text not null,
+			nonce text not null,
+			redirect_uri text not null,
+			created_at text not null
+		)`,
+	}, storage.Statement{
+		SQL: `create table if not exists sessions (
+			id text primary key,
+			user_sub text not null,
+			user_name text not null,
+			user_email text not null,
+			user_username text not null,
+			user_picture text not null,
+			user_zoneinfo text not null,
+			access_token text not null,
+			refresh_token text not null,
+			id_token text not null,
+			created_at text not null,
+			expires_at text not null
+		)`,
+	}, storage.Statement{
+		SQL: `create table if not exists checkins (
+			id text primary key,
+			message text not null,
+			author_sub text not null,
+			author_name text not null,
+			author_picture text not null,
+			created_at text not null
+		)`,
+	}, storage.Statement{
+		SQL: `create index if not exists checkins_created_idx on checkins(created_at)`,
+	}, storage.Statement{
+		SQL: `create index if not exists sessions_expires_idx on sessions(expires_at)`,
+	})
+}
+
+// requireSession loads the session or writes a 401 and returns nil.
+func (a *passportApp) requireSession(w http.ResponseWriter, r *http.Request) *userSession {
+	sess, err := a.loadSession(r.Context(), r)
+	if errors.Is(err, errNoSession) {
+		app.WriteErrorCode(w, http.StatusUnauthorized, "unauthorized", "sign in first")
+		return nil
+	}
+
+	if err != nil {
+		app.WriteError(w, http.StatusInternalServerError, "could not load the session")
+		return nil
+	}
+
+	return sess
+}
+
+func (a *passportApp) handleDeleteCheckin(w http.ResponseWriter, r *http.Request) {
+	if !session.SameOrigin(r) {
+		app.WriteErrorCode(w, http.StatusForbidden, "forbidden", "cross-site request rejected")
+		return
+	}
+
+	sess := a.requireSession(w, r)
+	if sess == nil {
+		return
+	}
+
+	result, err := a.store.Exec(r.Context(), `delete from checkins where id = ? and author_sub = ?`, r.PathValue("id"), sess.identity.Subject)
+	if err != nil {
+		app.WriteError(w, http.StatusInternalServerError, "could not delete the check-in")
+		return
+	}
+
+	if result.RowsAffected == 0 {
+		app.WriteError(w, http.StatusNotFound, "check-in not found")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// sessionResponse builds the public session response, with empty user fields when signed out.
+func (a *passportApp) sessionResponse(sess *userSession) contract.SessionResponse {
+	cfg := a.oauth.Config()
+	response := contract.SessionResponse{
+		Authenticated: sess != nil,
+		ClientID: cfg.ClientID,
+		ProviderIssuer: cfg.Issuer,
+		ProviderName: a.providerName,
+		Scopes: cfg.Scopes,
+	}
+
+	if sess == nil {
+		return response
+	}
+
+	response.ExpiresAt = sess.expiresAt.UTC().Format(time.RFC3339)
+	response.UserEmail = sess.identity.Email
+	response.UserName = sess.identity.Name
+	response.UserPicture = sess.identity.Picture
+	response.UserSub = sess.identity.Subject
+	response.UserUsername = sess.identity.Username
+	response.UserZoneinfo = sess.identity.Zoneinfo
+
+	return response
+}
+
+func (a *passportApp) handleSession(w http.ResponseWriter, r *http.Request) {
+	noStore(w)
+
+	sess, err := a.loadSession(r.Context(), r)
+	if err != nil && !errors.Is(err, errNoSession) {
+		app.WriteError(w, http.StatusInternalServerError, "could not load the session")
+		return
+	}
+
+	if errors.Is(err, errNoSession) {
+		sess = nil
+	}
+	app.WriteJSON(w, http.StatusOK, a.sessionResponse(sess))
+}
+
+// storeSession issues a session token, saves the session with the provider tokens and sets the session cookie. It writes the error response and reports false on failure.
+func (a *passportApp) storeSession(w http.ResponseWriter, r *http.Request, identity oauth.Identity, tokens oauth.Tokens) bool {
+	token, hash, err := session.Issue()
+	if err != nil {
+		app.WriteErrorCode(w, http.StatusInternalServerError, "internal", "could not create a session")
+		return false
+	}
+
+	now := time.Now().UTC()
+	expiresAt := now.Add(sessionTTL)
+	_, err = a.store.Batch(r.Context(), storage.Statement{
+		SQL: `delete from sessions where expires_at <= ?`,
+		Args: []any{now.Format(app.TimestampFormat)},
+	}, storage.Statement{
+		SQL: `insert into sessions (id, user_sub, user_name, user_email, user_username, user_picture, user_zoneinfo,
+				access_token, refresh_token, id_token, created_at, expires_at)
+				values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		Args: []any{
+			hash,
+			identity.Subject,
+			identity.Name,
+			identity.Email,
+			identity.Username,
+			identity.Picture,
+			identity.Zoneinfo,
+			tokens.AccessToken,
+			tokens.RefreshToken,
+			tokens.IDToken,
+			now.Format(app.TimestampFormat),
+			expiresAt.Format(app.TimestampFormat),
+		},
+	})
+
+	if err != nil {
+		log.Printf("store session: %v", err)
+		app.WriteErrorCode(w, http.StatusInternalServerError, "internal", "could not store the session")
+		return false
+	}
+	a.sessions.Set(w, r, token)
+	session.Clear(w, r, stateCookie)
+	return true
+}
+
+// takeFlow consumes a login flow so a callback code cannot be replayed.
+func (a *passportApp) takeFlow(ctx context.Context, state string) (callbackFlow, error) {
+	var (
+		flow callbackFlow
+		createdAt string
+	)
+
+	err := a.store.QueryRow(ctx, `select verifier, nonce, redirect_uri, created_at from login_flows where state = ?`, state).Scan(&flow.verifier, &flow.nonce, &flow.redirectURI, &createdAt)
+	if err != nil {
+		return flow, err
+	}
+
+	if _, err := a.store.Exec(ctx, `delete from login_flows where state = ?`, state); err != nil {
+		return flow, err
+	}
+
+	if created, err := time.Parse(app.TimestampFormat, createdAt); err != nil || time.Since(created) > flowTTL {
+		return flow, errors.New("login flow expired")
+	}
+
+	return flow, nil
+}
+
+// handleCallback validates state, exchanges the code, verifies the ID token and opens a session. The static /auth/callback page calls it, because the supervisor serves HTML navigations from static files before the component sees them.
+func (a *passportApp) handleCallback(w http.ResponseWriter, r *http.Request) {
+	noStore(w)
+	if !session.SameOrigin(r) {
+		app.WriteErrorCode(w, http.StatusForbidden, "forbidden", "cross-site request rejected")
+		return
+	}
+
+	var request contract.CallbackRequest
+	if !app.ReadJSON(w, r, maxBody, "state", &request) {
+		return
+	}
+
+	if !callbackStateMatches(r, request.State) {
+		app.WriteErrorCode(w, http.StatusBadRequest, "state", "the login state did not match this browser")
+		return
+	}
+
+	flow, err := a.takeFlow(r.Context(), request.State)
+	if errors.Is(err, storage.ErrNoRows) {
+		app.WriteErrorCode(w, http.StatusBadRequest, "expired", "the login flow expired or was already used")
+		return
+	}
+
+	if err != nil {
+		log.Printf("take login flow: %v", err)
+		app.WriteErrorCode(w, http.StatusInternalServerError, "internal", "could not complete the login")
+		return
+	}
+
+	identity, tokens, ok := a.completeLogin(w, r, flow, request.Code)
+	if !ok {
+		return
+	}
+
+	if !a.storeSession(w, r, identity, tokens) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// redirect sends the browser to a path on this app.
+func redirect(w http.ResponseWriter, r *http.Request, location string) {
+	http.Redirect(w, r, location, http.StatusSeeOther)
+}
+
+// authFailed sends the browser back to the frontend with a short reason the page can explain.
+func authFailed(w http.ResponseWriter, r *http.Request, reason string) {
+	redirect(w, r, "/?auth="+url.QueryEscape(reason))
+}
+
+// handleLogin starts the authorisation code flow with PKCE and a matching state cookie.
+func (a *passportApp) handleLogin(w http.ResponseWriter, r *http.Request) {
+	if !session.SameOrigin(r) {
+		app.WriteErrorCode(w, http.StatusForbidden, "forbidden", "cross-site request rejected")
+		return
+	}
+
+	state, err := oauth.NewNonce()
+	if err != nil {
+		authFailed(w, r, "internal")
+		return
+	}
+
+	verifier, challenge, err := oauth.NewPKCE()
+	if err != nil {
+		authFailed(w, r, "internal")
+		return
+	}
+
+	nonce, err := oauth.NewNonce()
+	if err != nil {
+		authFailed(w, r, "internal")
+		return
+	}
+
+	redirectURI := app.PublicURL(r) + "/auth/callback/"
+	authoriseURL, err := a.oauth.AuthoriseURL(r.Context(), redirectURI, state, nonce, challenge)
+	if err != nil {
+		log.Printf("oauth discovery: %v", err)
+		authFailed(w, r, "provider")
+		return
+	}
+
+	_, err = a.store.Batch(r.Context(), storage.Statement{
+		SQL: `delete from login_flows where created_at < ?`,
+		Args: []any{time.Now().UTC().Add(-flowTTL).Format(app.TimestampFormat)},
+	}, storage.Statement{
+		SQL: `insert into login_flows (state, verifier, nonce, redirect_uri, created_at) values (?, ?, ?, ?, ?)`,
+		Args: []any{state, verifier, nonce, redirectURI, time.Now().UTC().Format(app.TimestampFormat)},
+	})
+
+	if err != nil {
+		log.Printf("store login flow: %v", err)
+		authFailed(w, r, "internal")
+		return
+	}
+	session.Set(w, r, stateCookie, state, flowTTL)
+	//nolint:gosec // authoriseURL comes from the configured provider's discovery document, not user input.
+	http.Redirect(w, r, authoriseURL, http.StatusFound)
 }
 
 // validMessage reports whether a check-in is non-blank and within the character limit.
@@ -247,6 +584,7 @@ func (a *passportApp) handleCreateCheckin(w http.ResponseWriter, r *http.Request
 	}
 
 	message := strings.TrimSpace(request.Message)
+
 	if problem := validMessage(message); problem != "" {
 		app.WriteErrorField(w, http.StatusBadRequest, "invalid", "message", problem)
 		return
@@ -267,349 +605,7 @@ func (a *passportApp) handleCreateCheckin(w http.ResponseWriter, r *http.Request
 		app.WriteError(w, http.StatusInternalServerError, "could not save the check-in")
 		return
 	}
-
 	app.WriteJSON(w, http.StatusCreated, entry)
-}
-
-func (a *passportApp) handleDeleteCheckin(w http.ResponseWriter, r *http.Request) {
-	if !session.SameOrigin(r) {
-		app.WriteErrorCode(w, http.StatusForbidden, "forbidden", "cross-site request rejected")
-		return
-	}
-
-	sess := a.requireSession(w, r)
-	if sess == nil {
-		return
-	}
-
-	result, err := a.store.Exec(r.Context(), `delete from checkins where id = ? and author_sub = ?`, r.PathValue("id"), sess.identity.Subject)
-	if err != nil {
-		app.WriteError(w, http.StatusInternalServerError, "could not delete the check-in")
-		return
-	}
-
-	if result.RowsAffected == 0 {
-		app.WriteError(w, http.StatusNotFound, "check-in not found")
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (a *passportApp) handleLogout(w http.ResponseWriter, r *http.Request) {
-	noStore(w)
-
-	if !session.SameOrigin(r) {
-		app.WriteErrorCode(w, http.StatusForbidden, "forbidden", "cross-site request rejected")
-		return
-	}
-
-	response := contract.LogoutResponse{}
-	token, hasToken := a.sessions.Token(r)
-
-	var sess *userSession
-
-	if hasToken {
-		var err error
-
-		sess, err = a.loadSession(r.Context(), r)
-		if err != nil && !errors.Is(err, errNoSession) {
-			app.WriteError(w, http.StatusInternalServerError, "could not load the session")
-			return
-		}
-
-		if _, err := a.store.Exec(r.Context(), `delete from sessions where id = ?`, session.Hash(token)); err != nil {
-			app.WriteError(w, http.StatusInternalServerError, "could not sign out")
-			return
-		}
-	}
-
-	a.sessions.Clear(w, r)
-
-	if sess != nil {
-		response.EndSessionURL = a.endSessionURL(r, sess)
-	}
-
-	app.WriteJSON(w, http.StatusOK, response)
-}
-
-// endSessionURL builds the RP-initiated logout redirect, or an empty string when the provider cannot be reached.
-func (a *passportApp) endSessionURL(r *http.Request, sess *userSession) string {
-	redirectURI := ""
-	if base := app.PublicURL(r); base != "" {
-		redirectURI = base + "/"
-	}
-
-	endSession, err := a.oauth.EndSessionURL(r.Context(), sess.idToken, redirectURI)
-	if err != nil {
-		log.Printf("oauth end session: %v", err)
-		return ""
-	}
-
-	return endSession
-}
-
-// handleLogin starts the authorisation code flow with PKCE and a matching state cookie.
-func (a *passportApp) handleLogin(w http.ResponseWriter, r *http.Request) {
-	if !session.SameOrigin(r) {
-		app.WriteErrorCode(w, http.StatusForbidden, "forbidden", "cross-site request rejected")
-		return
-	}
-
-	state, err := oauth.NewNonce()
-	if err != nil {
-		authFailed(w, r, "internal")
-		return
-	}
-
-	verifier, challenge, err := oauth.NewPKCE()
-	if err != nil {
-		authFailed(w, r, "internal")
-		return
-	}
-
-	nonce, err := oauth.NewNonce()
-	if err != nil {
-		authFailed(w, r, "internal")
-		return
-	}
-
-	redirectURI := app.PublicURL(r) + "/auth/callback/"
-
-	authoriseURL, err := a.oauth.AuthoriseURL(r.Context(), redirectURI, state, nonce, challenge)
-	if err != nil {
-		log.Printf("oauth discovery: %v", err)
-		authFailed(w, r, "provider")
-
-		return
-	}
-
-	_, err = a.store.Batch(r.Context(),
-		storage.Statement{
-			SQL: `delete from login_flows where created_at < ?`,
-			Args: []any{time.Now().UTC().Add(-flowTTL).Format(app.TimestampFormat)},
-		},
-		storage.Statement{
-			SQL: `insert into login_flows (state, verifier, nonce, redirect_uri, created_at) values (?, ?, ?, ?, ?)`,
-			Args: []any{state, verifier, nonce, redirectURI, time.Now().UTC().Format(app.TimestampFormat)},
-		},
-	)
-	if err != nil {
-		log.Printf("store login flow: %v", err)
-		authFailed(w, r, "internal")
-
-		return
-	}
-
-	session.Set(w, r, stateCookie, state, flowTTL)
-	//nolint:gosec // authoriseURL comes from the configured provider's discovery document, not user input.
-	http.Redirect(w, r, authoriseURL, http.StatusFound)
-}
-
-// callbackFlow is the stored half of one login attempt.
-type callbackFlow struct {
-	verifier, nonce, redirectURI string
-}
-
-// takeFlow consumes a login flow so a callback code cannot be replayed.
-func (a *passportApp) takeFlow(ctx context.Context, state string) (callbackFlow, error) {
-	var (
-		flow callbackFlow
-		createdAt string
-	)
-
-	err := a.store.QueryRow(ctx, `select verifier, nonce, redirect_uri, created_at from login_flows where state = ?`, state).
-		Scan(&flow.verifier, &flow.nonce, &flow.redirectURI, &createdAt)
-	if err != nil {
-		return flow, err
-	}
-
-	if _, err := a.store.Exec(ctx, `delete from login_flows where state = ?`, state); err != nil {
-		return flow, err
-	}
-
-	if created, err := time.Parse(app.TimestampFormat, createdAt); err != nil || time.Since(created) > flowTTL {
-		return flow, errors.New("login flow expired")
-	}
-
-	return flow, nil
-}
-
-// callbackStateMatches reports whether the state from the callback body is the one this browser started the login with.
-func callbackStateMatches(r *http.Request, state string) bool {
-	cookie, err := r.Cookie(stateCookie)
-
-	return err == nil && cookie.Value != "" && state != "" && session.Equal(cookie.Value, state)
-}
-
-// completeLogin exchanges the authorisation code and verifies the ID token. It writes the error response and reports false on failure.
-func (a *passportApp) completeLogin(w http.ResponseWriter, r *http.Request, flow callbackFlow, code string) (oauth.Identity, oauth.Tokens, bool) {
-	tokens, err := a.oauth.Exchange(r.Context(), code, flow.redirectURI, flow.verifier)
-	if err != nil {
-		log.Printf("oauth token exchange: %v", err)
-		app.WriteErrorCode(w, http.StatusBadGateway, "exchange", "the identity provider rejected the code exchange")
-
-		return oauth.Identity{}, oauth.Tokens{}, false
-	}
-
-	identity, err := a.oauth.VerifyIDToken(r.Context(), tokens.IDToken, flow.nonce)
-	if err != nil {
-		log.Printf("verify id token: %v", err)
-		app.WriteErrorCode(w, http.StatusBadGateway, "token", "the identity token could not be verified")
-
-		return oauth.Identity{}, oauth.Tokens{}, false
-	}
-
-	// Userinfo enriches the profile but is optional: the verified ID token alone is enough to sign in.
-	if userinfo, err := a.oauth.Userinfo(r.Context(), tokens.AccessToken); err == nil {
-		if err := identity.Merge(userinfo); err != nil {
-			log.Printf("oauth userinfo: %v", err)
-		}
-	} else {
-		log.Printf("oauth userinfo: %v", err)
-	}
-
-	if identity.Subject == "" {
-		app.WriteErrorCode(w, http.StatusBadGateway, "token", "the identity token has no subject")
-
-		return oauth.Identity{}, oauth.Tokens{}, false
-	}
-
-	return identity, tokens, true
-}
-
-// storeSession issues a session token, saves the session with the provider tokens and sets the session cookie. It writes the error response and reports false on failure.
-func (a *passportApp) storeSession(w http.ResponseWriter, r *http.Request, identity oauth.Identity, tokens oauth.Tokens) bool {
-	token, hash, err := session.Issue()
-	if err != nil {
-		app.WriteErrorCode(w, http.StatusInternalServerError, "internal", "could not create a session")
-
-		return false
-	}
-
-	now := time.Now().UTC()
-	expiresAt := now.Add(sessionTTL)
-
-	_, err = a.store.Batch(r.Context(),
-		storage.Statement{
-			SQL: `delete from sessions where expires_at <= ?`,
-			Args: []any{now.Format(app.TimestampFormat)},
-		},
-		storage.Statement{
-			SQL: `insert into sessions (id, user_sub, user_name, user_email, user_username, user_picture, user_zoneinfo,
-				access_token, refresh_token, id_token, created_at, expires_at)
-				values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			Args: []any{hash, identity.Subject, identity.Name, identity.Email, identity.Username, identity.Picture, identity.Zoneinfo,
-				tokens.AccessToken, tokens.RefreshToken, tokens.IDToken,
-				now.Format(app.TimestampFormat), expiresAt.Format(app.TimestampFormat)},
-		},
-	)
-	if err != nil {
-		log.Printf("store session: %v", err)
-		app.WriteErrorCode(w, http.StatusInternalServerError, "internal", "could not store the session")
-
-		return false
-	}
-
-	a.sessions.Set(w, r, token)
-	session.Clear(w, r, stateCookie)
-
-	return true
-}
-
-// handleCallback validates state, exchanges the code, verifies the ID token and opens a session. The static /auth/callback page calls it, because the supervisor serves HTML navigations from static files before the component sees them.
-func (a *passportApp) handleCallback(w http.ResponseWriter, r *http.Request) {
-	noStore(w)
-
-	if !session.SameOrigin(r) {
-		app.WriteErrorCode(w, http.StatusForbidden, "forbidden", "cross-site request rejected")
-		return
-	}
-
-	var request contract.CallbackRequest
-	if !app.ReadJSON(w, r, maxBody, "state", &request) {
-		return
-	}
-
-	if !callbackStateMatches(r, request.State) {
-		app.WriteErrorCode(w, http.StatusBadRequest, "state", "the login state did not match this browser")
-		return
-	}
-
-	flow, err := a.takeFlow(r.Context(), request.State)
-	if errors.Is(err, storage.ErrNoRows) {
-		app.WriteErrorCode(w, http.StatusBadRequest, "expired", "the login flow expired or was already used")
-		return
-	}
-
-	if err != nil {
-		log.Printf("take login flow: %v", err)
-		app.WriteErrorCode(w, http.StatusInternalServerError, "internal", "could not complete the login")
-
-		return
-	}
-
-	identity, tokens, ok := a.completeLogin(w, r, flow, request.Code)
-	if !ok {
-		return
-	}
-
-	if !a.storeSession(w, r, identity, tokens) {
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// envDefault returns a trimmed environment value or a fallback.
-func envDefault(key, fallback string) string {
-	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
-		return value
-	}
-
-	return fallback
-}
-
-// migrate creates the login-flow, session and check-in tables.
-func (a *passportApp) migrate(ctx context.Context) error {
-	return a.store.Migrate(ctx, 1,
-		storage.Statement{SQL: `create table if not exists login_flows (
-			state text primary key,
-			verifier text not null,
-			nonce text not null,
-			redirect_uri text not null,
-			created_at text not null
-		)`},
-		storage.Statement{SQL: `create table if not exists sessions (
-			id text primary key,
-			user_sub text not null,
-			user_name text not null,
-			user_email text not null,
-			user_username text not null,
-			user_picture text not null,
-			user_zoneinfo text not null,
-			access_token text not null,
-			refresh_token text not null,
-			id_token text not null,
-			created_at text not null,
-			expires_at text not null
-		)`},
-		storage.Statement{SQL: `create table if not exists checkins (
-			id text primary key,
-			message text not null,
-			author_sub text not null,
-			author_name text not null,
-			author_picture text not null,
-			created_at text not null
-		)`},
-		storage.Statement{SQL: `create index if not exists checkins_created_idx on checkins(created_at)`},
-		storage.Statement{SQL: `create index if not exists sessions_expires_idx on sessions(expires_at)`},
-	)
-}
-
-// handler exposes the app's routes to the wasm wiring or a test.
-func (a *passportApp) handler() http.Handler {
-	return a.mux
 }
 
 // newPassportApp builds the app around one store and one HTTP client.
@@ -635,8 +631,5 @@ func newPassportApp(store *storage.Client, client *http.Client) (*passportApp, e
 	a.mux.HandleFunc("GET /auth/login", a.handleLogin)
 	a.mux.HandleFunc("POST /auth/login", a.handleLogin)
 	a.mux.HandleFunc("POST /api/auth/callback", a.handleCallback)
-
 	return a, nil
 }
-
-func main() {}

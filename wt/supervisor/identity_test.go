@@ -11,59 +11,94 @@ import (
 	"time"
 )
 
-func testIdentitySupervisor(t *testing.T) (*supervisor, *app, identityUserInfo) {
-	t.Helper()
-
+func TestIdentityAuthenticateDoesNotRevealDisabledOrUnknownUsers(t *testing.T) {
 	s := testSupervisor()
 	s.cfg.stateDir = t.TempDir()
-
 	store, err := newIdentityStore(s.cfg.stateDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	s.identity = store
-
-	blobs, err := newBlobStore(s.cfg.stateDir)
+	user, err := store.createUser("ada@example.com", "Ada", "correct horse battery", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	s.blobs = blobs
-	a := &app{name: "demo", cfg: appConfig{Host: "demo.localhost", Identity: identityModePlatform}}
-	s.apps["demo"] = a
-	s.hosts["demo.localhost"] = a
+	disabled := true
 
-	user, err := store.createUser("ada@example.com", "Ada", "correct horse battery", []string{"admins"})
-	if err != nil {
+	if _, err := store.updateUser(user.ID, "Ada", nil, &disabled); err != nil {
 		t.Fatal(err)
 	}
 
-	return s, a, user
+	if _, err := store.authenticate("nobody@example.com", "any password here"); !errors.Is(err, errIdentityNoUser) {
+		t.Errorf("unknown email error = %v, want errIdentityNoUser", err)
+	}
+
+	if _, err := store.authenticate("ada@example.com", "wrong password"); !errors.Is(err, errIdentityNoUser) {
+		t.Errorf("disabled user with wrong password error = %v, want errIdentityNoUser", err)
+	}
+
+	if _, err := store.authenticate("ada@example.com", "correct horse battery"); !errors.Is(err, errIdentityDisabled) {
+		t.Errorf("disabled user with correct password error = %v, want errIdentityDisabled", err)
+	}
 }
 
-func identityCall(t *testing.T, s *supervisor, method, path, body string, cookie *http.Cookie, csrf string) *httptest.ResponseRecorder {
-	t.Helper()
-
-	req := httptest.NewRequest(method, path, strings.NewReader(body))
-	if cookie != nil {
-		req.AddCookie(cookie)
+func TestIdentityConfigValidation(t *testing.T) {
+	if _, err := normaliseAppConfig(appConfig{
+		Name: "demo",
+		Identity: identityModePlatform,
+	}, "demo", "localhost", tenantTrusted); err != nil {
+		t.Errorf("platform identity rejected: %v", err)
 	}
 
-	if csrf != "" {
-		req.Header.Set(identityCSRFHeader, csrf)
+	if _, err := normaliseAppConfig(appConfig{
+		Name: "demo",
+		Identity: "oauth",
+	}, "demo", "localhost", tenantTrusted); err == nil {
+		t.Error("unknown identity mode accepted")
+	}
+}
+
+func TestIdentitySessionsExpire(t *testing.T) {
+	s := testSupervisor()
+	s.cfg.stateDir = t.TempDir()
+	store, err := newIdentityStore(s.cfg.stateDir)
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	rec := httptest.NewRecorder()
-	s.serveIdentityApp(rec, req)
+	user, err := store.createUser("ada@example.com", "Ada", "correct horse battery", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	return rec
+	token, session, err := store.newSession(user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.mu.Lock()
+
+	store.sessions[session.TokenHash].ExpiresAt = time.Now().Add(-time.Second)
+
+	store.mu.Unlock()
+	if _, _, err := store.session(token); err == nil {
+		t.Error("expired session was accepted")
+	}
+
+	if _, err := filepath.Abs(store.dir); err != nil || !strings.Contains(store.dir, ".identity") {
+		t.Errorf("identity dir = %q", store.dir)
+	}
+}
+
+func TestIdentitySignatureVector(t *testing.T) {
+	if got := identityUserSignature("identity-secret", "usr_1", "ada@example.com", "Ada", "admins,beta"); got != "4eb999754e66af1d072d352fd3504b1fb6f404e7bfa414a0aec935fd5eebea49" {
+		t.Errorf("identity signature = %s", got)
+	}
 }
 
 func TestIdentityStorePasswordAndSessions(t *testing.T) {
 	s := testSupervisor()
 	s.cfg.stateDir = t.TempDir()
-
 	store, err := newIdentityStore(s.cfg.stateDir)
 	if err != nil {
 		t.Fatal(err)
@@ -122,41 +157,112 @@ func TestIdentityStorePasswordAndSessions(t *testing.T) {
 	}
 }
 
-func TestIdentityAuthenticateDoesNotRevealDisabledOrUnknownUsers(t *testing.T) {
+func identityCall(t *testing.T, s *supervisor, method, path, body string, cookie *http.Cookie, csrf string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
+
+	if csrf != "" {
+		req.Header.Set(identityCSRFHeader, csrf)
+	}
+
+	rec := httptest.NewRecorder()
+
+	s.serveIdentityApp(rec, req)
+	return rec
+}
+
+func testIdentitySupervisor(t *testing.T) (*supervisor, *app, identityUserInfo) {
+	t.Helper()
+
 	s := testSupervisor()
 	s.cfg.stateDir = t.TempDir()
-
 	store, err := newIdentityStore(s.cfg.stateDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	user, err := store.createUser("ada@example.com", "Ada", "correct horse battery", nil)
+	s.identity = store
+	blobs, err := newBlobStore(s.cfg.stateDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	disabled := true
-	if _, err := store.updateUser(user.ID, "Ada", nil, &disabled); err != nil {
+	s.blobs = blobs
+	a := &app{
+		name: "demo",
+		cfg: appConfig{
+			Host: "demo.localhost",
+			Identity: identityModePlatform,
+		},
+	}
+	s.apps["demo"] = a
+	s.hosts["demo.localhost"] = a
+	user, err := store.createUser("ada@example.com", "Ada", "correct horse battery", []string{"admins"})
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := store.authenticate("nobody@example.com", "any password here"); !errors.Is(err, errIdentityNoUser) {
-		t.Errorf("unknown email error = %v, want errIdentityNoUser", err)
+	return s, a, user
+}
+
+func TestIdentityAdminUsers(t *testing.T) {
+	s, _, _ := testIdentitySupervisor(t)
+	body := `{"email":"grace@example.com","name":"Grace","password":"a long password","groups":["beta"]}`
+	req := httptest.NewRequest(http.MethodPost, "/identity/users", strings.NewReader(body))
+
+	req.Header.Set("Authorization", "Bearer secret")
+
+	rec := httptest.NewRecorder()
+
+	s.handleIdentityUsers(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create user = %d: %s", rec.Code, rec.Body.String())
 	}
 
-	if _, err := store.authenticate("ada@example.com", "wrong password"); !errors.Is(err, errIdentityNoUser) {
-		t.Errorf("disabled user with wrong password error = %v, want errIdentityNoUser", err)
+	var user identityUserInfo
+
+	if err := json.Unmarshal(rec.Body.Bytes(), &user); err != nil {
+		t.Fatal(err)
 	}
 
-	if _, err := store.authenticate("ada@example.com", "correct horse battery"); !errors.Is(err, errIdentityDisabled) {
-		t.Errorf("disabled user with correct password error = %v, want errIdentityDisabled", err)
+	if user.Email != "grace@example.com" || len(user.Groups) != 1 {
+		t.Errorf("created = %+v", user)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/identity/users", nil)
+
+	req.Header.Set("Authorization", "Bearer secret")
+
+	rec = httptest.NewRecorder()
+
+	s.handleIdentityUsers(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "grace@example.com") {
+		t.Errorf("list users = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/identity/users/"+user.ID+"/password", strings.NewReader(`{"password":"reset password here"}`))
+
+	req.Header.Set("Authorization", "Bearer secret")
+
+	rec = httptest.NewRecorder()
+
+	s.handleIdentityUser(rec, req, user.ID+"/password")
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("reset password = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	if _, err := s.identity.authenticate("grace@example.com", "reset password here"); err != nil {
+		t.Errorf("reset password rejected: %v", err)
 	}
 }
 
 func TestIdentityLoginMeLogout(t *testing.T) {
 	s, _, _ := testIdentitySupervisor(t)
-
 	rec := identityCall(t, s, http.MethodPost, identityAppPrefix+"/login", `{"email":"ada@example.com","password":"correct horse battery"}`, nil, "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("login = %d: %s", rec.Code, rec.Body.String())
@@ -168,6 +274,7 @@ func TestIdentityLoginMeLogout(t *testing.T) {
 	}
 
 	var me identityMeResponse
+
 	if err := json.Unmarshal(rec.Body.Bytes(), &me); err != nil {
 		t.Fatal(err)
 	}
@@ -177,6 +284,7 @@ func TestIdentityLoginMeLogout(t *testing.T) {
 	}
 
 	rec = identityCall(t, s, http.MethodGet, identityAppPrefix+"/me", "", cookies[0], "")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("me = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -186,16 +294,19 @@ func TestIdentityLoginMeLogout(t *testing.T) {
 	}
 
 	rec = identityCall(t, s, http.MethodPost, identityAppPrefix+"/logout", "", cookies[0], "")
+
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("logout without CSRF = %d, want 403", rec.Code)
 	}
 
 	rec = identityCall(t, s, http.MethodPost, identityAppPrefix+"/logout", "", cookies[0], me.CSRFToken)
+
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("logout = %d: %s", rec.Code, rec.Body.String())
 	}
 
 	rec = identityCall(t, s, http.MethodGet, identityAppPrefix+"/me", "", cookies[0], "")
+
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("me after logout = %d, want 401", rec.Code)
 	}
@@ -203,16 +314,16 @@ func TestIdentityLoginMeLogout(t *testing.T) {
 
 func TestIdentityPasswordChangeAndProxyHeaders(t *testing.T) {
 	s, _, user := testIdentitySupervisor(t)
-
 	token, session, err := s.identity.newSession(user.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	cookie := &http.Cookie{Name: identityCookieName, Value: token}
-
-	rec := identityCall(t, s, http.MethodPost, identityAppPrefix+"/password",
-		`{"currentPassword":"correct horse battery","newPassword":"another long password"}`, cookie, session.CSRF)
+	cookie := &http.Cookie{
+		Name: identityCookieName,
+		Value: token,
+	}
+	rec := identityCall(t, s, http.MethodPost, identityAppPrefix+"/password", `{"currentPassword":"correct horse battery","newPassword":"another long password"}`, cookie, session.CSRF)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("password = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -231,10 +342,10 @@ func TestIdentityPasswordChangeAndProxyHeaders(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
+
 	req.AddCookie(newCookies[0])
 	req.Header.Set("X-WT-User-Id", "spoof")
 	s.identityProxyHeaders(req, "demo", true)
-
 	if got := req.Header.Get(identityUserIDHeader); got != user.ID {
 		t.Errorf("injected user id = %q, want %q", got, user.ID)
 	}
@@ -253,65 +364,12 @@ func TestIdentityPasswordChangeAndProxyHeaders(t *testing.T) {
 	}
 }
 
-func TestIdentityAdminUsers(t *testing.T) {
-	s, _, _ := testIdentitySupervisor(t)
-	body := `{"email":"grace@example.com","name":"Grace","password":"a long password","groups":["beta"]}`
-	req := httptest.NewRequest(http.MethodPost, "/identity/users", strings.NewReader(body))
-	req.Header.Set("Authorization", "Bearer secret")
-
-	rec := httptest.NewRecorder()
-	s.handleIdentityUsers(rec, req)
-
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("create user = %d: %s", rec.Code, rec.Body.String())
-	}
-
-	var user identityUserInfo
-	if err := json.Unmarshal(rec.Body.Bytes(), &user); err != nil {
-		t.Fatal(err)
-	}
-
-	if user.Email != "grace@example.com" || len(user.Groups) != 1 {
-		t.Errorf("created = %+v", user)
-	}
-
-	req = httptest.NewRequest(http.MethodGet, "/identity/users", nil)
-	req.Header.Set("Authorization", "Bearer secret")
-
-	rec = httptest.NewRecorder()
-	s.handleIdentityUsers(rec, req)
-
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "grace@example.com") {
-		t.Errorf("list users = %d: %s", rec.Code, rec.Body.String())
-	}
-
-	req = httptest.NewRequest(http.MethodPost, "/identity/users/"+user.ID+"/password", strings.NewReader(`{"password":"reset password here"}`))
-	req.Header.Set("Authorization", "Bearer secret")
-
-	rec = httptest.NewRecorder()
-	s.handleIdentityUser(rec, req, user.ID+"/password")
-
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("reset password = %d: %s", rec.Code, rec.Body.String())
-	}
-
-	if _, err := s.identity.authenticate("grace@example.com", "reset password here"); err != nil {
-		t.Errorf("reset password rejected: %v", err)
-	}
-}
-
-func TestIdentitySignatureVector(t *testing.T) {
-	if got := identityUserSignature("identity-secret", "usr_1", "ada@example.com", "Ada", "admins,beta"); got != "4eb999754e66af1d072d352fd3504b1fb6f404e7bfa414a0aec935fd5eebea49" {
-		t.Errorf("identity signature = %s", got)
-	}
-}
-
 func TestIdentityProxyRouting(t *testing.T) {
 	s, _, _ := testIdentitySupervisor(t)
 	req := httptest.NewRequest(http.MethodPost, "http://demo.localhost/_wt/identity/login", strings.NewReader(`{"email":"ada@example.com","password":"correct horse battery"}`))
 	rec := httptest.NewRecorder()
-	s.handleProxy(rec, req)
 
+	s.handleProxy(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("proxied login = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -322,54 +380,13 @@ func TestIdentityProxyRouting(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "http://demo.localhost"+identityAppPrefix+"/me", nil)
+
 	req.AddCookie(cookies[0])
 
 	rec = httptest.NewRecorder()
-	s.handleProxy(rec, req)
 
+	s.handleProxy(rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "ada@example.com") {
 		t.Errorf("proxied me = %d: %s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestIdentityConfigValidation(t *testing.T) {
-	if _, err := normaliseAppConfig(appConfig{Name: "demo", Identity: identityModePlatform}, "demo", "localhost", tenantTrusted); err != nil {
-		t.Errorf("platform identity rejected: %v", err)
-	}
-
-	if _, err := normaliseAppConfig(appConfig{Name: "demo", Identity: "oauth"}, "demo", "localhost", tenantTrusted); err == nil {
-		t.Error("unknown identity mode accepted")
-	}
-}
-
-func TestIdentitySessionsExpire(t *testing.T) {
-	s := testSupervisor()
-	s.cfg.stateDir = t.TempDir()
-
-	store, err := newIdentityStore(s.cfg.stateDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	user, err := store.createUser("ada@example.com", "Ada", "correct horse battery", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	token, session, err := store.newSession(user.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	store.mu.Lock()
-	store.sessions[session.TokenHash].ExpiresAt = time.Now().Add(-time.Second)
-	store.mu.Unlock()
-
-	if _, _, err := store.session(token); err == nil {
-		t.Error("expired session was accepted")
-	}
-
-	if _, err := filepath.Abs(store.dir); err != nil || !strings.Contains(store.dir, ".identity") {
-		t.Errorf("identity dir = %q", store.dir)
 	}
 }

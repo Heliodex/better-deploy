@@ -19,8 +19,8 @@ func dropPrivileges() {
 	uid := int(envInt64("WT_RUN_UID", 10001))
 	gid := int(envInt64("WT_RUN_GID", 10001))
 	appsDir := env("WT_APPS_DIR", "./apps")
-
 	stateDir := env("WT_STATE_DIR", "./state")
+
 	for _, dir := range []string{appsDir, stateDir} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			log.Fatalf("drop privileges: create %s: %v", dir, err)
@@ -31,8 +31,8 @@ func dropPrivileges() {
 		}
 	}
 	// TMPDIR is the volume root in the image, so it must be writable by the app user too.
-	parent := filepath.Dir(stateDir)
-	if parent != "." && parent != "/" {
+
+	if parent := filepath.Dir(stateDir); parent != "." && parent != "/" {
 		if err := os.Chown(parent, uid, gid); err != nil {
 			log.Fatalf("drop privileges: chown %s: %v", parent, err)
 		}

@@ -20,28 +20,89 @@ import (
 type providerFixture struct {
 	server *httptest.Server
 	key *rsa.PrivateKey
-	clientID string
-	clientSecret string
-	kid string
+	clientID, clientSecret, kid string
 	tokenForm url.Values
-
 	keyMu sync.RWMutex
 }
 
-// signingMaterial returns the current key pair under the rotation lock.
-func (f *providerFixture) signingMaterial() (*rsa.PrivateKey, string) {
-	f.keyMu.RLock()
-	defer f.keyMu.RUnlock()
+func TestPKCE(t *testing.T) {
+	verifier, challenge, err := NewPKCE()
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	return f.key, f.kid
+	if sum := sha256.Sum256([]byte(verifier)); challenge != base64.RawURLEncoding.EncodeToString(sum[:]) {
+		t.Errorf("challenge = %q", challenge)
+	}
+
+	if len(verifier) < 43 {
+		t.Errorf("verifier too short: %d", len(verifier))
+	}
+}
+
+func fixtureClient(t *testing.T, fixture *providerFixture) *Client {
+	t.Helper()
+
+	client, err := New(Config{
+		Issuer: fixture.server.URL,
+		ClientID: fixture.clientID,
+		ClientSecret: fixture.clientSecret,
+		HTTPClient: fixture.server.Client(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return client
 }
 
 // setSigningMaterial rotates the key pair used by the token and JWKS endpoints.
 func (f *providerFixture) setSigningMaterial(key *rsa.PrivateKey, kid string) {
 	f.keyMu.Lock()
+
 	defer f.keyMu.Unlock()
 
 	f.key, f.kid = key, kid
+}
+
+// signingMaterial returns the current key pair under the rotation lock.
+func (f *providerFixture) signingMaterial() (*rsa.PrivateKey, string) {
+	f.keyMu.RLock()
+
+	defer f.keyMu.RUnlock()
+
+	return f.key, f.kid
+}
+
+func signedTestToken(t *testing.T, key *rsa.PrivateKey, kid string, value claims) string {
+	t.Helper()
+
+	header, err := json.Marshal(map[string]string{"alg": "RS256", "kid": kid, "typ": "JWT"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payload, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	signingInput := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(payload)
+	digest := sha256.Sum256([]byte(signingInput))
+	signature, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, digest[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return signingInput + "." + base64.RawURLEncoding.EncodeToString(signature)
+}
+
+func writeTestJSON(t *testing.T, w http.ResponseWriter, value any) {
+	t.Helper()
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.MarshalWrite(w, value); err != nil {
+		t.Errorf("encode response: %v", err)
+	}
 }
 
 func newProviderFixture(t *testing.T) *providerFixture {
@@ -52,28 +113,35 @@ func newProviderFixture(t *testing.T) *providerFixture {
 		t.Fatal(err)
 	}
 
-	fixture := &providerFixture{key: key, clientID: "client", clientSecret: "secret", kid: "test-key"}
-
+	fixture := &providerFixture{
+		key: key,
+		clientID: "client",
+		clientSecret: "secret",
+		kid: "test-key",
+	}
 	fixture.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/.well-known/openid-configuration":
 			writeTestJSON(t, w, map[string]string{
-				"issuer": fixture.server.URL,
 				"authorization_endpoint": fixture.server.URL + "/authorize",
+				"end_session_endpoint": fixture.server.URL + "/endsession",
+				"issuer": fixture.server.URL,
+				"jwks_uri": fixture.server.URL + "/jwks",
 				"token_endpoint": fixture.server.URL + "/token",
 				"userinfo_endpoint": fixture.server.URL + "/userinfo",
-				"end_session_endpoint": fixture.server.URL + "/endsession",
-				"jwks_uri": fixture.server.URL + "/jwks",
 			})
 		case "/jwks":
 			currentKey, kid := fixture.signingMaterial()
+
 			writeTestJSON(t, w, map[string]any{
-				"keys": []map[string]string{{
-					"kty": "RSA",
-					"kid": kid,
-					"n": base64.RawURLEncoding.EncodeToString(currentKey.N.Bytes()),
-					"e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(currentKey.E)).Bytes()),
-				}},
+				"keys": []map[string]string{
+					{
+						"kty": "RSA",
+						"kid": kid,
+						"n": base64.RawURLEncoding.EncodeToString(currentKey.N.Bytes()),
+						"e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(currentKey.E)).Bytes()),
+					},
+				},
 			})
 		case "/token":
 			if err := r.ParseForm(); err != nil {
@@ -101,85 +169,33 @@ func newProviderFixture(t *testing.T) *providerFixture {
 
 			writeTestJSON(t, w, map[string]any{
 				"access_token": "access",
+				"expires_in": 3600,
 				"id_token": token,
 				"token_type": "Bearer",
-				"expires_in": 3600,
 			})
 		case "/userinfo":
 			if r.Header.Get("Authorization") != "Bearer access" {
 				http.Error(w, "bad token", http.StatusUnauthorized)
 				return
 			}
-
 			writeTestJSON(t, w, map[string]any{
-				"sub": "alice",
-				"name": "Alice Example",
 				"email": "alice@example.com",
+				"name": "Alice Example",
 				"preferred_username": "alice",
+				"sub": "alice",
 			})
 		default:
 			http.NotFound(w, r)
 		}
 	}))
+
 	t.Cleanup(fixture.server.Close)
-
 	return fixture
-}
-
-func writeTestJSON(t *testing.T, w http.ResponseWriter, value any) {
-	t.Helper()
-
-	w.Header().Set("Content-Type", "application/json")
-
-	if err := json.MarshalWrite(w, value); err != nil {
-		t.Errorf("encode response: %v", err)
-	}
-}
-
-func signedTestToken(t *testing.T, key *rsa.PrivateKey, kid string, value claims) string {
-	t.Helper()
-
-	header, err := json.Marshal(map[string]string{"alg": "RS256", "kid": kid, "typ": "JWT"})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	payload, err := json.Marshal(value)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	signingInput := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(payload)
-	digest := sha256.Sum256([]byte(signingInput))
-
-	signature, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, digest[:])
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	return signingInput + "." + base64.RawURLEncoding.EncodeToString(signature)
-}
-
-func fixtureClient(t *testing.T, fixture *providerFixture) *Client {
-	t.Helper()
-
-	client, err := New(Config{
-		Issuer: fixture.server.URL,
-		ClientID: fixture.clientID,
-		ClientSecret: fixture.clientSecret,
-		HTTPClient: fixture.server.Client(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	return client
 }
 
 func TestDiscoverAndAuthoriseURL(t *testing.T) {
 	fixture := newProviderFixture(t)
 	client := fixtureClient(t, fixture)
-
 	provider, err := client.Discover(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -199,32 +215,32 @@ func TestDiscoverAndAuthoriseURL(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	query := parsed.Query()
-	if parsed.Host != strings.TrimPrefix(fixture.server.URL, "http://") || query.Get("state") != "state" || query.Get("nonce") != "nonce" || query.Get("code_challenge") != "challenge" || query.Get("code_challenge_method") != "S256" || query.Get("redirect_uri") != "https://app.example/auth/callback/" || query.Get("client_id") != fixture.clientID {
+	if query := parsed.Query(); parsed.Host != strings.TrimPrefix(fixture.server.URL, "http://") || query.Get("state") != "state" || query.Get("nonce") != "nonce" || query.Get("code_challenge") != "challenge" || query.Get("code_challenge_method") != "S256" || query.Get("redirect_uri") != "https://app.example/auth/callback/" || query.Get("client_id") != fixture.clientID {
 		t.Errorf("authorise URL = %s", authoriseURL)
 	}
 }
 
-func TestPKCE(t *testing.T) {
-	verifier, challenge, err := NewPKCE()
+func TestEndSessionURL(t *testing.T) {
+	fixture := newProviderFixture(t)
+	client := fixtureClient(t, fixture)
+	endSession, err := client.EndSessionURL(t.Context(), "id-token", "https://app.example/")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	sum := sha256.Sum256([]byte(verifier))
-	if challenge != base64.RawURLEncoding.EncodeToString(sum[:]) {
-		t.Errorf("challenge = %q", challenge)
+	parsed, err := url.Parse(endSession)
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	if len(verifier) < 43 {
-		t.Errorf("verifier too short: %d", len(verifier))
+	if query := parsed.Query(); query.Get("client_id") != fixture.clientID || query.Get("id_token_hint") != "id-token" || query.Get("post_logout_redirect_uri") != "https://app.example/" {
+		t.Errorf("end session URL = %s", endSession)
 	}
 }
 
 func TestExchange(t *testing.T) {
 	fixture := newProviderFixture(t)
 	client := fixtureClient(t, fixture)
-
 	tokens, err := client.Exchange(t.Context(), "code", "https://app.example/auth/callback/", "verifier")
 	if err != nil {
 		t.Fatal(err)
@@ -239,10 +255,23 @@ func TestExchange(t *testing.T) {
 	}
 }
 
+func TestNewValidationAndDiscoveryMismatch(t *testing.T) {
+	if _, err := New(Config{}); err == nil {
+		t.Error("empty config was accepted")
+	}
+
+	fixture := newProviderFixture(t)
+	client := fixtureClient(t, fixture)
+	client.cfg.Issuer = "https://other.example"
+
+	if _, err := client.Discover(t.Context()); err == nil {
+		t.Error("mismatched discovery issuer was accepted")
+	}
+}
+
 func TestVerifyIDTokenAndUserinfo(t *testing.T) {
 	fixture := newProviderFixture(t)
 	client := fixtureClient(t, fixture)
-
 	tokens, err := client.Exchange(t.Context(), "code", "https://app.example/auth/callback/", "verifier")
 	if err != nil {
 		t.Fatal(err)
@@ -312,7 +341,6 @@ func TestVerifyIDTokenAndUserinfo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	fixture.setSigningMaterial(rotatedKey, "rotated-key")
 
 	rotated, err := client.Exchange(t.Context(), "code", "https://app.example/auth/callback/", "verifier")
@@ -322,39 +350,5 @@ func TestVerifyIDTokenAndUserinfo(t *testing.T) {
 
 	if _, err := client.VerifyIDToken(t.Context(), rotated.IDToken, "nonce"); err != nil {
 		t.Errorf("rotated signing key was not refreshed: %v", err)
-	}
-}
-
-func TestEndSessionURL(t *testing.T) {
-	fixture := newProviderFixture(t)
-	client := fixtureClient(t, fixture)
-
-	endSession, err := client.EndSessionURL(t.Context(), "id-token", "https://app.example/")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	parsed, err := url.Parse(endSession)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	query := parsed.Query()
-	if query.Get("client_id") != fixture.clientID || query.Get("id_token_hint") != "id-token" || query.Get("post_logout_redirect_uri") != "https://app.example/" {
-		t.Errorf("end session URL = %s", endSession)
-	}
-}
-
-func TestNewValidationAndDiscoveryMismatch(t *testing.T) {
-	if _, err := New(Config{}); err == nil {
-		t.Error("empty config was accepted")
-	}
-
-	fixture := newProviderFixture(t)
-	client := fixtureClient(t, fixture)
-	client.cfg.Issuer = "https://other.example"
-
-	if _, err := client.Discover(t.Context()); err == nil {
-		t.Error("mismatched discovery issuer was accepted")
 	}
 }

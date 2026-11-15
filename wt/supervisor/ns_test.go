@@ -15,15 +15,25 @@ import (
 	"testing"
 )
 
-func TestMergeEnvOverrideWins(t *testing.T) {
-	merged := mergeEnv(
-		[]string{"PATH=/bin", "TMPDIR=/old", "LANG=C"},
-		[]string{"TMPDIR=/tmp", "HOME=/data"},
-	)
+func TestAppArgsForNamespaceLetsAppOverrideDefaults(t *testing.T) {
+	s := testSupervisor()
+	s.cfg.stateDir = t.TempDir()
+	a := &app{
+		name: "demo",
+		dir: t.TempDir(),
+		cfg: appConfig{
+			Name: "demo",
+			Host: "demo.localhost",
+			Env: map[string]string{"TMPDIR": "/custom"},
+		},
+	}
+	_, env, err := s.appArgsFor(a, "host/main.cwasm", true)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	want := []string{"HOME=/data", "LANG=C", "PATH=/bin", "TMPDIR=/tmp"}
-	if !slices.Equal(merged, want) {
-		t.Errorf("mergeEnv = %v, want %v", merged, want)
+	if !slices.Contains(env, "TMPDIR=/custom") {
+		t.Errorf("env = %v, want the app's TMPDIR", env)
 	}
 }
 
@@ -33,15 +43,19 @@ func TestAppArgsForNamespaceUsesInsidePaths(t *testing.T) {
 	a := &app{
 		name: "demo",
 		dir: t.TempDir(),
-		cfg: appConfig{Name: "demo", Host: "demo.localhost", Env: map[string]string{}},
+		cfg: appConfig{
+			Name: "demo",
+			Host: "demo.localhost",
+			Env: map[string]string{},
+		},
 	}
-
 	args, env, err := s.appArgsFor(a, filepath.Join(a.dir, "main.cwasm"), true)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	joined := strings.Join(args, " ")
+
 	for _, want := range []string{"--dir /data::/data", "--env TMPDIR", "--env HOME", " /app/main.cwasm"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("args = %q, missing %q", joined, want)
@@ -57,115 +71,9 @@ func TestAppArgsForNamespaceUsesInsidePaths(t *testing.T) {
 	}
 }
 
-func TestAppArgsForNamespaceLetsAppOverrideDefaults(t *testing.T) {
-	s := testSupervisor()
-	s.cfg.stateDir = t.TempDir()
-	a := &app{
-		name: "demo",
-		dir: t.TempDir(),
-		cfg: appConfig{Name: "demo", Host: "demo.localhost", Env: map[string]string{"TMPDIR": "/custom"}},
-	}
-
-	_, env, err := s.appArgsFor(a, "host/main.cwasm", true)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if !slices.Contains(env, "TMPDIR=/custom") {
-		t.Errorf("env = %v, want the app's TMPDIR", env)
-	}
-}
-
-func TestNamespaceSysProcAttr(t *testing.T) {
-	attr := namespaceSysProcAttr(20001, 20002, true)
-
-	wantFlags := uintptr(syscall.CLONE_NEWUSER | syscall.CLONE_NEWPID | syscall.CLONE_NEWNS | syscall.CLONE_NEWIPC | syscall.CLONE_NEWUTS)
-	if attr.Cloneflags != wantFlags {
-		t.Errorf("clone flags = %#x, want %#x", attr.Cloneflags, wantFlags)
-	}
-
-	if !attr.GidMappingsEnableSetgroups {
-		t.Error("untrusted namespaces should allow the helper to clear groups")
-	}
-
-	if len(attr.UidMappings) != 1 || attr.UidMappings[0].HostID != 20001 || attr.UidMappings[0].ContainerID != 0 {
-		t.Errorf("uid mappings = %+v", attr.UidMappings)
-	}
-
-	if len(attr.GidMappings) != 1 || attr.GidMappings[0].HostID != 20002 || attr.GidMappings[0].ContainerID != 0 {
-		t.Errorf("gid mappings = %+v", attr.GidMappings)
-	}
-}
-
-func TestNamespacePlanUsesDynamicRuntimeLibs(t *testing.T) {
-	s := testSupervisor()
-	s.cfg.stateDir = t.TempDir()
-	s.cfg.wasmtime = os.Args[0]
-
-	app := &app{name: "demo", dir: t.TempDir()}
-	if err := os.MkdirAll(filepath.Join(s.cfg.stateDir, app.name), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	root := filepath.Join(t.TempDir(), "root")
-	if err := os.MkdirAll(root, 0o700); err != nil {
-		t.Fatal(err)
-	}
-
-	plan, err := s.buildNamespacePlan(app, root, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if plan.BinPath != "/bin/wasmtime" || plan.Hostname != "demo" {
-		t.Errorf("plan = %+v", plan)
-	}
-
-	if !plan.Dynamic {
-		t.Error("the test binary should be dynamically linked")
-	}
-
-	if len(plan.LibDirs) == 0 {
-		t.Error("a dynamic runtime needs library directories")
-	}
-
-	if !slices.Contains(plan.Files, "/etc/passwd") {
-		t.Errorf("files = %v, want /etc/passwd", plan.Files)
-	}
-}
-
-func TestNamespacePlanCarriesRlimits(t *testing.T) {
-	s := testSupervisor()
-	s.cfg.tenantMode = tenantUntrusted
-	s.cfg.stateDir = t.TempDir()
-	s.cfg.wasmtime = os.Args[0]
-
-	app := &app{name: "demo", dir: t.TempDir(), cfg: appConfig{DiskMB: 256}}
-	if err := os.MkdirAll(filepath.Join(s.cfg.stateDir, app.name), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	root := filepath.Join(t.TempDir(), "root")
-	if err := os.MkdirAll(root, 0o700); err != nil {
-		t.Fatal(err)
-	}
-
-	plan, err := s.buildNamespacePlan(app, root, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(plan.Rlimits) != 3 {
-		t.Fatalf("rlimits = %+v, want three entries", plan.Rlimits)
-	}
-
-	if plan.Rlimits[0].Value != defaultNofileLimit || plan.Rlimits[1].Value != 256<<20 || plan.Rlimits[2].Value != 0 {
-		t.Errorf("rlimits = %+v", plan.Rlimits)
-	}
-}
-
 func TestElfInterpRejectsScripts(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "fake-wasmtime")
+
 	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -180,55 +88,10 @@ func TestElfInterpRejectsScripts(t *testing.T) {
 	}
 }
 
-func TestResetNamespaceRoots(t *testing.T) {
-	dir := t.TempDir()
-	if err := resetNamespaceRoots(dir, true); err != nil {
-		t.Fatal(err)
-	}
-
-	info, err := os.Stat(filepath.Join(dir, ".ns"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if info.Mode().Perm() != 0o711 {
-		t.Errorf("untrusted .ns mode = %o, want 711", info.Mode().Perm())
-	}
-
-	if err := resetNamespaceRoots(dir, false); err != nil {
-		t.Fatal(err)
-	}
-
-	info, err = os.Stat(filepath.Join(dir, ".ns"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if info.Mode().Perm() != 0o700 {
-		t.Errorf("trusted .ns mode = %o, want 700", info.Mode().Perm())
-	}
-}
-
-func TestValidateIsolationConfig(t *testing.T) {
-	untrusted := config{tenantMode: tenantUntrusted, appNamespaces: true, appSeccomp: true}
-	if err := validateIsolationConfig(untrusted); err != nil {
-		t.Errorf("both boundaries enabled: %v", err)
-	}
-
-	untrusted.appNamespaces = false
-	if err := validateIsolationConfig(untrusted); err == nil {
-		t.Error("untrusted mode accepted namespaces off")
-	}
-
-	untrusted.appNamespaces = true
-
-	untrusted.appSeccomp = false
-	if err := validateIsolationConfig(untrusted); err == nil {
-		t.Error("untrusted mode accepted seccomp off")
-	}
-
-	if err := validateIsolationConfig(config{tenantMode: tenantTrusted}); err != nil {
-		t.Errorf("trusted mode should keep both optional: %v", err)
+func TestMergeEnvOverrideWins(t *testing.T) {
+	merged := mergeEnv([]string{"PATH=/bin", "TMPDIR=/old", "LANG=C"}, []string{"TMPDIR=/tmp", "HOME=/data"})
+	if want := []string{"HOME=/data", "LANG=C", "PATH=/bin", "TMPDIR=/tmp"}; !slices.Equal(merged, want) {
+		t.Errorf("mergeEnv = %v, want %v", merged, want)
 	}
 }
 
@@ -236,7 +99,6 @@ func TestNamespaceHelperChild(t *testing.T) {
 	if os.Getenv("WT_NS_HELPER") != "1" {
 		t.Skip("namespace helper child")
 	}
-
 	nsInitMain([]string{"-c", "test -d /app && test -w /data && echo ok > /data/ns-ok && test ! -e /etc/hostname"})
 }
 
@@ -264,14 +126,12 @@ func TestNamespaceLaunch(t *testing.T) {
 	t.Cleanup(func() {
 		_ = os.RemoveAll(root)
 	})
-
 	if err := os.Chmod(root, 0o700); err != nil {
 		t.Fatal(err)
 	}
 
 	appDir := t.TempDir()
 	dataDir := t.TempDir()
-
 	interp, isELF, err := elfInterp("/bin/sh")
 	if err != nil {
 		t.Fatal(err)
@@ -296,17 +156,14 @@ func TestNamespaceLaunch(t *testing.T) {
 		Seccomp: true,
 		Rlimits: rlimitPlan(appConfig{}),
 	}
-
 	raw, err := json.Marshal(plan)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	cmd := exec.Command(os.Args[0], "-test.run=^TestNamespaceHelperChild$")
-
 	cmd.Env = append(os.Environ(), "WT_NS_HELPER=1", nsPlanEnv+"="+string(raw))
 	cmd.SysProcAttr = namespaceSysProcAttr(os.Geteuid(), os.Getegid(), false)
-
 	goReader, goWriter, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
@@ -322,8 +179,8 @@ func TestNamespaceLaunch(t *testing.T) {
 	var out bytes.Buffer
 
 	cmd.Stdout = &out
-
 	cmd.Stderr = &out
+
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -344,5 +201,164 @@ func TestNamespaceLaunch(t *testing.T) {
 
 	if strings.TrimSpace(string(data)) != "ok" {
 		t.Errorf("data = %q, want ok", data)
+	}
+}
+
+func TestNamespacePlanCarriesRlimits(t *testing.T) {
+	s := testSupervisor()
+	s.cfg.tenantMode = tenantUntrusted
+	s.cfg.stateDir = t.TempDir()
+	s.cfg.wasmtime = os.Args[0]
+	app := &app{
+		name: "demo",
+		dir: t.TempDir(),
+		cfg: appConfig{
+			DiskMB: 256,
+		},
+	}
+
+	if err := os.MkdirAll(filepath.Join(s.cfg.stateDir, app.name), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	root := filepath.Join(t.TempDir(), "root")
+
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := s.buildNamespacePlan(app, root, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(plan.Rlimits) != 3 {
+		t.Fatalf("rlimits = %+v, want three entries", plan.Rlimits)
+	}
+
+	if plan.Rlimits[0].Value != defaultNofileLimit || plan.Rlimits[1].Value != 256<<20 || plan.Rlimits[2].Value != 0 {
+		t.Errorf("rlimits = %+v", plan.Rlimits)
+	}
+}
+
+func TestNamespacePlanUsesDynamicRuntimeLibs(t *testing.T) {
+	s := testSupervisor()
+	s.cfg.stateDir = t.TempDir()
+	s.cfg.wasmtime = os.Args[0]
+	app := &app{
+		name: "demo",
+		dir: t.TempDir(),
+	}
+
+	if err := os.MkdirAll(filepath.Join(s.cfg.stateDir, app.name), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	root := filepath.Join(t.TempDir(), "root")
+
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := s.buildNamespacePlan(app, root, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if plan.BinPath != "/bin/wasmtime" || plan.Hostname != "demo" {
+		t.Errorf("plan = %+v", plan)
+	}
+
+	if !plan.Dynamic {
+		t.Error("the test binary should be dynamically linked")
+	}
+
+	if len(plan.LibDirs) == 0 {
+		t.Error("a dynamic runtime needs library directories")
+	}
+
+	if !slices.Contains(plan.Files, "/etc/passwd") {
+		t.Errorf("files = %v, want /etc/passwd", plan.Files)
+	}
+}
+
+func TestNamespaceSysProcAttr(t *testing.T) {
+	attr := namespaceSysProcAttr(20001, 20002, true)
+	if wantFlags := uintptr(syscall.CLONE_NEWUSER | syscall.CLONE_NEWPID | syscall.CLONE_NEWNS | syscall.CLONE_NEWIPC | syscall.CLONE_NEWUTS); attr.Cloneflags != wantFlags {
+		t.Errorf("clone flags = %#x, want %#x", attr.Cloneflags, wantFlags)
+	}
+
+	if !attr.GidMappingsEnableSetgroups {
+		t.Error("untrusted namespaces should allow the helper to clear groups")
+	}
+
+	if len(attr.UidMappings) != 1 || attr.UidMappings[0].HostID != 20001 || attr.UidMappings[0].ContainerID != 0 {
+		t.Errorf("uid mappings = %+v", attr.UidMappings)
+	}
+
+	if len(attr.GidMappings) != 1 || attr.GidMappings[0].HostID != 20002 || attr.GidMappings[0].ContainerID != 0 {
+		t.Errorf("gid mappings = %+v", attr.GidMappings)
+	}
+}
+
+func TestResetNamespaceRoots(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := resetNamespaceRoots(dir, true); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := os.Stat(filepath.Join(dir, ".ns"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if info.Mode().Perm() != 0o711 {
+		t.Errorf("untrusted .ns mode = %o, want 711", info.Mode().Perm())
+	}
+
+	if err := resetNamespaceRoots(dir, false); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err = os.Stat(filepath.Join(dir, ".ns"))
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if info.Mode().Perm() != 0o700 {
+		t.Errorf("trusted .ns mode = %o, want 700", info.Mode().Perm())
+	}
+}
+
+func TestValidateIsolationConfig(t *testing.T) {
+	untrusted := config{
+		tenantMode: tenantUntrusted,
+		appNamespaces: true,
+		appSeccomp: true,
+	}
+
+	if err := validateIsolationConfig(untrusted); err != nil {
+		t.Errorf("both boundaries enabled: %v", err)
+	}
+
+	untrusted.appNamespaces = false
+
+	if err := validateIsolationConfig(untrusted); err == nil {
+		t.Error("untrusted mode accepted namespaces off")
+	}
+
+	untrusted.appNamespaces = true
+	untrusted.appSeccomp = false
+
+	if err := validateIsolationConfig(untrusted); err == nil {
+		t.Error("untrusted mode accepted seccomp off")
+	}
+
+	if err := validateIsolationConfig(config{
+		tenantMode: tenantTrusted,
+	}); err != nil {
+		t.Errorf("trusted mode should keep both optional: %v", err)
 	}
 }

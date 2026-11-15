@@ -15,6 +15,7 @@ import (
 // decodeStorageBlob decodes the {"$b64": "..."} form used for byte parameters.
 func decodeStorageBlob(raw jsontext.Value) ([]byte, error) {
 	var object map[string]string
+
 	if err := json.Unmarshal(raw, &object); err != nil {
 		return nil, errors.New("object parameters must be {\"$b64\": \"...\"}")
 	}
@@ -57,6 +58,7 @@ func decodeStorageValue(raw jsontext.Value) (any, error) {
 		return false, nil
 	case '"':
 		var value string
+
 		if err := json.Unmarshal(raw, &value); err != nil {
 			return nil, err
 		}
@@ -76,6 +78,7 @@ func decodeStorageParams(raw []jsontext.Value) ([]any, error) {
 	}
 
 	params := make([]any, len(raw))
+
 	for i, value := range raw {
 		decoded, err := decodeStorageValue(value)
 		if err != nil {
@@ -113,7 +116,7 @@ func storageValueSize(value any) int {
 		return len(value)
 	case []byte:
 		return base64.StdEncoding.EncodedLen(len(value))
-	case int64, float64:
+	case float64, int64:
 		return 8
 	case time.Time:
 		return 32

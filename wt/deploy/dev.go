@@ -18,10 +18,95 @@ type devConfig struct {
 	skipBuild, skipCompile, watch, vite bool
 }
 
+// deployDevApps builds and uploads every app, returning the configs and the Vite-backed one.
+func deployDevApps(cfg *devConfig, dirs []string, deployAddr, target string, vite *viteDev) ([]*deployConfig, *deployConfig, error) {
+	configs := make([]*deployConfig, 0, len(dirs))
+
+	var viteDCfg *deployConfig
+
+	for _, dir := range dirs {
+		m, err := readManifest(dir)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		host := cfg.appHost
+		if cfg.workspace != "" || host == "" {
+			host = m.Name + ".localhost"
+		}
+
+		dcfg := &deployConfig{
+			dir: dir,
+			host: "http://" + deployAddr,
+			token: "dev",
+			wasmtime: cfg.wasmtime,
+			target: target,
+			appHost: host,
+			skipBuild: cfg.skipBuild,
+			skipCompile: cfg.skipCompile,
+			overlayEnv: true,
+		}
+
+		if vite != nil && dir == vite.appDir {
+			dcfg.buildComponentCommand = vite.build
+			dcfg.skipStatic = true
+			viteDCfg = dcfg
+		}
+
+		m, data, status, err := buildBundle(dcfg)
+		if err != nil {
+			return nil, nil, err
+		}
+		printBuildStatus(status)
+		if err := upload(dcfg, m, data); err != nil {
+			return nil, nil, err
+		}
+
+		configs = append(configs, dcfg)
+
+		if vite != nil {
+			fmt.Printf("dev: %s API at http://%s:%d/\n", m.Name, host, cfg.port)
+		} else {
+			fmt.Printf("dev: %s at http://%s:%d/\n", m.Name, host, cfg.port)
+		}
+	}
+
+	return configs, viteDCfg, nil
+}
+
+// devWorkDir names the temporary state tree for one dev run. The port is part of the key so two supervisors for the same app do not share runner state.
+func devWorkDir(cfg *devConfig, dirs []string) string {
+	if len(dirs) == 1 {
+		m, _ := readManifest(dirs[0])
+
+		return filepath.Join(os.TempDir(), "wt-dev", fmt.Sprintf("%s-%d", m.Name, cfg.port))
+	}
+
+	return filepath.Join(os.TempDir(), "wt-dev", "workspace-"+filepath.Base(filepath.Clean(cfg.workspace)))
+}
+
+func dirHasGoMod(dir string) bool {
+	info, err := os.Stat(filepath.Join(dir, "go.mod"))
+
+	return err == nil && !info.IsDir()
+}
+
+// overlayDevEnv lets client environment override manifest values in dev, so `FOO=1 wt dev` behaves like the README says. Only keys the manifest already defines are touched, and production deploys stay manifest-pinned.
+func overlayDevEnv(m *manifest) {
+	if m.Env == nil {
+		return
+	}
+
+	for key := range m.Env {
+		if value, ok := os.LookupEnv(key); ok {
+			m.Env[key] = value
+		}
+	}
+}
+
 // resolveDevConfig loads dev flags, applies WT_DEV_PORT and derives the admin port from the app port.
 func resolveDevConfig(args []string) (*devConfig, error) {
 	configPath := configArg(args)
-
 	fileCfg, err := loadFileConfig(configPath)
 	if err != nil {
 		return nil, err
@@ -40,8 +125,8 @@ func resolveDevConfig(args []string) (*devConfig, error) {
 	skipBuild := flags.Bool("skip-build", false, "skip running app.json's build commands")
 	skipCompile := flags.Bool("skip-compile", false, "reuse an existing main.cwasm")
 	watch := flags.Bool("watch", true, "rebuild and redeploy the component when its inputs change")
-
 	vite := flags.Bool("vite", true, "run the SvelteKit dev server with HMR when a web directory exists")
+
 	if err := flags.Parse(args); err != nil {
 		return nil, err
 	}
@@ -80,81 +165,17 @@ func resolveDevConfig(args []string) (*devConfig, error) {
 	return &devConfig{
 		dir: *dir,
 		workspace: *workspace,
-		port: resolved,
-		adminPort: resolvedAdmin,
 		wasmtime: *wasmtime,
 		target: *target,
 		supervisor: *supervisor,
 		appHost: *appHost,
+		port: resolved,
+		adminPort: resolvedAdmin,
 		skipBuild: *skipBuild,
 		skipCompile: *skipCompile,
 		watch: *watch,
 		vite: *vite,
 	}, nil
-}
-
-func dirHasGoMod(dir string) bool {
-	info, err := os.Stat(filepath.Join(dir, "go.mod"))
-	return err == nil && !info.IsDir()
-}
-
-// workspaceAppDirs lists the immediate child directories that contain app.json, sorted by path.
-func workspaceAppDirs(dir string) ([]string, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
-
-	dirs := []string{}
-
-	for _, entry := range entries {
-		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
-			continue
-		}
-
-		path := filepath.Join(dir, entry.Name())
-		if info, err := os.Stat(filepath.Join(path, "app.json")); err == nil && info.Mode().IsRegular() {
-			dirs = append(dirs, path)
-		}
-	}
-
-	slices.Sort(dirs)
-
-	if len(dirs) == 0 {
-		return nil, fmt.Errorf("workspace %s has no child app directories with app.json", dir)
-	}
-
-	return dirs, nil
-}
-
-// resolveDevDirs returns the app directories to serve and rejects duplicate app names.
-func resolveDevDirs(cfg *devConfig) ([]string, error) {
-	dirs := []string{cfg.dir}
-	if cfg.workspace != "" {
-		workspaceDirs, err := workspaceAppDirs(cfg.workspace)
-		if err != nil {
-			return nil, err
-		}
-
-		dirs = workspaceDirs
-	}
-
-	seen := map[string]struct{}{}
-
-	for _, dir := range dirs {
-		m, err := readManifest(dir)
-		if err != nil {
-			return nil, err
-		}
-
-		if _, ok := seen[m.Name]; ok {
-			return nil, fmt.Errorf("workspace has two apps named %q", m.Name)
-		}
-
-		seen[m.Name] = struct{}{}
-	}
-
-	return dirs, nil
 }
 
 // resolveDevVite resolves the frontend dev server for a single app and explains when workspace mode ignores --vite.
@@ -186,94 +207,12 @@ func resolveDevVite(cfg *devConfig, dirs []string) (*viteDev, error) {
 	if vite == nil {
 		return nil, nil //nolint:nilnil // A nil result means the app has no Vite dev server.
 	}
-
 	fmt.Fprintf(os.Stderr, "dev: vite frontend in %s on 127.0.0.1:%d\n", vite.webDir, vite.port)
-
 	if err := ensureWebDeps(vite.webDir); err != nil {
 		return nil, err
 	}
 
 	return vite, nil
-}
-
-// devWorkDir names the temporary state tree for one dev run. The port is part of the key so two supervisors for the same app do not share runner state.
-func devWorkDir(cfg *devConfig, dirs []string) string {
-	if len(dirs) == 1 {
-		m, _ := readManifest(dirs[0])
-		return filepath.Join(os.TempDir(), "wt-dev", fmt.Sprintf("%s-%d", m.Name, cfg.port))
-	}
-
-	return filepath.Join(os.TempDir(), "wt-dev", "workspace-"+filepath.Base(filepath.Clean(cfg.workspace)))
-}
-
-// overlayDevEnv lets client environment override manifest values in dev, so `FOO=1 wt dev` behaves like the README says. Only keys the manifest already defines are touched, and production deploys stay manifest-pinned.
-func overlayDevEnv(m *manifest) {
-	if m.Env == nil {
-		return
-	}
-
-	for key := range m.Env {
-		if value, ok := os.LookupEnv(key); ok {
-			m.Env[key] = value
-		}
-	}
-}
-
-// deployDevApps builds and uploads every app, returning the configs and the Vite-backed one.
-func deployDevApps(cfg *devConfig, dirs []string, deployAddr, target string, vite *viteDev) ([]*deployConfig, *deployConfig, error) {
-	configs := make([]*deployConfig, 0, len(dirs))
-
-	var viteDCfg *deployConfig
-
-	for _, dir := range dirs {
-		m, err := readManifest(dir)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		host := cfg.appHost
-		if cfg.workspace != "" || host == "" {
-			host = m.Name + ".localhost"
-		}
-
-		dcfg := &deployConfig{
-			dir: dir,
-			host: "http://" + deployAddr,
-			token: "dev",
-			wasmtime: cfg.wasmtime,
-			target: target,
-			appHost: host,
-			skipBuild: cfg.skipBuild,
-			skipCompile: cfg.skipCompile,
-			overlayEnv: true,
-		}
-		if vite != nil && dir == vite.appDir {
-			dcfg.buildComponentCommand = vite.build
-			dcfg.skipStatic = true
-			viteDCfg = dcfg
-		}
-
-		m, data, status, err := buildBundle(dcfg)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		printBuildStatus(status)
-
-		if err := upload(dcfg, m, data); err != nil {
-			return nil, nil, err
-		}
-
-		configs = append(configs, dcfg)
-
-		if vite != nil {
-			fmt.Printf("dev: %s API at http://%s:%d/\n", m.Name, host, cfg.port)
-		} else {
-			fmt.Printf("dev: %s at http://%s:%d/\n", m.Name, host, cfg.port)
-		}
-	}
-
-	return configs, viteDCfg, nil
 }
 
 // runViteDev serves the app through Vite with HMR and optionally watches component inputs.
@@ -285,6 +224,7 @@ func runViteDev(cfg *devConfig, vite *viteDev, viteDCfg *deployConfig, stop <-ch
 	if err := writeViteDevConfig(vite, cfg.port); err != nil {
 		return err
 	}
+
 	defer os.Remove(vite.configPath)
 
 	viteCmd, err := startVite(vite)
@@ -297,7 +237,6 @@ func runViteDev(cfg *devConfig, vite *viteDev, viteDCfg *deployConfig, stop <-ch
 	}()
 
 	fmt.Printf("dev: vite at http://127.0.0.1:%d/ (HMR)\n", vite.port)
-
 	if cfg.watch {
 		go watchComponent(viteDCfg, vite.watch, done)
 
@@ -305,6 +244,7 @@ func runViteDev(cfg *devConfig, vite *viteDev, viteDCfg *deployConfig, stop <-ch
 	}
 
 	viteDone := make(chan error, 1)
+
 	go func() {
 		viteDone <- viteCmd.Wait()
 	}()
@@ -319,6 +259,65 @@ func runViteDev(cfg *devConfig, vite *viteDev, viteDCfg *deployConfig, stop <-ch
 	}
 
 	return nil
+}
+
+// workspaceAppDirs lists the immediate child directories that contain app.json, sorted by path.
+func workspaceAppDirs(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	dirs := []string{}
+
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+
+		path := filepath.Join(dir, entry.Name())
+
+		if info, err := os.Stat(filepath.Join(path, "app.json")); err == nil && info.Mode().IsRegular() {
+			dirs = append(dirs, path)
+		}
+	}
+	slices.Sort(dirs)
+	if len(dirs) == 0 {
+		return nil, fmt.Errorf("workspace %s has no child app directories with app.json", dir)
+	}
+
+	return dirs, nil
+}
+
+// resolveDevDirs returns the app directories to serve and rejects duplicate app names.
+func resolveDevDirs(cfg *devConfig) ([]string, error) {
+	dirs := []string{cfg.dir}
+
+	if cfg.workspace != "" {
+		workspaceDirs, err := workspaceAppDirs(cfg.workspace)
+		if err != nil {
+			return nil, err
+		}
+
+		dirs = workspaceDirs
+	}
+
+	seen := map[string]struct{}{}
+
+	for _, dir := range dirs {
+		m, err := readManifest(dir)
+		if err != nil {
+			return nil, err
+		}
+
+		if _, ok := seen[m.Name]; ok {
+			return nil, fmt.Errorf("workspace has two apps named %q", m.Name)
+		}
+
+		seen[m.Name] = struct{}{}
+	}
+
+	return dirs, nil
 }
 
 func runDev(args []string) error {
@@ -338,7 +337,6 @@ func runDev(args []string) error {
 	}
 
 	workDir := devWorkDir(cfg, dirs)
-
 	appsDir, stateDir, err := prepareDevState(workDir)
 	if err != nil {
 		return err
@@ -355,7 +353,6 @@ func runDev(args []string) error {
 	}
 
 	addr, adminAddr := devAddresses(cfg)
-
 	cmd, err := startDevSupervisor(supervisor, cfg, appsDir, stateDir, addr, adminAddr, target)
 	if err != nil {
 		return err
@@ -370,15 +367,15 @@ func runDev(args []string) error {
 	if err != nil {
 		return err
 	}
-
 	fmt.Printf("dev: admin at http://%s/admin/ (token: dev)\n", adminAddr)
 
 	done := make(chan struct{})
+
 	defer close(done)
 
 	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	if vite != nil && viteDCfg != nil {
 		return runViteDev(cfg, vite, viteDCfg, stop, done)
 	}
@@ -387,12 +384,10 @@ func runDev(args []string) error {
 		for _, dcfg := range configs {
 			go watchDev(dcfg, done)
 		}
-
 		fmt.Fprintln(os.Stderr, "dev: watching for changes")
 	}
 
 	<-stop
 	fmt.Fprintln(os.Stderr, "\ndev: stopping")
-
 	return nil
 }

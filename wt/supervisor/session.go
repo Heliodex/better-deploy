@@ -8,29 +8,10 @@ import (
 
 const authCookieName = "wt_token"
 
-// setSessionCookie writes an HttpOnly, SameSite=Lax session cookie with the forwarded scheme.
-func (s *supervisor) setSessionCookie(w http.ResponseWriter, r *http.Request, name, value string, maxAge int) {
-	secure := s.forwardedInfo(r).Proto == "https"
-	//nolint:gosec // Secure follows the forwarded request scheme.
-	http.SetCookie(w, &http.Cookie{
-		Name: name,
-		Value: value,
-		Path: "/",
-		MaxAge: maxAge,
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		Secure: secure,
-	})
-}
-
-// setAuthCookie writes the operator token as an HttpOnly cookie so event streams authenticate without JavaScript access.
-func (s *supervisor) setAuthCookie(w http.ResponseWriter, r *http.Request, token string, maxAge int) {
-	s.setSessionCookie(w, r, authCookieName, token, maxAge)
-}
-
 // loginGuard returns the rate limiter for one credential plane.
 func (s *supervisor) loginGuard(scope string) *loginLimiter {
 	s.loginMu.Lock()
+
 	defer s.loginMu.Unlock()
 
 	if s.loginLimiters == nil {
@@ -54,6 +35,26 @@ func (s *supervisor) loginKey(r *http.Request) string {
 	}
 
 	return key
+}
+
+// setSessionCookie writes an HttpOnly, SameSite=Lax session cookie with the forwarded scheme.
+func (s *supervisor) setSessionCookie(w http.ResponseWriter, r *http.Request, name, value string, maxAge int) {
+	secure := s.forwardedInfo(r).Proto == "https"
+	//nolint:gosec // Secure follows the forwarded request scheme.
+	http.SetCookie(w, &http.Cookie{
+		Name: name,
+		Value: value,
+		Path: "/",
+		MaxAge: maxAge,
+		Secure: secure,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+// setAuthCookie writes the operator token as an HttpOnly cookie so event streams authenticate without JavaScript access.
+func (s *supervisor) setAuthCookie(w http.ResponseWriter, r *http.Request, token string, maxAge int) {
+	s.setSessionCookie(w, r, authCookieName, token, maxAge)
 }
 
 // writeRetryAfter reports how long a rate-limited caller should wait.

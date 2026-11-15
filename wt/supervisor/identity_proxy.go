@@ -20,16 +20,33 @@ func identityUserSignature(secret, id, email, name, groups string) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-// identitySecretFor derives an app's identity key from the supervisor's blob secret so it is not shared between apps.
-func (s *supervisor) identitySecretFor(app string) string {
-	if s.blobs == nil {
-		return ""
+// stripIdentityCookie removes only the supervisor session cookie before proxying.
+func stripIdentityCookie(r *http.Request) {
+	raw := r.Header.Get("Cookie")
+	if raw == "" {
+		return
 	}
 
-	mac := hmac.New(sha256.New, []byte(s.blobs.secretFor(app)))
-	_, _ = mac.Write([]byte("identity"))
+	parts := strings.Split(raw, ";")
+	kept := parts[:0]
 
-	return hex.EncodeToString(mac.Sum(nil))
+	for _, part := range parts {
+		if name, _, _ := strings.Cut(strings.TrimSpace(part), "="); name == identityCookieName {
+			continue
+		}
+
+		kept = append(kept, part)
+	}
+
+	if len(kept) == 0 {
+		r.Header.Del("Cookie")
+		return
+	}
+	r.Header.Set("Cookie", strings.Join(kept, "; "))
+}
+
+func (s *supervisor) clearIdentityCookie(w http.ResponseWriter, r *http.Request) {
+	s.setSessionCookie(w, r, identityCookieName, "", -1)
 }
 
 // identityRequest resolves the session cookie and returns the user and raw token.
@@ -51,6 +68,18 @@ func (s *supervisor) identityRequest(r *http.Request) (identitySession, identity
 	return session, user, cookie.Value, true
 }
 
+// identitySecretFor derives an app's identity key from the supervisor's blob secret so it is not shared between apps.
+func (s *supervisor) identitySecretFor(app string) string {
+	if s.blobs == nil {
+		return ""
+	}
+
+	mac := hmac.New(sha256.New, []byte(s.blobs.secretFor(app)))
+	_, _ = mac.Write([]byte("identity"))
+
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
 // identityProxyHeaders removes any client-supplied identity values and injects the signed platform user for an opted-in app.
 func (s *supervisor) identityProxyHeaders(r *http.Request, appName string, enabled bool) {
 	for key := range r.Header {
@@ -63,23 +92,21 @@ func (s *supervisor) identityProxyHeaders(r *http.Request, appName string, enabl
 		user identityUserInfo
 		ok bool
 	)
+
 	if enabled {
 		_, user, _, ok = s.identityRequest(r)
 	}
 	// The app never receives the supervisor session cookie; it gets signed headers instead.
 	stripIdentityCookie(r)
-
 	if !ok {
 		return
 	}
 
 	groups := strings.Join(user.Groups, ",")
-
 	secret := s.identitySecretFor(appName)
 	if secret == "" {
 		return
 	}
-
 	r.Header.Set(identityUserIDHeader, user.ID)
 	r.Header.Set(identityUserEmail, user.Email)
 	r.Header.Set(identityUserName, user.Name)
@@ -87,37 +114,6 @@ func (s *supervisor) identityProxyHeaders(r *http.Request, appName string, enabl
 	r.Header.Set(identityUserSignatureHeader, identityUserSignature(secret, user.ID, user.Email, user.Name, groups))
 }
 
-// stripIdentityCookie removes only the supervisor session cookie before proxying.
-func stripIdentityCookie(r *http.Request) {
-	raw := r.Header.Get("Cookie")
-	if raw == "" {
-		return
-	}
-
-	parts := strings.Split(raw, ";")
-
-	kept := parts[:0]
-	for _, part := range parts {
-		name, _, _ := strings.Cut(strings.TrimSpace(part), "=")
-		if name == identityCookieName {
-			continue
-		}
-
-		kept = append(kept, part)
-	}
-
-	if len(kept) == 0 {
-		r.Header.Del("Cookie")
-		return
-	}
-
-	r.Header.Set("Cookie", strings.Join(kept, "; "))
-}
-
 func (s *supervisor) setIdentityCookie(w http.ResponseWriter, r *http.Request, token string) {
 	s.setSessionCookie(w, r, identityCookieName, token, int(identitySessionTTL/time.Second))
-}
-
-func (s *supervisor) clearIdentityCookie(w http.ResponseWriter, r *http.Request) {
-	s.setSessionCookie(w, r, identityCookieName, "", -1)
 }

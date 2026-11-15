@@ -19,6 +19,7 @@ func decodeStorageStatements(statements []storageStatement, requireOne bool) ([]
 	}
 
 	params := make([][]any, len(statements))
+
 	for i, statement := range statements {
 		if err := validateStorageSQL(statement.SQL); err != nil {
 			return nil, fmt.Errorf("statement %d: %w", i+1, err)
@@ -35,32 +36,10 @@ func decodeStorageStatements(statements []storageStatement, requireOne bool) ([]
 	return params, nil
 }
 
-// validateStorageStatements writes the validation error and reports whether the statements are usable.
-func validateStorageStatements(w http.ResponseWriter, statements []storageStatement, requireOne bool) ([][]any, bool) {
-	params, err := decodeStorageStatements(statements, requireOne)
-	if err != nil {
-		writeStorageError(w, err)
-		return nil, false
-	}
-
-	return params, true
-}
-
-// readTransactionRequest parses and validates one batch request.
-func readTransactionRequest(w http.ResponseWriter, r *http.Request) (storageStatementsRequest, [][]any, bool) {
-	var req storageStatementsRequest
-	if !readStorageJSON(w, r, &req) {
-		return req, nil, false
-	}
-
-	params, ok := validateStorageStatements(w, req.Statements, true)
-
-	return req, params, ok
-}
-
 // executeStatement runs one statement inside the transaction and records its row-change range.
 func executeStatement(ctx context.Context, tx *sql.Tx, statement storageStatement, params []any, changes *rowChangeCollector, index int) (storageResult, int, int, error) {
 	start := len(changes.rows)
+
 	if statement.Query {
 		rows, err := tx.QueryContext(ctx, statement.SQL, params...)
 		if err != nil {
@@ -78,7 +57,11 @@ func executeStatement(ctx context.Context, tx *sql.Tx, statement storageStatemen
 			return storageResult{}, start, start, fmt.Errorf("statement %d: %w", index+1, closeErr)
 		}
 
-		return storageResult{Columns: columns, Rows: encoded, Truncated: truncated}, start, len(changes.rows), nil
+		return storageResult{
+			Columns: columns,
+			Rows: encoded,
+			Truncated: truncated,
+		}, start, len(changes.rows), nil
 	}
 
 	res, err := tx.ExecContext(ctx, statement.SQL, params...)
@@ -89,7 +72,10 @@ func executeStatement(ctx context.Context, tx *sql.Tx, statement storageStatemen
 	affected, _ := res.RowsAffected()
 	lastID, _ := res.LastInsertId()
 
-	return storageResult{RowsAffected: affected, LastInsertID: lastID}, start, len(changes.rows), nil
+	return storageResult{
+		RowsAffected: affected,
+		LastInsertID: lastID,
+	}, start, len(changes.rows), nil
 }
 
 // executeTransaction runs every statement in one transaction and returns the per-statement results and row ranges.
@@ -102,7 +88,6 @@ func (s *storageServer) executeTransaction(ctx context.Context, app string, req 
 
 	err := s.withWriteConn(ctx, app, func(conn *sql.Conn, changes *rowChangeCollector) error {
 		collector = changes
-
 		tx, err := conn.BeginTx(ctx, nil)
 		if err != nil {
 			return err
@@ -116,6 +101,7 @@ func (s *storageServer) executeTransaction(ctx context.Context, app string, req 
 		if err != nil {
 			return err
 		}
+
 		defer func() {
 			_ = unregister()
 		}()
@@ -149,6 +135,7 @@ func transactionChanges(req storageStatementsRequest, results []storageResult, s
 		}
 
 		var rows []rowChange
+
 		if collector != nil && starts[i] <= ends[i] {
 			rows = collector.rows[starts[i]:ends[i]]
 		}
@@ -166,6 +153,29 @@ func transactionChanges(req storageStatementsRequest, results []storageResult, s
 	return changes
 }
 
+// validateStorageStatements writes the validation error and reports whether the statements are usable.
+func validateStorageStatements(w http.ResponseWriter, statements []storageStatement, requireOne bool) ([][]any, bool) {
+	params, err := decodeStorageStatements(statements, requireOne)
+	if err != nil {
+		writeStorageError(w, err)
+		return nil, false
+	}
+
+	return params, true
+}
+
+// readTransactionRequest parses and validates one batch request.
+func readTransactionRequest(w http.ResponseWriter, r *http.Request) (storageStatementsRequest, [][]any, bool) {
+	var req storageStatementsRequest
+	if !readStorageJSON(w, r, &req) {
+		return req, nil, false
+	}
+
+	params, ok := validateStorageStatements(w, req.Statements, true)
+
+	return req, params, ok
+}
+
 // transaction runs statements in one SQLite transaction and can return rows from reads as well as write counts.
 func (s *storageServer) transaction(w http.ResponseWriter, r *http.Request, app string) {
 	req, params, ok := readTransactionRequest(w, r)
@@ -174,6 +184,7 @@ func (s *storageServer) transaction(w http.ResponseWriter, r *http.Request, app 
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), storageTimeout)
+
 	defer cancel()
 
 	results, starts, ends, collector, err := s.executeTransaction(ctx, app, req, params)
@@ -181,7 +192,8 @@ func (s *storageServer) transaction(w http.ResponseWriter, r *http.Request, app 
 		writeStorageError(w, err)
 		return
 	}
-
 	s.logChanges(app, transactionChanges(req, results, starts, ends, collector))
-	writeJSON(w, http.StatusOK, storageStatementsResponse{Results: results})
+	writeJSON(w, http.StatusOK, storageStatementsResponse{
+		Results: results,
+	})
 }

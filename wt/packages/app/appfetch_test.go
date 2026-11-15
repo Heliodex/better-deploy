@@ -11,7 +11,6 @@ import (
 func TestAppURLUsesPerAppAndBaseEnv(t *testing.T) {
 	t.Setenv("WT_APP_URL_NOTES", "http://127.0.0.1:9001/apps/notes/")
 	t.Setenv("WT_APP_FETCH_URL", "http://127.0.0.1:9000")
-
 	if got := AppURL("notes"); got != "http://127.0.0.1:9001/apps/notes" {
 		t.Errorf("known app URL = %q", got)
 	}
@@ -21,21 +20,23 @@ func TestAppURLUsesPerAppAndBaseEnv(t *testing.T) {
 	}
 }
 
-func TestNewAppRequestAddsIdentity(t *testing.T) {
-	t.Setenv("WT_APP_URL_NOTES", "http://127.0.0.1:9001/apps/notes")
-	t.Setenv("WT_APP_TOKEN", "caller-token")
+func TestCallerRejectsStaleAndMissingHeaders(t *testing.T) {
+	t.Setenv("WT_APP_TOKEN", "target-token")
 
-	req, err := NewAppRequest(t.Context(), http.MethodPost, "notes", "/v1/items", strings.NewReader("{}"))
-	if err != nil {
-		t.Fatal(err)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+
+	if _, ok := Caller(req); ok {
+		t.Error("missing headers verified")
 	}
 
-	if req.URL.String() != "http://127.0.0.1:9001/apps/notes/v1/items" {
-		t.Errorf("URL = %q", req.URL)
-	}
+	timestamp := time.Now().Add(-10 * time.Minute).UTC().Format(time.RFC3339Nano)
 
-	if got := req.Header.Get("Authorization"); got != "Bearer caller-token" {
-		t.Errorf("Authorization = %q", got)
+	req.Header.Set(AppCallerHeader, "frontend")
+	req.Header.Set(AppTimestampHeader, timestamp)
+	req.Header.Set(AppBodyHashHeader, appBodySHA256(nil))
+	req.Header.Set(AppSignatureV2Header, appCallSignatureV2("target-token", "frontend", http.MethodGet, "/", timestamp, appBodySHA256(nil)))
+	if _, ok := Caller(req); ok {
+		t.Error("stale signature verified")
 	}
 }
 
@@ -56,29 +57,27 @@ func TestCallerVerifiesSupervisorSignature(t *testing.T) {
 	}
 
 	req.URL.Path = "/v1/other"
-
 	req.URL.RawQuery = ""
+
 	if caller, ok := Caller(req); ok {
 		t.Errorf("tampered path verified as %q", caller)
 	}
 }
 
-func TestCallerRejectsStaleAndMissingHeaders(t *testing.T) {
-	t.Setenv("WT_APP_TOKEN", "target-token")
+func TestNewAppRequestAddsIdentity(t *testing.T) {
+	t.Setenv("WT_APP_URL_NOTES", "http://127.0.0.1:9001/apps/notes")
+	t.Setenv("WT_APP_TOKEN", "caller-token")
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	if _, ok := Caller(req); ok {
-		t.Error("missing headers verified")
+	req, err := NewAppRequest(t.Context(), http.MethodPost, "notes", "/v1/items", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	timestamp := time.Now().Add(-10 * time.Minute).UTC().Format(time.RFC3339Nano)
+	if req.URL.String() != "http://127.0.0.1:9001/apps/notes/v1/items" {
+		t.Errorf("URL = %q", req.URL)
+	}
 
-	req.Header.Set(AppCallerHeader, "frontend")
-	req.Header.Set(AppTimestampHeader, timestamp)
-	req.Header.Set(AppBodyHashHeader, appBodySHA256(nil))
-	req.Header.Set(AppSignatureV2Header, appCallSignatureV2("target-token", "frontend", http.MethodGet, "/", timestamp, appBodySHA256(nil)))
-
-	if _, ok := Caller(req); ok {
-		t.Error("stale signature verified")
+	if got := req.Header.Get("Authorization"); got != "Bearer caller-token" {
+		t.Errorf("Authorization = %q", got)
 	}
 }

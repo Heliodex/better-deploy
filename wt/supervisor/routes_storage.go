@@ -2,11 +2,6 @@ package main
 
 import "net/http"
 
-// storageRoutes returns the cached table for the storage API.
-func (s *storageServer) storageRoutes() *routeTable {
-	return s.routesCache.get(s.buildStorageRoutes)
-}
-
 // storageApp returns the authenticated app name placed in the route parameters.
 func storageApp(params map[string]string) string {
 	return params["app"]
@@ -29,6 +24,7 @@ func withStorageID(fn func(http.ResponseWriter, *http.Request, string, string)) 
 // buildStorageRoutes declares the storage API once with its methods and path parameters.
 func (s *storageServer) buildStorageRoutes() *routeTable {
 	rt := newRouteTable()
+
 	rt.add(http.MethodPost, "/v1/publish", withStorageApp(func(w http.ResponseWriter, r *http.Request, app string) {
 		handleEventPublish(s.bus, w, r, app)
 	}))
@@ -55,11 +51,9 @@ func (s *storageServer) buildStorageRoutes() *routeTable {
 	rt.add(http.MethodPost, "/v1/sessions/{id}/rollback", withStorageID(func(w http.ResponseWriter, r *http.Request, app, id string) {
 		s.closeSessionRequest(w, r, app, id, false)
 	}))
-
 	for _, op := range []string{"get", "set", "delete", "incr"} {
 		rt.add(http.MethodPost, "/v1/kv/"+op, withStorageApp(s.kvHandler(op)))
 	}
-
 	rt.add(http.MethodPost, "/v1/query", withStorageApp(s.query))
 	rt.add(http.MethodPost, "/v1/exec", withStorageApp(s.exec))
 	rt.add(http.MethodPost, "/v1/write", withStorageApp(s.writeReturning))
@@ -67,6 +61,10 @@ func (s *storageServer) buildStorageRoutes() *routeTable {
 	rt.add(http.MethodPost, "/v1/transaction", withStorageApp(s.transaction))
 	rt.add(http.MethodGet, "/v1/schema", withStorageApp(s.readSchema))
 	rt.add(http.MethodPost, "/v1/migrate", withStorageApp(s.runMigration))
-
 	return rt
+}
+
+// storageRoutes returns the cached table for the storage API.
+func (s *storageServer) storageRoutes() *routeTable {
+	return s.routesCache.get(s.buildStorageRoutes)
 }

@@ -20,6 +20,7 @@ func freeTestPort(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	defer listener.Close()
 
 	_, port, err := net.SplitHostPort(listener.Addr().String())
@@ -28,6 +29,35 @@ func freeTestPort(t *testing.T) string {
 	}
 
 	return port
+}
+
+func supervisorAppPID(t *testing.T, base, token string) int {
+	t.Helper()
+
+	request, err := http.NewRequest(http.MethodGet, base+"/apps/demo", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+token)
+
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("app info status = %d", response.StatusCode)
+	}
+
+	var info appInfo
+
+	if err := json.UnmarshalRead(response.Body, &info); err != nil {
+		t.Fatal(err)
+	}
+
+	return info.PID
 }
 
 func waitHTTP(t *testing.T, url string, headers map[string]string, want int) {
@@ -46,7 +76,6 @@ func waitHTTP(t *testing.T, url string, headers map[string]string, want int) {
 				request.Host = value
 				continue
 			}
-
 			request.Header.Set(key, value)
 		}
 
@@ -56,44 +85,14 @@ func waitHTTP(t *testing.T, url string, headers map[string]string, want int) {
 				response.Body.Close()
 				return
 			}
-
 			response.Body.Close()
 		}
 
 		if time.Now().After(deadline) {
 			t.Fatalf("GET %s did not return %d: %v", url, want, err)
 		}
-
 		time.Sleep(50 * time.Millisecond)
 	}
-}
-
-func supervisorAppPID(t *testing.T, base, token string) int {
-	t.Helper()
-
-	request, err := http.NewRequest(http.MethodGet, base+"/apps/demo", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	request.Header.Set("Authorization", "Bearer "+token)
-
-	response, err := http.DefaultClient.Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer response.Body.Close()
-
-	if response.StatusCode != http.StatusOK {
-		t.Fatalf("app info status = %d", response.StatusCode)
-	}
-
-	var info appInfo
-	if err := json.UnmarshalRead(response.Body, &info); err != nil {
-		t.Fatal(err)
-	}
-
-	return info.PID
 }
 
 func waitLog(t *testing.T, path string, done func(string) bool) {
@@ -110,7 +109,6 @@ func waitLog(t *testing.T, path string, done func(string) bool) {
 		if time.Now().After(deadline) {
 			t.Fatalf("timed out waiting for the supervisor log:\n%s", data)
 		}
-
 		time.Sleep(50 * time.Millisecond)
 	}
 }
@@ -123,8 +121,8 @@ func TestSupervisorHandoverKeepsAppPID(t *testing.T) {
 	port := freeTestPort(t)
 	appsDir := t.TempDir()
 	stateDir := t.TempDir()
-
 	appDir := filepath.Join(appsDir, "demo")
+
 	if err := os.MkdirAll(appDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -141,37 +139,29 @@ func TestSupervisorHandoverKeepsAppPID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	defer logFile.Close()
 	defer func() {
 		data, _ := os.ReadFile(logFile.Name())
+
 		t.Logf("supervisor log:\n%s", data)
 	}()
 
 	base := "http://127.0.0.1:" + port
-	cmd := exec.Command(os.Args[0],
-		"-listen", "127.0.0.1:"+port,
-		"-apps", appsDir,
-		"-state", stateDir,
-		"-wasmtime", os.Args[0],
-		"-token", "test",
-		"-domain", "localhost",
-	)
-
+	cmd := exec.Command(os.Args[0], "-listen", "127.0.0.1:"+port, "-apps", appsDir, "-state", stateDir, "-wasmtime", os.Args[0], "-token", "test", "-domain", "localhost")
 	cmd.Env = append(os.Environ(), "WT_TEST_SUPERVISOR=1")
 	cmd.Stdout = logFile
-
 	cmd.Stderr = logFile
+
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-
 	t.Cleanup(func() {
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
 			_, _ = cmd.Process.Wait()
 		}
 	})
-
 	waitHTTP(t, base+"/healthz", nil, http.StatusOK)
 	waitHTTP(t, base+"/", map[string]string{"Host": "demo.localhost"}, http.StatusNoContent)
 
@@ -183,28 +173,23 @@ func TestSupervisorHandoverKeepsAppPID(t *testing.T) {
 	if err := cmd.Process.Signal(syscall.SIGHUP); err != nil {
 		t.Fatal(err)
 	}
-
 	waitLog(t, logFile.Name(), func(text string) bool {
 		return strings.Contains(text, "handover: exec") && strings.Count(text, "supervisor listening") >= 2
 	})
 	waitHTTP(t, base+"/healthz", nil, http.StatusOK)
 	waitHTTP(t, base+"/", map[string]string{"Host": "demo.localhost"}, http.StatusNoContent)
-
-	after := supervisorAppPID(t, base, "test")
-	if after != before {
+	if after := supervisorAppPID(t, base, "test"); after != before {
 		t.Errorf("app pid changed from %d to %d across handover", before, after)
 	}
 
 	if err := cmd.Process.Signal(syscall.SIGHUP); err != nil {
 		t.Fatal(err)
 	}
-
 	waitLog(t, logFile.Name(), func(text string) bool {
 		return strings.Count(text, "supervisor listening") >= 3
 	})
 	waitHTTP(t, base+"/healthz", nil, http.StatusOK)
 	waitHTTP(t, base+"/", map[string]string{"Host": "demo.localhost"}, http.StatusNoContent)
-
 	if second := supervisorAppPID(t, base, "test"); second != before {
 		t.Errorf("app pid changed from %d to %d across the second handover", before, second)
 	}
@@ -228,6 +213,7 @@ func TestSupervisorHandoverKeepsAppPID(t *testing.T) {
 	}
 
 	done := make(chan error, 1)
+
 	go func() {
 		done <- cmd.Wait()
 	}()

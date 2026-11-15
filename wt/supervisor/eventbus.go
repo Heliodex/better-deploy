@@ -12,32 +12,48 @@ import (
 	"time"
 )
 
-const (
-	eventBusMaxEvents = 256
-	eventBusMaxBytes = 1 << 20
-	eventSubBuffer = 64
-	eventMaxTopic = 128
-	eventMaxBody = 64 << 10
+type (
+	// busEvent is one published value. The ID is monotonic per app and is the cursor a subscriber sends back as since or Last-Event-ID.
+	busEvent struct {
+		ID int64 `json:"id"`
+		Topic string `json:"topic"`
+		Time time.Time `json:"time"`
+		Data jsontext.Value `json:"data"`
+	}
+
+	busSubscriber struct {
+		topic string
+		ch chan busEvent
+	}
+
+	appEventLog struct {
+		mu sync.Mutex
+		next int64
+		ring *boundedRing[busEvent]
+		subs map[*busSubscriber]struct{}
+	}
+
+	eventBus struct {
+		mu sync.Mutex
+		apps map[string]*appEventLog
+	}
 )
 
-// busEvent is one published value. The ID is monotonic per app and is the cursor a subscriber sends back as since or Last-Event-ID.
-type busEvent struct {
-	ID int64 `json:"id"`
-	Topic string `json:"topic"`
-	Time time.Time `json:"time"`
-	Data jsontext.Value `json:"data"`
-}
+const (
+	eventBusMaxBytes = 1 << 20
+	eventBusMaxEvents = 256
+	eventMaxBody = 64 << 10
+	eventMaxTopic = 128
+	eventSubBuffer = 64
+)
 
-type busSubscriber struct {
-	topic string
-	ch chan busEvent
-}
+func (e busEvent) json() []byte {
+	data, err := json.Marshal(e)
+	if err != nil {
+		return nil
+	}
 
-type appEventLog struct {
-	mu sync.Mutex
-	next int64
-	ring *boundedRing[busEvent]
-	subs map[*busSubscriber]struct{}
+	return data
 }
 
 // busEventSize approximates the memory one event occupies in the ring.
@@ -45,18 +61,10 @@ func busEventSize(event busEvent) int {
 	return len(event.Data) + len(event.Topic) + 64
 }
 
-type eventBus struct {
-	mu sync.Mutex
-	apps map[string]*appEventLog
-}
-
-func newEventBus() *eventBus {
-	return &eventBus{apps: map[string]*appEventLog{}}
-}
-
 // log returns the app's event log, creating it on first use.
 func (b *eventBus) log(app string) *appEventLog {
 	b.mu.Lock()
+
 	defer b.mu.Unlock()
 
 	log := b.apps[app]
@@ -78,6 +86,7 @@ func (b *eventBus) publish(app, topic string, data jsontext.Value) (busEvent, er
 	}
 
 	topic = strings.TrimSpace(topic)
+
 	if topic == "" || len(topic) > eventMaxTopic || strings.ContainsAny(topic, "\x00\r\n") {
 		return busEvent{}, fmt.Errorf("topic must be 1 to %d bytes without control characters", eventMaxTopic)
 	}
@@ -91,13 +100,18 @@ func (b *eventBus) publish(app, topic string, data jsontext.Value) (busEvent, er
 	}
 
 	log := b.log(app)
-	event := busEvent{Topic: topic, Time: time.Now().UTC(), Data: data}
+	event := busEvent{
+		Topic: topic,
+		Time: time.Now().UTC(),
+		Data: data,
+	}
 
 	log.mu.Lock()
+
 	log.next++
 	event.ID = log.next
-	log.ring.add(event)
 
+	log.ring.add(event)
 	for sub := range log.subs {
 		if sub.topic != "" && sub.topic != topic {
 			continue
@@ -110,17 +124,72 @@ func (b *eventBus) publish(app, topic string, data jsontext.Value) (busEvent, er
 		}
 	}
 	log.mu.Unlock()
-
 	return event, nil
+}
+
+// remove drops an app's ring and closes live subscribers when the app is deleted.
+func (b *eventBus) remove(app string) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+
+	log := b.apps[app]
+
+	delete(b.apps, app)
+	b.mu.Unlock()
+	if log == nil {
+		return
+	}
+	log.mu.Lock()
+	for sub := range log.subs {
+		close(sub.ch)
+		delete(log.subs, sub)
+	}
+	log.ring.reset()
+	log.mu.Unlock()
+}
+
+// unsubscribe removes a live subscriber from an app's event log.
+func (b *eventBus) unsubscribe(app string, sub *busSubscriber) {
+	if b == nil || sub == nil {
+		return
+	}
+	b.mu.Lock()
+
+	log := b.apps[app]
+
+	b.mu.Unlock()
+	if log == nil {
+		return
+	}
+	log.mu.Lock()
+	delete(log.subs, sub)
+	log.mu.Unlock()
+}
+
+func newEventBus() *eventBus {
+	return &eventBus{
+		apps: map[string]*appEventLog{},
+	}
+}
+
+// topics normalises an optional topic filter.
+func topics(topic string) string {
+	return strings.TrimSpace(topic)
 }
 
 // subscribe atomically snapshots the replay window and registers the live channel.
 // A nil since means live only; a non-nil since replays events newer than it.
 func (b *eventBus) subscribe(app, topic string, since *int64) (sub *busSubscriber, replay []busEvent, oldest int64, gap bool) {
 	log := b.log(app)
-	sub = &busSubscriber{topic: topics(topic), ch: make(chan busEvent, eventSubBuffer)}
+	sub = &busSubscriber{
+		topic: topics(topic),
+		ch: make(chan busEvent, eventSubBuffer),
+	}
 
 	log.mu.Lock()
+
 	defer log.mu.Unlock()
 
 	if log.ring.len() > 0 {
@@ -149,62 +218,4 @@ func (b *eventBus) subscribe(app, topic string, since *int64) (sub *busSubscribe
 	log.subs[sub] = struct{}{}
 
 	return sub, replay, oldest, gap
-}
-
-// topics normalises an optional topic filter.
-func topics(topic string) string {
-	return strings.TrimSpace(topic)
-}
-
-// unsubscribe removes a live subscriber from an app's event log.
-func (b *eventBus) unsubscribe(app string, sub *busSubscriber) {
-	if b == nil || sub == nil {
-		return
-	}
-
-	b.mu.Lock()
-	log := b.apps[app]
-	b.mu.Unlock()
-
-	if log == nil {
-		return
-	}
-
-	log.mu.Lock()
-	delete(log.subs, sub)
-	log.mu.Unlock()
-}
-
-// remove drops an app's ring and closes live subscribers when the app is deleted.
-func (b *eventBus) remove(app string) {
-	if b == nil {
-		return
-	}
-
-	b.mu.Lock()
-	log := b.apps[app]
-	delete(b.apps, app)
-	b.mu.Unlock()
-
-	if log == nil {
-		return
-	}
-
-	log.mu.Lock()
-	for sub := range log.subs {
-		close(sub.ch)
-		delete(log.subs, sub)
-	}
-
-	log.ring.reset()
-	log.mu.Unlock()
-}
-
-func (e busEvent) json() []byte {
-	data, err := json.Marshal(e)
-	if err != nil {
-		return nil
-	}
-
-	return data
 }

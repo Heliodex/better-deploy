@@ -21,25 +21,8 @@ type storageErrorResponse struct {
 // errStorageMigrationChecksum marks an edited migration whose version was already applied with a different checksum.
 var errStorageMigrationChecksum = errors.New("migration checksum mismatch")
 
-// storageSQLiteError maps an extended SQLite result code to an HTTP status and a stable error code.
-func storageSQLiteError(code int) (status int, name, constraint string) {
-	base := code & 0xff
-	switch base {
-	case sqlite3.SQLITE_CONSTRAINT:
-		return http.StatusConflict, "constraint", storageConstraintName(code)
-	case sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED:
-		return http.StatusServiceUnavailable, "busy", ""
-	case sqlite3.SQLITE_FULL:
-		return http.StatusInsufficientStorage, "disk_full", ""
-	case sqlite3.SQLITE_READONLY:
-		return http.StatusForbidden, "readonly", ""
-	case sqlite3.SQLITE_AUTH, sqlite3.SQLITE_PERM:
-		return http.StatusForbidden, "denied", ""
-	case sqlite3.SQLITE_TOOBIG, sqlite3.SQLITE_RANGE, sqlite3.SQLITE_MISMATCH:
-		return http.StatusBadRequest, "invalid", ""
-	default:
-		return http.StatusInternalServerError, "internal", ""
-	}
+func errorMessage(err error) string {
+	return strings.TrimSpace(err.Error())
 }
 
 // storageConstraintName names the extended constraint that failed, for clients that want to react to a specific one.
@@ -74,26 +57,67 @@ func storageConstraintName(code int) string {
 	}
 }
 
+// storageSQLiteError maps an extended SQLite result code to an HTTP status and a stable error code.
+func storageSQLiteError(code int) (status int, name, constraint string) {
+	base := code & 0xff
+
+	switch base {
+	case sqlite3.SQLITE_AUTH, sqlite3.SQLITE_PERM:
+		return http.StatusForbidden, "denied", ""
+	case sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED:
+		return http.StatusServiceUnavailable, "busy", ""
+	case sqlite3.SQLITE_CONSTRAINT:
+		return http.StatusConflict, "constraint", storageConstraintName(code)
+	case sqlite3.SQLITE_FULL:
+		return http.StatusInsufficientStorage, "disk_full", ""
+	case sqlite3.SQLITE_TOOBIG, sqlite3.SQLITE_RANGE, sqlite3.SQLITE_MISMATCH:
+		return http.StatusBadRequest, "invalid", ""
+	case sqlite3.SQLITE_READONLY:
+		return http.StatusForbidden, "readonly", ""
+	default:
+		return http.StatusInternalServerError, "internal", ""
+	}
+}
+
 // storageErrorDetails classifies an error from a storage handler. Unknown SQL and runtime failures stay 500; only request validation is 400.
 func storageErrorDetails(err error) (int, storageErrorResponse) {
 	switch {
 	case errors.Is(err, errStorageInvalid):
-		return http.StatusBadRequest, storageErrorResponse{Error: errorMessage(err), Code: "invalid"}
+		return http.StatusBadRequest, storageErrorResponse{
+			Error: errorMessage(err),
+			Code: "invalid",
+		}
 	case errors.Is(err, errStorageUnavailable):
-		return http.StatusInternalServerError, storageErrorResponse{Error: errorMessage(err), Code: "storage_unavailable"}
+		return http.StatusInternalServerError, storageErrorResponse{
+			Error: errorMessage(err),
+			Code: "storage_unavailable",
+		}
 	case errors.Is(err, errStorageTempBudget):
-		return http.StatusInsufficientStorage, storageErrorResponse{Error: errorMessage(err), Code: "temp_budget"}
+		return http.StatusInsufficientStorage, storageErrorResponse{
+			Error: errorMessage(err),
+			Code: "temp_budget",
+		}
 	case errors.Is(err, errStorageMigrationChecksum):
-		return http.StatusConflict, storageErrorResponse{Error: errorMessage(err), Code: "migration_checksum"}
+		return http.StatusConflict, storageErrorResponse{
+			Error: errorMessage(err),
+			Code: "migration_checksum",
+		}
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
-		return http.StatusGatewayTimeout, storageErrorResponse{Error: "storage query timed out", Code: "timeout"}
+		return http.StatusGatewayTimeout, storageErrorResponse{
+			Error: "storage query timed out",
+			Code: "timeout",
+		}
 	}
 
 	if sqliteErr, ok := errors.AsType[*sqlite.Error](err); ok {
 		code := sqliteErr.Code()
 		if code == sqlite3.SQLITE_ERROR && strings.Contains(strings.ToLower(sqliteErr.Error()), "not authorized to use function") {
 			// SQLite refuses a disabled function such as load_extension before the authoriser runs, and reports SQLITE_ERROR.
-			return http.StatusForbidden, storageErrorResponse{Error: errorMessage(err), Code: "denied", SQLiteCode: code}
+			return http.StatusForbidden, storageErrorResponse{
+				Error: errorMessage(err),
+				Code: "denied",
+				SQLiteCode: code,
+			}
 		}
 
 		status, name, constraint := storageSQLiteError(code)
@@ -106,14 +130,14 @@ func storageErrorDetails(err error) (int, storageErrorResponse) {
 		}
 	}
 
-	return http.StatusInternalServerError, storageErrorResponse{Error: errorMessage(err), Code: "internal"}
-}
-
-func errorMessage(err error) string {
-	return strings.TrimSpace(err.Error())
+	return http.StatusInternalServerError, storageErrorResponse{
+		Error: errorMessage(err),
+		Code: "internal",
+	}
 }
 
 func writeStorageError(w http.ResponseWriter, err error) {
 	status, body := storageErrorDetails(err)
+
 	writeJSON(w, status, body)
 }

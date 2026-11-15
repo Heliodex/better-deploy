@@ -12,6 +12,7 @@ func TestDevSourceStateIgnoresOutputs(t *testing.T) {
 		t.Helper()
 
 		path := filepath.Join(dir, name)
+
 		if err := os.MkdirAll(filepath.Dir(path), privateDirMode); err != nil {
 			t.Fatal(err)
 		}
@@ -20,6 +21,7 @@ func TestDevSourceStateIgnoresOutputs(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+
 	write("main.go")
 	write("main.wasm")
 	write("main.cwasm")
@@ -39,7 +41,6 @@ func TestDevSourceStateIgnoresOutputs(t *testing.T) {
 	if _, ok := state[filepath.Join(dir, "main.go")]; !ok {
 		t.Errorf("state missing main.go: %v", state)
 	}
-
 	write("main.go")
 
 	next, err := devSourceState(dir)
@@ -50,7 +51,6 @@ func TestDevSourceStateIgnoresOutputs(t *testing.T) {
 	if !devSourcesChanged(state, next) {
 		t.Error("editing a source file was not detected")
 	}
-
 	write("static/other.html")
 
 	after, err := devSourceState(dir)

@@ -14,35 +14,23 @@ import (
 	"time"
 )
 
-// uploadProgress prints a coarse percentage while a bundle uploads, without buffering it a second time.
-type uploadProgress struct {
-	reader io.Reader
-	total, done int64
-	next int64
-	last time.Time
-}
-
-func (u *uploadProgress) Read(p []byte) (int, error) {
-	count, err := u.reader.Read(p)
-
-	u.done += int64(count)
-	if u.total <= 0 {
-		return count, err
+type (
+	// deploymentState is the subset of a deployment resource the CLI needs.
+	deploymentState struct {
+		ID string `json:"id"`
+		Status string `json:"status"`
+		Mode string `json:"mode"`
+		Digest string `json:"digest"`
+		Error string `json:"error"`
 	}
 
-	if u.next == 0 {
-		u.next = u.total / 4
-		u.last = time.Now()
+	// uploadProgress prints a coarse percentage while a bundle uploads, without buffering it a second time.
+	uploadProgress struct {
+		reader io.Reader
+		total, done, next int64
+		last time.Time
 	}
-
-	if u.done >= u.next || err == io.EOF {
-		percent := u.done * 100 / u.total
-		fmt.Fprintf(os.Stderr, "upload: %d%% (%d/%d bytes)\n", percent, u.done, u.total)
-		u.next = u.done + u.total/4
-	}
-
-	return count, err
-}
+)
 
 // baseURL adds https when host has no scheme and strips a trailing slash.
 func baseURL(host string) string {
@@ -53,189 +41,60 @@ func baseURL(host string) string {
 	return "https://" + host
 }
 
-// upload posts the bundle as a multipart deployment and waits for a queued deployment to finish.
-func upload(cfg *deployConfig, m manifest, bundle []byte) error {
-	var body bytes.Buffer
+// checkDeploySecrets fails fast when the manifest references secrets the supervisor does not have, instead of failing after the build and upload.
+func checkDeploySecrets(cfg *deployConfig, m manifest) error {
+	var wanted []string
 
-	form := multipart.NewWriter(&body)
-
-	part, err := form.CreateFormFile("artifact", "app.tar.gz")
-	if err != nil {
-		return err
-	}
-
-	if _, err := part.Write(bundle); err != nil {
-		return err
-	}
-
-	if err := form.Close(); err != nil {
-		return err
-	}
-
-	url := baseURL(cfg.host) + "/apps/" + m.Name + "/deployments"
-
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, &body)
-	if err != nil {
-		return err
-	}
-
-	if cfg.token != "" {
-		req.Header.Set("Authorization", "Bearer "+cfg.token)
-	}
-
-	req.Header.Set("Content-Type", form.FormDataContentType())
-
-	size := int64(body.Len())
-	req.ContentLength = size
-	progress := &uploadProgress{reader: bytes.NewReader(body.Bytes()), total: size}
-	req.Body = io.NopCloser(progress)
-
-	client := &http.Client{Timeout: 2 * time.Minute}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("post bundle: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, smallResponseLimit))
-	if err != nil {
-		return fmt.Errorf("read response: %w", err)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("deploy failed with status %s: %s", resp.Status, strings.TrimSpace(string(respBody)))
-	}
-
-	if resp.StatusCode != http.StatusAccepted {
-		return printDeployResult(cfg, m.Name, respBody)
-	}
-
-	location := resp.Header.Get("Location")
-
-	var queued deploymentState
-	if err := json.Unmarshal(respBody, &queued); err != nil {
-		return fmt.Errorf("read deployment: %w", err)
-	}
-
-	if location == "" {
-		location = "/apps/" + m.Name + "/deployments/" + queued.ID
-	}
-
-	if queued.ID == "" {
-		queued.ID = filepath.Base(location)
-	}
-
-	return waitDeploy(cfg, m.Name, location)
-}
-
-// deploymentState is the subset of a deployment resource the CLI needs.
-type deploymentState struct {
-	ID string `json:"id"`
-	Status string `json:"status"`
-	Mode string `json:"mode"`
-	Digest string `json:"digest"`
-	Error string `json:"error"`
-}
-
-// waitDeploy polls a queued deployment until it succeeds or fails, then prints the app.
-func waitDeploy(cfg *deployConfig, name, location string) error {
-	client := clientOptions{host: cfg.host, token: cfg.token, jsonOut: cfg.jsonOut, timeout: deployPollTimeout}
-	for {
-		status, _, body, err := apiDo(client, http.MethodGet, location, nil, "")
-		if err != nil {
-			return err
+	for _, value := range m.Env {
+		name, ok := strings.CutPrefix(value, "secret://")
+		if !ok || name == "" {
+			continue
 		}
 
-		if status != http.StatusOK {
-			return fmt.Errorf("deployment status %d: %s", status, strings.TrimSpace(string(body)))
-		}
-
-		var state deploymentState
-		if err := json.Unmarshal(body, &state); err != nil {
-			return fmt.Errorf("read deployment status: %w", err)
-		}
-
-		switch state.Status {
-		case "queued", "running":
-			time.Sleep(deployPollDelay)
-		case "success":
-			return printDeployResult(cfg, name, nil)
-		default:
-			if state.Error != "" {
-				return fmt.Errorf("deploy %s: %s", state.Status, state.Error)
-			}
-
-			return fmt.Errorf("deploy %s", state.Status)
-		}
-	}
-}
-
-// printDeployResult prints the app info from a fresh GET, or the provided response body.
-func printDeployResult(cfg *deployConfig, name string, body []byte) error {
-	if body == nil {
-		client := clientOptions{host: cfg.host, token: cfg.token, jsonOut: cfg.jsonOut, timeout: deployPollTimeout}
-
-		status, _, data, err := apiDo(client, http.MethodGet, "/apps/"+name, nil, "")
-		if err != nil {
-			return err
-		}
-
-		if status != http.StatusOK {
-			return fmt.Errorf("app info status %d: %s", status, strings.TrimSpace(string(data)))
-		}
-
-		body = data
+		wanted = append(wanted, name)
 	}
 
-	if cfg.jsonOut {
-		fmt.Println(strings.TrimSpace(string(body)))
+	if len(wanted) == 0 {
 		return nil
 	}
 
-	var info struct {
-		Name string `json:"name"`
-		Host string `json:"host"`
-		Status string `json:"status"`
-		Ready bool `json:"ready"`
-		CurrentDigest string `json:"currentDigest"`
+	client := clientOptions{
+		host: cfg.host,
+		token: cfg.token,
+		jsonOut: cfg.jsonOut,
+		timeout: deployPollTimeout,
 	}
-	if err := json.Unmarshal(body, &info); err != nil {
-		fmt.Println(strings.TrimSpace(string(body)))
-		return nil
-	}
-
-	if info.Name == "" {
-		info.Name = name
+	status, _, body, err := apiDo(client, http.MethodGet, "/apps/"+m.Name+"/secrets", nil, "")
+	if err != nil {
+		return err
 	}
 
-	fmt.Printf("deployed %s\n", info.Name)
-
-	if info.Host != "" {
-		fmt.Printf("  url: %s\n", appURLForHost(cfg.host, info.Host))
+	if err := checkAPI(status, body); err != nil {
+		return err
 	}
 
-	if info.CurrentDigest != "" {
-		digest := info.CurrentDigest
-		if len(digest) > shortHashLength {
-			digest = digest[:shortHashLength]
+	var result secretKeysResponse
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return fmt.Errorf("read secrets: %w", err)
+	}
+
+	have := map[string]struct{}{}
+
+	for _, key := range result.Keys {
+		have[key] = struct{}{}
+	}
+
+	var missing []string
+
+	for _, name := range wanted {
+		if _, ok := have[name]; !ok {
+			missing = append(missing, name)
 		}
-
-		fmt.Printf("  digest: %s\n", digest)
 	}
 
-	if info.Status != "" {
-		fmt.Printf("  status: %s", info.Status)
-
-		if info.Ready {
-			fmt.Print(" (ready)")
-		}
-
-		fmt.Println()
-	}
-
-	if !cfg.start.IsZero() {
-		fmt.Printf("  time: %s\n", time.Since(cfg.start).Round(time.Millisecond))
+	if len(missing) > 0 {
+		return fmt.Errorf("missing secrets for app %q: %s (set with wt secrets %s set KEY)", m.Name, strings.Join(missing, ", "), m.Name)
 	}
 
 	return nil
@@ -253,11 +112,10 @@ func prepareManifest(m *manifest, cfg *deployConfig) error {
 
 	if cfg.appHost != "" {
 		m.Host = cfg.appHost
+
 		return nil
 	}
-
 	applyAppDomain(m, cfg.appDomain)
-
 	return nil
 }
 
@@ -289,57 +147,216 @@ func buildBundle(cfg *deployConfig) (manifest, []byte, buildStatus, error) {
 	return m, data, status, nil
 }
 
-// checkDeploySecrets fails fast when the manifest references secrets the supervisor does not have, instead of failing after the build and upload.
-func checkDeploySecrets(cfg *deployConfig, m manifest) error {
-	var wanted []string
-
-	for _, value := range m.Env {
-		name, ok := strings.CutPrefix(value, "secret://")
-		if !ok || name == "" {
-			continue
+// printDeployResult prints the app info from a fresh GET, or the provided response body.
+func printDeployResult(cfg *deployConfig, name string, body []byte) error {
+	if body == nil {
+		client := clientOptions{
+			host: cfg.host,
+			token: cfg.token,
+			jsonOut: cfg.jsonOut,
+			timeout: deployPollTimeout,
+		}
+		status, _, data, err := apiDo(client, http.MethodGet, "/apps/"+name, nil, "")
+		if err != nil {
+			return err
 		}
 
-		wanted = append(wanted, name)
+		if status != http.StatusOK {
+			return fmt.Errorf("app info status %d: %s", status, strings.TrimSpace(string(data)))
+		}
+
+		body = data
 	}
 
-	if len(wanted) == 0 {
+	if cfg.jsonOut {
+		fmt.Println(strings.TrimSpace(string(body)))
 		return nil
 	}
 
-	client := clientOptions{host: cfg.host, token: cfg.token, jsonOut: cfg.jsonOut, timeout: deployPollTimeout}
+	var info struct {
+		Name string `json:"name"`
+		Host string `json:"host"`
+		Status string `json:"status"`
+		Ready bool `json:"ready"`
+		CurrentDigest string `json:"currentDigest"`
+	}
 
-	status, _, body, err := apiDo(client, http.MethodGet, "/apps/"+m.Name+"/secrets", nil, "")
+	if err := json.Unmarshal(body, &info); err != nil {
+		fmt.Println(strings.TrimSpace(string(body)))
+		return nil
+	}
+
+	if info.Name == "" {
+		info.Name = name
+	}
+	fmt.Printf("deployed %s\n", info.Name)
+	if info.Host != "" {
+		fmt.Printf("  url: %s\n", appURLForHost(cfg.host, info.Host))
+	}
+
+	if info.CurrentDigest != "" {
+		digest := info.CurrentDigest
+		if len(digest) > shortHashLength {
+			digest = digest[:shortHashLength]
+		}
+		fmt.Printf("  digest: %s\n", digest)
+	}
+
+	if info.Status != "" {
+		fmt.Printf("  status: %s", info.Status)
+		if info.Ready {
+			fmt.Print(" (ready)")
+		}
+		fmt.Println()
+	}
+
+	if !cfg.start.IsZero() {
+		fmt.Printf("  time: %s\n", time.Since(cfg.start).Round(time.Millisecond))
+	}
+
+	return nil
+}
+
+func (u *uploadProgress) Read(p []byte) (int, error) {
+	count, err := u.reader.Read(p)
+	u.done += int64(count)
+
+	if u.total <= 0 {
+		return count, err
+	}
+
+	if u.next == 0 {
+		u.next = u.total / 4
+		u.last = time.Now()
+	}
+
+	if u.done >= u.next || err == io.EOF {
+		percent := u.done * 100 / u.total
+
+		fmt.Fprintf(os.Stderr, "upload: %d%% (%d/%d bytes)\n", percent, u.done, u.total)
+
+		u.next = u.done + u.total/4
+	}
+
+	return count, err
+}
+
+// waitDeploy polls a queued deployment until it succeeds or fails, then prints the app.
+func waitDeploy(cfg *deployConfig, name, location string) error {
+	client := clientOptions{
+		host: cfg.host,
+		token: cfg.token,
+		jsonOut: cfg.jsonOut,
+		timeout: deployPollTimeout,
+	}
+
+	for {
+		status, _, body, err := apiDo(client, http.MethodGet, location, nil, "")
+		if err != nil {
+			return err
+		}
+
+		if status != http.StatusOK {
+			return fmt.Errorf("deployment status %d: %s", status, strings.TrimSpace(string(body)))
+		}
+
+		var state deploymentState
+
+		if err := json.Unmarshal(body, &state); err != nil {
+			return fmt.Errorf("read deployment status: %w", err)
+		}
+
+		switch state.Status {
+		case "queued", "running":
+			time.Sleep(deployPollDelay)
+		case "success":
+			return printDeployResult(cfg, name, nil)
+		default:
+			if state.Error != "" {
+				return fmt.Errorf("deploy %s: %s", state.Status, state.Error)
+			}
+
+			return fmt.Errorf("deploy %s", state.Status)
+		}
+	}
+}
+
+// upload posts the bundle as a multipart deployment and waits for a queued deployment to finish.
+func upload(cfg *deployConfig, m manifest, bundle []byte) error {
+	var body bytes.Buffer
+
+	form := multipart.NewWriter(&body)
+	part, err := form.CreateFormFile("artifact", "app.tar.gz")
 	if err != nil {
 		return err
 	}
 
-	if err := checkAPI(status, body); err != nil {
+	if _, err := part.Write(bundle); err != nil {
 		return err
 	}
 
-	var result secretKeysResponse
-	if err := json.Unmarshal(body, &result); err != nil {
-		return fmt.Errorf("read secrets: %w", err)
+	if err := form.Close(); err != nil {
+		return err
 	}
 
-	have := map[string]struct{}{}
-	for _, key := range result.Keys {
-		have[key] = struct{}{}
+	url := baseURL(cfg.host) + "/apps/" + m.Name + "/deployments"
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, &body)
+	if err != nil {
+		return err
 	}
 
-	var missing []string
+	if cfg.token != "" {
+		req.Header.Set("Authorization", "Bearer "+cfg.token)
+	}
+	req.Header.Set("Content-Type", form.FormDataContentType())
 
-	for _, name := range wanted {
-		if _, ok := have[name]; !ok {
-			missing = append(missing, name)
-		}
+	size := int64(body.Len())
+	req.ContentLength = size
+	progress := &uploadProgress{
+		reader: bytes.NewReader(body.Bytes()),
+		total: size,
+	}
+	req.Body = io.NopCloser(progress)
+	client := &http.Client{
+		Timeout: 2 * time.Minute,
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("post bundle: %w", err)
 	}
 
-	if len(missing) > 0 {
-		return fmt.Errorf("missing secrets for app %q: %s (set with wt secrets %s set KEY)", m.Name, strings.Join(missing, ", "), m.Name)
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, smallResponseLimit))
+	if err != nil {
+		return fmt.Errorf("read response: %w", err)
 	}
 
-	return nil
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("deploy failed with status %s: %s", resp.Status, strings.TrimSpace(string(respBody)))
+	}
+
+	if resp.StatusCode != http.StatusAccepted {
+		return printDeployResult(cfg, m.Name, respBody)
+	}
+
+	location := resp.Header.Get("Location")
+
+	var queued deploymentState
+
+	if err := json.Unmarshal(respBody, &queued); err != nil {
+		return fmt.Errorf("read deployment: %w", err)
+	}
+
+	if location == "" {
+		location = "/apps/" + m.Name + "/deployments/" + queued.ID
+	}
+
+	if queued.ID == "" {
+		queued.ID = filepath.Base(location)
+	}
+
+	return waitDeploy(cfg, m.Name, location)
 }
 
 // deploy builds the bundle and uploads it, omitting the component when the supervisor already runs the same wasm.
@@ -350,7 +367,6 @@ func deploy(args []string) error {
 	}
 
 	cfg.start = time.Now()
-
 	m, err := readManifest(cfg.dir)
 	if err != nil {
 		return err
@@ -369,7 +385,6 @@ func deploy(args []string) error {
 		if err != nil {
 			return err
 		}
-
 		applyDeployEnv(&m, vars)
 	}
 
@@ -394,10 +409,10 @@ func deploy(args []string) error {
 	if err != nil {
 		return err
 	}
-
 	printBuildStatus(status)
 
-	keepComponent := false
+	var keepComponent bool
+
 	if !cfg.forceBuild && status.WasmDigest != "" {
 		keepComponent = keepRunningComponent(false, status, serverDigest(cfg, m.Name))
 	}
@@ -408,6 +423,7 @@ func deploy(args []string) error {
 		fmt.Fprintln(os.Stderr, "component: uploading")
 
 		_, cwasmErr := os.Stat(filepath.Join(cfg.dir, "main.cwasm"))
+
 		printRuntimePlan(preflight, cwasmErr == nil)
 	}
 

@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	storageMaintenanceTimeout = 60 * time.Second
 	storageMaintenanceOps = "vacuum, optimize, checkpoint, integrity_check"
+	storageMaintenanceTimeout = 60 * time.Second
 )
 
 // maintenance runs one administrative SQLite operation that raw app SQL cannot request.
@@ -25,6 +25,7 @@ func (s *storageServer) maintenance(ctx context.Context, app, op string) (string
 			if _, err := sqlite.Limit(conn, sqlite3.SQLITE_LIMIT_ATTACHED, 10); err != nil {
 				return err
 			}
+
 			defer func() {
 				_, _ = sqlite.Limit(conn, sqlite3.SQLITE_LIMIT_ATTACHED, 0)
 			}()
@@ -38,6 +39,7 @@ func (s *storageServer) maintenance(ctx context.Context, app, op string) (string
 	case "optimize":
 		err := s.withConn(ctx, app, func(conn *sql.Conn) error {
 			_, err := conn.ExecContext(ctx, "pragma optimize")
+
 			return err
 		})
 
@@ -45,10 +47,9 @@ func (s *storageServer) maintenance(ctx context.Context, app, op string) (string
 	case "checkpoint":
 		var busy, logFrames, checkpointed int
 
-		err := s.withConn(ctx, app, func(conn *sql.Conn) error {
+		if err := s.withConn(ctx, app, func(conn *sql.Conn) error {
 			return conn.QueryRowContext(ctx, "pragma wal_checkpoint(truncate)").Scan(&busy, &logFrames, &checkpointed)
-		})
-		if err != nil {
+		}); err != nil {
 			return "", err
 		}
 
@@ -56,15 +57,17 @@ func (s *storageServer) maintenance(ctx context.Context, app, op string) (string
 	case "integrity_check":
 		results := []string{}
 
-		err := s.withConn(ctx, app, func(conn *sql.Conn) error {
+		if err := s.withConn(ctx, app, func(conn *sql.Conn) error {
 			rows, err := conn.QueryContext(ctx, "pragma integrity_check")
 			if err != nil {
 				return err
 			}
+
 			defer rows.Close()
 
 			for rows.Next() {
 				var line string
+
 				if err := rows.Scan(&line); err != nil {
 					return err
 				}
@@ -73,8 +76,7 @@ func (s *storageServer) maintenance(ctx context.Context, app, op string) (string
 			}
 
 			return rows.Err()
-		})
-		if err != nil {
+		}); err != nil {
 			return "", err
 		}
 

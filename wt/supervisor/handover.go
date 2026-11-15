@@ -21,11 +21,20 @@ import (
 )
 
 const (
-	handoverEnv = "WT_SUPERVISOR_HANDOVER"
-	storageFDEnv = "WT_SUPERVISOR_STORAGE_FD"
 	fetchFDEnv = "WT_SUPERVISOR_FETCH_FD"
+	handoverEnv = "WT_SUPERVISOR_HANDOVER"
 	runnerFDEnv = "WT_SUPERVISOR_RUNNER_FD"
+	storageFDEnv = "WT_SUPERVISOR_STORAGE_FD"
 )
+
+// clearCloseOnExec keeps a file open across the handover exec.
+func clearCloseOnExec(file *os.File) error {
+	if _, err := unix.FcntlInt(file.Fd(), unix.F_SETFD, 0); err != nil {
+		return fmt.Errorf("clear close-on-exec on %s: %w", file.Name(), err)
+	}
+
+	return nil
+}
 
 // inheritedListener rebuilds a listener from an FD passed by a handover.
 // The original FD is closed after net.FileListener duplicates it.
@@ -55,82 +64,6 @@ func inheritedListener(key string) (net.Listener, bool, error) {
 	return listener, true, nil
 }
 
-// listenerFile returns a dupable file for a TCP or Unix listener.
-func listenerFile(listener net.Listener) (*os.File, error) {
-	switch value := listener.(type) {
-	case *net.TCPListener:
-		return value.File()
-	case *net.UnixListener:
-		return value.File()
-	default:
-		return nil, fmt.Errorf("unsupported listener %T", listener)
-	}
-}
-
-// clearCloseOnExec keeps a file open across the handover exec.
-func clearCloseOnExec(file *os.File) error {
-	if _, err := unix.FcntlInt(file.Fd(), unix.F_SETFD, 0); err != nil {
-		return fmt.Errorf("clear close-on-exec on %s: %w", file.Name(), err)
-	}
-
-	return nil
-}
-
-// waitForSocketGone polls for up to five seconds until the runner socket path is removed.
-func waitForSocketGone(socket string) {
-	for range 50 {
-		if _, err := os.Stat(socket); os.IsNotExist(err) {
-			return
-		}
-
-		time.Sleep(100 * time.Millisecond)
-	}
-}
-
-// adoptHandoverRunner connects to the runner left by the previous supervisor. It reports false when none answers, and the caller then starts a new runner.
-func (s *supervisor) adoptHandoverRunner(socket string) bool {
-	if raw := os.Getenv(runnerFDEnv); raw != "" {
-		if fd, err := strconv.Atoi(raw); err == nil && fd >= 0 {
-			s.runnerLiveness = os.NewFile(uintptr(fd), "runner-liveness")
-		}
-	}
-
-	client, snapshot, pid, err := dialRunner(socket, 5*time.Second)
-	if err == nil {
-		s.runner = client
-
-		s.runnerSnapshot = snapshot
-		go s.reapRunner(pid)
-
-		return true
-	}
-
-	log.Printf("runner handover: %v; starting a new runner", err)
-
-	if s.runnerLiveness != nil {
-		_ = s.runnerLiveness.Close()
-		s.runnerLiveness = nil
-	}
-
-	waitForSocketGone(socket)
-
-	return false
-}
-
-// stopStaleRunner asks a runner that still answers on the socket to shut down, so a cold start does not adopt its apps.
-// A runner from a supervisor that crashed should have exited when its liveness pipe closed.
-func stopStaleRunner(socket string) {
-	client, _, _, err := dialRunner(socket, 500*time.Millisecond)
-	if err != nil {
-		return
-	}
-
-	_ = client.Shutdown()
-	client.Close()
-
-	waitForSocketGone(socket)
-}
-
 // launchRunner starts a runner process listening on socket. It returns the process and the write end of its liveness pipe, which the supervisor must keep open.
 func launchRunner(socket string) (*exec.Cmd, *os.File, error) {
 	read, write, err := os.Pipe()
@@ -139,13 +72,12 @@ func launchRunner(socket string) (*exec.Cmd, *os.File, error) {
 	}
 
 	cmd := exec.CommandContext(context.Background(), "/proc/self/exe", runnerArg)
-
 	cmd.Env = append(minimalEnv(), runnerSocketEnv+"="+socket, runnerLivenessEnv+"=3")
 	cmd.ExtraFiles = []*os.File{read}
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
-
 	cmd.SysProcAttr = &syscall.SysProcAttr{}
+
 	if err := cmd.Start(); err != nil {
 		_ = read.Close()
 		_ = write.Close()
@@ -158,66 +90,15 @@ func launchRunner(socket string) (*exec.Cmd, *os.File, error) {
 	return cmd, write, nil
 }
 
-// startRunner connects to an existing runner during a handover or starts a new one.
-// The runner owns the app processes; its liveness pipe ties it to this supervisor process.
-func (s *supervisor) startRunner() error {
-	socket := runnerSocketPath(s.cfg.stateDir)
-
-	if os.Getenv(handoverEnv) == "1" {
-		if s.adoptHandoverRunner(socket) {
-			return nil
-		}
-	} else {
-		stopStaleRunner(socket)
-	}
-
-	_ = os.Remove(socket)
-
-	cmd, liveness, err := launchRunner(socket)
-	if err != nil {
-		return err
-	}
-
-	s.runnerLiveness = liveness
-
-	client, snapshot, _, err := dialRunner(socket, 5*time.Second)
-	if err != nil {
-		_ = liveness.Close()
-		_ = cmd.Process.Kill()
-
-		return fmt.Errorf("runner: %w", err)
-	}
-
-	s.runner = client
-	s.runnerSnapshot = snapshot
-
-	go func() {
-		if err := cmd.Wait(); err != nil {
-			log.Printf("runner: %v", err)
-		}
-	}()
-
-	return nil
-}
-
-// reapRunner waits for an inherited runner process so it does not become a zombie.
-func (s *supervisor) reapRunner(pid int) {
-	if pid <= 0 {
-		return
-	}
-
-	var status syscall.WaitStatus
-	for {
-		_, err := syscall.Wait4(pid, &status, 0, nil)
-		if err == syscall.EINTR {
-			continue
-		}
-
-		if err != nil {
-			log.Printf("runner pid %d: %v", pid, err)
-		}
-
-		return
+// listenerFile returns a dupable file for a TCP or Unix listener.
+func listenerFile(listener net.Listener) (*os.File, error) {
+	switch value := listener.(type) {
+	case *net.TCPListener:
+		return value.File()
+	case *net.UnixListener:
+		return value.File()
+	default:
+		return nil, fmt.Errorf("unsupported listener %T", listener)
 	}
 }
 
@@ -236,16 +117,18 @@ func (s *supervisor) handover() error {
 	fetchFile, err := listenerFile(s.fetch.listener)
 	if err != nil {
 		_ = storageFile.Close()
+
 		return fmt.Errorf("app fetch listener: %w", err)
 	}
 
 	files := []*os.File{storageFile, fetchFile}
-
 	env := make([]string, 0, len(os.Environ())+4)
+
 	for _, pair := range os.Environ() {
 		key, _, _ := strings.Cut(pair, "=")
+
 		switch key {
-		case handoverEnv, storageFDEnv, fetchFDEnv, runnerFDEnv:
+		case fetchFDEnv, handoverEnv, runnerFDEnv, storageFDEnv:
 			continue
 		}
 
@@ -261,6 +144,7 @@ func (s *supervisor) handover() error {
 
 		return nil
 	}
+
 	if err := add(storageFDEnv, storageFile); err != nil {
 		return err
 	}
@@ -274,10 +158,10 @@ func (s *supervisor) handover() error {
 	}
 
 	env = append(env, handoverEnv+"=1")
-
 	executable := os.Args[0]
 	if executable == "" {
 		executable, err = os.Executable()
+
 		if err != nil {
 			return fmt.Errorf("find supervisor binary: %w", err)
 		}
@@ -293,19 +177,128 @@ func (s *supervisor) handover() error {
 	}
 
 	executable, err = filepath.Abs(executable)
+
 	if err != nil {
 		return fmt.Errorf("resolve supervisor binary: %w", err)
 	}
-
 	s.stopping.Store(true)
 	log.Printf("handover: exec %s with %d app(s)", executable, len(s.allApps()))
-
 	if err := syscall.Exec(executable, os.Args, env); err != nil {
 		s.stopping.Store(false)
 		return fmt.Errorf("exec %s: %w", executable, err)
 	}
-
 	runtime.KeepAlive(files)
+	return nil
+}
+
+// reapRunner waits for an inherited runner process so it does not become a zombie.
+func (s *supervisor) reapRunner(pid int) {
+	if pid <= 0 {
+		return
+	}
+
+	var status syscall.WaitStatus
+
+	for {
+		_, err := syscall.Wait4(pid, &status, 0, nil)
+		if err == syscall.EINTR {
+			continue
+		}
+
+		if err != nil {
+			log.Printf("runner pid %d: %v", pid, err)
+		}
+
+		return
+	}
+}
+
+// waitForSocketGone polls for up to five seconds until the runner socket path is removed.
+func waitForSocketGone(socket string) {
+	for range 50 {
+		if _, err := os.Stat(socket); os.IsNotExist(err) {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// stopStaleRunner asks a runner that still answers on the socket to shut down, so a cold start does not adopt its apps.
+// A runner from a supervisor that crashed should have exited when its liveness pipe closed.
+func stopStaleRunner(socket string) {
+	client, _, _, err := dialRunner(socket, 500*time.Millisecond)
+	if err != nil {
+		return
+	}
+
+	_ = client.Shutdown()
+
+	client.Close()
+	waitForSocketGone(socket)
+}
+
+// adoptHandoverRunner connects to the runner left by the previous supervisor. It reports false when none answers, and the caller then starts a new runner.
+func (s *supervisor) adoptHandoverRunner(socket string) bool {
+	if raw := os.Getenv(runnerFDEnv); raw != "" {
+		if fd, err := strconv.Atoi(raw); err == nil && fd >= 0 {
+			s.runnerLiveness = os.NewFile(uintptr(fd), "runner-liveness")
+		}
+	}
+
+	client, snapshot, pid, err := dialRunner(socket, 5*time.Second)
+	if err == nil {
+		s.runner = client
+		s.runnerSnapshot = snapshot
+
+		go s.reapRunner(pid)
+
+		return true
+	}
+	log.Printf("runner handover: %v; starting a new runner", err)
+	if s.runnerLiveness != nil {
+		_ = s.runnerLiveness.Close()
+		s.runnerLiveness = nil
+	}
+	waitForSocketGone(socket)
+	return false
+}
+
+// startRunner connects to an existing runner during a handover or starts a new one.
+// The runner owns the app processes; its liveness pipe ties it to this supervisor process.
+func (s *supervisor) startRunner() error {
+	socket := runnerSocketPath(s.cfg.stateDir)
+
+	if os.Getenv(handoverEnv) == "1" {
+		if s.adoptHandoverRunner(socket) {
+			return nil
+		}
+	} else {
+		stopStaleRunner(socket)
+	}
+
+	_ = os.Remove(socket)
+	cmd, liveness, err := launchRunner(socket)
+	if err != nil {
+		return err
+	}
+
+	s.runnerLiveness = liveness
+	client, snapshot, _, err := dialRunner(socket, 5*time.Second)
+	if err != nil {
+		_ = liveness.Close()
+		_ = cmd.Process.Kill()
+
+		return fmt.Errorf("runner: %w", err)
+	}
+
+	s.runner = client
+	s.runnerSnapshot = snapshot
+
+	go func() {
+		if err := cmd.Wait(); err != nil {
+			log.Printf("runner: %v", err)
+		}
+	}()
 
 	return nil
 }

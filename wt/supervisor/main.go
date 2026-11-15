@@ -20,6 +20,176 @@ import (
 	"time"
 )
 
+type (
+	// appDevConfig is the optional SvelteKit dev loop configuration carried in app.json.
+	// The supervisor does not use it, but keeps it so a config PATCH does not drop it.
+	appDevConfig struct {
+		Web string `json:"web,omitempty"`
+		Command string `json:"command,omitempty"`
+		Build string `json:"build,omitempty"`
+		Proxy []string `json:"proxy,omitempty"`
+		Watch []string `json:"watch,omitempty"`
+		Port int `json:"port,omitempty"`
+	}
+
+	appInfo struct {
+		Name string `json:"name"`
+		Host string `json:"host"`
+		Port int `json:"port"`
+		UID int `json:"uid,omitempty"`
+		Status string `json:"status"`
+		PID int `json:"pid,omitempty"`
+		StartedAt time.Time `json:"startedAt"`
+		CPUPercent float64 `json:"cpuPercent"`
+		MemoryBytes int64 `json:"memoryBytes"`
+		DiskBytes int64 `json:"diskBytes"`
+		DiskLimitBytes int64 `json:"diskLimitBytes,omitempty"`
+		HistoryBytes int64 `json:"historyBytes"`
+		OverQuota bool `json:"overQuota,omitempty"`
+		Maintenance bool `json:"maintenance,omitempty"`
+		Idle bool `json:"idle,omitempty"`
+		SampledAt time.Time `json:"sampledAt"`
+		LastHealthy time.Time `json:"lastHealthy"`
+		LastError string `json:"lastError,omitempty"`
+		CurrentDigest string `json:"currentDigest,omitempty"`
+		Ready bool `json:"ready"`
+		// Schedules reports the last call of each schedule entry since the app started.
+		Schedules []scheduleRun `json:"schedules,omitempty"`
+	}
+
+	config struct {
+		appsDir, stateDir, cacheDir, listen, storageListen, domain, wasmtime, wasmtimeCompiler, wasmtimeTarget, token, tlsCert, tlsKey, tenantMode, adminListen, appFetchListen, authFile, trustedProxiesValue string
+		trustedProxies []netip.Prefix
+		cgroupRoot, iptables, ip6tables, dataQuotaMode, setquota, findmnt, dataQuotaFS string
+		appUIDBase int
+		ipv6Egress, appNamespaces, appSeccomp bool
+		cacheMaxBytes, diskBudgetBytes int64
+		accessLog bool
+		accessLogEvery int
+		storageMigrationTimeout time.Duration
+		storageTmpDir string
+		storageTempBudgetBytes int64
+	}
+
+	// egressRule allows one IPv4 or IPv6 CIDR and TCP port for an untrusted app. The app's uid still reaches only these destinations plus storage and the internal fetch listener.
+	egressRule struct {
+		CIDR string `json:"cidr"`
+		Port int `json:"port"`
+	}
+
+	// scheduleConfig asks the supervisor to call an app endpoint on a timer. Components cannot run their own background loops under `wasmtime serve`, so time is driven from the host.
+	scheduleConfig struct {
+		// Name labels the entry in status and logs; it defaults to the method and path.
+		Name string `json:"name,omitempty"`
+		Method string `json:"method,omitempty"`
+		Path string `json:"path"`
+		Every string `json:"every"`
+		// Timeout bounds one call; it defaults to the interval, with a floor of 5s.
+		Timeout string `json:"timeout,omitempty"`
+	}
+
+	appConfig struct {
+		Name string `json:"name"`
+		Host string `json:"host"`
+		Hosts []string `json:"hosts,omitempty"`
+		Health string `json:"health"`
+		Env map[string]string `json:"env"`
+		Build string `json:"build,omitempty"`
+		MemoryMB int `json:"memory_mb,omitempty"`
+		DiskMB int `json:"disk_mb,omitempty"`
+		CPUMillicores int `json:"cpu_millicores,omitempty"`
+		PidsMax int `json:"pids_max,omitempty"`
+		IOWeight int `json:"io_weight,omitempty"`
+		MaxConcurrent int `json:"max_concurrency,omitempty"`
+		RequestTimeout string `json:"request_timeout,omitempty"`
+		StartupTimeout string `json:"startup_timeout,omitempty"`
+		HealthInterval string `json:"health_interval,omitempty"`
+		HealthFailures int `json:"health_failures,omitempty"`
+		RestartOnUnhealthy bool `json:"restart_on_unhealthy,omitempty"`
+		IdleTimeout string `json:"idle_timeout,omitempty"`
+		Network string `json:"network,omitempty"`
+		Identity string `json:"identity,omitempty"`
+		Maintenance bool `json:"maintenance,omitempty"`
+		DependsOn []string `json:"depends_on,omitempty"`
+		JobConcurrency int `json:"job_concurrency,omitempty"`
+		AllowCallers []string `json:"allow_callers,omitempty"`
+		ServerPaths []string `json:"server_paths,omitempty"`
+		ServerPages []string `json:"server_pages,omitempty"`
+		Egress []egressRule `json:"egress,omitempty"`
+		Schedule []scheduleConfig `json:"schedule,omitempty"`
+		Dev *appDevConfig `json:"dev,omitempty"`
+		requestTimeout, startupTimeout, healthInterval, idleTimeout time.Duration
+	}
+
+	app struct {
+		name, dir, digest string
+		port, uid int
+		cfg appConfig
+		proxy *httputil.ReverseProxy
+		started time.Time
+		delay time.Duration
+		timer *time.Timer
+		logs *appLog
+		stats appStats
+		disk, history diskUsageCache
+		requests sync.WaitGroup // in-flight proxied requests, drained before a replaced version stops
+		accessLines atomic.Uint64
+		mu, startMu sync.Mutex
+		scheduleCancel context.CancelFunc
+		scheduleRuns map[string]scheduleRun
+		cmd *exec.Cmd
+		isolation *isolationPlan
+		done chan struct{}
+		exited, retired, starting, draining, unhealthyRestart, idleStopped bool
+		inflight int
+		lastRequest time.Time
+		slots chan struct{}
+		wasmEpoch bool
+		workPID int
+		healthOK, ready bool
+		healthFailures int
+		nextHealth, lastHealthy time.Time
+		lastError string
+	}
+
+	supervisor struct {
+		cfg config
+		storage *storageServer
+		backups *backupManager
+		fetch *appFetchServer
+		events *hub
+		deployments *deploymentManager
+		blobs *blobStore
+		identity *identityStore
+		bus *eventBus
+		secrets *secretStore
+		jobs *jobManager
+		metrics *metrics
+		auth *authStore
+		audit *auditStore
+		uids *uidAllocator
+		cgroups *cgroupManager
+		egress *egressManager
+		quota *dataQuota
+		runner runnerConn
+		runnerLiveness *os.File
+		runnerSnapshot []runnerAppInfo
+		mu sync.RWMutex
+		apps, hosts map[string]*app
+		deployLocks appLocks
+		deployRunsMu sync.Mutex
+		deployRuns map[string]*deploymentRun
+		artifactCacheMu, loginMu sync.Mutex
+		loginLimiters map[string]*loginLimiter
+		stopping, ready atomic.Bool
+		versionOnce sync.Once
+		version string
+		compilerOnce sync.Once
+		compilerOK bool
+		appRoutesCache, identityRoutesCache, adminRoutesCache, publicRoutesCache routeCache
+	}
+)
+
 const (
 	maxUploadBytes = 256 << 20
 	maxExtractBytes = 512 << 20
@@ -31,96 +201,6 @@ const (
 	drainTimeout = 10 * time.Second
 	shutdownTimeout = 15 * time.Second
 	defaultCacheMaxBytes = 2 << 30
-)
-
-type config struct {
-	appsDir, stateDir, cacheDir, listen, storageListen, domain string
-	wasmtime, wasmtimeCompiler, wasmtimeTarget string
-	token, tlsCert, tlsKey string
-	tenantMode, adminListen, appFetchListen string
-	authFile string
-	trustedProxiesValue string
-	trustedProxies []netip.Prefix
-	cgroupRoot, iptables, ip6tables string
-	dataQuotaMode, setquota, findmnt, dataQuotaFS string
-	appUIDBase int
-	ipv6Egress bool
-	appNamespaces, appSeccomp bool
-	cacheMaxBytes int64
-	diskBudgetBytes int64
-	accessLog bool
-	accessLogEvery int
-	storageMigrationTimeout time.Duration
-	storageTmpDir string
-	storageTempBudgetBytes int64
-}
-
-type appConfig struct {
-	Name string `json:"name"`
-	Host string `json:"host"`
-	Hosts []string `json:"hosts,omitempty"`
-	Health string `json:"health"`
-	Env map[string]string `json:"env"`
-	Build string `json:"build,omitempty"`
-	MemoryMB int `json:"memory_mb,omitempty"`
-	DiskMB int `json:"disk_mb,omitempty"`
-	CPUMillicores int `json:"cpu_millicores,omitempty"`
-	PidsMax int `json:"pids_max,omitempty"`
-	IOWeight int `json:"io_weight,omitempty"`
-	MaxConcurrent int `json:"max_concurrency,omitempty"`
-	RequestTimeout string `json:"request_timeout,omitempty"`
-	StartupTimeout string `json:"startup_timeout,omitempty"`
-	HealthInterval string `json:"health_interval,omitempty"`
-	HealthFailures int `json:"health_failures,omitempty"`
-	RestartOnUnhealthy bool `json:"restart_on_unhealthy,omitempty"`
-	IdleTimeout string `json:"idle_timeout,omitempty"`
-	Network string `json:"network,omitempty"`
-	Identity string `json:"identity,omitempty"`
-	Maintenance bool `json:"maintenance,omitempty"`
-	DependsOn []string `json:"depends_on,omitempty"`
-	JobConcurrency int `json:"job_concurrency,omitempty"`
-	AllowCallers []string `json:"allow_callers,omitempty"`
-	ServerPaths []string `json:"server_paths,omitempty"`
-	ServerPages []string `json:"server_pages,omitempty"`
-	Egress []egressRule `json:"egress,omitempty"`
-	Schedule []scheduleConfig `json:"schedule,omitempty"`
-	Dev *appDevConfig `json:"dev,omitempty"`
-
-	requestTimeout time.Duration
-	startupTimeout time.Duration
-	healthInterval time.Duration
-	idleTimeout time.Duration
-}
-
-// appDevConfig is the optional SvelteKit dev loop configuration carried in app.json.
-// The supervisor does not use it, but keeps it so a config PATCH does not drop it.
-type appDevConfig struct {
-	Web string `json:"web,omitempty"`
-	Command string `json:"command,omitempty"`
-	Build string `json:"build,omitempty"`
-	Proxy []string `json:"proxy,omitempty"`
-	Watch []string `json:"watch,omitempty"`
-	Port int `json:"port,omitempty"`
-}
-
-// egressRule allows one IPv4 or IPv6 CIDR and TCP port for an untrusted app. The app's uid still reaches only these destinations plus storage and the internal fetch listener.
-type egressRule struct {
-	CIDR string `json:"cidr"`
-	Port int `json:"port"`
-}
-
-// scheduleConfig asks the supervisor to call an app endpoint on a timer. Components cannot run their own background loops under `wasmtime serve`, so time is driven from the host.
-type scheduleConfig struct {
-	// Name labels the entry in status and logs; it defaults to the method and path.
-	Name string `json:"name,omitempty"`
-	Method string `json:"method,omitempty"`
-	Path string `json:"path"`
-	Every string `json:"every"`
-	// Timeout bounds one call; it defaults to the interval, with a floor of 5s.
-	Timeout string `json:"timeout,omitempty"`
-}
-
-const (
 	defaultScheduleMethod = http.MethodPost
 	minScheduleInterval = time.Second
 	maxScheduleInterval = 24 * time.Hour
@@ -129,114 +209,35 @@ const (
 	scheduleHeader = "X-Wt-Schedule"
 )
 
-type app struct {
-	name, dir, digest string
-	port int
-	uid int
-	cfg appConfig
-	proxy *httputil.ReverseProxy
-	started time.Time
-	delay time.Duration
-	timer *time.Timer
-	logs *appLog
-	stats appStats
-	disk diskUsageCache
-	history diskUsageCache
-	requests sync.WaitGroup // in-flight proxied requests, drained before a replaced version stops
-	accessLines atomic.Uint64
-
-	mu sync.Mutex
-	startMu sync.Mutex
-	scheduleCancel context.CancelFunc
-	scheduleRuns map[string]scheduleRun
-	cmd *exec.Cmd
-	isolation *isolationPlan
-	done chan struct{}
-	exited, retired bool
-	starting bool
-	draining bool
-	unhealthyRestart bool
-	idleStopped bool
-	inflight int
-	lastRequest time.Time
-
-	slots chan struct{}
-	wasmEpoch bool
-	workPID int
-	healthOK bool
-	ready bool
-	healthFailures int
-	nextHealth time.Time
-	lastHealthy time.Time
-	lastError string
-}
-
-type supervisor struct {
-	cfg config
-	storage *storageServer
-	backups *backupManager
-	fetch *appFetchServer
-	events *hub
-	deployments *deploymentManager
-	blobs *blobStore
-	identity *identityStore
-	bus *eventBus
-	secrets *secretStore
-	jobs *jobManager
-	metrics *metrics
-	auth *authStore
-	audit *auditStore
-	uids *uidAllocator
-	cgroups *cgroupManager
-	egress *egressManager
-	quota *dataQuota
-	runner runnerConn
-	runnerLiveness *os.File
-	runnerSnapshot []runnerAppInfo
-
-	mu sync.RWMutex
-	apps, hosts map[string]*app
-
-	deployLocks appLocks
-	deployRunsMu sync.Mutex
-	deployRuns map[string]*deploymentRun
-	artifactCacheMu sync.Mutex
-	loginMu sync.Mutex
-	loginLimiters map[string]*loginLimiter
-	stopping atomic.Bool
-	ready atomic.Bool
-
-	versionOnce sync.Once
-	version string
-	compilerOnce sync.Once
-	compilerOK bool
-	appRoutesCache routeCache
-	identityRoutesCache routeCache
-	adminRoutesCache routeCache
-	publicRoutesCache routeCache
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-
-	data, _ := json.Marshal(value)
-	_, _ = w.Write(append(data, '\n')) //nolint:gosec // The body is escaped or JSON-encoded before writing.
-}
-
-func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, map[string]string{"error": message})
-}
-
-// readJSONBody decodes a size-limited JSON body and reports a 400 on malformed input.
-func readJSONBody(w http.ResponseWriter, r *http.Request, limit int64, target any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, limit)
-	if err := json.UnmarshalRead(r.Body, target); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+// loopbackListen reports whether addr only accepts loopback connections.
+func loopbackListen(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
 		return false
 	}
 
-	return true
+	if host == "localhost" {
+		return true
+	}
+
+	ip := net.ParseIP(host)
+
+	return ip != nil && ip.IsLoopback()
+}
+
+func main() {
+	if len(os.Args) > 1 && os.Args[1] == runnerArg {
+		runnerMain()
+		return
+	}
+
+	if len(os.Args) > 1 && os.Args[1] == nsInitArg {
+		nsInitMain(os.Args[2:])
+		return
+	}
+	log.SetFlags(log.LstdFlags | log.LUTC)
+	dropPrivileges()
+	serve(startSupervisor(parseConfig()))
 }
 
 // requireMethod writes 405 with an Allow header unless the request uses method.
@@ -244,85 +245,19 @@ func requireMethod(w http.ResponseWriter, r *http.Request, method string) bool {
 	if r.Method == method {
 		return true
 	}
-
 	w.Header().Set("Allow", method)
 	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-
 	return false
-}
-
-// info assembles the API representation of an app, including live resource stats.
-func (s *supervisor) info(a *app) appInfo {
-	info := appInfo{Name: a.name, Port: a.port}
-	a.mu.Lock()
-	info.Host = a.cfg.Host
-	info.StartedAt = a.started
-	info.DiskLimitBytes = int64(a.cfg.DiskMB) << 20
-	info.Status = a.statusLocked()
-	info.LastHealthy = a.lastHealthy
-	lastError := a.lastError
-	info.CurrentDigest = a.digest
-	info.Ready = a.ready
-	info.Maintenance = a.cfg.Maintenance
-	info.Idle = a.idleStopped
-	info.Schedules = a.scheduleRunsLocked()
-
-	info.UID = a.uid
-	if a.cmd != nil && a.cmd.Process != nil && !a.exited {
-		info.PID = a.cmd.Process.Pid
-		if a.workPID > 0 {
-			info.PID = a.workPID
-		}
-	}
-	a.mu.Unlock()
-	info.LastError = s.redactAppText(a.name, lastError)
-	info.DiskBytes = s.diskBytes(a)
-	info.HistoryBytes = s.historyBytes(a)
-	info.OverQuota = info.DiskLimitBytes > 0 && info.DiskBytes > info.DiskLimitBytes
-	info.CPUPercent, info.MemoryBytes, info.SampledAt = a.resourceStats()
-
-	return info
-}
-
-func (s *supervisor) handleApps(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodGet) {
-		return
-	}
-
-	identity, ok := s.requireIdentity(w, r)
-	if !ok {
-		return
-	}
-
-	snapshot := s.snapshot()
-	if !identity.isAdmin() {
-		filtered := snapshot[:0]
-		for _, info := range snapshot {
-			if identity.canAccessApp(info.Name) {
-				filtered = append(filtered, info)
-			}
-		}
-
-		snapshot = filtered
-	}
-
-	writeJSON(w, http.StatusOK, snapshot)
-}
-
-// lookup returns the app with the given name, or nil.
-func (s *supervisor) lookup(name string) *app {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	return s.apps[name]
 }
 
 // allApps returns a snapshot of the registered apps in an unspecified order.
 func (s *supervisor) allApps() []*app {
 	s.mu.RLock()
+
 	defer s.mu.RUnlock()
 
 	apps := make([]*app, 0, len(s.apps))
+
 	for _, a := range s.apps {
 		apps = append(apps, a)
 	}
@@ -330,89 +265,65 @@ func (s *supervisor) allApps() []*app {
 	return apps
 }
 
-type appInfo struct {
-	Name string `json:"name"`
-	Host string `json:"host"`
-	Port int `json:"port"`
-	UID int `json:"uid,omitempty"`
-	Status string `json:"status"`
-	PID int `json:"pid,omitempty"`
-	StartedAt time.Time `json:"startedAt"`
-	CPUPercent float64 `json:"cpuPercent"`
-	MemoryBytes int64 `json:"memoryBytes"`
-	DiskBytes int64 `json:"diskBytes"`
-	DiskLimitBytes int64 `json:"diskLimitBytes,omitempty"`
-	HistoryBytes int64 `json:"historyBytes"`
-	OverQuota bool `json:"overQuota,omitempty"`
-	Maintenance bool `json:"maintenance,omitempty"`
-	Idle bool `json:"idle,omitempty"`
-	SampledAt time.Time `json:"sampledAt"`
-	LastHealthy time.Time `json:"lastHealthy"`
-	LastError string `json:"lastError,omitempty"`
-	CurrentDigest string `json:"currentDigest,omitempty"`
-	Ready bool `json:"ready"`
-	// Schedules reports the last call of each schedule entry since the app started.
-	Schedules []scheduleRun `json:"schedules,omitempty"`
-}
-
-// stopAll stops and drains every app during supervisor shutdown.
-func (s *supervisor) stopAll() {
-	s.deployRunsMu.Lock()
-	for _, run := range s.deployRuns {
-		run.cancel()
-	}
-	s.deployRunsMu.Unlock()
-	apps := s.allApps()
-
-	var wg sync.WaitGroup
-	for _, a := range apps {
-		wg.Add(1)
-		go func(a *app) {
-			defer wg.Done()
-
-			s.drainAndStop(a, "shutdown")
-
-			if a.logs != nil {
-				a.logs.close()
-			}
-		}(a)
+// handleAppAudited runs a matched mutating app route and appends its outcome to the audit log.
+func (s *supervisor) handleAppAudited(w http.ResponseWriter, r *http.Request, identity authIdentity, name, action string, handler routeHandler, params map[string]string) {
+	recorder := &auditWriter{
+		ResponseWriter: w,
 	}
 
-	wg.Wait()
-}
+	handler(recorder, r, params)
 
-// handleAppRoot serves the app resource itself: inspect, deploy, or delete.
-func (s *supervisor) handleAppRoot(w http.ResponseWriter, r *http.Request, name string) {
-	switch r.Method {
-	case http.MethodGet:
-		a, ok := s.requireApp(w, r, name)
-		if !ok {
-			return
-		}
-
-		a.sampleResources(time.Now())
-		writeJSON(w, http.StatusOK, s.info(a))
-	case http.MethodDelete:
-		s.handleDelete(w, r, name)
-	default:
-		w.Header().Set("Allow", "GET, DELETE")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	status := recorder.status
+	if status == 0 {
+		status = http.StatusOK
 	}
+	s.appendAudit(identity, r, auditAction(r.Method, action), name, status, auditError(recorder.body.Bytes()))
 }
 
-// handleAppLogs serves either the log tail or the live log stream.
-func (s *supervisor) handleAppLogs(w http.ResponseWriter, r *http.Request, name, action string) {
-	a, ok := s.requireAppMethod(w, r, name, http.MethodGet)
+// handleApp dispatches actions on one app.
+func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
+	identity, ok := s.requireIdentity(w, r)
 	if !ok {
 		return
 	}
 
-	if action == "logs/stream" {
-		s.handleLogStream(w, r, a)
+	route, params, allowed := s.appRoutes().match(r.Method, r.URL.Path)
+	if route == nil {
+		if len(allowed) > 0 {
+			w.Header().Set("Allow", strings.Join(allowed, ", "))
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		http.NotFound(w, r)
 		return
 	}
 
-	s.handleLogs(w, r, a)
+	name := params["name"]
+	if !validName(name) {
+		http.Error(w, "invalid app name", http.StatusBadRequest)
+		return
+	}
+
+	if !identity.canAccessApp(name) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	var action string
+	if route.action != nil {
+		action = route.action(params)
+	}
+
+	if !identity.canPerformAppAction(r, action) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	if s.audit != nil && r.Method != http.MethodGet && r.Method != http.MethodHead {
+		s.handleAppAudited(w, r, identity, name, action, route.handler, params)
+		return
+	}
+	route.handler(w, r, params)
 }
 
 // handleAppDatabase dispatches the database endpoints for one app.
@@ -437,6 +348,55 @@ func (s *supervisor) handleAppDatabase(w http.ResponseWriter, r *http.Request, n
 	}
 }
 
+// info assembles the API representation of an app, including live resource stats.
+func (s *supervisor) info(a *app) appInfo {
+	info := appInfo{
+		Name: a.name,
+		Port: a.port,
+	}
+
+	a.mu.Lock()
+
+	info.Host = a.cfg.Host
+	info.StartedAt = a.started
+	info.DiskLimitBytes = int64(a.cfg.DiskMB) << 20
+	info.Status = a.statusLocked()
+	info.LastHealthy = a.lastHealthy
+	lastError := a.lastError
+	info.CurrentDigest = a.digest
+	info.Ready = a.ready
+	info.Maintenance = a.cfg.Maintenance
+	info.Idle = a.idleStopped
+	info.Schedules = a.scheduleRunsLocked()
+	info.UID = a.uid
+
+	if a.cmd != nil && a.cmd.Process != nil && !a.exited {
+		info.PID = a.cmd.Process.Pid
+
+		if a.workPID > 0 {
+			info.PID = a.workPID
+		}
+	}
+	a.mu.Unlock()
+
+	info.LastError = s.redactAppText(a.name, lastError)
+	info.DiskBytes = s.diskBytes(a)
+	info.HistoryBytes = s.historyBytes(a)
+	info.OverQuota = info.DiskLimitBytes > 0 && info.DiskBytes > info.DiskLimitBytes
+	info.CPUPercent, info.MemoryBytes, info.SampledAt = a.resourceStats()
+
+	return info
+}
+
+// lookup returns the app with the given name, or nil.
+func (s *supervisor) lookup(name string) *app {
+	s.mu.RLock()
+
+	defer s.mu.RUnlock()
+
+	return s.apps[name]
+}
+
 // requireAppMethod checks an app route's method before looking the app up.
 func (s *supervisor) requireAppMethod(w http.ResponseWriter, r *http.Request, name, method string) (*app, bool) {
 	if !requireMethod(w, r, method) {
@@ -446,83 +406,45 @@ func (s *supervisor) requireAppMethod(w http.ResponseWriter, r *http.Request, na
 	return s.requireApp(w, r, name)
 }
 
-// handleAppAudited runs a matched mutating app route and appends its outcome to the audit log.
-func (s *supervisor) handleAppAudited(w http.ResponseWriter, r *http.Request, identity authIdentity, name, action string, handler routeHandler, params map[string]string) {
-	recorder := &auditWriter{ResponseWriter: w}
-	handler(recorder, r, params)
-
-	status := recorder.status
-	if status == 0 {
-		status = http.StatusOK
-	}
-
-	s.appendAudit(identity, r, auditAction(r.Method, action), name, status, auditError(recorder.body.Bytes()))
-}
-
-// handleApp dispatches actions on one app.
-func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
-	identity, ok := s.requireIdentity(w, r)
+// handleAppLogs serves either the log tail or the live log stream.
+func (s *supervisor) handleAppLogs(w http.ResponseWriter, r *http.Request, name, action string) {
+	a, ok := s.requireAppMethod(w, r, name, http.MethodGet)
 	if !ok {
 		return
 	}
 
-	route, params, allowed := s.appRoutes().match(r.Method, r.URL.Path)
-	if route == nil {
-		if len(allowed) > 0 {
-			w.Header().Set("Allow", strings.Join(allowed, ", "))
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-
-			return
-		}
-
-		http.NotFound(w, r)
-
+	if action == "logs/stream" {
+		s.handleLogStream(w, r, a)
 		return
 	}
-
-	name := params["name"]
-	if !validName(name) {
-		http.Error(w, "invalid app name", http.StatusBadRequest)
-		return
-	}
-
-	if !identity.canAccessApp(name) {
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return
-	}
-
-	action := ""
-	if route.action != nil {
-		action = route.action(params)
-	}
-
-	if !identity.canPerformAppAction(r, action) {
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return
-	}
-
-	if s.audit != nil && r.Method != http.MethodGet && r.Method != http.MethodHead {
-		s.handleAppAudited(w, r, identity, name, action, route.handler, params)
-		return
-	}
-
-	route.handler(w, r, params)
+	s.handleLogs(w, r, a)
 }
 
-// loopbackListen reports whether addr only accepts loopback connections.
-func loopbackListen(addr string) bool {
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil {
-		return false
+// stopAll stops and drains every app during supervisor shutdown.
+func (s *supervisor) stopAll() {
+	s.deployRunsMu.Lock()
+	for _, run := range s.deployRuns {
+		run.cancel()
 	}
+	s.deployRunsMu.Unlock()
 
-	if host == "localhost" {
-		return true
+	apps := s.allApps()
+
+	var wg sync.WaitGroup
+
+	for _, a := range apps {
+		wg.Add(1)
+
+		go func(a *app) {
+			defer wg.Done()
+
+			s.drainAndStop(a, "shutdown")
+			if a.logs != nil {
+				a.logs.close()
+			}
+		}(a)
 	}
-
-	ip := net.ParseIP(host)
-
-	return ip != nil && ip.IsLoopback()
+	wg.Wait()
 }
 
 // validateAppFetchListen keeps the internal app-to-app endpoint on loopback, where apps reach it through their egress allow rules.
@@ -536,26 +458,77 @@ func validateAppFetchListen(value string) error {
 		return nil
 	}
 
-	ip := net.ParseIP(host)
-	if ip == nil || !ip.IsLoopback() {
+	if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
 		return fmt.Errorf("app fetch listen %q must be loopback", value)
 	}
 
 	return nil
 }
 
-func main() {
-	if len(os.Args) > 1 && os.Args[1] == runnerArg {
-		runnerMain()
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+
+	data, _ := json.Marshal(value)
+	_, _ = w.Write(append(data, '\n')) //nolint:gosec // The body is escaped or JSON-encoded before writing.
+}
+
+// handleAppRoot serves the app resource itself: inspect, deploy, or delete.
+func (s *supervisor) handleAppRoot(w http.ResponseWriter, r *http.Request, name string) {
+	switch r.Method {
+	case http.MethodGet:
+		a, ok := s.requireApp(w, r, name)
+		if !ok {
+			return
+		}
+		a.sampleResources(time.Now())
+		writeJSON(w, http.StatusOK, s.info(a))
+	case http.MethodDelete:
+		s.handleDelete(w, r, name)
+	default:
+		w.Header().Set("Allow", "GET, DELETE")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *supervisor) handleApps(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 
-	if len(os.Args) > 1 && os.Args[1] == nsInitArg {
-		nsInitMain(os.Args[2:])
+	identity, ok := s.requireIdentity(w, r)
+	if !ok {
 		return
 	}
 
-	log.SetFlags(log.LstdFlags | log.LUTC)
-	dropPrivileges()
-	serve(startSupervisor(parseConfig()))
+	snapshot := s.snapshot()
+
+	if !identity.isAdmin() {
+		filtered := snapshot[:0]
+
+		for _, info := range snapshot {
+			if identity.canAccessApp(info.Name) {
+				filtered = append(filtered, info)
+			}
+		}
+
+		snapshot = filtered
+	}
+	writeJSON(w, http.StatusOK, snapshot)
+}
+
+func writeError(w http.ResponseWriter, status int, message string) {
+	writeJSON(w, status, map[string]string{"error": message})
+}
+
+// readJSONBody decodes a size-limited JSON body and reports a 400 on malformed input.
+func readJSONBody(w http.ResponseWriter, r *http.Request, limit int64, target any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
+
+	if err := json.UnmarshalRead(r.Body, target); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return false
+	}
+
+	return true
 }

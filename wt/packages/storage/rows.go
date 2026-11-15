@@ -5,6 +5,19 @@ import (
 	"fmt"
 )
 
+// Close releases the rows. It exists so callers can use defer rows.Close().
+func (r *Rows) Close() error {
+	r.closed = true
+	r.rows = nil
+
+	return nil
+}
+
+// Err returns the error that stopped iteration, if any.
+func (r *Rows) Err() error {
+	return r.err
+}
+
 // Next advances to the next row.
 func (r *Rows) Next() bool {
 	if r.closed || r.err != nil || r.index >= len(r.rows) {
@@ -32,19 +45,6 @@ func (r *Rows) NextPage() (Page, bool) {
 	return next, true
 }
 
-// Close releases the rows. It exists so callers can use defer rows.Close().
-func (r *Rows) Close() error {
-	r.closed = true
-	r.rows = nil
-
-	return nil
-}
-
-// Err returns the error that stopped iteration, if any.
-func (r *Rows) Err() error {
-	return r.err
-}
-
 // Scan copies the current row into dest. It supports *string, *[]byte, *int64, *int, *float64, *bool, *time.Time, *any and anything with a Scan(any) error method.
 func (r *Rows) Scan(dest ...any) error {
 	if r.err != nil {
@@ -64,6 +64,7 @@ func (r *Rows) Scan(dest ...any) error {
 	}
 
 	row := r.rows[r.index-1]
+
 	for i, target := range dest {
 		if err := scanValue(target, row[i]); err != nil {
 			return fmt.Errorf("storage: column %q: %w", r.Columns[i], err)

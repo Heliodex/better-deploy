@@ -11,10 +11,89 @@ import (
 	"time"
 )
 
+func TestAppConfigConditionalRequests(t *testing.T) {
+	dir := t.TempDir()
+	cfg, err := normaliseAppConfig(appConfig{
+		Name: "demo",
+		Host: "demo.localhost",
+		Health: "/",
+		Env: map[string]string{},
+	}, "demo", "localhost", tenantTrusted)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := persistAppConfig(dir, cfg, tenantTrusted); err != nil {
+		t.Fatal(err)
+	}
+
+	s := testSupervisor()
+	a := &app{
+		name: "demo",
+		dir: dir,
+		cfg: cfg,
+	}
+	s.apps["demo"] = a
+	s.hosts[cfg.Host] = a
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/apps/demo/config", nil)
+
+	req.Header.Set("Authorization", "Bearer secret")
+	s.handleAppConfig(rec, req, "demo")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET config = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	etag := rec.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("GET config has no ETag")
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/apps/demo/config", nil)
+
+	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set("If-None-Match", etag)
+
+	rec = httptest.NewRecorder()
+
+	s.handleAppConfig(rec, req, "demo")
+	if rec.Code != http.StatusNotModified {
+		t.Errorf("conditional GET = %d, want 304", rec.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(`{"memory_mb":256}`))
+
+	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set("If-Match", `"wrong"`)
+
+	rec = httptest.NewRecorder()
+
+	s.handleAppConfig(rec, req, "demo")
+	if rec.Code != http.StatusPreconditionFailed {
+		t.Errorf("stale PATCH = %d, want 412: %s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(`{"memory_mb":256}`))
+
+	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set("If-Match", etag)
+
+	rec = httptest.NewRecorder()
+
+	s.handleAppConfig(rec, req, "demo")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("conditional PATCH = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	if rec.Header().Get("ETag") == "" || rec.Header().Get("ETag") == etag {
+		t.Errorf("PATCH ETag = %q, old %q", rec.Header().Get("ETag"), etag)
+	}
+}
+
 func TestAppConfigGetAndPatch(t *testing.T) {
 	dir := t.TempDir()
-
 	original := `{"name":"demo","host":"demo.localhost","health":"/","env":{"A":"1","SECRET":"x"},"build":"make app","memory_mb":128,"server_pages":["/"]}`
+
 	if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(original), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -25,15 +104,18 @@ func TestAppConfigGetAndPatch(t *testing.T) {
 	}
 
 	s := testSupervisor()
-	a := &app{name: "demo", dir: dir, cfg: cfg}
+	a := &app{
+		name: "demo",
+		dir: dir,
+		cfg: cfg,
+	}
 	s.apps["demo"] = a
 	s.hosts[cfg.Host] = a
-
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/apps/demo/config", nil)
+
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleAppConfig(rec, req, "demo")
-
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET config status = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -43,6 +125,7 @@ func TestAppConfigGetAndPatch(t *testing.T) {
 	}
 
 	var got appConfigResponse
+
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
@@ -54,9 +137,9 @@ func TestAppConfigGetAndPatch(t *testing.T) {
 	patch := `{"host":"new.localhost","health":"/ready","env":{"A":"2","SECRET":null,"NEW":"3"},"memory_mb":256,"disk_mb":512,"idle_timeout":"15m","schedule":[],"server_pages":["/","/login"]}`
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(patch))
+
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleAppConfig(rec, req, "demo")
-
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PATCH config status = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -72,11 +155,11 @@ func TestAppConfigGetAndPatch(t *testing.T) {
 	if got.IdleTimeout != "15m" {
 		t.Errorf("idle_timeout = %q, want 15m", got.IdleTimeout)
 	}
-
 	a.mu.Lock()
-	live := a.cfg
-	a.mu.Unlock()
 
+	live := a.cfg
+
+	a.mu.Unlock()
 	if live.Host != "new.localhost" || live.Health != "/ready" || live.MemoryMB != 256 || live.DiskMB != 512 {
 		t.Errorf("live config = %+v", live)
 	}
@@ -113,8 +196,12 @@ func TestAppConfigGetAndPatch(t *testing.T) {
 
 func TestAppConfigIdleTimeoutNeedsNoRestart(t *testing.T) {
 	dir := t.TempDir()
-	cfg := appConfig{Name: "demo", Host: "demo.localhost", Health: "/healthz", Env: map[string]string{}}
-
+	cfg := appConfig{
+		Name: "demo",
+		Host: "demo.localhost",
+		Health: "/healthz",
+		Env: map[string]string{},
+	}
 	cfg, err := normaliseAppConfig(cfg, "demo", "localhost", tenantTrusted)
 	if err != nil {
 		t.Fatal(err)
@@ -125,20 +212,24 @@ func TestAppConfigIdleTimeoutNeedsNoRestart(t *testing.T) {
 	}
 
 	s := testSupervisor()
-	a := &app{name: "demo", dir: dir, cfg: cfg}
+	a := &app{
+		name: "demo",
+		dir: dir,
+		cfg: cfg,
+	}
 	s.apps["demo"] = a
 	s.hosts[cfg.Host] = a
-
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(`{"idle_timeout":"5m"}`))
+
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleAppConfig(rec, req, "demo")
-
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PATCH config status = %d: %s", rec.Code, rec.Body.String())
 	}
 
 	var got appConfigResponse
+
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
@@ -149,9 +240,9 @@ func TestAppConfigIdleTimeoutNeedsNoRestart(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(`{"idle_timeout":"none"}`))
+
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleAppConfig(rec, req, "demo")
-
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PATCH config status = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -163,20 +254,117 @@ func TestAppConfigIdleTimeoutNeedsNoRestart(t *testing.T) {
 	if got.IdleTimeout != "none" || got.RestartRequired {
 		t.Errorf("PATCH config = %+v; want disabled without a restart", got)
 	}
-
 	a.mu.Lock()
-	live, stored := a.cfg.idleTimeout, a.cfg.IdleTimeout
-	a.mu.Unlock()
 
+	live, stored := a.cfg.idleTimeout, a.cfg.IdleTimeout
+
+	a.mu.Unlock()
 	if live != 0 || stored != "none" {
 		t.Errorf("live idle timeout = %s (%q), want 0 (none)", live, stored)
 	}
 }
 
-func TestAppConfigRejectsIdleTimeoutWithSchedule(t *testing.T) {
+func TestAppConfigPatchesCallersAndEgress(t *testing.T) {
 	dir := t.TempDir()
-	cfg := appConfig{Name: "demo", Host: "demo.localhost", Health: "/healthz", Env: map[string]string{}}
+	cfg, err := normaliseAppConfig(appConfig{
+		Name: "demo",
+		Host: "demo.localhost",
+		Health: "/",
+		Env: map[string]string{},
+	}, "demo", "localhost", tenantTrusted)
+	if err != nil {
+		t.Fatal(err)
+	}
 
+	if err := persistAppConfig(dir, cfg, tenantTrusted); err != nil {
+		t.Fatal(err)
+	}
+
+	s := testSupervisor()
+	a := &app{
+		name: "demo",
+		dir: dir,
+		cfg: cfg,
+	}
+	s.apps["demo"] = a
+	s.hosts[cfg.Host] = a
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(`{"allow_callers":["Frontend","frontend"]}`))
+
+	req.Header.Set("Authorization", "Bearer secret")
+	s.handleAppConfig(rec, req, "demo")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("callers patch = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var got appConfigResponse
+
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(got.AllowCallers) != 1 || got.AllowCallers[0] != "frontend" || got.RestartRequired {
+		t.Errorf("callers patch response = %+v", got)
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(`{"egress":[{"cidr":"203.0.113.9/24","port":443}]}`))
+
+	req.Header.Set("Authorization", "Bearer secret")
+	s.handleAppConfig(rec, req, "demo")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("egress patch = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(got.Egress) != 1 || got.Egress[0].CIDR != "203.0.113.0/24" || got.Egress[0].Port != 443 || !got.RestartRequired {
+		t.Errorf("egress patch response = %+v", got)
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(`{"egress":[{"cidr":"2001:db8::1/32","port":443}]}`))
+
+	req.Header.Set("Authorization", "Bearer secret")
+	s.handleAppConfig(rec, req, "demo")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("IPv6 egress patch = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(got.Egress) != 1 || got.Egress[0].CIDR != "2001:db8::/32" || got.Egress[0].Port != 443 || !got.RestartRequired {
+		t.Errorf("IPv6 egress patch response = %+v", got)
+	}
+
+	for _, body := range []string{
+		`{"allow_callers":["bad/name"]}`,
+		`{"egress":[{"cidr":"not-a-cidr","port":443}]}`,
+		`{"egress":[{"cidr":"203.0.113.0/24","port":0}]}`,
+	} {
+		rec = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(body))
+
+		req.Header.Set("Authorization", "Bearer secret")
+		s.handleAppConfig(rec, req, "demo")
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("invalid patch %s = %d, want 400", body, rec.Code)
+		}
+	}
+}
+
+func TestAppConfigPatchesHealthSettings(t *testing.T) {
+	dir := t.TempDir()
+	cfg := appConfig{
+		Name: "demo",
+		Host: "demo.localhost",
+		Health: "/healthz",
+		Env: map[string]string{},
+	}
 	cfg, err := normaliseAppConfig(cfg, "demo", "localhost", tenantTrusted)
 	if err != nil {
 		t.Fatal(err)
@@ -187,31 +375,138 @@ func TestAppConfigRejectsIdleTimeoutWithSchedule(t *testing.T) {
 	}
 
 	s := testSupervisor()
-	a := &app{name: "demo", dir: dir, cfg: cfg}
+	a := &app{
+		name: "demo",
+		dir: dir,
+		cfg: cfg,
+	}
 	s.apps["demo"] = a
 	s.hosts[cfg.Host] = a
+	patch := `{"startup_timeout":"30s","health_interval":"5s","health_failures":3,"restart_on_unhealthy":true}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(patch))
 
+	req.Header.Set("Authorization", "Bearer secret")
+	s.handleAppConfig(rec, req, "demo")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PATCH config status = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var got appConfigResponse
+
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+
+	if got.StartupTimeout != "30s" || got.HealthInterval != "5s" || got.HealthFailures != 3 || !got.RestartOnUnhealthy {
+		t.Errorf("PATCH health config = %+v", got)
+	}
+	a.mu.Lock()
+
+	live := a.cfg
+
+	a.mu.Unlock()
+	if live.startupTimeout != 30*time.Second || live.healthInterval != 5*time.Second {
+		t.Errorf("live health durations = %+v", live)
+	}
+}
+
+func TestAppConfigRejectsIdleTimeoutWithSchedule(t *testing.T) {
+	dir := t.TempDir()
+	cfg := appConfig{
+		Name: "demo",
+		Host: "demo.localhost",
+		Health: "/healthz",
+		Env: map[string]string{},
+	}
+	cfg, err := normaliseAppConfig(cfg, "demo", "localhost", tenantTrusted)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := persistAppConfig(dir, cfg, tenantTrusted); err != nil {
+		t.Fatal(err)
+	}
+
+	s := testSupervisor()
+	a := &app{
+		name: "demo",
+		dir: dir,
+		cfg: cfg,
+	}
+	s.apps["demo"] = a
+	s.hosts[cfg.Host] = a
 	patch := `{"idle_timeout":"5m","schedule":[{"path":"/tick","every":"1m"}]}`
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(patch))
+
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleAppConfig(rec, req, "demo")
-
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400: %s", rec.Code, rec.Body.String())
 	}
 }
 
+func TestAppConfigRejectsTakenHost(t *testing.T) {
+	dir := t.TempDir()
+	cfg := appConfig{
+		Name: "demo",
+		Host: "demo.localhost",
+		Health: "/",
+		Env: map[string]string{},
+	}
+
+	if err := persistAppConfig(dir, cfg, tenantTrusted); err != nil {
+		t.Fatal(err)
+	}
+
+	s := testSupervisor()
+	a := &app{
+		name: "demo",
+		dir: dir,
+		cfg: cfg,
+	}
+	s.apps["demo"] = a
+	s.hosts[cfg.Host] = a
+	other := &app{
+		name: "other",
+		cfg: appConfig{
+			Host: "taken.localhost",
+		},
+	}
+	s.apps["other"] = other
+	s.hosts["taken.localhost"] = other
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(`{"host":"taken.localhost"}`))
+
+	req.Header.Set("Authorization", "Bearer secret")
+	s.handleAppConfig(rec, req, "demo")
+	if rec.Code != http.StatusConflict {
+		t.Errorf("status = %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestNormaliseIdleTimeoutDefaults(t *testing.T) {
 	newConfig := func(idle string, schedule bool) appConfig {
-		cfg := appConfig{Name: "demo", Host: "demo.localhost", Health: "/healthz", Env: map[string]string{}, IdleTimeout: idle}
+		cfg := appConfig{
+			Name: "demo",
+			Host: "demo.localhost",
+			Health: "/healthz",
+			Env: map[string]string{},
+			IdleTimeout: idle,
+		}
+
 		if schedule {
-			cfg.Schedule = []scheduleConfig{{Path: "/tick", Every: "1m"}}
+			cfg.Schedule = []scheduleConfig{
+				{
+					Path: "/tick",
+					Every: "1m",
+				},
+			}
 		}
 
 		return cfg
 	}
-
 	cfg, err := normaliseAppConfig(newConfig("", false), "demo", "localhost", tenantTrusted)
 	if err != nil {
 		t.Fatal(err)
@@ -222,6 +517,7 @@ func TestNormaliseIdleTimeoutDefaults(t *testing.T) {
 	}
 
 	cfg, err = normaliseAppConfig(newConfig("15m", false), "demo", "localhost", tenantTrusted)
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,86 +538,13 @@ func TestNormaliseIdleTimeoutDefaults(t *testing.T) {
 	}
 
 	cfg, err = normaliseAppConfig(newConfig("", true), "demo", "localhost", tenantTrusted)
+
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	if cfg.IdleTimeout != "" || cfg.idleTimeout != 0 {
 		t.Errorf("scheduled app idle_timeout = %q (%s); want empty (0) so removing the schedule restores the default", cfg.IdleTimeout, cfg.idleTimeout)
-	}
-}
-
-func TestAppConfigPatchesHealthSettings(t *testing.T) {
-	dir := t.TempDir()
-	cfg := appConfig{Name: "demo", Host: "demo.localhost", Health: "/healthz", Env: map[string]string{}}
-
-	cfg, err := normaliseAppConfig(cfg, "demo", "localhost", tenantTrusted)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := persistAppConfig(dir, cfg, tenantTrusted); err != nil {
-		t.Fatal(err)
-	}
-
-	s := testSupervisor()
-	a := &app{name: "demo", dir: dir, cfg: cfg}
-	s.apps["demo"] = a
-	s.hosts[cfg.Host] = a
-
-	patch := `{"startup_timeout":"30s","health_interval":"5s","health_failures":3,"restart_on_unhealthy":true}`
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(patch))
-	req.Header.Set("Authorization", "Bearer secret")
-	s.handleAppConfig(rec, req, "demo")
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("PATCH config status = %d: %s", rec.Code, rec.Body.String())
-	}
-
-	var got appConfigResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatal(err)
-	}
-
-	if got.StartupTimeout != "30s" || got.HealthInterval != "5s" || got.HealthFailures != 3 || !got.RestartOnUnhealthy {
-		t.Errorf("PATCH health config = %+v", got)
-	}
-
-	a.mu.Lock()
-	live := a.cfg
-	a.mu.Unlock()
-
-	if live.startupTimeout != 30*time.Second || live.healthInterval != 5*time.Second {
-		t.Errorf("live health durations = %+v", live)
-	}
-}
-
-func TestNormaliseServerPaths(t *testing.T) {
-	cfg, err := normaliseAppConfig(appConfig{
-		Name: "demo",
-		Host: "demo.localhost",
-		Health: "/",
-		Env: map[string]string{},
-		ServerPaths: []string{"/auth/", "/api/v1", "/auth", "/"},
-	}, "demo", "localhost", tenantTrusted)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(cfg.ServerPaths) != 3 || cfg.ServerPaths[0] != "/" || cfg.ServerPaths[1] != "/api/v1" || cfg.ServerPaths[2] != "/auth" {
-		t.Errorf("server paths = %v", cfg.ServerPaths)
-	}
-
-	for _, paths := range [][]string{
-		{"auth"},
-		{"/auth?x=1"},
-		{"/a/../b"},
-		{""},
-	} {
-		if _, err := normaliseAppConfig(appConfig{ServerPaths: paths}, "demo", "localhost", tenantTrusted); err == nil {
-			t.Errorf("accepted invalid server paths %v", paths)
-		}
 	}
 }
 
@@ -341,194 +564,36 @@ func TestNormaliseServerPages(t *testing.T) {
 		t.Errorf("server pages = %v", cfg.ServerPages)
 	}
 
-	for _, paths := range [][]string{
-		{"login"},
-		{"/login?x=1"},
-		{"/a/../b"},
-		{""},
-	} {
-		if _, err := normaliseAppConfig(appConfig{ServerPages: paths}, "demo", "localhost", tenantTrusted); err == nil {
+	for _, paths := range [][]string{{"login"}, {"/login?x=1"}, {"/a/../b"}, {""}} {
+		if _, err := normaliseAppConfig(appConfig{
+			ServerPages: paths,
+		}, "demo", "localhost", tenantTrusted); err == nil {
 			t.Errorf("accepted invalid server pages %v", paths)
 		}
 	}
 }
 
-func TestAppConfigRejectsTakenHost(t *testing.T) {
-	dir := t.TempDir()
-
-	cfg := appConfig{Name: "demo", Host: "demo.localhost", Health: "/", Env: map[string]string{}}
-	if err := persistAppConfig(dir, cfg, tenantTrusted); err != nil {
-		t.Fatal(err)
-	}
-
-	s := testSupervisor()
-	a := &app{name: "demo", dir: dir, cfg: cfg}
-	s.apps["demo"] = a
-	s.hosts[cfg.Host] = a
-	other := &app{name: "other", cfg: appConfig{Host: "taken.localhost"}}
-	s.apps["other"] = other
-	s.hosts["taken.localhost"] = other
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(`{"host":"taken.localhost"}`))
-	req.Header.Set("Authorization", "Bearer secret")
-	s.handleAppConfig(rec, req, "demo")
-
-	if rec.Code != http.StatusConflict {
-		t.Errorf("status = %d, want 409: %s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestAppConfigPatchesCallersAndEgress(t *testing.T) {
-	dir := t.TempDir()
-
-	cfg, err := normaliseAppConfig(appConfig{Name: "demo", Host: "demo.localhost", Health: "/", Env: map[string]string{}}, "demo", "localhost", tenantTrusted)
+func TestNormaliseServerPaths(t *testing.T) {
+	cfg, err := normaliseAppConfig(appConfig{
+		Name: "demo",
+		Host: "demo.localhost",
+		Health: "/",
+		Env: map[string]string{},
+		ServerPaths: []string{"/auth/", "/api/v1", "/auth", "/"},
+	}, "demo", "localhost", tenantTrusted)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if err := persistAppConfig(dir, cfg, tenantTrusted); err != nil {
-		t.Fatal(err)
+	if len(cfg.ServerPaths) != 3 || cfg.ServerPaths[0] != "/" || cfg.ServerPaths[1] != "/api/v1" || cfg.ServerPaths[2] != "/auth" {
+		t.Errorf("server paths = %v", cfg.ServerPaths)
 	}
 
-	s := testSupervisor()
-	a := &app{name: "demo", dir: dir, cfg: cfg}
-	s.apps["demo"] = a
-	s.hosts[cfg.Host] = a
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(`{"allow_callers":["Frontend","frontend"]}`))
-	req.Header.Set("Authorization", "Bearer secret")
-	s.handleAppConfig(rec, req, "demo")
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("callers patch = %d: %s", rec.Code, rec.Body.String())
-	}
-
-	var got appConfigResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatal(err)
-	}
-
-	if len(got.AllowCallers) != 1 || got.AllowCallers[0] != "frontend" || got.RestartRequired {
-		t.Errorf("callers patch response = %+v", got)
-	}
-
-	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(`{"egress":[{"cidr":"203.0.113.9/24","port":443}]}`))
-	req.Header.Set("Authorization", "Bearer secret")
-	s.handleAppConfig(rec, req, "demo")
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("egress patch = %d: %s", rec.Code, rec.Body.String())
-	}
-
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatal(err)
-	}
-
-	if len(got.Egress) != 1 || got.Egress[0].CIDR != "203.0.113.0/24" || got.Egress[0].Port != 443 || !got.RestartRequired {
-		t.Errorf("egress patch response = %+v", got)
-	}
-
-	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(`{"egress":[{"cidr":"2001:db8::1/32","port":443}]}`))
-	req.Header.Set("Authorization", "Bearer secret")
-	s.handleAppConfig(rec, req, "demo")
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("IPv6 egress patch = %d: %s", rec.Code, rec.Body.String())
-	}
-
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatal(err)
-	}
-
-	if len(got.Egress) != 1 || got.Egress[0].CIDR != "2001:db8::/32" || got.Egress[0].Port != 443 || !got.RestartRequired {
-		t.Errorf("IPv6 egress patch response = %+v", got)
-	}
-
-	for _, body := range []string{
-		`{"allow_callers":["bad/name"]}`,
-		`{"egress":[{"cidr":"not-a-cidr","port":443}]}`,
-		`{"egress":[{"cidr":"203.0.113.0/24","port":0}]}`,
-	} {
-		rec = httptest.NewRecorder()
-		req = httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(body))
-		req.Header.Set("Authorization", "Bearer secret")
-		s.handleAppConfig(rec, req, "demo")
-
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("invalid patch %s = %d, want 400", body, rec.Code)
+	for _, paths := range [][]string{{"auth"}, {"/auth?x=1"}, {"/a/../b"}, {""}} {
+		if _, err := normaliseAppConfig(appConfig{
+			ServerPaths: paths,
+		}, "demo", "localhost", tenantTrusted); err == nil {
+			t.Errorf("accepted invalid server paths %v", paths)
 		}
-	}
-}
-
-func TestAppConfigConditionalRequests(t *testing.T) {
-	dir := t.TempDir()
-
-	cfg, err := normaliseAppConfig(appConfig{Name: "demo", Host: "demo.localhost", Health: "/", Env: map[string]string{}}, "demo", "localhost", tenantTrusted)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := persistAppConfig(dir, cfg, tenantTrusted); err != nil {
-		t.Fatal(err)
-	}
-
-	s := testSupervisor()
-	a := &app{name: "demo", dir: dir, cfg: cfg}
-	s.apps["demo"] = a
-	s.hosts[cfg.Host] = a
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/apps/demo/config", nil)
-	req.Header.Set("Authorization", "Bearer secret")
-	s.handleAppConfig(rec, req, "demo")
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET config = %d: %s", rec.Code, rec.Body.String())
-	}
-
-	etag := rec.Header().Get("ETag")
-	if etag == "" {
-		t.Fatal("GET config has no ETag")
-	}
-
-	req = httptest.NewRequest(http.MethodGet, "/apps/demo/config", nil)
-	req.Header.Set("Authorization", "Bearer secret")
-	req.Header.Set("If-None-Match", etag)
-
-	rec = httptest.NewRecorder()
-	s.handleAppConfig(rec, req, "demo")
-
-	if rec.Code != http.StatusNotModified {
-		t.Errorf("conditional GET = %d, want 304", rec.Code)
-	}
-
-	req = httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(`{"memory_mb":256}`))
-	req.Header.Set("Authorization", "Bearer secret")
-	req.Header.Set("If-Match", `"wrong"`)
-
-	rec = httptest.NewRecorder()
-	s.handleAppConfig(rec, req, "demo")
-
-	if rec.Code != http.StatusPreconditionFailed {
-		t.Errorf("stale PATCH = %d, want 412: %s", rec.Code, rec.Body.String())
-	}
-
-	req = httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(`{"memory_mb":256}`))
-	req.Header.Set("Authorization", "Bearer secret")
-	req.Header.Set("If-Match", etag)
-
-	rec = httptest.NewRecorder()
-	s.handleAppConfig(rec, req, "demo")
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("conditional PATCH = %d: %s", rec.Code, rec.Body.String())
-	}
-
-	if rec.Header().Get("ETag") == "" || rec.Header().Get("ETag") == etag {
-		t.Errorf("PATCH ETag = %q, old %q", rec.Header().Get("ETag"), etag)
 	}
 }

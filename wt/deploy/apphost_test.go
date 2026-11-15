@@ -6,13 +6,39 @@ import (
 	"testing"
 )
 
+func TestAppDomainForTarget(t *testing.T) {
+	tests := []struct {
+		name, profile, supervisor, domain, want string
+	}{
+		{
+			"same remote target",
+			"https://wt.example.com",
+			"https://other.example.com",
+			"example.com",
+			"example.com",
+		},
+		{"same local target", "http://127.0.0.1:8080", "http://localhost:8080", "localhost", "localhost"},
+		{
+			"remote profile on local host",
+			"https://wt.example.com",
+			"http://127.0.0.1:8080",
+			"example.com",
+			"",
+		},
+		{"local profile on remote host", "http://127.0.0.1:8080", "https://wt.example.com", "localhost", ""},
+		{"no domain", "https://wt.example.com", "http://127.0.0.1:8080", "", ""},
+	}
+
+	for _, test := range tests {
+		if got := appDomainForTarget(test.profile, test.supervisor, test.domain); got != test.want {
+			t.Errorf("%s: domain = %q, want %q", test.name, got, test.want)
+		}
+	}
+}
+
 func TestApplyAppDomain(t *testing.T) {
 	tests := []struct {
-		name string
-		host string
-		app string
-		domain string
-		want string
+		name, host, app, domain, want string
 	}{
 		{"default local host", "notes.localhost", "notes", "example.com", "notes.example.com"},
 		{"empty host", "", "notes", "example.com", "notes.example.com"},
@@ -25,9 +51,12 @@ func TestApplyAppDomain(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		m := manifest{Name: test.app, Host: test.host}
-		applyAppDomain(&m, test.domain)
+		m := manifest{
+			Name: test.app,
+			Host: test.host,
+		}
 
+		applyAppDomain(&m, test.domain)
 		if m.Host != test.want {
 			t.Errorf("%s: host = %q, want %q", test.name, m.Host, test.want)
 		}
@@ -36,10 +65,7 @@ func TestApplyAppDomain(t *testing.T) {
 
 func TestCheckAppHostTarget(t *testing.T) {
 	tests := []struct {
-		name string
-		supervisor string
-		appHost string
-		appName string
+		name, supervisor, appHost, appName string
 		wantError bool
 	}{
 		{"remote public host", "https://wt.example.com", "notes.example.com", "notes", false},
@@ -53,7 +79,7 @@ func TestCheckAppHostTarget(t *testing.T) {
 
 	for _, test := range tests {
 		err := checkAppHostTarget(test.supervisor, test.appHost, test.appName, "remote")
-		if (err != nil) != test.wantError {
+		if err != nil != test.wantError {
 			t.Errorf("%s: error = %v, wantError %v", test.name, err, test.wantError)
 		}
 
@@ -63,24 +89,36 @@ func TestCheckAppHostTarget(t *testing.T) {
 	}
 }
 
-func TestPrepareManifestExplicitAppHostWins(t *testing.T) {
-	m := manifest{Name: "notes", Host: "notes.localhost"}
-	m.Host = "notes.dev.example"
+func TestDeployRefusesLocalAppHostOnRemoteSupervisor(t *testing.T) {
+	dir := t.TempDir()
 
-	cfg := &deployConfig{appHost: "notes.dev.example", appDomain: "example.com"}
+	writeTestFile(t, filepath.Join(dir, "app.json"), `{"name":"notes","host":"notes.localhost"}`)
 
-	if err := prepareManifest(&m, cfg); err != nil {
-		t.Fatal(err)
+	err := deploy([]string{
+		"--dir",
+		dir,
+		"--host",
+		"https://wt.example.com",
+		"--config",
+		filepath.Join(dir, "missing.json"),
+	})
+	if err == nil {
+		t.Fatal("deploy accepted a local app host on a remote supervisor")
 	}
 
-	if m.Host != "notes.dev.example" {
-		t.Errorf("host = %q, want the explicit app host", m.Host)
+	if !strings.Contains(err.Error(), "app host") || !strings.Contains(err.Error(), "app_domain") {
+		t.Errorf("error = %v, want app host guidance", err)
 	}
 }
 
 func TestPrepareManifestAppliesAppDomain(t *testing.T) {
-	m := manifest{Name: "notes", Host: "notes.localhost"}
-	cfg := &deployConfig{appDomain: "example.com"}
+	cfg := &deployConfig{
+		appDomain: "example.com",
+	}
+	m := manifest{
+		Name: "notes",
+		Host: "notes.localhost",
+	}
 
 	if err := prepareManifest(&m, cfg); err != nil {
 		t.Fatal(err)
@@ -91,38 +129,22 @@ func TestPrepareManifestAppliesAppDomain(t *testing.T) {
 	}
 }
 
-func TestAppDomainForTarget(t *testing.T) {
-	tests := []struct {
-		name string
-		profile string
-		supervisor string
-		domain string
-		want string
-	}{
-		{"same remote target", "https://wt.example.com", "https://other.example.com", "example.com", "example.com"},
-		{"same local target", "http://127.0.0.1:8080", "http://localhost:8080", "localhost", "localhost"},
-		{"remote profile on local host", "https://wt.example.com", "http://127.0.0.1:8080", "example.com", ""},
-		{"local profile on remote host", "http://127.0.0.1:8080", "https://wt.example.com", "localhost", ""},
-		{"no domain", "https://wt.example.com", "http://127.0.0.1:8080", "", ""},
+func TestPrepareManifestExplicitAppHostWins(t *testing.T) {
+	m := manifest{
+		Name: "notes",
+		Host: "notes.localhost",
+	}
+	m.Host = "notes.dev.example"
+	cfg := &deployConfig{
+		appHost: "notes.dev.example",
+		appDomain: "example.com",
 	}
 
-	for _, test := range tests {
-		if got := appDomainForTarget(test.profile, test.supervisor, test.domain); got != test.want {
-			t.Errorf("%s: domain = %q, want %q", test.name, got, test.want)
-		}
-	}
-}
-
-func TestDeployRefusesLocalAppHostOnRemoteSupervisor(t *testing.T) {
-	dir := t.TempDir()
-	writeTestFile(t, filepath.Join(dir, "app.json"), `{"name":"notes","host":"notes.localhost"}`)
-
-	err := deploy([]string{"--dir", dir, "--host", "https://wt.example.com", "--config", filepath.Join(dir, "missing.json")})
-	if err == nil {
-		t.Fatal("deploy accepted a local app host on a remote supervisor")
+	if err := prepareManifest(&m, cfg); err != nil {
+		t.Fatal(err)
 	}
 
-	if !strings.Contains(err.Error(), "app host") || !strings.Contains(err.Error(), "app_domain") {
-		t.Errorf("error = %v, want app host guidance", err)
+	if m.Host != "notes.dev.example" {
+		t.Errorf("host = %q, want the explicit app host", m.Host)
 	}
 }

@@ -11,48 +11,23 @@ import (
 	"time"
 )
 
-type deployConfig struct {
-	dir, app, host, token, wasmtime, target, appHost, appDomain, profile, out string
-	buildComponentCommand string
-	skipBuild, skipCompile, skipStatic, jsonOut, forceBuild, skipRouteCheck bool
-	overlayEnv bool
-	targetConfigured bool
-	verify bool
-	verifyPath string
-	verifyTimeout time.Duration
-	envVars []string
-	start time.Time
-}
-
-func env(key string) string {
-	return os.Getenv(key)
-}
-
-// profileSelection is the config file and profile that deploy and bundle flags default from.
-type profileSelection struct {
-	path, name string
-	file fileConfig
-	profile fileProfile
-}
-
-// selectProfile loads the config file named by args and resolves the profile that the flags select.
-func selectProfile(args []string) (profileSelection, error) {
-	path := configArg(args)
-
-	file, err := loadFileConfig(path)
-	if err != nil {
-		return profileSelection{}, err
+type (
+	deployConfig struct {
+		dir, app, host, token, wasmtime, target, appHost, appDomain, profile, out, buildComponentCommand string
+		skipBuild, skipCompile, skipStatic, jsonOut, forceBuild, skipRouteCheck, overlayEnv, targetConfigured, verify bool
+		verifyPath string
+		verifyTimeout time.Duration
+		envVars []string
+		start time.Time
 	}
 
-	name := activeProfileName(profileArg(args), file)
-
-	profile, err := resolveProfile(file, name)
-	if err != nil {
-		return profileSelection{}, err
+	// profileSelection is the config file and profile that deploy and bundle flags default from.
+	profileSelection struct {
+		path, name string
+		file fileConfig
+		profile fileProfile
 	}
-
-	return profileSelection{path: path, name: name, file: file, profile: profile}, nil
-}
+)
 
 // applyConfigFile reloads the profile from the file named by --config. It fills any host, token or app domain that the flags left empty.
 func applyConfigFile(path string, profileSet, appDomainSet bool, profileFlag, host, token, appDomain *string) (fileProfile, error) {
@@ -85,6 +60,80 @@ func applyConfigFile(path string, profileSet, appDomainSet bool, profileFlag, ho
 	return profile, nil
 }
 
+func env(key string) string {
+	return os.Getenv(key)
+}
+
+// isHelpFlag reports whether arg asks for help, including the single-dash -help form that Go's flag package also accepts.
+func isHelpFlag(arg string) bool {
+	return arg == "-h" || arg == "-help" || arg == "--help"
+}
+
+// selectProfile loads the config file named by args and resolves the profile that the flags select.
+func selectProfile(args []string) (profileSelection, error) {
+	path := configArg(args)
+	file, err := loadFileConfig(path)
+	if err != nil {
+		return profileSelection{}, err
+	}
+
+	name := activeProfileName(profileArg(args), file)
+	profile, err := resolveProfile(file, name)
+	if err != nil {
+		return profileSelection{}, err
+	}
+
+	return profileSelection{
+		path: path,
+		name: name,
+		file: file,
+		profile: profile,
+	}, nil
+}
+
+// resolveBundleConfig parses the flags for building a bundle without a supervisor.
+func resolveBundleConfig(args []string) (*deployConfig, error) {
+	sel, err := selectProfile(args)
+	if err != nil {
+		return nil, err
+	}
+
+	configPath, fileCfg, profileName, profile := sel.path, sel.file, sel.name, sel.profile
+	flags := newFlagSet("bundle")
+	dir := flags.String("dir", ".", "app directory containing app.json")
+	wasmtime := flags.String("wasmtime", firstNonEmpty(env("WT_WASMTIME"), fileCfg.Wasmtime, "wasmtime"), "wasmtime binary")
+	target := flags.String("target", firstNonEmpty(env("WT_WASMTIME_TARGET"), fileCfg.Target, "x86_64-unknown-linux-musl"), "wasmtime compile target")
+	out := flags.String("out", "", "output file (default <name>.tar.gz)")
+	profileFlag := flags.String("profile", profileName, "config profile for the app domain")
+	appDomain := flags.String("app-domain", profile.AppDomain, "app host suffix for <app>.localhost hosts")
+
+	flags.String("config", configPath, "config file (default ~/.config/wt/config.json)")
+
+	skipBuild := flags.Bool("skip-build", false, "skip running app.json's build commands")
+	skipCompile := flags.Bool("skip-compile", false, "do not compile; include main.cwasm only if it already exists")
+	forceBuild := flags.Bool("force-build", false, "rebuild the component and static phases even when their inputs are unchanged")
+
+	if err := flags.Parse(args); err != nil {
+		return nil, err
+	}
+
+	if flags.NArg() > 0 {
+		return nil, fmt.Errorf("unexpected argument %q", flags.Arg(0))
+	}
+
+	return &deployConfig{
+		dir: *dir,
+		wasmtime: *wasmtime,
+		target: *target,
+		profile: strings.TrimSpace(*profileFlag),
+		appDomain: *appDomain,
+		skipBuild: *skipBuild,
+		skipCompile: *skipCompile,
+		forceBuild: *forceBuild,
+		out: *out,
+	}, nil
+}
+
 // resolveConfig builds the deploy config from the config file, environment and deploy flags.
 func resolveConfig(args []string) (*deployConfig, error) {
 	sel, err := selectProfile(args)
@@ -93,7 +142,6 @@ func resolveConfig(args []string) (*deployConfig, error) {
 	}
 
 	configPath, fileCfg, profileName, profile := sel.path, sel.file, sel.name, sel.profile
-
 	flags := newFlagSet("deploy")
 	dir := flags.String("dir", ".", "app directory containing app.json")
 	app := flags.String("app", "", "app name (default: app.json name or directory name)")
@@ -102,8 +150,8 @@ func resolveConfig(args []string) (*deployConfig, error) {
 	token := flags.String("token", firstNonEmpty(env("WT_TOKEN"), profile.Token), "deploy bearer token")
 	wasmtime := flags.String("wasmtime", firstNonEmpty(env("WT_WASMTIME"), fileCfg.Wasmtime, "wasmtime"), "wasmtime binary")
 	targetDefault := firstNonEmpty(env("WT_WASMTIME_TARGET"), fileCfg.Target)
-
 	targetConfigured := targetDefault != ""
+
 	if targetDefault == "" {
 		targetDefault = "x86_64-unknown-linux-musl"
 	}
@@ -120,14 +168,13 @@ func resolveConfig(args []string) (*deployConfig, error) {
 	verifyPath := flags.String("verify-path", defaultRoutePath, "public path to probe for --verify")
 	verifyTimeout := flags.Duration("verify-timeout", verifyDefaultTimeout, "how long --verify waits for the app to serve")
 	envVars := deployEnvFlag(flags)
-
 	skipCompile := flags.Bool("skip-compile", false, "do not compile; include main.cwasm only if it already exists")
+
 	if err := flags.Parse(args); err != nil {
 		return nil, err
 	}
 
-	profileSet := false
-	appDomainSet := false
+	var appDomainSet, profileSet bool
 
 	flags.Visit(func(f *flag.Flag) {
 		switch f.Name {
@@ -139,7 +186,6 @@ func resolveConfig(args []string) (*deployConfig, error) {
 			appDomainSet = true
 		}
 	})
-
 	if *target != targetDefault {
 		targetConfigured = true
 	}
@@ -150,6 +196,7 @@ func resolveConfig(args []string) (*deployConfig, error) {
 
 	if *config != configPath {
 		profile, err = applyConfigFile(*config, profileSet, appDomainSet, profileFlag, host, token, appDomain)
+
 		if err != nil {
 			return nil, err
 		}
@@ -186,49 +233,6 @@ func resolveConfig(args []string) (*deployConfig, error) {
 	}, nil
 }
 
-// resolveBundleConfig parses the flags for building a bundle without a supervisor.
-func resolveBundleConfig(args []string) (*deployConfig, error) {
-	sel, err := selectProfile(args)
-	if err != nil {
-		return nil, err
-	}
-
-	configPath, fileCfg, profileName, profile := sel.path, sel.file, sel.name, sel.profile
-
-	flags := newFlagSet("bundle")
-	dir := flags.String("dir", ".", "app directory containing app.json")
-	wasmtime := flags.String("wasmtime", firstNonEmpty(env("WT_WASMTIME"), fileCfg.Wasmtime, "wasmtime"), "wasmtime binary")
-	target := flags.String("target", firstNonEmpty(env("WT_WASMTIME_TARGET"), fileCfg.Target, "x86_64-unknown-linux-musl"), "wasmtime compile target")
-	out := flags.String("out", "", "output file (default <name>.tar.gz)")
-	profileFlag := flags.String("profile", profileName, "config profile for the app domain")
-	appDomain := flags.String("app-domain", profile.AppDomain, "app host suffix for <app>.localhost hosts")
-	flags.String("config", configPath, "config file (default ~/.config/wt/config.json)")
-	skipBuild := flags.Bool("skip-build", false, "skip running app.json's build commands")
-	skipCompile := flags.Bool("skip-compile", false, "do not compile; include main.cwasm only if it already exists")
-
-	forceBuild := flags.Bool("force-build", false, "rebuild the component and static phases even when their inputs are unchanged")
-
-	if err := flags.Parse(args); err != nil {
-		return nil, err
-	}
-
-	if flags.NArg() > 0 {
-		return nil, fmt.Errorf("unexpected argument %q", flags.Arg(0))
-	}
-
-	return &deployConfig{
-		dir: *dir,
-		wasmtime: *wasmtime,
-		target: *target,
-		profile: strings.TrimSpace(*profileFlag),
-		appDomain: *appDomain,
-		skipBuild: *skipBuild,
-		skipCompile: *skipCompile,
-		forceBuild: *forceBuild,
-		out: *out,
-	}, nil
-}
-
 // runBundle builds the deploy artifact into a file instead of uploading it, for CI or manual upload.
 func runBundle(args []string) error {
 	cfg, err := resolveBundleConfig(args)
@@ -240,7 +244,6 @@ func runBundle(args []string) error {
 	if err != nil {
 		return err
 	}
-
 	printBuildStatus(status)
 
 	out := cfg.out
@@ -251,62 +254,8 @@ func runBundle(args []string) error {
 	if err := os.WriteFile(out, data, privateFileMode); err != nil {
 		return fmt.Errorf("write bundle: %w", err)
 	}
-
 	fmt.Println("wrote", out)
-
 	return nil
-}
-
-// isHelpFlag reports whether arg asks for help, including the single-dash -help form that Go's flag package also accepts.
-func isHelpFlag(arg string) bool {
-	return arg == "-h" || arg == "-help" || arg == "--help"
-}
-
-// withoutHelpFlags drops help flags from a help command's topic arguments.
-func withoutHelpFlags(args []string) []string {
-	topic := make([]string, 0, len(args))
-	for _, arg := range args {
-		if !isHelpFlag(arg) {
-			topic = append(topic, arg)
-		}
-	}
-
-	return topic
-}
-
-func main() {
-	command := "deploy"
-
-	args := os.Args[1:]
-	if len(args) == 0 {
-		printOverview(os.Stdout, ".")
-		return
-	}
-
-	hasCommand := !strings.HasPrefix(args[0], "-")
-	if hasCommand {
-		command, args = args[0], args[1:]
-	} else if isHelpFlag(args[0]) {
-		command, args = "help", args[1:]
-	}
-
-	helpRequested := command != "help" && slices.ContainsFunc(args, isHelpFlag)
-
-	var err error
-
-	switch {
-	case command == "help" || command == "-h" || command == "--help":
-		err = writeHelp(os.Stdout, withoutHelpFlags(args))
-	case helpRequested:
-		err = writeHelp(os.Stdout, helpTarget(command, args))
-	default:
-		err = runCommand(command, args)
-	}
-
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "wt-deploy:", err)
-		os.Exit(1)
-	}
 }
 
 // runCommand dispatches one top-level command.
@@ -314,7 +263,7 @@ func runCommand(command string, args []string) error {
 	switch command {
 	case "deploy":
 		return deploy(args)
-	case "bundle", "build":
+	case "build", "bundle":
 		return runBundle(args)
 	case "dev":
 		return runDev(args)
@@ -356,5 +305,52 @@ func runCommand(command string, args []string) error {
 		return runCompletion(args)
 	default:
 		return fmt.Errorf("unknown command %q", command)
+	}
+}
+
+// withoutHelpFlags drops help flags from a help command's topic arguments.
+func withoutHelpFlags(args []string) []string {
+	topic := make([]string, 0, len(args))
+
+	for _, arg := range args {
+		if !isHelpFlag(arg) {
+			topic = append(topic, arg)
+		}
+	}
+
+	return topic
+}
+
+func main() {
+	args := os.Args[1:]
+	command := "deploy"
+
+	if len(args) == 0 {
+		printOverview(os.Stdout, ".")
+		return
+	}
+
+	if hasCommand := !strings.HasPrefix(args[0], "-"); hasCommand {
+		command, args = args[0], args[1:]
+	} else if isHelpFlag(args[0]) {
+		command, args = "help", args[1:]
+	}
+
+	helpRequested := command != "help" && slices.ContainsFunc(args, isHelpFlag)
+
+	var err error
+
+	switch {
+	case command == "help" || command == "-h" || command == "--help":
+		err = writeHelp(os.Stdout, withoutHelpFlags(args))
+	case helpRequested:
+		err = writeHelp(os.Stdout, helpTarget(command, args))
+	default:
+		err = runCommand(command, args)
+	}
+
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "wt-deploy:", err)
+		os.Exit(1)
 	}
 }
