@@ -221,9 +221,7 @@ func validName(name string) bool {
 
 	for i, r := range name {
 		switch {
-		case r >= 'a' && r <= 'z':
-		case r >= '0' && r <= '9':
-		case r == '-' && i > 0 && i < len(name)-1:
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-' && i > 0 && i < len(name)-1:
 		default:
 			return false
 		}

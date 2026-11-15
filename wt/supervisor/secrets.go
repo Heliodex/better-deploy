@@ -197,10 +197,7 @@ func validateSecretKey(key string) error {
 
 	for i, r := range key {
 		switch {
-		case r >= 'A' && r <= 'Z':
-		case r >= 'a' && r <= 'z':
-		case r == '_':
-		case r >= '0' && r <= '9' && i > 0:
+		case r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z', r == '_', r >= '0' && r <= '9' && i > 0:
 		default:
 			return fmt.Errorf("%w: key %q is not an environment-style identifier", errSecretInvalid, key)
 		}

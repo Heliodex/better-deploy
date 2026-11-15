@@ -105,10 +105,7 @@ func validSecretKey(key string) bool {
 
 	for i, char := range key {
 		switch {
-		case char >= 'a' && char <= 'z':
-		case char >= 'A' && char <= 'Z':
-		case char == '_':
-		case char >= '0' && char <= '9' && i > 0:
+		case char >= 'a' && char <= 'z', char >= 'A' && char <= 'Z', char == '_', char >= '0' && char <= '9' && i > 0:
 		default:
 			return false
 		}

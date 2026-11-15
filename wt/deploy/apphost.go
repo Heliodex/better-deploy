@@ -19,9 +19,7 @@ func applyAppDomain(m *manifest, domain string) {
 	lower := strings.ToLower(host)
 
 	switch {
-	case host == "":
-		m.Host = m.Name + "." + domain
-	case lower == "localhost":
+	case host == "", lower == "localhost":
 		m.Host = m.Name + "." + domain
 	case strings.HasSuffix(lower, ".localhost"):
 		prefix := strings.TrimSuffix(host[:len(host)-len(".localhost")], ".")

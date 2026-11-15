@@ -70,9 +70,7 @@ func (m *cgroupManager) remove(name string) error {
 	err := os.Remove(path)
 
 	switch {
-	case err == nil:
-		return nil
-	case os.IsNotExist(err):
+	case err == nil, os.IsNotExist(err):
 		return nil
 	case errors.Is(err, syscall.ENOTEMPTY):
 		// A filesystem-backed test root keeps its limit files; a real cgroup directory does not.
