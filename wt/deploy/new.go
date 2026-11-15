@@ -113,9 +113,9 @@ func prepareNewDir(display, abs string) (bool, error) {
 		}
 
 		return false, nil
-	default:
-		return false, err
 	}
+
+	return false, err
 }
 
 // printNewSummary shows what was created and the first commands to run.

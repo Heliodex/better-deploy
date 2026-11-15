@@ -445,7 +445,7 @@ func validateTenantConfig(cfg config) error {
 		}
 
 		return nil
-	default:
-		return fmt.Errorf("WT_TENANT_MODE must be %s or %s, got %q", tenantTrusted, tenantUntrusted, cfg.tenantMode)
 	}
+
+	return fmt.Errorf("WT_TENANT_MODE must be %s or %s, got %q", tenantTrusted, tenantUntrusted, cfg.tenantMode)
 }

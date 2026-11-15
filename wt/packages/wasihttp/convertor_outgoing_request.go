@@ -53,9 +53,9 @@ func toWasiMethod(s string) wasi.Method {
 		return wasi.MakeMethodOptions()
 	case http.MethodTrace:
 		return wasi.MakeMethodTrace()
-	default:
-		return wasi.MakeMethodOther(s)
 	}
+
+	return wasi.MakeMethodOther(s)
 }
 
 // newOutgoingHTTPRequest converts an http.Request to a wasi.Request. The body copier stops when the request context is cancelled.

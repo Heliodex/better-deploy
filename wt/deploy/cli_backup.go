@@ -244,7 +244,7 @@ func runBackup(args []string) error {
 		}
 
 		return backupImport(cfg, name, rest[2])
-	default:
-		return fmt.Errorf("unknown backup action %q", action)
 	}
+
+	return fmt.Errorf("unknown backup action %q", action)
 }

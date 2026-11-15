@@ -70,9 +70,9 @@ func auditAction(method, action string) string {
 		return "deploy"
 	case http.MethodDelete:
 		return "delete"
-	default:
-		return method
 	}
+
+	return method
 }
 
 // auditError extracts the error field from a response body.

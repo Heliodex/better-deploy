@@ -37,9 +37,9 @@ func signedBlobURL(t *testing.T, s *supervisor, a *app, method, digest string, m
 	switch method {
 	case "upload":
 		return blobPrefix + "?max=" + strconv.FormatInt(maxBytes, 10) + "&ct=" + contentType + "&" + query
-	default:
-		return blobPrefix + "/" + digest + "?" + query
 	}
+
+	return blobPrefix + "/" + digest + "?" + query
 }
 
 func testBlobSupervisor(t *testing.T) (*supervisor, *app) {

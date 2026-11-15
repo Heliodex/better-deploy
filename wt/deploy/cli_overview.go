@@ -51,9 +51,9 @@ func overviewHint(hasApp, hasHost bool) string {
 		return "run `wt help` for commands; `wt deploy` deploys this app"
 	case hasApp:
 		return "run `wt help` for commands; `wt dev` runs this app locally"
-	default:
-		return "run `wt help` for commands; `wt new --dir PATH` scaffolds an app"
 	}
+
+	return "run `wt help` for commands; `wt new --dir PATH` scaffolds an app"
 }
 
 // printOverview reports the current directory, local app, host and config file for a bare wt call.

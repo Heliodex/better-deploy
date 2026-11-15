@@ -85,9 +85,9 @@ func storedMigrationChecksum(ctx context.Context, tx *sql.Tx, version int) (chec
 		return "", false, nil
 	case err != nil:
 		return "", false, err
-	default:
-		return checksum, true, nil
 	}
+
+	return checksum, true, nil
 }
 
 // applyMigration runs one version in a transaction and reports whether it was newly applied.

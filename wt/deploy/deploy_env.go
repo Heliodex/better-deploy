@@ -112,9 +112,9 @@ func verifyProbe(client clientOptions, supervisorHost, name, appHost, path strin
 		return false, "app status " + info.Status
 	case report.HTTPStatus < 200 || report.HTTPStatus >= 400:
 		return false, routeDetail(report)
-	default:
-		return true, fmt.Sprintf("HTTP %d, app %s", report.HTTPStatus, info.Status)
 	}
+
+	return true, fmt.Sprintf("HTTP %d, app %s", report.HTTPStatus, info.Status)
 }
 
 // verifyDeployment polls the supervisor app status and one public HTTP path until the fresh deployment serves.

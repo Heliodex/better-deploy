@@ -75,9 +75,9 @@ func (m *cgroupManager) remove(name string) error {
 	case errors.Is(err, syscall.ENOTEMPTY):
 		// A filesystem-backed test root keeps its limit files; a real cgroup directory does not.
 		return os.RemoveAll(path)
-	default:
-		return fmt.Errorf("remove cgroup %s: %w", path, err)
 	}
+
+	return fmt.Errorf("remove cgroup %s: %w", path, err)
 }
 
 // close removes every app cgroup under the root, leaving the root itself in place.

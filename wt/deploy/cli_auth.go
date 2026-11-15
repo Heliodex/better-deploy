@@ -100,9 +100,9 @@ func noteHostSource(values clientFlagValues, profileName string, profile filePro
 		}
 
 		return strings.TrimSpace(profile.Host), "config file"
-	default:
-		return "", "none"
 	}
+
+	return "", "none"
 }
 
 // noteProfileSource reports where the selected profile came from, when one is selected.
@@ -114,9 +114,9 @@ func noteProfileSource(values clientFlagValues, cfg fileConfig) string {
 		return "environment"
 	case strings.TrimSpace(cfg.Profile) != "":
 		return "config file"
-	default:
-		return ""
 	}
+
+	return ""
 }
 
 // noteTokenSource fills the token and a human-readable source without returning the token itself in status output.
@@ -132,9 +132,9 @@ func noteTokenSource(values clientFlagValues, profileName string, profile filePr
 		}
 
 		return strings.TrimSpace(profile.Token), "config file"
-	default:
-		return "", "none"
 	}
+
+	return "", "none"
 }
 
 // runAuthLogout removes the stored token and leaves the host and other config fields alone.
@@ -449,9 +449,9 @@ func runAuthWithIO(args []string, in io.Reader, out, errOut io.Writer) error {
 		return runAuthLogout(rest, out)
 	case "use":
 		return runAuthUse(rest, out)
-	default:
-		return fmt.Errorf("unknown auth action %q", action)
 	}
+
+	return fmt.Errorf("unknown auth action %q", action)
 }
 
 // runAuth dispatches wt auth with the process standard streams.

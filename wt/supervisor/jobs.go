@@ -253,9 +253,9 @@ func terminalJob(status string) bool {
 	switch status {
 	case jobStatusCanceled, jobStatusDead, jobStatusFailed, jobStatusSucceeded:
 		return true
-	default:
-		return false
 	}
+
+	return false
 }
 
 // pruneTerminalJobs keeps every active job and only the newest terminal jobs, so a steady producer cannot fill the queue with history.
@@ -286,9 +286,9 @@ func validJobStatus(status string) bool {
 	switch status {
 	case jobStatusCanceled, jobStatusDead, jobStatusFailed, jobStatusPending, jobStatusRunning, jobStatusSucceeded:
 		return true
-	default:
-		return false
 	}
+
+	return false
 }
 
 // load reads the queue, dropping invalid entries and requeueing jobs left running by a restart.

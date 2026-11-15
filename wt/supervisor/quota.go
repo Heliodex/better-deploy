@@ -148,9 +148,9 @@ func normaliseDataQuotaMode(mode string) (string, error) {
 		return dataQuotaMonitor, nil
 	case dataQuotaSetquota:
 		return dataQuotaSetquota, nil
-	default:
-		return "", fmt.Errorf("WT_DATA_QUOTA_MODE must be %s or %s, got %q", dataQuotaMonitor, dataQuotaSetquota, mode)
 	}
+
+	return "", fmt.Errorf("WT_DATA_QUOTA_MODE must be %s or %s, got %q", dataQuotaMonitor, dataQuotaSetquota, mode)
 }
 
 // clearAppDataQuota removes an app uid's quota on delete. The uid is never reused, so this is best effort.

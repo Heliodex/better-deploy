@@ -52,9 +52,9 @@ func storageConstraintName(code int) string {
 		return "UNIQUE"
 	case sqlite3.SQLITE_CONSTRAINT_VTAB:
 		return "VIRTUAL TABLE"
-	default:
-		return "CONSTRAINT"
 	}
+
+	return "CONSTRAINT"
 }
 
 // storageSQLiteError maps an extended SQLite result code to an HTTP status and a stable error code.
@@ -74,9 +74,9 @@ func storageSQLiteError(code int) (status int, name, constraint string) {
 		return http.StatusBadRequest, "invalid", ""
 	case sqlite3.SQLITE_READONLY:
 		return http.StatusForbidden, "readonly", ""
-	default:
-		return http.StatusInternalServerError, "internal", ""
 	}
+
+	return http.StatusInternalServerError, "internal", ""
 }
 
 // storageErrorDetails classifies an error from a storage handler. Unknown SQL and runtime failures stay 500; only request validation is 400.

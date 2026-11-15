@@ -71,7 +71,7 @@ func (i authIdentity) canPerformAppAction(r *http.Request, action string) bool {
 		return true
 	case action == "restart", action == "stop", action == "start", action == "maintenance", action == "jobs", strings.HasPrefix(action, "jobs/"), action == "validate":
 		return true
-	default:
-		return false
 	}
+
+	return false
 }

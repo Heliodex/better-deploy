@@ -335,9 +335,9 @@ func statsRequested(r *http.Request) bool {
 	switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get("stats"))) {
 	case "1", "on", "true", "yes":
 		return true
-	default:
-		return false
 	}
+
+	return false
 }
 
 // runMigration applies one user version with the host-wide migration timeout.

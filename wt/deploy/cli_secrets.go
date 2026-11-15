@@ -250,7 +250,7 @@ func runSecrets(args []string) error {
 		return runSecretsSet(cfg, name, rest[2:])
 	case "delete":
 		return runSecretsDelete(cfg, name, rest[2:])
-	default:
-		return fmt.Errorf("unknown secrets action %q", action)
 	}
+
+	return fmt.Errorf("unknown secrets action %q", action)
 }

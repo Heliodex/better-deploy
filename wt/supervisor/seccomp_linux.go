@@ -76,9 +76,9 @@ func seccompArch() (uint32, error) {
 		return unix.AUDIT_ARCH_X86_64, nil
 	case "arm64":
 		return unix.AUDIT_ARCH_AARCH64, nil
-	default:
-		return 0, fmt.Errorf("seccomp is not supported on %s", runtime.GOARCH)
 	}
+
+	return 0, fmt.Errorf("seccomp is not supported on %s", runtime.GOARCH)
 }
 
 // seccompFilter builds a classic BPF program that kills a foreign ABI, rejects x32 syscalls on amd64, denies replacing the filter through prctl, then returns EPERM for each denied syscall and allows everything else.

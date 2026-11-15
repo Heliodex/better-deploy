@@ -91,9 +91,9 @@ func storageInternalMutation(action sqlite.AuthorizerActionCode, arg1, arg2 stri
 		return isStorageMigrationsTable(arg2)
 	case sqlite.AuthInsert, sqlite.AuthUpdate, sqlite.AuthDelete, sqlite.AuthCreateTable, sqlite.AuthCreateTempTable, sqlite.AuthDropTable, sqlite.AuthDropTempTable, sqlite.AuthCreateView, sqlite.AuthCreateTempView, sqlite.AuthDropView, sqlite.AuthDropTempView, sqlite.AuthCreateVTable, sqlite.AuthDropVTable, sqlite.AuthReindex, sqlite.AuthAnalyze:
 		return isStorageMigrationsTable(arg1)
-	default:
-		return false
 	}
+
+	return false
 }
 
 // storageAuthoriser is the per-connection policy. It denies actions that can reach outside the app database, and in read-only mode it denies every write and schema change.

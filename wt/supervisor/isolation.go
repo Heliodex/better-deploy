@@ -67,9 +67,9 @@ func ensureAppReadable(root string) error {
 			}
 
 			return os.Chmod(path, perm)
-		default:
-			return nil
 		}
+
+		return nil
 	})
 }
 

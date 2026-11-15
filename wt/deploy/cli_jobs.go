@@ -438,7 +438,7 @@ func runJobs(args []string) error {
 		return jobsEnqueue(cfg, name, rest[2:])
 	case "cancel", "retry":
 		return jobsAction(cfg, name, action, rest[2:])
-	default:
-		return fmt.Errorf("unknown jobs action %q", action)
 	}
+
+	return fmt.Errorf("unknown jobs action %q", action)
 }

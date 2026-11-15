@@ -196,7 +196,7 @@ func runBlobs(args []string) error {
 		return runBlobsDelete(cfg, name, rest[2:])
 	case "gc":
 		return runBlobsGC(cfg, name, rest[2:])
-	default:
-		return fmt.Errorf("unknown blobs action %q", action)
 	}
+
+	return fmt.Errorf("unknown blobs action %q", action)
 }

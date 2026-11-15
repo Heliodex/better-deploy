@@ -22,9 +22,9 @@ func envBool(key string, fallback bool) bool {
 		return true
 	case "0", "false", "no", "off":
 		return false
-	default:
-		return fallback
 	}
+
+	return fallback
 }
 
 // envInt64 reads a positive integer from the environment, keeping the fallback for invalid values.

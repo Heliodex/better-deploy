@@ -176,7 +176,7 @@ func errorString(code wasi.ErrorCode) string {
 		return optionErrorString("HTTP response content coding", code.HttpResponseContentCoding())
 	case wasi.ErrorCodeInternalError:
 		return optionErrorString("internal error", code.InternalError())
-	default:
-		return fmt.Sprintf("unknown error code: %d", code.Tag())
 	}
+
+	return fmt.Sprintf("unknown error code: %d", code.Tag())
 }

@@ -115,9 +115,9 @@ func (a *app) statusLocked() string {
 		}
 
 		return "unhealthy"
-	default:
-		return "stopped"
 	}
+
+	return "stopped"
 }
 
 // handleHealthz is the liveness probe: it stays 200 while the process can serve HTTP at all.

@@ -122,7 +122,7 @@ func storageValueSize(value any) int {
 		return 32
 	case nil:
 		return 4
-	default:
-		return 8
 	}
+
+	return 8
 }

@@ -23,9 +23,9 @@ func boolValue(value any) (bool, error) {
 			return false, nil
 		case 1:
 			return true, nil
-		default:
-			return false, fmt.Errorf("cannot convert %d to bool", value)
 		}
+
+		return false, fmt.Errorf("cannot convert %d to bool", value)
 	case string:
 		return strconv.ParseBool(value)
 	default:
@@ -121,9 +121,9 @@ func encodeParam(arg any) any {
 		return int64(value)
 	case uint32:
 		return int64(value)
-	default:
-		return arg
 	}
+
+	return arg
 }
 
 // encodeParams applies encodeParam to every argument, returning nil for an empty list.

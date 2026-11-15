@@ -97,9 +97,9 @@ func listenerFile(listener net.Listener) (*os.File, error) {
 		return value.File()
 	case *net.UnixListener:
 		return value.File()
-	default:
-		return nil, fmt.Errorf("unsupported listener %T", listener)
 	}
+
+	return nil, fmt.Errorf("unsupported listener %T", listener)
 }
 
 // handover writes the listener FDs and execs the new supervisor binary.

@@ -149,7 +149,7 @@ func runConfig(args []string) error {
 		return runConfigShow(cfg, name)
 	case "set":
 		return runConfigSet(cfg, name, rest[1:])
-	default:
-		return fmt.Errorf("unknown config action %q", action)
 	}
+
+	return fmt.Errorf("unknown config action %q", action)
 }

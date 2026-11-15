@@ -35,9 +35,9 @@ func methodToString(m wasi.Method) (string, error) {
 		return "PATCH", nil
 	case wasi.MethodOther:
 		return m.Other(), errors.New("unknown http method 'other'")
-	default:
-		return "", errors.New("failed to convert http method")
 	}
+
+	return "", errors.New("failed to convert http method")
 }
 
 // toHTTPHeader appends wasi header pairs to dest, preserving repeated fields.

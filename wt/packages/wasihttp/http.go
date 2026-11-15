@@ -124,9 +124,9 @@ func toWasiHeaders(headers http.Header) (*wasi.Fields, error) {
 				return nil, fmt.Errorf("failed to set forbidden header key %s", key)
 			case wasi.HeaderErrorImmutable:
 				return nil, errors.New("failed to set header on immutable header fields")
-			default:
-				return nil, fmt.Errorf("error setting header %s", key)
 			}
+
+			return nil, fmt.Errorf("error setting header %s", key)
 		}
 	}
 

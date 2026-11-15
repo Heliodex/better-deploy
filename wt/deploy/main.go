@@ -303,9 +303,9 @@ func runCommand(command string, args []string) error {
 		return runOpen(args)
 	case "completion":
 		return runCompletion(args)
-	default:
-		return fmt.Errorf("unknown command %q", command)
 	}
+
+	return fmt.Errorf("unknown command %q", command)
 }
 
 // withoutHelpFlags drops help flags from a help command's topic arguments.

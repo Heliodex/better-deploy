@@ -550,9 +550,9 @@ func inlineCompatRefs(docs map[string]map[string]any, node any, stack []string) 
 		}
 
 		return inlineCompatRefs(docs, target, append(stack, ref))
-	default:
-		return node, nil
 	}
+
+	return node, nil
 }
 
 // compatDocs compares baseline and regenerated schema documents file by file.

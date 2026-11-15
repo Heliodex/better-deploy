@@ -81,7 +81,7 @@ func (s *storageServer) maintenance(ctx context.Context, app, op string) (string
 		}
 
 		return strings.Join(results, "\n"), nil
-	default:
-		return "", fmt.Errorf("%w: unknown maintenance op %q; use one of %s", errStorageInvalid, op, storageMaintenanceOps)
 	}
+
+	return "", fmt.Errorf("%w: unknown maintenance op %q; use one of %s", errStorageInvalid, op, storageMaintenanceOps)
 }

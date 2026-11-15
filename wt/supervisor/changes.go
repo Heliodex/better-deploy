@@ -178,9 +178,9 @@ func collectRowChange(data sqlite.SQLitePreUpdateData, budget int) (rowChange, i
 		change.New = newValues
 
 		return change, oldSize + newSize, nil
-	default:
-		return rowChange{}, 0, fmt.Errorf("unknown pre-update operation %d", data.Op)
 	}
+
+	return rowChange{}, 0, fmt.Errorf("unknown pre-update operation %d", data.Op)
 }
 
 // add appends a change while the count and byte budgets allow, counting anything larger as omitted.

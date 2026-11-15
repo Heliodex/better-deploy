@@ -203,7 +203,7 @@ func runDB(args []string) error {
 		return runDBQuery(cfg, name, actionArgs)
 	case "exec":
 		return runDBExec(cfg, name, actionArgs)
-	default:
-		return fmt.Errorf("unknown db action %q", action)
 	}
+
+	return fmt.Errorf("unknown db action %q", action)
 }

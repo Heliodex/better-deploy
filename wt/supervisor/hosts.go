@@ -56,9 +56,9 @@ func hostPatternsOverlap(a, b string) bool {
 		return hostMatchesPattern(b, a)
 	case bWildcard:
 		return hostMatchesPattern(a, b)
-	default:
-		return false
 	}
+
+	return false
 }
 
 // isReservedHostName reports names that belong to the supervisor or the local machine rather than an app.

@@ -256,9 +256,9 @@ func validateRole(role string) error {
 	switch role {
 	case roleAdmin, roleDeploy, roleRead:
 		return nil
-	default:
-		return fmt.Errorf("role must be %s, %s or %s", roleAdmin, roleDeploy, roleRead)
 	}
+
+	return fmt.Errorf("role must be %s, %s or %s", roleAdmin, roleDeploy, roleRead)
 }
 
 // create stores a new token and returns its bearer value once.
