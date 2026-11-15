@@ -85,12 +85,12 @@ func artifactSupervisorWithCache(t *testing.T, compiler, cache string) *supervis
 	t.Helper()
 
 	return &supervisor{cfg: config{
-		stateDir:         t.TempDir(),
-		cacheDir:         cache,
-		cacheMaxBytes:    defaultCacheMaxBytes,
-		wasmtime:         compiler,
+		stateDir: t.TempDir(),
+		cacheDir: cache,
+		cacheMaxBytes: defaultCacheMaxBytes,
+		wasmtime: compiler,
 		wasmtimeCompiler: compiler,
-		wasmtimeTarget:   "x86_64-test",
+		wasmtimeTarget: "x86_64-test",
 	}}
 }
 
@@ -215,10 +215,10 @@ func TestEnsureArtifactKeepsMatchingArtifact(t *testing.T) {
 
 func TestRuntimeRelease(t *testing.T) {
 	cases := map[string]string{
-		"wasmtime 50.0.0":                        "50.0.0",
-		"wasmtime-cli 51.2.3":                    "51.2.3",
+		"wasmtime 50.0.0": "50.0.0",
+		"wasmtime-cli 51.2.3": "51.2.3",
 		"wasmtime 50.0.0 (ebe5e8df1 2026-10-20)": "50.0.0",
-		"v50.0.0":                                "50.0.0",
+		"v50.0.0": "50.0.0",
 	}
 	for input, want := range cases {
 		if got := runtimeRelease(input); got != want {
@@ -406,10 +406,10 @@ func TestArtifactMatches(t *testing.T) {
 	current := artifactInfo{Wasmtime: "wasmtime-cli 51.0.0", Target: "x86_64-test", Epoch: true, WasmSHA256: digest}
 
 	cases := []struct {
-		name     string
+		name string
 		recorded artifactInfo
-		current  artifactInfo
-		want     bool
+		current artifactInfo
+		want bool
 	}{
 		{"same", current, current, true},
 		{"older runtime", artifactInfo{Wasmtime: "wasmtime-cli 50.0.0", Target: "x86_64-test", Epoch: true, WasmSHA256: digest}, current, false},

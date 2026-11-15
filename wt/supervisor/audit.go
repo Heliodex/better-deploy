@@ -18,25 +18,25 @@ import (
 )
 
 const (
-	auditMaxBytes      = 16 << 20
-	auditBodyBytes     = 2 << 10
-	auditDefaultLimit  = 200
-	auditMaxLimit      = 1000
+	auditMaxBytes = 16 << 20
+	auditBodyBytes = 2 << 10
+	auditDefaultLimit = 200
+	auditMaxLimit = 1000
 	auditRotatedSuffix = ".1"
 )
 
 // auditEntry is one mutating request. It records the actor from the scoped token, never the token itself.
 type auditEntry struct {
-	Time      time.Time `json:"time"`
-	Actor     string    `json:"actor,omitempty"`
-	Role      string    `json:"role,omitempty"`
-	Action    string    `json:"action"`
-	App       string    `json:"app,omitempty"`
-	Status    int       `json:"status"`
-	OK        bool      `json:"ok"`
-	Error     string    `json:"error,omitempty"`
-	Remote    string    `json:"remote,omitempty"`
-	RequestID string    `json:"requestId,omitempty"`
+	Time time.Time `json:"time"`
+	Actor string `json:"actor,omitempty"`
+	Role string `json:"role,omitempty"`
+	Action string `json:"action"`
+	App string `json:"app,omitempty"`
+	Status int `json:"status"`
+	OK bool `json:"ok"`
+	Error string `json:"error,omitempty"`
+	Remote string `json:"remote,omitempty"`
+	RequestID string `json:"requestId,omitempty"`
 }
 
 type auditResponse struct {
@@ -47,7 +47,7 @@ type auditResponse struct {
 type auditStore struct {
 	path string
 
-	mu   sync.Mutex
+	mu sync.Mutex
 	size int64
 }
 
@@ -171,7 +171,7 @@ type auditWriter struct {
 	http.ResponseWriter
 
 	status int
-	body   bytes.Buffer
+	body bytes.Buffer
 }
 
 func (w *auditWriter) WriteHeader(status int) {
@@ -262,15 +262,15 @@ func (s *supervisor) appendAudit(identity authIdentity, r *http.Request, action,
 	}
 
 	entry := auditEntry{
-		Time:      time.Now().UTC(),
-		Actor:     identity.Name,
-		Role:      identity.Role,
-		Action:    action,
-		App:       app,
-		Status:    status,
-		OK:        status < http.StatusBadRequest,
-		Error:     cause,
-		Remote:    remote,
+		Time: time.Now().UTC(),
+		Actor: identity.Name,
+		Role: identity.Role,
+		Action: action,
+		App: app,
+		Status: status,
+		OK: status < http.StatusBadRequest,
+		Error: cause,
+		Remote: remote,
 		RequestID: r.Header.Get(requestIDHeader),
 	}
 	if err := s.audit.append(entry); err != nil {

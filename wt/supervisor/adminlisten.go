@@ -46,7 +46,9 @@ func listenAdmin(network, address string) (net.Listener, func(), error) {
 			return nil, nil, err
 		}
 
-		return listener, func() { _ = listener.Close() }, nil
+		return listener, func() {
+			_ = listener.Close()
+		}, nil
 	}
 
 	if err := os.MkdirAll(filepath.Dir(address), 0o750); err != nil {

@@ -21,10 +21,10 @@ import (
 )
 
 const (
-	handoverEnv  = "WT_SUPERVISOR_HANDOVER"
+	handoverEnv = "WT_SUPERVISOR_HANDOVER"
 	storageFDEnv = "WT_SUPERVISOR_STORAGE_FD"
-	fetchFDEnv   = "WT_SUPERVISOR_FETCH_FD"
-	runnerFDEnv  = "WT_SUPERVISOR_RUNNER_FD"
+	fetchFDEnv = "WT_SUPERVISOR_FETCH_FD"
+	runnerFDEnv = "WT_SUPERVISOR_RUNNER_FD"
 )
 
 // inheritedListener rebuilds a listener from an FD passed by a handover.

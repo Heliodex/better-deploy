@@ -14,8 +14,8 @@ import (
 
 type devConfig struct {
 	dir, workspace, wasmtime, target, supervisor, appHost string
-	port, adminPort                                       int
-	skipBuild, skipCompile, watch, vite                   bool
+	port, adminPort int
+	skipBuild, skipCompile, watch, vite bool
 }
 
 // resolveDevConfig loads dev flags, applies WT_DEV_PORT and derives the admin port from the app port.
@@ -78,18 +78,18 @@ func resolveDevConfig(args []string) (*devConfig, error) {
 	}
 
 	return &devConfig{
-		dir:         *dir,
-		workspace:   *workspace,
-		port:        resolved,
-		adminPort:   resolvedAdmin,
-		wasmtime:    *wasmtime,
-		target:      *target,
-		supervisor:  *supervisor,
-		appHost:     *appHost,
-		skipBuild:   *skipBuild,
+		dir: *dir,
+		workspace: *workspace,
+		port: resolved,
+		adminPort: resolvedAdmin,
+		wasmtime: *wasmtime,
+		target: *target,
+		supervisor: *supervisor,
+		appHost: *appHost,
+		skipBuild: *skipBuild,
 		skipCompile: *skipCompile,
-		watch:       *watch,
-		vite:        *vite,
+		watch: *watch,
+		vite: *vite,
 	}, nil
 }
 
@@ -237,15 +237,15 @@ func deployDevApps(cfg *devConfig, dirs []string, deployAddr, target string, vit
 		}
 
 		dcfg := &deployConfig{
-			dir:         dir,
-			host:        "http://" + deployAddr,
-			token:       "dev",
-			wasmtime:    cfg.wasmtime,
-			target:      target,
-			appHost:     host,
-			skipBuild:   cfg.skipBuild,
+			dir: dir,
+			host: "http://" + deployAddr,
+			token: "dev",
+			wasmtime: cfg.wasmtime,
+			target: target,
+			appHost: host,
+			skipBuild: cfg.skipBuild,
 			skipCompile: cfg.skipCompile,
-			overlayEnv:  true,
+			overlayEnv: true,
 		}
 		if vite != nil && dir == vite.appDir {
 			dcfg.buildComponentCommand = vite.build
@@ -292,7 +292,9 @@ func runViteDev(cfg *devConfig, vite *viteDev, viteDCfg *deployConfig, stop <-ch
 		return err
 	}
 
-	defer func() { signalViteGroup(viteCmd, syscall.SIGTERM) }()
+	defer func() {
+		signalViteGroup(viteCmd, syscall.SIGTERM)
+	}()
 
 	fmt.Printf("dev: vite at http://127.0.0.1:%d/ (HMR)\n", vite.port)
 
@@ -303,7 +305,9 @@ func runViteDev(cfg *devConfig, vite *viteDev, viteDCfg *deployConfig, stop <-ch
 	}
 
 	viteDone := make(chan error, 1)
-	go func() { viteDone <- viteCmd.Wait() }()
+	go func() {
+		viteDone <- viteCmd.Wait()
+	}()
 
 	select {
 	case <-stop:

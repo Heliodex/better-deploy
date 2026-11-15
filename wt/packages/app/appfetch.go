@@ -28,11 +28,11 @@ const (
 	// RequestIDHeader carries a request identifier across proxied and outgoing requests.
 	RequestIDHeader = "X-Request-Id"
 
-	appFetchURLEnv  = "WT_APP_FETCH_URL"
-	appNameEnv      = "WT_APP_NAME"
-	appTokenEnv     = "WT_APP_TOKEN" //nolint:gosec // Environment variable name, not a credential.
+	appFetchURLEnv = "WT_APP_FETCH_URL"
+	appNameEnv = "WT_APP_NAME"
+	appTokenEnv = "WT_APP_TOKEN" //nolint:gosec // Environment variable name, not a credential.
 	appURLEnvPrefix = "WT_APP_URL_"
-	appCallMaxSkew  = 5 * time.Minute
+	appCallMaxSkew = 5 * time.Minute
 	// maxAppCallBody matches the supervisor's app-fetch body cap.
 	maxAppCallBody = 8 << 20
 )

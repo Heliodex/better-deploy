@@ -21,16 +21,16 @@ import (
 
 const (
 	defaultRequestTimeout = 10 * time.Second
-	metadataTTL           = 10 * time.Minute
-	clockSkew             = 60 * time.Second
+	metadataTTL = 10 * time.Minute
+	clockSkew = 60 * time.Second
 )
 
 // Config describes one OAuth client. HTTPClient must be a wasi:http client in a component; tests can pass a normal client.
 type Config struct {
 	Issuer, ClientID, ClientSecret string
-	Scopes                         []string
-	HTTPClient                     *http.Client
-	Timeout                        time.Duration
+	Scopes []string
+	HTTPClient *http.Client
+	Timeout time.Duration
 }
 
 // Provider is the subset of the discovery document the client uses.
@@ -38,24 +38,24 @@ type Provider struct {
 	Issuer string `json:"issuer"`
 	// AuthorisationEndpoint keeps the protocol's US-spelled JSON key.
 	AuthorisationEndpoint string `json:"authorization_endpoint"`
-	TokenEndpoint         string `json:"token_endpoint"`
-	UserinfoEndpoint      string `json:"userinfo_endpoint"`
-	EndSessionEndpoint    string `json:"end_session_endpoint"`
-	JWKSUri               string `json:"jwks_uri"`
+	TokenEndpoint string `json:"token_endpoint"`
+	UserinfoEndpoint string `json:"userinfo_endpoint"`
+	EndSessionEndpoint string `json:"end_session_endpoint"`
+	JWKSUri string `json:"jwks_uri"`
 }
 
 // Tokens is the token endpoint response.
 type Tokens struct {
 	AccessToken, RefreshToken, IDToken, TokenType, Scope string
-	ExpiresIn                                            int64
-	Error, ErrorDescription                              string
+	ExpiresIn int64
+	Error, ErrorDescription string
 }
 
 // Identity is the user information from an ID token or UserInfo response.
 type Identity struct {
 	Subject, Name, Email, Username, Picture, Zoneinfo, Issuer string
-	Audience                                                  []string
-	ExpiresAt, IssuedAt                                       time.Time
+	Audience []string
+	ExpiresAt, IssuedAt time.Time
 }
 
 // Merge fills missing profile fields from a UserInfo response. A different subject is an error.
@@ -69,10 +69,10 @@ func (i *Identity) Merge(other Identity) error {
 	}
 
 	for target, value := range map[*string]string{
-		&i.Name:     other.Name,
-		&i.Email:    other.Email,
+		&i.Name: other.Name,
+		&i.Email: other.Email,
 		&i.Username: other.Username,
-		&i.Picture:  other.Picture,
+		&i.Picture: other.Picture,
 		&i.Zoneinfo: other.Zoneinfo,
 	} {
 		if *target == "" {
@@ -101,17 +101,17 @@ func (i *Identity) Merge(other Identity) error {
 
 // claims is the common claim set from an ID token or UserInfo response.
 type claims struct {
-	Issuer            string `json:"iss"`
-	Audience          any    `json:"aud"`
-	Expires           int64  `json:"exp"`
-	Issued            int64  `json:"iat"`
-	Nonce             string `json:"nonce"`
-	Subject           string `json:"sub"`
-	Name              string `json:"name"`
-	Email             string `json:"email"`
+	Issuer string `json:"iss"`
+	Audience any `json:"aud"`
+	Expires int64 `json:"exp"`
+	Issued int64 `json:"iat"`
+	Nonce string `json:"nonce"`
+	Subject string `json:"sub"`
+	Name string `json:"name"`
+	Email string `json:"email"`
 	PreferredUsername string `json:"preferred_username"`
-	Picture           string `json:"picture"`
-	Zoneinfo          string `json:"zoneinfo"`
+	Picture string `json:"picture"`
+	Zoneinfo string `json:"zoneinfo"`
 }
 
 // identity converts claims into the shared profile shape and fills the username from the email when needed.
@@ -130,16 +130,16 @@ func (c claims) identity() Identity {
 	}
 
 	identity := Identity{
-		Subject:   strings.TrimSpace(c.Subject),
-		Name:      name,
-		Email:     strings.TrimSpace(c.Email),
-		Username:  username,
-		Picture:   strings.TrimSpace(c.Picture),
-		Zoneinfo:  strings.TrimSpace(c.Zoneinfo),
-		Issuer:    strings.TrimSpace(c.Issuer),
-		Audience:  audienceStrings(c.Audience),
+		Subject: strings.TrimSpace(c.Subject),
+		Name: name,
+		Email: strings.TrimSpace(c.Email),
+		Username: username,
+		Picture: strings.TrimSpace(c.Picture),
+		Zoneinfo: strings.TrimSpace(c.Zoneinfo),
+		Issuer: strings.TrimSpace(c.Issuer),
+		Audience: audienceStrings(c.Audience),
 		ExpiresAt: unixTime(c.Expires),
-		IssuedAt:  unixTime(c.Issued),
+		IssuedAt: unixTime(c.Issued),
 	}
 
 	return identity
@@ -177,15 +177,15 @@ func unixTime(seconds int64) time.Time {
 
 // Client caches discovery metadata and signing keys between requests.
 type Client struct {
-	cfg        Config
+	cfg Config
 	httpClient *http.Client
 
-	mu             sync.Mutex
-	provider       Provider
+	mu sync.Mutex
+	provider Provider
 	providerExpiry time.Time
 
-	keysMu     sync.Mutex
-	keys       map[string]*rsa.PublicKey
+	keysMu sync.Mutex
+	keys map[string]*rsa.PublicKey
 	keysExpiry time.Time
 }
 
@@ -329,7 +329,7 @@ func errorBody(resp *http.Response) error {
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
 
 	var body struct {
-		Error            string `json:"error"`
+		Error string `json:"error"`
 		ErrorDescription string `json:"error_description"`
 	}
 	if err := json.Unmarshal(raw, &body); err == nil && body.Error != "" {
@@ -388,14 +388,14 @@ func (c *Client) AuthoriseURL(ctx context.Context, redirectURI, state, nonce, co
 	}
 
 	params := url.Values{
-		"client_id":             {c.cfg.ClientID},
-		"code_challenge":        {codeChallenge},
+		"client_id": {c.cfg.ClientID},
+		"code_challenge": {codeChallenge},
 		"code_challenge_method": {"S256"},
-		"nonce":                 {nonce},
-		"redirect_uri":          {redirectURI},
-		"response_type":         {"code"},
-		"scope":                 {strings.Join(c.cfg.Scopes, " ")},
-		"state":                 {state},
+		"nonce": {nonce},
+		"redirect_uri": {redirectURI},
+		"response_type": {"code"},
+		"scope": {strings.Join(c.cfg.Scopes, " ")},
+		"state": {state},
 	}
 
 	return provider.AuthorisationEndpoint + "?" + params.Encode(), nil
@@ -409,11 +409,11 @@ func (c *Client) Exchange(ctx context.Context, code, redirectURI, verifier strin
 	}
 
 	form := url.Values{
-		"client_id":     {c.cfg.ClientID},
-		"code":          {code},
+		"client_id": {c.cfg.ClientID},
+		"code": {code},
 		"code_verifier": {verifier},
-		"grant_type":    {"authorization_code"},
-		"redirect_uri":  {redirectURI},
+		"grant_type": {"authorization_code"},
+		"redirect_uri": {redirectURI},
 	}
 
 	username, password := "", ""
@@ -431,13 +431,13 @@ func (c *Client) Exchange(ctx context.Context, code, redirectURI, verifier strin
 	}
 
 	var raw struct {
-		AccessToken      string `json:"access_token"`
-		RefreshToken     string `json:"refresh_token"`
-		IDToken          string `json:"id_token"`
-		TokenType        string `json:"token_type"`
-		Scope            string `json:"scope"`
-		ExpiresIn        int64  `json:"expires_in"`
-		Error            string `json:"error"`
+		AccessToken string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		IDToken string `json:"id_token"`
+		TokenType string `json:"token_type"`
+		Scope string `json:"scope"`
+		ExpiresIn int64 `json:"expires_in"`
+		Error string `json:"error"`
 		ErrorDescription string `json:"error_description"`
 	}
 	if err := decodeJSON(resp, &raw); err != nil {
@@ -453,13 +453,13 @@ func (c *Client) Exchange(ctx context.Context, code, redirectURI, verifier strin
 	}
 
 	return Tokens{
-		AccessToken:      raw.AccessToken,
-		RefreshToken:     raw.RefreshToken,
-		IDToken:          raw.IDToken,
-		TokenType:        raw.TokenType,
-		Scope:            raw.Scope,
-		ExpiresIn:        raw.ExpiresIn,
-		Error:            raw.Error,
+		AccessToken: raw.AccessToken,
+		RefreshToken: raw.RefreshToken,
+		IDToken: raw.IDToken,
+		TokenType: raw.TokenType,
+		Scope: raw.Scope,
+		ExpiresIn: raw.ExpiresIn,
+		Error: raw.Error,
 		ErrorDescription: raw.ErrorDescription,
 	}, nil
 }

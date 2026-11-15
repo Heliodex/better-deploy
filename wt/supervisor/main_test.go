@@ -196,11 +196,11 @@ func TestProxyRewrite(t *testing.T) {
 
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got <- request{
-			host:           r.Host,
-			forwardedHost:  r.Header.Get("X-Forwarded-Host"),
+			host: r.Host,
+			forwardedHost: r.Header.Get("X-Forwarded-Host"),
 			forwardedProto: r.Header.Get("X-Forwarded-Proto"),
-			forwardedFor:   r.Header.Get("X-Forwarded-For"),
-			target:         r.URL.RequestURI(),
+			forwardedFor: r.Header.Get("X-Forwarded-For"),
+			target: r.URL.RequestURI(),
 		}
 
 		_, _ = w.Write([]byte("ok"))
@@ -317,7 +317,7 @@ func TestHandleProxyLogsRequest(t *testing.T) {
 func TestFormatProxyDuration(t *testing.T) {
 	cases := []struct {
 		elapsed time.Duration
-		want    string
+		want string
 	}{
 		{500 * time.Microsecond, "500µs"},
 		{1500 * time.Microsecond, "1.5ms"},
@@ -332,9 +332,9 @@ func TestFormatProxyDuration(t *testing.T) {
 
 func TestFormatAccessLog(t *testing.T) {
 	cases := []struct {
-		method               string
-		status               int
-		elapsed              time.Duration
+		method string
+		status int
+		elapsed time.Duration
 		uri, requestID, want string
 	}{
 		{"GET", 200, 1500 * time.Microsecond, "/hello?x=1", "", "GET 200 1.5ms /hello?x=1"},
@@ -427,7 +427,9 @@ func TestShutdownServerWaitsForInflightHandler(t *testing.T) {
 		<-release
 		w.WriteHeader(http.StatusNoContent)
 	})}
-	go func() { _ = server.Serve(listener) }()
+	go func() {
+		_ = server.Serve(listener)
+	}()
 
 	response := make(chan error, 1)
 
@@ -443,7 +445,9 @@ func TestShutdownServerWaitsForInflightHandler(t *testing.T) {
 	<-started
 
 	shutdown := make(chan error, 1)
-	go func() { shutdown <- shutdownServer(server, 2*time.Second) }()
+	go func() {
+		shutdown <- shutdownServer(server, 2*time.Second)
+	}()
 
 	select {
 	case err := <-shutdown:
@@ -475,8 +479,8 @@ func TestHandleRestartRestartsSchedule(t *testing.T) {
 
 	a, err := s.spawn("demo", dir, appConfig{
 		Health: "/",
-		Host:   "demo.localhost",
-		Name:   "demo",
+		Host: "demo.localhost",
+		Name: "demo",
 		Schedule: []scheduleConfig{
 			{Path: "/tick", Every: "1s"},
 		},
@@ -611,13 +615,13 @@ func TestHandlerLetsAppHostsOwnAdminPaths(t *testing.T) {
 
 func TestLoopbackListen(t *testing.T) {
 	cases := map[string]bool{
-		"127.0.0.1:8080":   true,
-		"localhost:8080":   true,
-		"[::1]:8080":       true,
-		"0.0.0.0:8080":     false,
-		":8080":            false,
+		"127.0.0.1:8080": true,
+		"localhost:8080": true,
+		"[::1]:8080": true,
+		"0.0.0.0:8080": false,
+		":8080": false,
 		"example.com:8080": false,
-		"not-an-address":   false,
+		"not-an-address": false,
 	}
 	for addr, want := range cases {
 		if got := loopbackListen(addr); got != want {

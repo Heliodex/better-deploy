@@ -15,22 +15,22 @@ type helpFlag struct {
 
 // helpCommand describes one command or subcommand for per-command help.
 type helpCommand struct {
-	name     string
-	summary  string
-	usage    []string
-	details  []string
-	flags    []helpFlag
+	name string
+	summary string
+	usage []string
+	details []string
+	flags []helpFlag
 	examples []string
-	subs     []helpCommand
-	client   bool
+	subs []helpCommand
+	client bool
 }
 
 // helpCommands is the help registry in the order shown by wt help.
 var helpCommands = []helpCommand{
 	{
-		name:    "apps",
+		name: "apps",
 		summary: "list deployed apps",
-		usage:   []string{"wt apps [flags]"},
+		usage: []string{"wt apps [flags]"},
 		details: []string{"Prints a table of apps with their host, status, readiness, PID and digest. --json returns the raw API response."},
 		examples: []string{
 			"wt apps",
@@ -39,9 +39,9 @@ var helpCommands = []helpCommand{
 		client: true,
 	},
 	{
-		name:    "logs",
+		name: "logs",
 		summary: "print or follow an app's logs",
-		usage:   []string{"wt logs <app> [flags]"},
+		usage: []string{"wt logs <app> [flags]"},
 		details: []string{"Without --follow the supervisor returns one page of entries. --follow consumes its SSE stream until interrupted."},
 		flags: []helpFlag{
 			{"--tail", "N", "number of entries to fetch (default 200)"},
@@ -57,30 +57,30 @@ var helpCommands = []helpCommand{
 		client: true,
 	},
 	{
-		name:    "jobs",
+		name: "jobs",
 		summary: "inspect and manage durable jobs",
-		usage:   []string{"wt jobs <app> <action> [flags]"},
-		client:  true,
+		usage: []string{"wt jobs <app> <action> [flags]"},
+		client: true,
 		subs: []helpCommand{
 			{
-				name:    "list",
+				name: "list",
 				summary: "list an app's jobs",
-				usage:   []string{"wt jobs <app> list [flags]"},
+				usage: []string{"wt jobs <app> list [flags]"},
 				flags: []helpFlag{
 					{"--status", "STATUS", "pending, running, succeeded, failed, dead or canceled"},
 				},
 				examples: []string{"wt jobs ticker list --status dead"},
 			},
 			{
-				name:     "show",
-				summary:  "show one job",
-				usage:    []string{"wt jobs <app> show <id> [flags]"},
+				name: "show",
+				summary: "show one job",
+				usage: []string{"wt jobs <app> show <id> [flags]"},
 				examples: []string{"wt jobs ticker show <id>"},
 			},
 			{
-				name:    "enqueue",
+				name: "enqueue",
 				summary: "create a job",
-				usage:   []string{"wt jobs <app> enqueue [flags]"},
+				usage: []string{"wt jobs <app> enqueue [flags]"},
 				flags: []helpFlag{
 					{"--path", helpPathValue, "target path, for example /jobs/email (required)"},
 					{"--method", "METHOD", "HTTP method (default POST)"},
@@ -94,41 +94,41 @@ var helpCommands = []helpCommand{
 				examples: []string{`wt jobs ticker enqueue --path /jobs/beat --body '{"slot":1}' --max-attempts 5`},
 			},
 			{
-				name:     "cancel",
-				summary:  "cancel a pending job",
-				usage:    []string{"wt jobs <app> cancel <id> [flags]"},
+				name: "cancel",
+				summary: "cancel a pending job",
+				usage: []string{"wt jobs <app> cancel <id> [flags]"},
 				examples: []string{"wt jobs ticker cancel <id>"},
 			},
 			{
-				name:     "retry",
-				summary:  "retry a failed or dead job",
-				usage:    []string{"wt jobs <app> retry <id> [flags]"},
+				name: "retry",
+				summary: "retry a failed or dead job",
+				usage: []string{"wt jobs <app> retry <id> [flags]"},
 				examples: []string{"wt jobs ticker retry <id>"},
 			},
 		},
 	},
 	{
-		name:    "blobs",
+		name: "blobs",
 		summary: "inspect and clean up an app's blobs",
-		usage:   []string{"wt blobs <app> <action> [flags]"},
-		client:  true,
+		usage: []string{"wt blobs <app> <action> [flags]"},
+		client: true,
 		subs: []helpCommand{
 			{
-				name:     "list",
-				summary:  "list stored blobs",
-				usage:    []string{"wt blobs <app> list [flags]"},
+				name: "list",
+				summary: "list stored blobs",
+				usage: []string{"wt blobs <app> list [flags]"},
 				examples: []string{"wt blobs blobbox list"},
 			},
 			{
-				name:     "delete",
-				summary:  "remove one blob by digest",
-				usage:    []string{"wt blobs <app> delete <digest> [flags]"},
+				name: "delete",
+				summary: "remove one blob by digest",
+				usage: []string{"wt blobs <app> delete <digest> [flags]"},
 				examples: []string{"wt blobs blobbox delete <digest>"},
 			},
 			{
-				name:    "gc",
+				name: "gc",
 				summary: "remove old blobs, or preview the removal",
-				usage:   []string{"wt blobs <app> gc [flags]"},
+				usage: []string{"wt blobs <app> gc [flags]"},
 				details: []string{"The cutoff is explicit. Pass --keep for every digest the app still references, or run --dry-run first."},
 				flags: []helpFlag{
 					{"--older-than", "DURATION", "minimum age, for example 720h (required)"},
@@ -143,15 +143,15 @@ var helpCommands = []helpCommand{
 		},
 	},
 	{
-		name:    "db",
+		name: "db",
 		summary: "run one-off SQL on an app's remote database",
-		usage:   []string{"wt db <app> <action> [flags]"},
-		client:  true,
+		usage: []string{"wt db <app> <action> [flags]"},
+		client: true,
 		subs: []helpCommand{
 			{
-				name:    "query",
+				name: "query",
 				summary: "run a read-only SQL statement",
-				usage:   []string{"wt db <app> query <sql> [flags]", "wt db <app> query --sql <sql> [flags]"},
+				usage: []string{"wt db <app> query <sql> [flags]", "wt db <app> query --sql <sql> [flags]"},
 				details: []string{"Returns columns and rows from the app's SQLite database on the supervisor."},
 				flags: []helpFlag{
 					{"--sql", "SQL", "statement to run; can also follow the action as arguments"},
@@ -161,9 +161,9 @@ var helpCommands = []helpCommand{
 				examples: []string{"wt db ire query 'select count(*) from user'", "wt db ire query --sql 'select * from membership where active = 0'"},
 			},
 			{
-				name:    "exec",
+				name: "exec",
 				summary: "run a write SQL statement",
-				usage:   []string{"wt db <app> exec <sql> [flags]", "wt db <app> exec --sql <sql> [flags]"},
+				usage: []string{"wt db <app> exec <sql> [flags]", "wt db <app> exec --sql <sql> [flags]"},
 				details: []string{"Runs one statement that changes the app's SQLite database on the supervisor. Use with care."},
 				flags: []helpFlag{
 					{"--sql", "SQL", "statement to run; can also follow the action as arguments"},
@@ -174,22 +174,22 @@ var helpCommands = []helpCommand{
 		},
 	},
 	{
-		name:    "secrets",
+		name: "secrets",
 		summary: "list, set and delete an app's secrets",
-		usage:   []string{"wt secrets <app> <action> [flags]"},
+		usage: []string{"wt secrets <app> <action> [flags]"},
 		details: []string{"Values are never printed. A change that the supervisor cannot apply live reports that a restart is required."},
-		client:  true,
+		client: true,
 		subs: []helpCommand{
 			{
-				name:     "list",
-				summary:  "print secret key names",
-				usage:    []string{"wt secrets <app> list [flags]"},
+				name: "list",
+				summary: "print secret key names",
+				usage: []string{"wt secrets <app> list [flags]"},
 				examples: []string{"wt secrets passport list"},
 			},
 			{
-				name:    "set",
+				name: "set",
 				summary: "write one secret from stdin or a file",
-				usage:   []string{"wt secrets <app> set <KEY> [flags]"},
+				usage: []string{"wt secrets <app> set <KEY> [flags]"},
 				details: []string{"The value is read from stdin unless --file is given. One trailing newline is trimmed and the value is capped at 64 KiB."},
 				flags: []helpFlag{
 					{"--file", helpPathValue, "read the value from a file instead of stdin"},
@@ -197,28 +197,28 @@ var helpCommands = []helpCommand{
 				examples: []string{"printf 'client-secret' | wt secrets passport set OAUTH_CLIENT_SECRET"},
 			},
 			{
-				name:     "delete",
-				summary:  "remove one secret",
-				usage:    []string{"wt secrets <app> delete <KEY> [flags]"},
+				name: "delete",
+				summary: "remove one secret",
+				usage: []string{"wt secrets <app> delete <KEY> [flags]"},
 				examples: []string{"wt secrets passport delete OAUTH_CLIENT_SECRET"},
 			},
 		},
 	},
 	{
-		name:    "route",
+		name: "route",
 		summary: "check that an app host is routed",
-		usage:   []string{"wt route check <app> [flags]"},
+		usage: []string{"wt route check <app> [flags]"},
 		flags: []helpFlag{
 			{"--path", helpPathValue, "path to request (default /healthz)"},
 			{"--timeout", "DURATION", "probe timeout (default 8s)"},
 		},
 		examples: []string{"wt route check passport"},
-		client:   true,
+		client: true,
 	},
 	{
-		name:    "doctor",
+		name: "doctor",
 		summary: "report the supervisor runtime and optionally one app's route",
-		usage:   []string{"wt doctor [app] [flags]"},
+		usage: []string{"wt doctor [app] [flags]"},
 		flags: []helpFlag{
 			{"--path", helpPathValue, "path to request (default /healthz)"},
 			{"--timeout", "DURATION", "probe timeout (default 8s)"},
@@ -230,9 +230,9 @@ var helpCommands = []helpCommand{
 		client: true,
 	},
 	{
-		name:    "auth",
+		name: "auth",
 		summary: "save, switch and inspect supervisor credentials",
-		usage:   []string{"wt auth <login|status|logout|use> [flags]"},
+		usage: []string{"wt auth <login|status|logout|use> [flags]"},
 		details: []string{"Credentials are stored in the shared config file with 0600 permissions. Use a scoped deploy token, not the admin bootstrap token. Profiles keep local and remote hosts, their tokens and app domains side by side."},
 		examples: []string{
 			"wt auth login --profile remote --host https://wt.example.com --app-domain example.com",
@@ -243,9 +243,9 @@ var helpCommands = []helpCommand{
 		},
 		subs: []helpCommand{
 			{
-				name:    "login",
+				name: "login",
 				summary: "save a supervisor URL and deploy token, optionally in a profile",
-				usage:   []string{"wt auth login [flags]"},
+				usage: []string{"wt auth login [flags]"},
 				details: []string{"The token is read from the terminal without echo or from stdin when piped. It is checked against GET /capabilities before the config is replaced. --profile creates or updates that profile; --app-domain maps <app>.localhost manifest hosts onto this target."},
 				flags: []helpFlag{
 					{"--host", "URL", "supervisor URL (default WT_DEPLOY_HOST or the selected profile)"},
@@ -260,9 +260,9 @@ var helpCommands = []helpCommand{
 				},
 			},
 			{
-				name:    "status",
+				name: "status",
 				summary: "show where the profile, host and token come from",
-				usage:   []string{"wt auth status [flags]"},
+				usage: []string{"wt auth status [flags]"},
 				details: []string{"Never prints the token. --check contacts the supervisor and reports whether it accepts the current credentials."},
 				flags: []helpFlag{
 					{"--host", "URL", "supervisor URL override"},
@@ -277,9 +277,9 @@ var helpCommands = []helpCommand{
 				},
 			},
 			{
-				name:    "logout",
+				name: "logout",
 				summary: "remove the saved token from a profile",
-				usage:   []string{"wt auth logout [flags]"},
+				usage: []string{"wt auth logout [flags]"},
 				details: []string{"Leaves the supervisor URL, app domain and unrelated config fields in place. Without --profile, the active profile is used."},
 				flags: []helpFlag{
 					{"--profile", "NAME", "profile to log out of"},
@@ -291,9 +291,9 @@ var helpCommands = []helpCommand{
 				},
 			},
 			{
-				name:    "use",
+				name: "use",
 				summary: "select the default profile",
-				usage:   []string{"wt auth use <profile>"},
+				usage: []string{"wt auth use <profile>"},
 				details: []string{"Sets the profile commands use when --profile or WT_PROFILE is not given."},
 				examples: []string{
 					"wt auth use local",
@@ -303,30 +303,30 @@ var helpCommands = []helpCommand{
 		},
 	},
 	{
-		name:    "runtime",
+		name: "runtime",
 		summary: "compare the local and supervisor wasmtime releases",
-		usage:   []string{"wt runtime [flags]"},
+		usage: []string{"wt runtime [flags]"},
 		flags: []helpFlag{
 			{"--wasmtime", helpPathValue, "local wasmtime binary (default wasmtime)"},
 		},
 		examples: []string{"wt runtime"},
-		client:   true,
+		client: true,
 	},
 	{
-		name:    "inspect",
+		name: "inspect",
 		summary: "show an app's route, deployment, config, env and secrets",
-		usage:   []string{"wt inspect <app> [flags]"},
+		usage: []string{"wt inspect <app> [flags]"},
 		details: []string{"With --dir, the local app.json is compared against the deployed configuration."},
 		flags: []helpFlag{
 			{"--dir", "DIR", "local app directory to compare (default .)"},
 		},
 		examples: []string{"wt inspect passport --dir ./passport"},
-		client:   true,
+		client: true,
 	},
 	{
-		name:    "deploy",
+		name: "deploy",
 		summary: "build and upload an app to the supervisor",
-		usage:   []string{"wt deploy [flags]"},
+		usage: []string{"wt deploy [flags]"},
 		details: []string{"Runs app.json's build commands, precompiles the component with wasmtime and uploads the bundle. The host is required and can come from --host, WT_DEPLOY_HOST or the selected profile. A profile's app_domain rewrites <app>.localhost manifest hosts for remote targets, and a local app host on a remote supervisor is refused before the build."},
 		flags: []helpFlag{
 			{"--dir", "DIR", `app directory containing app.json (default ".")`},
@@ -355,9 +355,9 @@ var helpCommands = []helpCommand{
 		},
 	},
 	{
-		name:    "rollback",
+		name: "rollback",
 		summary: "restore a previous deployment, optionally with a snapshot",
-		usage:   []string{"wt rollback <app> <deployment-id> [flags]"},
+		usage: []string{"wt rollback <app> <deployment-id> [flags]"},
 		flags: []helpFlag{
 			{"--backup", "SNAPSHOT", "also restore this snapshot, swapping code and data together"},
 		},
@@ -368,62 +368,62 @@ var helpCommands = []helpCommand{
 		client: true,
 	},
 	{
-		name:    "backup",
+		name: "backup",
 		summary: "list, create, restore, download and import snapshots",
-		usage:   []string{"wt backup <action> <app> [flags]"},
-		client:  true,
+		usage: []string{"wt backup <action> <app> [flags]"},
+		client: true,
 		subs: []helpCommand{
 			{
-				name:     "list",
-				summary:  "list retained snapshots and mark the current one",
-				usage:    []string{"wt backup list <app> [flags]"},
+				name: "list",
+				summary: "list retained snapshots and mark the current one",
+				usage: []string{"wt backup list <app> [flags]"},
 				examples: []string{"wt backup list notes"},
 			},
 			{
-				name:     "create",
-				summary:  "take a snapshot now",
-				usage:    []string{"wt backup create <app> [flags]"},
+				name: "create",
+				summary: "take a snapshot now",
+				usage: []string{"wt backup create <app> [flags]"},
 				examples: []string{"wt backup create notes"},
 			},
 			{
-				name:     "restore",
-				summary:  "replace the app's data with a snapshot",
-				usage:    []string{"wt backup restore <app> <snapshot> [flags]"},
+				name: "restore",
+				summary: "replace the app's data with a snapshot",
+				usage: []string{"wt backup restore <app> <snapshot> [flags]"},
 				examples: []string{"wt backup restore notes storage-20261101T120000.000000000Z.db"},
 			},
 			{
-				name:    "download",
+				name: "download",
 				summary: "download a snapshot archive",
-				usage:   []string{"wt backup download <app> <snapshot> [flags]"},
+				usage: []string{"wt backup download <app> <snapshot> [flags]"},
 				flags: []helpFlag{
 					{"--out", "FILE", "output path (default <snapshot>.tar.gz)"},
 				},
 				examples: []string{"wt backup download notes storage-20261101T120000.000000000Z.db --out notes.tar.gz"},
 			},
 			{
-				name:     "import",
-				summary:  "store an exported snapshot archive without restoring it",
-				usage:    []string{"wt backup import <app> <archive.tar.gz> [flags]"},
+				name: "import",
+				summary: "store an exported snapshot archive without restoring it",
+				usage: []string{"wt backup import <app> <archive.tar.gz> [flags]"},
 				examples: []string{"wt backup import notes notes.tar.gz"},
 			},
 		},
 	},
 	{
-		name:    "config",
+		name: "config",
 		summary: "show or patch an app's runtime config",
-		usage:   []string{"wt config <action> <app> [flags]"},
-		client:  true,
+		usage: []string{"wt config <action> <app> [flags]"},
+		client: true,
 		subs: []helpCommand{
 			{
-				name:     "show",
-				summary:  "print the effective config and its ETag",
-				usage:    []string{"wt config show <app> [flags]"},
+				name: "show",
+				summary: "print the effective config and its ETag",
+				usage: []string{"wt config show <app> [flags]"},
 				examples: []string{"wt config show notes"},
 			},
 			{
-				name:    "set",
+				name: "set",
 				summary: "apply a JSON merge patch with optional If-Match",
-				usage:   []string{"wt config set <app> [flags]"},
+				usage: []string{"wt config set <app> [flags]"},
 				flags: []helpFlag{
 					{"--data", "JSON", "inline JSON patch"},
 					{"--file", helpPathValue, "read the JSON patch from a file"},
@@ -434,19 +434,19 @@ var helpCommands = []helpCommand{
 		},
 	},
 	{
-		name:    "open",
+		name: "open",
 		summary: "open an app in the browser",
-		usage:   []string{"wt open <app> [flags]"},
+		usage: []string{"wt open <app> [flags]"},
 		flags: []helpFlag{
 			{"--print", "", "print the URL instead of opening it"},
 		},
 		examples: []string{"wt open notes"},
-		client:   true,
+		client: true,
 	},
 	{
-		name:    "build",
+		name: "build",
 		summary: "build an upload bundle locally, without a supervisor",
-		usage:   []string{"wt build [flags]", "wt bundle [flags]"},
+		usage: []string{"wt build [flags]", "wt bundle [flags]"},
 		details: []string{"Runs the component and static phases, precompiles the component when wasmtime is available and writes the tarball. This is the local build path for the pinned Containerfile."},
 		flags: []helpFlag{
 			{"--dir", "DIR", `app directory containing app.json (default ".")`},
@@ -463,9 +463,9 @@ var helpCommands = []helpCommand{
 		examples: []string{"wt build --dir ./notes --out notes.tar.gz"},
 	},
 	{
-		name:    "dev",
+		name: "dev",
 		summary: "run an app locally with the dev supervisor",
-		usage:   []string{"wt dev [flags]"},
+		usage: []string{"wt dev [flags]"},
 		details: []string{"Builds and deploys into a local supervisor, serves the app at <app>.localhost and runs the SvelteKit dev server when a web directory exists."},
 		flags: []helpFlag{
 			{"--dir", "DIR", `app directory containing app.json (default ".")`},
@@ -487,9 +487,9 @@ var helpCommands = []helpCommand{
 		},
 	},
 	{
-		name:    "new",
+		name: "new",
 		summary: "scaffold a new app",
-		usage:   []string{"wt new [flags]"},
+		usage: []string{"wt new [flags]"},
 		flags: []helpFlag{
 			{"--dir", helpPathValue, `directory to scaffold the app in (default ".")`},
 			{"--module", helpPathValue, "Go module path for a standalone app (default app name)"},
@@ -502,9 +502,9 @@ var helpCommands = []helpCommand{
 		},
 	},
 	{
-		name:    "contract",
+		name: "contract",
 		summary: "generate or check an app's JSON Schema and Go contract",
-		usage:   []string{"wt contract [flags]"},
+		usage: []string{"wt contract [flags]"},
 		flags: []helpFlag{
 			{"--dir", "DIR", `app directory containing app.json (default ".")`},
 			{"--check", "", "verify the generated files without writing them"},
@@ -518,9 +518,9 @@ var helpCommands = []helpCommand{
 		},
 	},
 	{
-		name:    "completion",
+		name: "completion",
 		summary: "print a shell completion script",
-		usage:   []string{"wt completion <bash|zsh|fish>"},
+		usage: []string{"wt completion <bash|zsh|fish>"},
 		examples: []string{
 			"wt completion bash",
 			"wt completion zsh",
@@ -528,9 +528,9 @@ var helpCommands = []helpCommand{
 		},
 	},
 	{
-		name:    "help",
+		name: "help",
 		summary: "show this help or one command's help",
-		usage:   []string{"wt help [command] [subcommand]"},
+		usage: []string{"wt help [command] [subcommand]"},
 		details: []string{"Every command also accepts -h or --help, for example wt jobs enqueue --help."},
 		examples: []string{
 			"wt help",

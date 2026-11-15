@@ -16,8 +16,8 @@ import (
 // compatBreak is one breaking response-shape change between the baseline contract and the regenerated one.
 type compatBreak struct {
 	Schema string
-	Path   string
-	Rule   string
+	Path string
+	Rule string
 	Detail string
 }
 

@@ -36,7 +36,7 @@ type Duration = uint64
 // [POSIX's Seconds Since the Epoch]: https://pubs.opengroup.org/onlinepubs/9699919799/xrat/V4_xbd_chap04.html#tag_21_04_16
 // [Unix Time]: https://en.wikipedia.org/wiki/Unix_time
 type Instant struct {
-	Seconds     int64
+	Seconds int64
 	Nanoseconds uint32
 }
 

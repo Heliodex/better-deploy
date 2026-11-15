@@ -16,25 +16,25 @@ import (
 const defaultRoutePath = "/"
 
 type routeAppInfo struct {
-	Name          string `json:"name"`
-	Host          string `json:"host"`
-	Status        string `json:"status"`
-	Ready         bool   `json:"ready"`
+	Name string `json:"name"`
+	Host string `json:"host"`
+	Status string `json:"status"`
+	Ready bool `json:"ready"`
 	CurrentDigest string `json:"currentDigest"`
 }
 
 type routeReport struct {
-	App        string   `json:"app"`
-	Host       string   `json:"host"`
-	URL        string   `json:"url"`
-	Addresses  []string `json:"addresses,omitempty"`
-	DNSError   string   `json:"dnsError,omitempty"`
-	HTTPStatus int      `json:"httpStatus,omitempty"`
-	HTTPError  string   `json:"httpError,omitempty"`
-	Routed     bool     `json:"routed"`
-	Ready      bool     `json:"ready"`
-	AppStatus  string   `json:"appStatus,omitempty"`
-	HealthPath string   `json:"healthPath"`
+	App string `json:"app"`
+	Host string `json:"host"`
+	URL string `json:"url"`
+	Addresses []string `json:"addresses,omitempty"`
+	DNSError string `json:"dnsError,omitempty"`
+	HTTPStatus int `json:"httpStatus,omitempty"`
+	HTTPError string `json:"httpError,omitempty"`
+	Routed bool `json:"routed"`
+	Ready bool `json:"ready"`
+	AppStatus string `json:"appStatus,omitempty"`
+	HealthPath string `json:"healthPath"`
 }
 
 // routeApp fetches one app's public host from the supervisor.

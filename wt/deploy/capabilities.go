@@ -11,21 +11,21 @@ import (
 
 // supervisorCapabilities is the runtime document served by a supervisor.
 type supervisorCapabilities struct {
-	Version        string `json:"version"`
-	Commit         string `json:"commit,omitempty"`
-	GoVersion      string `json:"goVersion,omitempty"`
-	Wasmtime       string `json:"wasmtime,omitempty"`
+	Version string `json:"version"`
+	Commit string `json:"commit,omitempty"`
+	GoVersion string `json:"goVersion,omitempty"`
+	Wasmtime string `json:"wasmtime,omitempty"`
 	WasmtimeTarget string `json:"wasmtimeTarget,omitempty"`
-	Compiler       bool   `json:"compiler"`
-	Epoch          bool   `json:"epoch"`
+	Compiler bool `json:"compiler"`
+	Epoch bool `json:"epoch"`
 }
 
 // deployPreflight is the result of asking the supervisor what it can do before a build starts.
 type deployPreflight struct {
-	Checked          bool
-	Capabilities     supervisorCapabilities
-	RuntimeKnown     bool
-	RuntimeMatch     bool
+	Checked bool
+	Capabilities supervisorCapabilities
+	RuntimeKnown bool
+	RuntimeMatch bool
 	TargetFromServer bool
 }
 

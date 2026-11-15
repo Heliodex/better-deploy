@@ -136,7 +136,7 @@ func TestDatabaseRows(t *testing.T) {
 	insertItem(t, storage, token, "three")
 
 	resp := storageSQL(t, storage, token, "/v1/exec", map[string]any{
-		"sql":    `create table mixed (id integer primary key, text_value text, blob_value blob)`,
+		"sql": `create table mixed (id integer primary key, text_value text, blob_value blob)`,
 		"params": []any{},
 	})
 	if resp.StatusCode != http.StatusOK {
@@ -146,7 +146,7 @@ func TestDatabaseRows(t *testing.T) {
 	resp.Body.Close()
 
 	resp = storageSQL(t, storage, token, "/v1/exec", map[string]any{
-		"sql":    `insert into mixed (text_value, blob_value) values (?, ?)`,
+		"sql": `insert into mixed (text_value, blob_value) values (?, ?)`,
 		"params": []any{"hello", map[string]string{"$b64": "AAEC"}},
 	})
 	if resp.StatusCode != http.StatusOK {

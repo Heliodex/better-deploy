@@ -10,12 +10,12 @@ import (
 )
 
 type identityUserFile struct {
-	Version int            `json:"version"`
-	Users   []identityUser `json:"users"`
+	Version int `json:"version"`
+	Users []identityUser `json:"users"`
 }
 
 type identitySessionFile struct {
-	Version  int               `json:"version"`
+	Version int `json:"version"`
 	Sessions []identitySession `json:"sessions"`
 }
 

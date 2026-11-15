@@ -18,9 +18,9 @@ func appFetchTarget(t *testing.T, s *supervisor, name string, allow []string) (*
 	token := storage.tokenFor(name)
 	s.apps["caller"] = &app{name: "caller"}
 	a := &app{
-		name:  name,
-		cfg:   appConfig{Host: name + ".localhost", AllowCallers: allow},
-		cmd:   &exec.Cmd{},
+		name: name,
+		cfg: appConfig{Host: name + ".localhost", AllowCallers: allow},
+		cmd: &exec.Cmd{},
 		ready: true,
 	}
 	a.proxy = s.newProxy(a)
@@ -146,7 +146,7 @@ func TestAppFetchRejectsUnauthorizedAndDisallowedCallers(t *testing.T) {
 func TestAppFetchPathParsing(t *testing.T) {
 	for _, test := range []struct {
 		path, target, rest string
-		ok                 bool
+		ok bool
 	}{
 		{"/apps/notes", "notes", "/", true},
 		{"/apps/notes/", "notes", "/", true},

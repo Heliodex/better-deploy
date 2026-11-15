@@ -29,7 +29,7 @@ func TestRunBlobsList(t *testing.T) {
 func TestRunBlobsGC(t *testing.T) {
 	var (
 		gotPath, gotAuth string
-		got              map[string]any
+		got map[string]any
 	)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

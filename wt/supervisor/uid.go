@@ -18,7 +18,7 @@ type uidState struct {
 
 // uidAllocator hands out stable dedicated UIDs from a base, persisting them under WT_STATE_DIR/.uids.json.
 type uidAllocator struct {
-	mu   sync.Mutex
+	mu sync.Mutex
 	path string
 	base int
 	apps map[string]int

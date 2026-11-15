@@ -14,8 +14,8 @@ const defaultClientTimeout = 30 * time.Second
 
 type clientOptions struct {
 	host, token, profile, appDomain string
-	jsonOut                         bool
-	timeout                         time.Duration
+	jsonOut bool
+	timeout time.Duration
 }
 
 func firstNonEmpty(values ...string) string {
@@ -60,14 +60,14 @@ func runApps(args []string) error {
 	}
 
 	var apps []struct {
-		Name          string  `json:"name"`
-		Host          string  `json:"host"`
-		Status        string  `json:"status"`
-		Ready         bool    `json:"ready"`
-		PID           int     `json:"pid"`
-		CurrentDigest string  `json:"currentDigest"`
-		CPUPercent    float64 `json:"cpuPercent"`
-		MemoryBytes   int64   `json:"memoryBytes"`
+		Name string `json:"name"`
+		Host string `json:"host"`
+		Status string `json:"status"`
+		Ready bool `json:"ready"`
+		PID int `json:"pid"`
+		CurrentDigest string `json:"currentDigest"`
+		CPUPercent float64 `json:"cpuPercent"`
+		MemoryBytes int64 `json:"memoryBytes"`
 	}
 	if err := json.Unmarshal(body, &apps); err != nil {
 		return err

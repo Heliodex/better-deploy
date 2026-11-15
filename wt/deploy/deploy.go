@@ -16,10 +16,10 @@ import (
 
 // uploadProgress prints a coarse percentage while a bundle uploads, without buffering it a second time.
 type uploadProgress struct {
-	reader      io.Reader
+	reader io.Reader
 	total, done int64
-	next        int64
-	last        time.Time
+	next int64
+	last time.Time
 }
 
 func (u *uploadProgress) Read(p []byte) (int, error) {
@@ -131,11 +131,11 @@ func upload(cfg *deployConfig, m manifest, bundle []byte) error {
 
 // deploymentState is the subset of a deployment resource the CLI needs.
 type deploymentState struct {
-	ID     string `json:"id"`
+	ID string `json:"id"`
 	Status string `json:"status"`
-	Mode   string `json:"mode"`
+	Mode string `json:"mode"`
 	Digest string `json:"digest"`
-	Error  string `json:"error"`
+	Error string `json:"error"`
 }
 
 // waitDeploy polls a queued deployment until it succeeds or fails, then prints the app.
@@ -194,10 +194,10 @@ func printDeployResult(cfg *deployConfig, name string, body []byte) error {
 	}
 
 	var info struct {
-		Name          string `json:"name"`
-		Host          string `json:"host"`
-		Status        string `json:"status"`
-		Ready         bool   `json:"ready"`
+		Name string `json:"name"`
+		Host string `json:"host"`
+		Status string `json:"status"`
+		Ready bool `json:"ready"`
 		CurrentDigest string `json:"currentDigest"`
 	}
 	if err := json.Unmarshal(body, &info); err != nil {

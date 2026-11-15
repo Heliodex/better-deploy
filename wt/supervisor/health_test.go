@@ -13,12 +13,12 @@ import (
 
 func testApp(port int) *app {
 	return &app{
-		name:     "demo",
-		port:     port,
-		cfg:      appConfig{Health: "/"},
-		cmd:      &exec.Cmd{},
+		name: "demo",
+		port: port,
+		cfg: appConfig{Health: "/"},
+		cmd: &exec.Cmd{},
 		healthOK: true,
-		ready:    true,
+		ready: true,
 	}
 }
 
@@ -28,7 +28,7 @@ func TestAppStatusLocked(t *testing.T) {
 
 	cases := []struct {
 		name string
-		app  *app
+		app *app
 		want string
 	}{
 		{"retired", &app{retired: true}, "stopped"},
@@ -89,7 +89,9 @@ func TestRecordHealthTransitions(t *testing.T) {
 
 type stringError string
 
-func (e stringError) Error() string { return string(e) }
+func (e stringError) Error() string {
+	return string(e)
+}
 
 func TestCheckHealthMarksAppUnhealthy(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -283,13 +285,13 @@ func TestRestartOnUnhealthyKillsProcess(t *testing.T) {
 
 	s := testSupervisor()
 	a := &app{
-		name:           "demo",
-		port:           port,
-		cfg:            appConfig{Health: "/", HealthFailures: 1, RestartOnUnhealthy: true},
-		cmd:            cmd,
-		done:           done,
-		healthOK:       true,
-		ready:          true,
+		name: "demo",
+		port: port,
+		cfg: appConfig{Health: "/", HealthFailures: 1, RestartOnUnhealthy: true},
+		cmd: cmd,
+		done: done,
+		healthOK: true,
+		ready: true,
 		healthFailures: 0,
 	}
 	s.apps[a.name] = a
@@ -333,7 +335,9 @@ func TestProxyResponseHeaderTimeout(t *testing.T) {
 	previous := proxyResponseHeaderTimeout
 
 	proxyResponseHeaderTimeout = 50 * time.Millisecond
-	defer func() { proxyResponseHeaderTimeout = previous }()
+	defer func() {
+		proxyResponseHeaderTimeout = previous
+	}()
 
 	s := testSupervisor()
 	proxy := s.newProxy(&app{name: "demo", port: port})

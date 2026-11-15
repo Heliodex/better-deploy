@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	wit "go.bytecodealliance.org/pkg/wit/types"
 	wasi "github.com/heliodex/better-deploy/wt/packages/v2/binding/imports/wasi_http_0_3_0_types"
+	wit "go.bytecodealliance.org/pkg/wit/types"
 )
 
 // fieldSizeString formats an optional field name and size payload for error messages.

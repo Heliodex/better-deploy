@@ -115,8 +115,8 @@ func TestReadProcessMemoryReadsSelf(t *testing.T) {
 func TestCPUPercent(t *testing.T) {
 	cases := []struct {
 		previous, current uint64
-		elapsed           time.Duration
-		want              float64
+		elapsed time.Duration
+		want float64
 	}{
 		{0, 100, 10 * time.Second, 10},
 		{100, 100, time.Second, 0},

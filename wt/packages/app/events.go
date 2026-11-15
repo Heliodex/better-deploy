@@ -13,21 +13,21 @@ import (
 )
 
 const (
-	storageURLEnv    = "WT_STORAGE_URL"
-	storageTokenEnv  = "WT_STORAGE_TOKEN"
+	storageURLEnv = "WT_STORAGE_URL"
+	storageTokenEnv = "WT_STORAGE_TOKEN"
 	eventPublishPath = "/v1/publish"
 )
 
 // Event is the accepted publish result. ID is the cursor to pass to GET /v1/events?since=.
 type Event struct {
-	ID    int64     `json:"id"`
-	Topic string    `json:"topic"`
-	Time  time.Time `json:"time"`
+	ID int64 `json:"id"`
+	Topic string `json:"topic"`
+	Time time.Time `json:"time"`
 }
 
 type publishPayload struct {
 	Topic string `json:"topic"`
-	Data  any    `json:"data"`
+	Data any `json:"data"`
 }
 
 // eventResult decodes the publish response and turns a non-2xx status into an error.

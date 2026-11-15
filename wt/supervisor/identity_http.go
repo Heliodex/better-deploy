@@ -14,31 +14,31 @@ import (
 const identityAppPrefix = "/_wt/identity"
 
 type identityMeResponse struct {
-	User      identityUserInfo `json:"user"`
-	CSRFToken string           `json:"csrfToken"`
+	User identityUserInfo `json:"user"`
+	CSRFToken string `json:"csrfToken"`
 }
 
 type identityLoginRequest struct {
-	Email    string `json:"email"`
+	Email string `json:"email"`
 	Password string `json:"password"`
 }
 
 type identityPasswordRequest struct {
 	CurrentPassword string `json:"currentPassword"`
-	NewPassword     string `json:"newPassword"`
+	NewPassword string `json:"newPassword"`
 }
 
 type identityCreateUserRequest struct {
-	Email    string   `json:"email"`
-	Name     string   `json:"name"`
-	Password string   `json:"password"`
-	Groups   []string `json:"groups"`
+	Email string `json:"email"`
+	Name string `json:"name"`
+	Password string `json:"password"`
+	Groups []string `json:"groups"`
 }
 
 type identityUpdateUserRequest struct {
-	Name     *string   `json:"name"`
-	Groups   *[]string `json:"groups"`
-	Disabled *bool     `json:"disabled"`
+	Name *string `json:"name"`
+	Groups *[]string `json:"groups"`
+	Disabled *bool `json:"disabled"`
 }
 
 type identityResetPasswordRequest struct {

@@ -16,19 +16,19 @@ import (
 )
 
 const (
-	maxBody     = 8 << 10
+	maxBody = 8 << 10
 	maxFileSize = 8 << 20
-	maxName     = 100
+	maxName = 100
 )
 
 type fileRecord struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Digest      string `json:"digest"`
-	Size        int64  `json:"size"`
+	ID string `json:"id"`
+	Name string `json:"name"`
+	Digest string `json:"digest"`
+	Size int64 `json:"size"`
 	ContentType string `json:"contentType"`
-	Owner       string `json:"owner"`
-	CreatedAt   string `json:"createdAt"`
+	Owner string `json:"owner"`
+	CreatedAt string `json:"createdAt"`
 	DownloadURL string `json:"downloadUrl"`
 }
 
@@ -37,28 +37,28 @@ type filesResponse struct {
 }
 
 type uploadRequest struct {
-	Name        string `json:"name"`
+	Name string `json:"name"`
 	ContentType string `json:"contentType"`
-	Size        int64  `json:"size"`
+	Size int64 `json:"size"`
 }
 
 type uploadResponse struct {
 	UploadURL string `json:"uploadUrl"`
-	Max       int64  `json:"max"`
+	Max int64 `json:"max"`
 }
 
 type createFileRequest struct {
-	Name        string `json:"name"`
-	Digest      string `json:"digest"`
+	Name string `json:"name"`
+	Digest string `json:"digest"`
 	ContentType string `json:"contentType"`
-	Size        int64  `json:"size"`
+	Size int64 `json:"size"`
 }
 
 // blobApp owns the store and routes for the blob box.
 type blobApp struct {
-	store  *storage.Client
+	store *storage.Client
 	client *http.Client
-	mux    *http.ServeMux
+	mux *http.ServeMux
 }
 
 func (a *blobApp) migrate(ctx context.Context) error {
@@ -221,13 +221,13 @@ func (a *blobApp) handleCreateFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	item := fileRecord{
-		ID:          app.NewID(),
-		Name:        name,
-		Digest:      digest,
-		Size:        request.Size,
+		ID: app.NewID(),
+		Name: name,
+		Digest: digest,
+		Size: request.Size,
 		ContentType: contentType,
-		Owner:       user.Name,
-		CreatedAt:   time.Now().UTC().Format(app.TimestampFormat),
+		Owner: user.Name,
+		CreatedAt: time.Now().UTC().Format(app.TimestampFormat),
 	}
 	if _, err := a.store.Exec(r.Context(), `insert into files (id, name, digest, size, content_type, owner_id, owner_name, created_at) values (?, ?, ?, ?, ?, ?, ?, ?)`,
 		item.ID, item.Name, item.Digest, item.Size, item.ContentType, user.ID, user.Name, item.CreatedAt); err != nil {

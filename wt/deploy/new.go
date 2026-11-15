@@ -14,18 +14,18 @@ import (
 
 // Template placeholders substituted when scaffolding. Templates must not use these tokens otherwise.
 const (
-	newNameToken       = "__APP_NAME__"        //nolint:gosec // Template placeholder, not a credential.
-	newContractToken   = "__CONTRACT_IMPORT__" //nolint:gosec // Template placeholder, not a credential.
-	newModuleToken     = "__APP_MODULE__"      //nolint:gosec // Template placeholder, not a credential.
-	newSDKPathToken    = "__SDK_MODULE__"      //nolint:gosec // Template placeholder, not a credential.
-	newSDKVersionToken = "__SDK_VERSION__"     //nolint:gosec // Template placeholder, not a credential.
-	newSDKPrepareToken = "__SDK_PREPARE__"     //nolint:gosec // Template placeholder, not a credential.
-	newSDKWITToken     = "__SDK_WIT__"         //nolint:gosec // Template placeholder, not a credential.
+	newNameToken = "__APP_NAME__" //nolint:gosec // Template placeholder, not a credential.
+	newContractToken = "__CONTRACT_IMPORT__" //nolint:gosec // Template placeholder, not a credential.
+	newModuleToken = "__APP_MODULE__" //nolint:gosec // Template placeholder, not a credential.
+	newSDKPathToken = "__SDK_MODULE__" //nolint:gosec // Template placeholder, not a credential.
+	newSDKVersionToken = "__SDK_VERSION__" //nolint:gosec // Template placeholder, not a credential.
+	newSDKPrepareToken = "__SDK_PREPARE__" //nolint:gosec // Template placeholder, not a credential.
+	newSDKWITToken = "__SDK_WIT__" //nolint:gosec // Template placeholder, not a credential.
 )
 
 // The SDK module is published from wt/packages. Go module tags must be full semantic versions, so 1 and v1 are not recognized.
 const (
-	sdkModulePath    = "github.com/heliodex/better-deploy/wt/packages/v2"
+	sdkModulePath = "github.com/heliodex/better-deploy/wt/packages/v2"
 	sdkModuleVersion = "v2.0.2"
 )
 
@@ -92,11 +92,11 @@ func resolveNewConfig(args []string) (*newConfig, error) {
 }
 
 type scaffoldMode struct {
-	monorepo   bool
-	module     string
-	contract   string
+	monorepo bool
+	module string
+	contract string
 	sdkPrepare string
-	sdkWIT     string
+	sdkWIT string
 	standalone bool
 }
 
@@ -141,11 +141,11 @@ func scaffoldFor(cfg *newConfig, abs, name string) (scaffoldMode, error) {
 	if cfg.sdk == "" {
 		if module, err := exampleModule(abs); err == nil {
 			return scaffoldMode{
-				monorepo:   true,
-				module:     module,
-				contract:   module + "/" + name + "/contract",
+				monorepo: true,
+				module: module,
+				contract: module + "/" + name + "/contract",
 				sdkPrepare: "../../packages/generate.sh && ",
-				sdkWIT:     "../../packages/wit",
+				sdkWIT: "../../packages/wit",
 			}, nil
 		}
 	}
@@ -160,11 +160,11 @@ func scaffoldFor(cfg *newConfig, abs, name string) (scaffoldMode, error) {
 	}
 
 	return scaffoldMode{
-		monorepo:   false,
-		module:     module,
-		contract:   module + "/contract",
+		monorepo: false,
+		module: module,
+		contract: module + "/contract",
 		sdkPrepare: "",
-		sdkWIT:     `\"$(go list -m -f '{{.Dir}}' ` + sdkModulePath + `)/wit\"`,
+		sdkWIT: `\"$(go list -m -f '{{.Dir}}' ` + sdkModulePath + `)/wit\"`,
 		standalone: true,
 	}, nil
 }

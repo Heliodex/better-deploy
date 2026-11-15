@@ -138,7 +138,7 @@ func TestValidateStorageTempDir(t *testing.T) {
 	apps := "/var/lib/wt/apps"
 
 	cases := []struct {
-		tmp  string
+		tmp string
 		want bool
 	}{
 		{"/var/lib/wt/.tmp", true},

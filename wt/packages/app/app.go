@@ -37,7 +37,7 @@ func WriteJSON(w http.ResponseWriter, status int, value any) {
 // ErrorResponse is the standard JSON error body. Error stays the human-readable message; Code is stable for clients and Field names a request field when one applies.
 type ErrorResponse struct {
 	Error string `json:"error"`
-	Code  string `json:"code"`
+	Code string `json:"code"`
 	Field string `json:"field,omitempty"`
 }
 

@@ -19,7 +19,7 @@ func newStorageForConfig(cfg config) *storageServer {
 
 	var (
 		storage *storageServer
-		err     error
+		err error
 	)
 
 	if listener, ok, listenErr := inheritedListener(storageFDEnv); listenErr != nil {
@@ -96,18 +96,18 @@ func newSupervisorServices(cfg config) *supervisor {
 	}
 
 	s := &supervisor{
-		cfg:         cfg,
-		storage:     storage,
-		backups:     newBackupManager(filepath.Join(cfg.stateDir, ".backups"), storage, cfg.stateDir),
-		events:      newHub(),
+		cfg: cfg,
+		storage: storage,
+		backups: newBackupManager(filepath.Join(cfg.stateDir, ".backups"), storage, cfg.stateDir),
+		events: newHub(),
 		deployments: newDeploymentManager(filepath.Join(cfg.stateDir, ".deployments")),
-		blobs:       blobs,
-		identity:    identity,
-		secrets:     secrets,
-		auth:        auth,
-		audit:       audit,
-		apps:        map[string]*app{},
-		hosts:       map[string]*app{},
+		blobs: blobs,
+		identity: identity,
+		secrets: secrets,
+		auth: auth,
+		audit: audit,
+		apps: map[string]*app{},
+		hosts: map[string]*app{},
 	}
 	s.bus = newEventBus()
 	s.jobs = newJobManager(filepath.Join(cfg.stateDir, ".jobs"), s)
@@ -207,11 +207,11 @@ func (s *supervisor) startMonitors(ctx context.Context) {
 // newHTTPServer builds the public or admin listener with the shared timeout policy.
 func newHTTPServer(addr string, handler http.Handler) *http.Server {
 	return &http.Server{
-		Addr:              addr,
-		Handler:           handler,
+		Addr: addr,
+		Handler: handler,
 		ReadHeaderTimeout: 5 * time.Second,
-		IdleTimeout:       60 * time.Second,
-		MaxHeaderBytes:    1 << 20,
+		IdleTimeout: 60 * time.Second,
+		MaxHeaderBytes: 1 << 20,
 	}
 }
 

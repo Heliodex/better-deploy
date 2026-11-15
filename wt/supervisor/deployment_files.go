@@ -177,10 +177,10 @@ func (m *deploymentManager) storeStatic(app, source, dst string) (map[string]str
 
 // componentRecord describes the component files stored for one deployment.
 type componentRecord struct {
-	files                   map[string]string
+	files map[string]string
 	cwasmDigest, wasmDigest string
-	cwasmSize, wasmSize     int64
-	bytes                   int64
+	cwasmSize, wasmSize int64
+	bytes int64
 }
 
 // digest returns the preferred artifact digest, preferring the portable wasm over the cwasm.

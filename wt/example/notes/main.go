@@ -15,19 +15,19 @@ import (
 )
 
 const (
-	maxNotes    = 50
+	maxNotes = 50
 	maxNoteBody = 2 << 10
 )
 
 type note struct {
-	ID        string    `json:"id"`
-	Body      string    `json:"body"`
+	ID string `json:"id"`
+	Body string `json:"body"`
 	CreatedAt time.Time `json:"createdAt"`
 }
 
 var (
-	mu         sync.Mutex
-	store      *storage.Client
+	mu sync.Mutex
+	store *storage.Client
 	errStorage error
 )
 
@@ -65,11 +65,11 @@ func addNote(ctx context.Context, body string) (note, error) {
 
 	_, err := store.Batch(ctx,
 		storage.Statement{
-			SQL:  `insert into notes (id, body, created_at) values (?, ?, ?)`,
+			SQL: `insert into notes (id, body, created_at) values (?, ?, ?)`,
 			Args: []any{entry.ID, entry.Body, entry.CreatedAt.UTC().Format(app.TimestampFormat)},
 		},
 		storage.Statement{
-			SQL:  `delete from notes where id not in (select id from notes order by created_at desc, id desc limit ?)`,
+			SQL: `delete from notes where id not in (select id from notes order by created_at desc, id desc limit ?)`,
 			Args: []any{maxNotes},
 		},
 	)

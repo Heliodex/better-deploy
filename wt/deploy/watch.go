@@ -11,23 +11,23 @@ import (
 // devIgnoredDirs hold build output and dependency trees, so a rebuild does not immediately trigger another one.
 var devIgnoredDirs = map[string]struct{}{
 	"node_modules": {},
-	".git":         {},
-	".svelte-kit":  {},
-	"build":        {},
-	"dist":         {},
-	"target":       {},
-	"static":       {},
+	".git": {},
+	".svelte-kit": {},
+	"build": {},
+	"dist": {},
+	"target": {},
+	"static": {},
 }
 
 var devIgnoredFiles = map[string]struct{}{
-	"main.wasm":     {},
-	"main.cwasm":    {},
+	"main.wasm": {},
+	"main.cwasm": {},
 	"artefact.json": {},
 }
 
 type devFileState struct {
 	modified time.Time
-	size     int64
+	size int64
 }
 
 // devSourceState records the source files under root, ignoring build output and dependencies.
@@ -92,21 +92,21 @@ func devSourcesChanged(previous, next map[string]devFileState) bool {
 
 // componentIgnoredDirs holds frontend and build output that Vite or the build owns, not the wasm component.
 var componentIgnoredDirs = map[string]struct{}{
-	".git":         {},
-	".svelte-kit":  {},
-	"build":        {},
-	"dist":         {},
+	".git": {},
+	".svelte-kit": {},
+	"build": {},
+	"dist": {},
 	"node_modules": {},
-	"static":       {},
-	"target":       {},
-	"web":          {},
+	"static": {},
+	"target": {},
+	"web": {},
 }
 
 var componentIgnoredFiles = map[string]struct{}{
-	"artefact.json":          {},
-	"main.cwasm":             {},
-	"main.wasm":              {},
-	".wt-build.json":         {},
+	"artefact.json": {},
+	"main.cwasm": {},
+	"main.wasm": {},
+	".wt-build.json": {},
 	".wt-dev.vite.config.ts": {},
 }
 

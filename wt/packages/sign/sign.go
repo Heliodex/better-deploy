@@ -32,7 +32,7 @@ var (
 type Signer struct {
 	Secret []byte
 	Window time.Duration
-	Now    func() time.Time
+	Now func() time.Time
 }
 
 // Sign signs body for deliveryID and returns the timestamp and lowercase hex signature.

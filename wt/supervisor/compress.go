@@ -117,7 +117,7 @@ type compressedBody struct {
 	*io.PipeReader
 
 	original io.ReadCloser
-	once     sync.Once
+	once sync.Once
 }
 
 func (b *compressedBody) Close() error {

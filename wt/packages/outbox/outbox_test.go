@@ -17,8 +17,8 @@ import (
 // recordingSender records each delivery and returns the configured statuses in order.
 type recordingSender struct {
 	statuses []int
-	errs     []error
-	calls    []Delivery
+	errs []error
+	calls []Delivery
 }
 
 func (s *recordingSender) Send(_ context.Context, delivery Delivery) (int, error) {
@@ -50,8 +50,12 @@ func testOutbox(t *testing.T) (*Outbox, *storage.Client, *time.Time) {
 	now := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
 	client := server.NewClient(server.Client())
 	box := Outbox{
-		Signer: sign.Signer{Secret: []byte("secret"), Now: func() time.Time { return now }},
-		Now:    func() time.Time { return now },
+		Signer: sign.Signer{Secret: []byte("secret"), Now: func() time.Time {
+			return now
+		}},
+		Now: func() time.Time {
+			return now
+		},
 	}
 
 	schema, err := box.Schema()
@@ -68,12 +72,12 @@ func testOutbox(t *testing.T) (*Outbox, *storage.Client, *time.Time) {
 
 func testMessage(key string) Message {
 	return Message{
-		Event:     "ship.approved",
+		Event: "ship.approved",
 		DedupeKey: key,
-		Payload:   []byte(`{"approved":true}`),
-		URL:       "https://example.com/hook",
-		Headers:   map[string]string{"X-Custom": "yes"},
-		Metadata:  map[string]string{"submission": "sub_1"},
+		Payload: []byte(`{"approved":true}`),
+		URL: "https://example.com/hook",
+		Headers: map[string]string{"X-Custom": "yes"},
+		Metadata: map[string]string{"submission": "sub_1"},
 	}
 }
 
@@ -283,7 +287,7 @@ func TestDeliverDueRequiresSecretAndValidTable(t *testing.T) {
 func TestHTTPSenderSetsSignedHeaders(t *testing.T) {
 	var (
 		gotHeaders http.Header
-		gotBody    string
+		gotBody string
 	)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -295,11 +299,13 @@ func TestHTTPSenderSetsSignedHeaders(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	signer := sign.Signer{Secret: []byte("secret"), Now: func() time.Time { return time.Unix(1000, 0) }}
+	signer := sign.Signer{Secret: []byte("secret"), Now: func() time.Time {
+		return time.Unix(1000, 0)
+	}}
 	message := Message{
-		Payload:    []byte(`{"ok":true}`),
-		URL:        server.URL,
-		Headers:    map[string]string{"X-Custom": "yes"},
+		Payload: []byte(`{"ok":true}`),
+		URL: server.URL,
+		Headers: map[string]string{"X-Custom": "yes"},
 		DeliveryID: "delivery-1",
 	}
 	delivery := Delivery{Message: message}

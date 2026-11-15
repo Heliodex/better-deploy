@@ -12,7 +12,9 @@ import (
 func TestKVStoreTTLAndIncr(t *testing.T) {
 	store := newKVStore()
 	now := time.Unix(1_000, 0)
-	store.now = func() time.Time { return now }
+	store.now = func() time.Time {
+		return now
+	}
 
 	if err := store.set("a", kvRequest{Key: "k", Value: "v", TTLMS: 1_000}); err != nil {
 		t.Fatal(err)
@@ -68,7 +70,9 @@ func TestKVStoreTTLAndIncr(t *testing.T) {
 func TestKVStoreBudget(t *testing.T) {
 	store := newKVStore()
 	now := time.Unix(1_000, 0)
-	store.now = func() time.Time { return now }
+	store.now = func() time.Time {
+		return now
+	}
 
 	value := strings.Repeat("x", maxKVValueBytes-10)
 	stored := 0

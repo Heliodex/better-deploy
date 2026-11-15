@@ -8,26 +8,26 @@ import (
 	"strings"
 	"time"
 
-	"wt.example/guestbook/contract"
 	"github.com/heliodex/better-deploy/wt/packages/v2/app"
 	"github.com/heliodex/better-deploy/wt/packages/v2/storage"
 	wasihttp "github.com/heliodex/better-deploy/wt/packages/v2/wasihttp"
+	"wt.example/guestbook/contract"
 )
 
 const (
-	maxBody        = 16 << 10
-	defaultLimit   = 50
-	maxLimit       = 100
+	maxBody = 16 << 10
+	defaultLimit = 50
+	maxLimit = 100
 	reactionRocket = "rocket"
-	reactionHeart  = "heart"
-	reactionEyes   = "eyes"
-	reactionBrain  = "brain"
+	reactionHeart = "heart"
+	reactionEyes = "eyes"
+	reactionBrain = "brain"
 )
 
 var errMessageNotFound = errors.New("message not found")
 
 var (
-	store      *storage.Client
+	store *storage.Client
 	errStorage error
 )
 
@@ -36,7 +36,7 @@ func seed(ctx context.Context) error {
 		now := time.Now().UTC()
 		seeds := []struct {
 			id, name, body string
-			reactions      map[string]int64
+			reactions map[string]int64
 		}{
 			{
 				"ada",
@@ -70,12 +70,12 @@ func seed(ctx context.Context) error {
 			createdAt := now.Add(-time.Duration(i*3+1) * time.Hour).Format(app.TimestampFormat)
 
 			statements = append(statements, storage.Statement{
-				SQL:  `insert or ignore into messages (id, name, body, created_at) values (?, ?, ?, ?)`,
+				SQL: `insert or ignore into messages (id, name, body, created_at) values (?, ?, ?, ?)`,
 				Args: []any{seed.id, seed.name, seed.body, createdAt},
 			})
 			for reaction, count := range seed.reactions {
 				statements = append(statements, storage.Statement{
-					SQL:  `insert or ignore into reactions (message_id, reaction, count) values (?, ?, ?)`,
+					SQL: `insert or ignore into reactions (message_id, reaction, count) values (?, ?, ?)`,
 					Args: []any{seed.id, reaction, count},
 				})
 			}
@@ -171,9 +171,9 @@ func handleCreateMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	item := contract.Message{
-		ID:        app.NewID(),
-		Name:      strings.TrimSpace(request.Name),
-		Body:      strings.TrimSpace(request.Body),
+		ID: app.NewID(),
+		Name: strings.TrimSpace(request.Name),
+		Body: strings.TrimSpace(request.Body),
 		CreatedAt: time.Now().UTC().Format(app.TimestampFormat),
 	}
 	if _, err := store.Exec(r.Context(), `insert into messages (id, name, body, created_at) values (?, ?, ?, ?)`,

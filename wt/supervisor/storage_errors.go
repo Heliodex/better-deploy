@@ -12,9 +12,9 @@ import (
 
 // storageErrorResponse stays flat for existing clients: error is still the message, while code and the SQLite details are additive.
 type storageErrorResponse struct {
-	Error      string `json:"error"`
-	Code       string `json:"code,omitempty"`
-	SQLiteCode int    `json:"sqlite_code,omitempty"`
+	Error string `json:"error"`
+	Code string `json:"code,omitempty"`
+	SQLiteCode int `json:"sqlite_code,omitempty"`
 	Constraint string `json:"constraint,omitempty"`
 }
 
@@ -99,8 +99,8 @@ func storageErrorDetails(err error) (int, storageErrorResponse) {
 		status, name, constraint := storageSQLiteError(code)
 
 		return status, storageErrorResponse{
-			Error:      errorMessage(err),
-			Code:       name,
+			Error: errorMessage(err),
+			Code: name,
 			SQLiteCode: code,
 			Constraint: constraint,
 		}

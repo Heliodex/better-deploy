@@ -32,14 +32,14 @@ func testProxyPort(t *testing.T, backend *httptest.Server) int {
 
 func TestCompressibleMediaType(t *testing.T) {
 	for mediaType, want := range map[string]bool{
-		"application/json":         true,
-		"application/x-ndjson":     true,
-		"application/ld+json":      true,
-		"text/html":                true,
-		"text/csv":                 true,
-		"image/svg+xml":            true,
-		"text/event-stream":        false,
-		"image/png":                false,
+		"application/json": true,
+		"application/x-ndjson": true,
+		"application/ld+json": true,
+		"text/html": true,
+		"text/csv": true,
+		"image/svg+xml": true,
+		"text/event-stream": false,
+		"image/png": false,
 		"application/octet-stream": false,
 	} {
 		if got := compressibleMediaType(mediaType); got != want {

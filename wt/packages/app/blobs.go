@@ -18,10 +18,10 @@ import (
 
 const (
 	// BlobPrefix is the reserved same-origin path the supervisor serves blobs from.
-	BlobPrefix    = "/_wt/blobs"
+	BlobPrefix = "/_wt/blobs"
 	blobSecretEnv = "WT_BLOB_SECRET" //nolint:gosec // Environment variable name, not a credential.
 	blobPrefixEnv = "WT_BLOB_PREFIX"
-	blobMaxTTL    = 24 * time.Hour
+	blobMaxTTL = 24 * time.Hour
 )
 
 // blobSecret reads and validates the 64-character hex key shared with the supervisor.

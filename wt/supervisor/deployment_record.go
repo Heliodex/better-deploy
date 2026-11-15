@@ -106,11 +106,11 @@ func (m *deploymentManager) recordFailure(app, digest, message string) (deployme
 	defer os.RemoveAll(temp)
 
 	recorded := deploymentInfo{
-		ID:         id,
+		ID: id,
 		DeployedAt: now,
-		Digest:     digest,
-		Status:     deploymentStatusFail,
-		Error:      message,
+		Digest: digest,
+		Status: deploymentStatusFail,
+		Error: message,
 	}
 
 	meta, err := json.Marshal(recorded)

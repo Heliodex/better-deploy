@@ -108,13 +108,17 @@ func (s *storageServer) executeTransaction(ctx context.Context, app string, req 
 			return err
 		}
 
-		defer func() { _ = tx.Rollback() }()
+		defer func() {
+			_ = tx.Rollback()
+		}()
 
 		unregister, err := requireStorageAuthoriser(conn, false)
 		if err != nil {
 			return err
 		}
-		defer func() { _ = unregister() }()
+		defer func() {
+			_ = unregister()
+		}()
 
 		for i, statement := range req.Statements {
 			result, start, end, err := executeStatement(ctx, tx, statement, params[i], changes, i)
@@ -150,11 +154,11 @@ func transactionChanges(req storageStatementsRequest, results []storageResult, s
 		}
 
 		changes = append(changes, storageChange{
-			Time:          time.Now().UTC(),
-			SQL:           statement.SQL,
-			Params:        statement.Params,
-			RowsAffected:  results[i].RowsAffected,
-			Rows:          rows,
+			Time: time.Now().UTC(),
+			SQL: statement.SQL,
+			Params: statement.Params,
+			RowsAffected: results[i].RowsAffected,
+			Rows: rows,
 			RowsTruncated: collector != nil && collector.omitted > 0,
 		})
 	}

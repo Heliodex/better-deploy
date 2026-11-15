@@ -12,33 +12,33 @@ import (
 )
 
 type runnerStream struct {
-	name    string
-	events  chan runnerEvent
+	name string
+	events chan runnerEvent
 	started chan runnerEvent
 }
 
 type runnerClient struct {
 	conn net.Conn
 
-	writeMu   sync.Mutex
-	mu        sync.Mutex
-	streams   map[string]*runnerStream
-	snapshot  []runnerAppInfo
+	writeMu sync.Mutex
+	mu sync.Mutex
+	streams map[string]*runnerStream
+	snapshot []runnerAppInfo
 	runnerPID int
 
 	snapshotOnce sync.Once
-	snapshotCh   chan struct{}
-	done         chan struct{}
-	closeOnce    sync.Once
-	closeErr     error
+	snapshotCh chan struct{}
+	done chan struct{}
+	closeOnce sync.Once
+	closeErr error
 }
 
 func newRunnerClient(conn net.Conn) *runnerClient {
 	c := &runnerClient{
-		conn:       conn,
-		streams:    map[string]*runnerStream{},
+		conn: conn,
+		streams: map[string]*runnerStream{},
 		snapshotCh: make(chan struct{}),
-		done:       make(chan struct{}),
+		done: make(chan struct{}),
 	}
 	go c.readLoop()
 
@@ -120,14 +120,16 @@ func (c *runnerClient) dispatch(event runnerEvent) {
 			id := info.ID
 			if c.streams[id] == nil {
 				c.streams[id] = &runnerStream{
-					name:    id,
-					events:  make(chan runnerEvent, runnerOutputBuffer),
+					name: id,
+					events: make(chan runnerEvent, runnerOutputBuffer),
 					started: make(chan runnerEvent, 1),
 				}
 			}
 		}
 		c.mu.Unlock()
-		c.snapshotOnce.Do(func() { close(c.snapshotCh) })
+		c.snapshotOnce.Do(func() {
+			close(c.snapshotCh)
+		})
 	case runnerOpStarted, runnerOpError:
 		c.mu.Lock()
 		stream := c.streams[event.ID]
@@ -252,8 +254,8 @@ func (c *runnerClient) newStream(id string) *runnerStream {
 	stream := c.streams[id]
 	if stream == nil {
 		stream = &runnerStream{
-			name:    id,
-			events:  make(chan runnerEvent, runnerOutputBuffer),
+			name: id,
+			events: make(chan runnerEvent, runnerOutputBuffer),
 			started: make(chan runnerEvent, 1),
 		}
 		c.streams[id] = stream
@@ -268,8 +270,8 @@ func (c *runnerClient) startStream(id string) *runnerStream {
 	defer c.mu.Unlock()
 
 	stream := &runnerStream{
-		name:    id,
-		events:  make(chan runnerEvent, runnerOutputBuffer),
+		name: id,
+		events: make(chan runnerEvent, runnerOutputBuffer),
 		started: make(chan runnerEvent, 1),
 	}
 	c.streams[id] = stream

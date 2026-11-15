@@ -138,8 +138,8 @@ func TestAuthTokenAdminOnlyAndRevocation(t *testing.T) {
 	s.apps["other"] = &app{name: "other", cfg: appConfig{Host: "other.localhost"}}
 
 	for target, want := range map[string]int{
-		"/apps/demo":    http.StatusOK,
-		"/apps/other":   http.StatusForbidden,
+		"/apps/demo": http.StatusOK,
+		"/apps/other": http.StatusForbidden,
 		"/apps/missing": http.StatusForbidden,
 	} {
 		rec = httptest.NewRecorder()
@@ -178,10 +178,10 @@ func TestAppRolePermissions(t *testing.T) {
 	admin := authIdentity{Name: "operator", Role: roleAdmin, Apps: []string{"*"}}
 	for _, test := range []struct {
 		identity authIdentity
-		method   string
-		target   string
-		action   string
-		want     bool
+		method string
+		target string
+		action string
+		want bool
 	}{
 		{read, http.MethodGet, "/apps/notes", "", true},
 		{read, http.MethodGet, "/apps/notes/database", "database", false},

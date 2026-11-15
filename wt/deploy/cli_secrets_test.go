@@ -31,7 +31,7 @@ func TestRunSecretsList(t *testing.T) {
 func TestRunSecretsSetAndDelete(t *testing.T) {
 	var (
 		gotMethod, gotPath, gotAuth string
-		got                         map[string]string
+		got map[string]string
 	)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

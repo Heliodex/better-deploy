@@ -34,16 +34,16 @@ func wasm_stream_drop_readable_u8(handle int32)
 func wasm_stream_drop_writable_u8(handle int32)
 
 var wasm_stream_vtable_u8 = witTypes.StreamVtable[uint8]{
-	Size:         1,
-	Align:        1,
-	Read:         wasm_stream_read_u8,
-	Write:        wasm_stream_write_u8,
-	CancelRead:   nil,
-	CancelWrite:  nil,
+	Size: 1,
+	Align: 1,
+	Read: wasm_stream_read_u8,
+	Write: wasm_stream_write_u8,
+	CancelRead: nil,
+	CancelWrite: nil,
 	DropReadable: wasm_stream_drop_readable_u8,
 	DropWritable: wasm_stream_drop_writable_u8,
-	Lift:         nil,
-	Lower:        nil,
+	Lift: nil,
+	Lower: nil,
 }
 
 func MakeStreamU8() (*witTypes.StreamWriter[uint8], *witTypes.StreamReader[uint8]) {
@@ -1029,16 +1029,16 @@ func wasm_future_lower_result_option_fields_error_code(
 }
 
 var wasm_future_vtable_result_option_fields_error_code = witTypes.FutureVtable[witTypes.Result[witTypes.Option[*Fields], ErrorCode]]{
-	Size:         (24 + 4*4),
-	Align:        8,
-	Read:         wasm_future_read_result_option_fields_error_code,
-	Write:        wasm_future_write_result_option_fields_error_code,
-	CancelRead:   nil,
-	CancelWrite:  nil,
+	Size: (24 + 4*4),
+	Align: 8,
+	Read: wasm_future_read_result_option_fields_error_code,
+	Write: wasm_future_write_result_option_fields_error_code,
+	CancelRead: nil,
+	CancelWrite: nil,
 	DropReadable: wasm_future_drop_readable_result_option_fields_error_code,
 	DropWritable: wasm_future_drop_writable_result_option_fields_error_code,
-	Lift:         wasm_future_lift_result_option_fields_error_code,
-	Lower:        wasm_future_lower_result_option_fields_error_code,
+	Lift: wasm_future_lift_result_option_fields_error_code,
+	Lower: wasm_future_lower_result_option_fields_error_code,
 }
 
 func MakeFutureResultOptionFieldsErrorCode() (*witTypes.FutureWriter[witTypes.Result[witTypes.Option[*Fields], ErrorCode]], *witTypes.FutureReader[witTypes.Result[witTypes.Option[*Fields], ErrorCode]]) {
@@ -1990,16 +1990,16 @@ func wasm_future_lower_result_unit_error_code(
 }
 
 var wasm_future_vtable_result_unit_error_code = witTypes.FutureVtable[witTypes.Result[witTypes.Unit, ErrorCode]]{
-	Size:         (24 + 4*4),
-	Align:        8,
-	Read:         wasm_future_read_result_unit_error_code,
-	Write:        wasm_future_write_result_unit_error_code,
-	CancelRead:   nil,
-	CancelWrite:  nil,
+	Size: (24 + 4*4),
+	Align: 8,
+	Read: wasm_future_read_result_unit_error_code,
+	Write: wasm_future_write_result_unit_error_code,
+	CancelRead: nil,
+	CancelWrite: nil,
 	DropReadable: wasm_future_drop_readable_result_unit_error_code,
 	DropWritable: wasm_future_drop_writable_result_unit_error_code,
-	Lift:         wasm_future_lift_result_unit_error_code,
-	Lower:        wasm_future_lower_result_unit_error_code,
+	Lift: wasm_future_lift_result_unit_error_code,
+	Lower: wasm_future_lower_result_unit_error_code,
 }
 
 func MakeFutureResultUnitErrorCode() (*witTypes.FutureWriter[witTypes.Result[witTypes.Unit, ErrorCode]], *witTypes.FutureReader[witTypes.Result[witTypes.Unit, ErrorCode]]) {
@@ -2015,21 +2015,21 @@ func LiftFutureResultUnitErrorCode(handle int32) *witTypes.FutureReader[witTypes
 type Duration = uint64
 
 const (
-	MethodGet     uint8 = 0
-	MethodHead    uint8 = 1
-	MethodPost    uint8 = 2
-	MethodPut     uint8 = 3
-	MethodDelete  uint8 = 4
+	MethodGet uint8 = 0
+	MethodHead uint8 = 1
+	MethodPost uint8 = 2
+	MethodPut uint8 = 3
+	MethodDelete uint8 = 4
 	MethodConnect uint8 = 5
 	MethodOptions uint8 = 6
-	MethodTrace   uint8 = 7
-	MethodPatch   uint8 = 8
-	MethodOther   uint8 = 9
+	MethodTrace uint8 = 7
+	MethodPatch uint8 = 8
+	MethodOther uint8 = 9
 )
 
 // This type corresponds to HTTP standard Methods.
 type Method struct {
-	tag   uint8
+	tag uint8
 	value any
 }
 
@@ -2076,14 +2076,14 @@ func MakeMethodOther(value string) Method {
 }
 
 const (
-	SchemeHttp  uint8 = 0
+	SchemeHttp uint8 = 0
 	SchemeHttps uint8 = 1
 	SchemeOther uint8 = 2
 )
 
 // This type corresponds to HTTP standard Related Schemes.
 type Scheme struct {
-	tag   uint8
+	tag uint8
 	value any
 }
 
@@ -2110,13 +2110,13 @@ func MakeSchemeOther(value string) Scheme {
 
 // Defines the case payload type for `DNS-error` above:
 type DnsErrorPayload struct {
-	Rcode    witTypes.Option[string]
+	Rcode witTypes.Option[string]
 	InfoCode witTypes.Option[uint16]
 }
 
 // Defines the case payload type for `TLS-alert-received` above:
 type TlsAlertReceivedPayload struct {
-	AlertId      witTypes.Option[uint8]
+	AlertId witTypes.Option[uint8]
 	AlertMessage witTypes.Option[string]
 }
 
@@ -2127,44 +2127,44 @@ type FieldSizePayload struct {
 }
 
 const (
-	ErrorCodeDnsTimeout                     uint8 = 0
-	ErrorCodeDnsError                       uint8 = 1
-	ErrorCodeDestinationNotFound            uint8 = 2
-	ErrorCodeDestinationUnavailable         uint8 = 3
-	ErrorCodeDestinationIpProhibited        uint8 = 4
-	ErrorCodeDestinationIpUnroutable        uint8 = 5
-	ErrorCodeConnectionRefused              uint8 = 6
-	ErrorCodeConnectionTerminated           uint8 = 7
-	ErrorCodeConnectionTimeout              uint8 = 8
-	ErrorCodeConnectionReadTimeout          uint8 = 9
-	ErrorCodeConnectionWriteTimeout         uint8 = 10
-	ErrorCodeConnectionLimitReached         uint8 = 11
-	ErrorCodeTlsProtocolError               uint8 = 12
-	ErrorCodeTlsCertificateError            uint8 = 13
-	ErrorCodeTlsAlertReceived               uint8 = 14
-	ErrorCodeHttpRequestDenied              uint8 = 15
-	ErrorCodeHttpRequestLengthRequired      uint8 = 16
-	ErrorCodeHttpRequestBodySize            uint8 = 17
-	ErrorCodeHttpRequestMethodInvalid       uint8 = 18
-	ErrorCodeHttpRequestUriInvalid          uint8 = 19
-	ErrorCodeHttpRequestUriTooLong          uint8 = 20
-	ErrorCodeHttpRequestHeaderSectionSize   uint8 = 21
-	ErrorCodeHttpRequestHeaderSize          uint8 = 22
-	ErrorCodeHttpRequestTrailerSectionSize  uint8 = 23
-	ErrorCodeHttpRequestTrailerSize         uint8 = 24
-	ErrorCodeHttpResponseIncomplete         uint8 = 25
-	ErrorCodeHttpResponseHeaderSectionSize  uint8 = 26
-	ErrorCodeHttpResponseHeaderSize         uint8 = 27
-	ErrorCodeHttpResponseBodySize           uint8 = 28
+	ErrorCodeDnsTimeout uint8 = 0
+	ErrorCodeDnsError uint8 = 1
+	ErrorCodeDestinationNotFound uint8 = 2
+	ErrorCodeDestinationUnavailable uint8 = 3
+	ErrorCodeDestinationIpProhibited uint8 = 4
+	ErrorCodeDestinationIpUnroutable uint8 = 5
+	ErrorCodeConnectionRefused uint8 = 6
+	ErrorCodeConnectionTerminated uint8 = 7
+	ErrorCodeConnectionTimeout uint8 = 8
+	ErrorCodeConnectionReadTimeout uint8 = 9
+	ErrorCodeConnectionWriteTimeout uint8 = 10
+	ErrorCodeConnectionLimitReached uint8 = 11
+	ErrorCodeTlsProtocolError uint8 = 12
+	ErrorCodeTlsCertificateError uint8 = 13
+	ErrorCodeTlsAlertReceived uint8 = 14
+	ErrorCodeHttpRequestDenied uint8 = 15
+	ErrorCodeHttpRequestLengthRequired uint8 = 16
+	ErrorCodeHttpRequestBodySize uint8 = 17
+	ErrorCodeHttpRequestMethodInvalid uint8 = 18
+	ErrorCodeHttpRequestUriInvalid uint8 = 19
+	ErrorCodeHttpRequestUriTooLong uint8 = 20
+	ErrorCodeHttpRequestHeaderSectionSize uint8 = 21
+	ErrorCodeHttpRequestHeaderSize uint8 = 22
+	ErrorCodeHttpRequestTrailerSectionSize uint8 = 23
+	ErrorCodeHttpRequestTrailerSize uint8 = 24
+	ErrorCodeHttpResponseIncomplete uint8 = 25
+	ErrorCodeHttpResponseHeaderSectionSize uint8 = 26
+	ErrorCodeHttpResponseHeaderSize uint8 = 27
+	ErrorCodeHttpResponseBodySize uint8 = 28
 	ErrorCodeHttpResponseTrailerSectionSize uint8 = 29
-	ErrorCodeHttpResponseTrailerSize        uint8 = 30
-	ErrorCodeHttpResponseTransferCoding     uint8 = 31
-	ErrorCodeHttpResponseContentCoding      uint8 = 32
-	ErrorCodeHttpResponseTimeout            uint8 = 33
-	ErrorCodeHttpUpgradeFailed              uint8 = 34
-	ErrorCodeHttpProtocolError              uint8 = 35
-	ErrorCodeLoopDetected                   uint8 = 36
-	ErrorCodeConfigurationError             uint8 = 37
+	ErrorCodeHttpResponseTrailerSize uint8 = 30
+	ErrorCodeHttpResponseTransferCoding uint8 = 31
+	ErrorCodeHttpResponseContentCoding uint8 = 32
+	ErrorCodeHttpResponseTimeout uint8 = 33
+	ErrorCodeHttpUpgradeFailed uint8 = 34
+	ErrorCodeHttpProtocolError uint8 = 35
+	ErrorCodeLoopDetected uint8 = 36
+	ErrorCodeConfigurationError uint8 = 37
 	// This is a catch-all error for anything that doesn't fit cleanly into a
 	// more specific case. It also includes an optional string for an
 	// unstructured description of the error. Users should not depend on the
@@ -2177,7 +2177,7 @@ const (
 //
 //	<https://www.iana.org/assignments/http-proxy-status/http-proxy-status.xhtml#table-http-proxy-error-types>
 type ErrorCode struct {
-	tag   uint8
+	tag uint8
 	value any
 }
 
@@ -2422,7 +2422,7 @@ const (
 // This type enumerates the different kinds of errors that may occur when
 // setting or appending to a `fields` resource.
 type HeaderError struct {
-	tag   uint8
+	tag uint8
 	value any
 }
 
@@ -2471,7 +2471,7 @@ const (
 // This type enumerates the different kinds of errors that may occur when
 // setting fields of a `request-options` resource.
 type RequestOptionsError struct {
-	tag   uint8
+	tag uint8
 	value any
 }
 

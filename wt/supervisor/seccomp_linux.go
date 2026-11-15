@@ -16,9 +16,9 @@ import (
 
 const (
 	seccompRetKillProcess = 0x80000000
-	seccompRetAllow       = 0x7fff0000
-	seccompRetErrno       = 0x00050000
-	x32SyscallBit         = 0x40000000
+	seccompRetAllow = 0x7fff0000
+	seccompRetErrno = 0x00050000
+	x32SyscallBit = 0x40000000
 )
 
 // commonDeniedSyscalls are dangerous syscalls present on both amd64 and arm64.

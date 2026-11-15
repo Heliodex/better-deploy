@@ -34,21 +34,21 @@ const (
 
 // resourceSample is one point in an app's CPU and memory history.
 type resourceSample struct {
-	At          time.Time `json:"at"`
-	CPUPercent  float64   `json:"cpuPercent"`
-	MemoryBytes int64     `json:"memoryBytes"`
+	At time.Time `json:"at"`
+	CPUPercent float64 `json:"cpuPercent"`
+	MemoryBytes int64 `json:"memoryBytes"`
 }
 
 // appStats caches the last resource sample for one app process and keeps a short history for the charts.
 type appStats struct {
-	mu                    sync.Mutex
-	pid                   int
-	lastTicks             uint64
+	mu sync.Mutex
+	pid int
+	lastTicks uint64
 	lastSample, sampledAt time.Time
-	cpuPercent            float64
-	memoryBytes           int64
-	lastAppend            time.Time
-	history               []resourceSample
+	cpuPercent float64
+	memoryBytes int64
+	lastAppend time.Time
+	history []resourceSample
 }
 
 // appendHistory records a point when the chart interval has passed. The caller holds stats.mu.
@@ -177,7 +177,9 @@ func (s *supervisor) loadResourceHistory(a *app) {
 		kept = append(kept, sample)
 	}
 
-	sort.Slice(kept, func(i, j int) bool { return kept[i].At.Before(kept[j].At) })
+	sort.Slice(kept, func(i, j int) bool {
+		return kept[i].At.Before(kept[j].At)
+	})
 
 	if len(kept) > resourceHistoryPoints {
 		kept = kept[len(kept)-resourceHistoryPoints:]

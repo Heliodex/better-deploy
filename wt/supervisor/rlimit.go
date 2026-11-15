@@ -11,8 +11,8 @@ const defaultNofileLimit = 1024
 
 type rlimitSpec struct {
 	Resource int
-	Name     string
-	Value    uint64
+	Name string
+	Value uint64
 }
 
 // rlimitPlan derives the app's per-process hard limits. disk_mb becomes a per-file backstop through RLIMIT_FSIZE.
@@ -23,8 +23,8 @@ func rlimitPlan(cfg appConfig) []rlimitSpec {
 	if cfg.DiskMB > 0 {
 		plan = append(plan, rlimitSpec{
 			Resource: unix.RLIMIT_FSIZE,
-			Name:     "RLIMIT_FSIZE",
-			Value:    uint64(cfg.DiskMB) << 20,
+			Name: "RLIMIT_FSIZE",
+			Value: uint64(cfg.DiskMB) << 20,
 		})
 	}
 

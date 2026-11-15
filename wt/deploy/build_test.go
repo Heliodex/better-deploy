@@ -263,9 +263,9 @@ func TestPrepareBuildsSplitsPhases(t *testing.T) {
 	writeTestFile(t, filepath.Join(dir, "web", "src", "+page.svelte"), "<h1>one</h1>")
 
 	m := manifest{
-		Name:           testAppName,
+		Name: testAppName,
 		BuildComponent: "printf 'component\\n' >> build.log; printf wasm > main.wasm",
-		BuildStatic:    "printf 'static\\n' >> build.log; mkdir -p static; printf html > static/index.html",
+		BuildStatic: "printf 'static\\n' >> build.log; mkdir -p static; printf html > static/index.html",
 	}
 	cfg := &deployConfig{dir: dir, skipCompile: true, wasmtime: fakeWasmtime(t, t.TempDir()), target: testTarget}
 	logPath := filepath.Join(dir, "build.log")

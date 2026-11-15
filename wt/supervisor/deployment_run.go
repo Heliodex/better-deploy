@@ -16,7 +16,7 @@ const deploymentLogPoll = 250 * time.Millisecond
 // deploymentRun is one active async install. cancel is best-effort: the runner checks it between steps.
 type deploymentRun struct {
 	app, id string
-	cancel  context.CancelFunc
+	cancel context.CancelFunc
 }
 
 func deploymentKey(app, id string) string {
@@ -102,7 +102,7 @@ func (s *supervisor) finishDeploymentRun(app, id, status string, cause error) de
 type deploymentLogWriter struct {
 	header http.Header
 	status int
-	log    func(string)
+	log func(string)
 }
 
 func (w *deploymentLogWriter) Header() http.Header {
@@ -150,7 +150,9 @@ func (s *supervisor) handleDeploymentCreate(w http.ResponseWriter, r *http.Reque
 		recorder = &deployRecorder{ResponseWriter: w}
 
 		w = recorder
-		defer func() { s.storeDeployReplay(name, idempotencyKey, recorder) }()
+		defer func() {
+			s.storeDeployReplay(name, idempotencyKey, recorder)
+		}()
 	}
 
 	if s.rejectOverBudget(w) {
@@ -250,7 +252,9 @@ func (s *supervisor) runDeployment(ctx context.Context, name, id string, staged 
 		return
 	}
 
-	writer := &deploymentLogWriter{log: func(text string) { s.deploymentLog(name, id, text) }}
+	writer := &deploymentLogWriter{log: func(text string) {
+		s.deploymentLog(name, id, text)
+	}}
 
 	next, mode, err := s.installBundle(writer, name, staged.cfg, staged.dir, staged.digest, "deployed")
 	if err != nil {

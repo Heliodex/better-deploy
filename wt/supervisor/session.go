@@ -13,13 +13,13 @@ func (s *supervisor) setSessionCookie(w http.ResponseWriter, r *http.Request, na
 	secure := s.forwardedInfo(r).Proto == "https"
 	//nolint:gosec // Secure follows the forwarded request scheme.
 	http.SetCookie(w, &http.Cookie{
-		Name:     name,
-		Value:    value,
-		Path:     "/",
-		MaxAge:   maxAge,
+		Name: name,
+		Value: value,
+		Path: "/",
+		MaxAge: maxAge,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   secure,
+		Secure: secure,
 	})
 }
 

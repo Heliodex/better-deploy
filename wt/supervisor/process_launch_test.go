@@ -15,10 +15,10 @@ func TestAppServeArgsSerialisesInstances(t *testing.T) {
 
 func TestEpochMismatch(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
+		name string
 		output string
-		epoch  bool
-		ok     bool
+		epoch bool
+		ok bool
 	}{
 		{"needs epoch", "Caused by:\n    Module was compiled with epoch interruption but it is not enabled for the host", true, true},
 		{"needs no epoch", "Caused by:\n    Module was compiled without epoch interruption but it is enabled for the host", false, true},

@@ -51,7 +51,7 @@ const (
 
 // Lookup error codes.
 type ErrorCode struct {
-	tag   uint8
+	tag uint8
 	value any
 }
 

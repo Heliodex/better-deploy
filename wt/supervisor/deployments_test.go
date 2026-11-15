@@ -33,7 +33,7 @@ func TestDeploymentHistoryRecordListAndPrune(t *testing.T) {
 
 	source := writeDeploymentSource(t, "demo.localhost")
 	for name, body := range map[string]string{
-		"main.wasm":     "wasm",
+		"main.wasm": "wasm",
 		"artefact.json": `{"wasmtime":"wasmtime-cli 50.0.0","target":"x86_64-test"}`,
 	} {
 		if err := os.WriteFile(filepath.Join(source, name), []byte(body), 0o644); err != nil {
@@ -197,7 +197,9 @@ func TestRollbackInstallsPreviousBundle(t *testing.T) {
 		t.Fatalf("rollback did not replace the app: %v", next)
 	}
 
-	t.Cleanup(func() { s.stop(next) })
+	t.Cleanup(func() {
+		s.stop(next)
+	})
 
 	infos, err := s.deployments.list("demo")
 	if err != nil {
@@ -320,7 +322,9 @@ func TestDeploymentHistoryByteBudget(t *testing.T) {
 	previous := deploymentMaxBytes
 
 	deploymentMaxBytes = 16
-	defer func() { deploymentMaxBytes = previous }()
+	defer func() {
+		deploymentMaxBytes = previous
+	}()
 
 	manager := newDeploymentManager(t.TempDir())
 
@@ -564,8 +568,8 @@ func TestDeploymentHistoryLegacyStaticWithoutMetadata(t *testing.T) {
 	}
 
 	for name, body := range map[string]string{
-		"app.json":      `{"name":"demo","host":"demo.localhost"}`,
-		"main.cwasm":    "cwasm demo.localhost",
+		"app.json": `{"name":"demo","host":"demo.localhost"}`,
+		"main.cwasm": "cwasm demo.localhost",
 		"static/app.js": "console.log('legacy')",
 	} {
 		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(name)), []byte(body), 0o644); err != nil {

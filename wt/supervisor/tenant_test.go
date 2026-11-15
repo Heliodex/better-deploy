@@ -15,12 +15,12 @@ func TestPublicAndAdminHandlersSeparateRoutes(t *testing.T) {
 	admin := s.adminHandler()
 
 	cases := []struct {
-		name    string
+		name string
 		handler http.Handler
-		method  string
-		target  string
-		token   bool
-		status  int
+		method string
+		target string
+		token bool
+		status int
 	}{
 		{"public apps hidden", public, http.MethodGet, "/apps", true, http.StatusNotFound},
 		{"public admin hidden", public, http.MethodGet, "/admin/", true, http.StatusNotFound},
@@ -174,9 +174,9 @@ func TestValidateTenantConfig(t *testing.T) {
 
 func TestParseAdminListen(t *testing.T) {
 	cases := map[string]struct{ network, address string }{
-		"127.0.0.1:8081":     {"tcp", "127.0.0.1:8081"},
+		"127.0.0.1:8081": {"tcp", "127.0.0.1:8081"},
 		"tcp:127.0.0.1:8081": {"tcp", "127.0.0.1:8081"},
-		"unix:/tmp/wt.sock":  {"unix", "/tmp/wt.sock"},
+		"unix:/tmp/wt.sock": {"unix", "/tmp/wt.sock"},
 	}
 	for input, want := range cases {
 		network, address, err := parseAdminListen(input)

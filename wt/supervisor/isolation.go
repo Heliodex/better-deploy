@@ -12,11 +12,11 @@ import (
 
 // isolationPlan owns every per-launch resource outside the process itself.
 type isolationPlan struct {
-	app            *app
-	uid, gid       int
+	app *app
+	uid, gid int
 	cgroup, nsRoot string
-	ns             *nsLaunch
-	closed         bool
+	ns *nsLaunch
+	closed bool
 }
 
 // prepareIsolation allocates the app uid, /data ownership, quota, cgroup and namespaces before the process starts.

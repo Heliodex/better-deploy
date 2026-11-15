@@ -18,8 +18,8 @@ type secretKeysResponse struct {
 }
 
 type secretMutationResponse struct {
-	Key             string `json:"key"`
-	RestartRequired bool   `json:"restart_required"`
+	Key string `json:"key"`
+	RestartRequired bool `json:"restart_required"`
 }
 
 // validSecretKey matches the supervisor's environment-style key rules.
@@ -46,7 +46,7 @@ func validSecretKey(key string) bool {
 func readSecretValue(file string) (string, error) {
 	var (
 		data []byte
-		err  error
+		err error
 	)
 
 	if file != "" {
@@ -117,7 +117,7 @@ func runSecretsList(cfg clientOptions, name string, args []string) error {
 func runSecretsSet(cfg clientOptions, name string, args []string) error {
 	var (
 		file string
-		key  string
+		key string
 	)
 
 	for index := 0; index < len(args); index++ {

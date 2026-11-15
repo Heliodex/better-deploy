@@ -49,9 +49,9 @@ func responseError(resp *http.Response) error {
 	}
 
 	return &Error{
-		Status:     resp.StatusCode,
-		Code:       body.Code,
-		Message:    message,
+		Status: resp.StatusCode,
+		Code: body.Code,
+		Message: message,
 		SQLiteCode: body.SQLiteCode,
 		Constraint: body.Constraint,
 	}
@@ -280,11 +280,11 @@ func (c *Client) transact(ctx context.Context, batch []TransactionStatement) ([]
 		}
 
 		results[i] = TransactionResult{
-			Columns:      result.Columns,
-			Rows:         rows,
+			Columns: result.Columns,
+			Rows: rows,
 			RowsAffected: result.RowsAffected,
 			LastInsertID: result.LastInsertID,
-			Truncated:    result.Truncated,
+			Truncated: result.Truncated,
 		}
 	}
 

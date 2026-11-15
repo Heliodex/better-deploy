@@ -30,8 +30,8 @@ func timeNowUnix() int64 {
 type jwk struct {
 	Kty string `json:"kty"`
 	Kid string `json:"kid"`
-	N   string `json:"n"`
-	E   string `json:"e"`
+	N string `json:"n"`
+	E string `json:"e"`
 }
 
 type jwksDocument struct {

@@ -15,38 +15,38 @@ import (
 
 var (
 	errSessionNotFound = errors.New("storage session not found")
-	errSessionClosed   = errors.New("storage session is closed")
+	errSessionClosed = errors.New("storage session is closed")
 )
 
 // storageSession pins one connection and an open transaction across several requests, so apps can read, decide and write atomically.
 type storageSession struct {
-	id, app    string
-	conn       *sql.Conn
-	tx         *sql.Tx
-	collector  *rowChangeCollector
-	hook       bool
+	id, app string
+	conn *sql.Conn
+	tx *sql.Tx
+	collector *rowChangeCollector
+	hook bool
 	authoriser bool
-	writes     []storageSessionWrite
+	writes []storageSessionWrite
 
-	mu        sync.Mutex
-	closed    bool
+	mu sync.Mutex
+	closed bool
 	expiresAt time.Time // protected by storageServer.sessionMu
 }
 
 type storageSessionWrite struct {
 	statement storageStatement
-	result    storageResult
-	start     int
-	end       int
+	result storageResult
+	start int
+	end int
 }
 
 type storageSessionResponse struct {
-	ID        string    `json:"id"`
+	ID string `json:"id"`
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
 type storageSessionCloseResponse struct {
-	Committed  bool `json:"committed"`
+	Committed bool `json:"committed"`
 	RolledBack bool `json:"rolled_back"`
 }
 
@@ -257,11 +257,11 @@ func (session *storageSession) changes() []storageChange {
 		}
 
 		out = append(out, storageChange{
-			Time:          time.Now().UTC(),
-			SQL:           write.statement.SQL,
-			Params:        write.statement.Params,
-			RowsAffected:  write.result.RowsAffected,
-			Rows:          rows,
+			Time: time.Now().UTC(),
+			SQL: write.statement.SQL,
+			Params: write.statement.Params,
+			RowsAffected: write.result.RowsAffected,
+			Rows: rows,
 			RowsTruncated: session.collector.omitted > 0,
 		})
 	}
@@ -356,14 +356,14 @@ func (s *storageServer) openSession(ctx context.Context, w http.ResponseWriter, 
 	}
 
 	return &storageSession{
-		id:         id,
-		app:        app,
-		conn:       conn,
-		tx:         tx,
-		collector:  collector,
-		hook:       hook,
+		id: id,
+		app: app,
+		conn: conn,
+		tx: tx,
+		collector: collector,
+		hook: hook,
 		authoriser: true,
-		expiresAt:  time.Now().Add(storageSessionLease),
+		expiresAt: time.Now().Add(storageSessionLease),
 	}, true
 }
 
@@ -470,8 +470,8 @@ func (s *storageServer) sessionQuery(w http.ResponseWriter, r *http.Request, app
 		if end := len(session.collector.rows); end > start {
 			session.writes = append(session.writes, storageSessionWrite{
 				statement: storageStatement{SQL: req.SQL, Params: req.Params, Query: true},
-				start:     start,
-				end:       end,
+				start: start,
+				end: end,
 			})
 		}
 
@@ -522,9 +522,9 @@ func (s *storageServer) sessionExec(w http.ResponseWriter, r *http.Request, app,
 		result.LastInsertID, _ = res.LastInsertId()
 		session.writes = append(session.writes, storageSessionWrite{
 			statement: storageStatement{SQL: req.SQL, Params: req.Params},
-			result:    result,
-			start:     start,
-			end:       end,
+			result: result,
+			start: start,
+			end: end,
 		})
 
 		return nil

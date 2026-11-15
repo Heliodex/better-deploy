@@ -48,7 +48,9 @@ func TestProxyConcurrencyLimit(t *testing.T) {
 
 	s := testSupervisor()
 	backendApp(t, s, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		once.Do(func() { entered <- struct{}{} })
+		once.Do(func() {
+			entered <- struct{}{}
+		})
 		<-release
 
 		_, _ = w.Write([]byte("ok"))
@@ -149,9 +151,9 @@ func TestNormaliseHealthSettings(t *testing.T) {
 	}
 
 	cfg, err = normaliseAppConfig(appConfig{
-		StartupTimeout:     "30s",
-		HealthInterval:     "5s",
-		HealthFailures:     3,
+		StartupTimeout: "30s",
+		HealthInterval: "5s",
+		HealthFailures: 3,
 		RestartOnUnhealthy: true,
 	}, "demo", "localhost", tenantTrusted)
 	if err != nil {
@@ -182,9 +184,9 @@ func TestNormaliseHealthSettings(t *testing.T) {
 
 func TestSameRuntimeConfigIncludesHealthSettings(t *testing.T) {
 	base := appConfig{
-		Host:           "demo.localhost",
-		Health:         "/healthz",
-		Env:            map[string]string{"A": "1"},
+		Host: "demo.localhost",
+		Health: "/healthz",
+		Env: map[string]string{"A": "1"},
 		StartupTimeout: "15s",
 		HealthInterval: "10s",
 		HealthFailures: 2,
@@ -194,9 +196,9 @@ func TestSameRuntimeConfigIncludesHealthSettings(t *testing.T) {
 	}
 
 	cases := map[string]appConfig{
-		"startup timeout":      {Host: base.Host, Health: base.Health, Env: base.Env, StartupTimeout: "30s", HealthInterval: base.HealthInterval, HealthFailures: base.HealthFailures},
-		"health interval":      {Host: base.Host, Health: base.Health, Env: base.Env, StartupTimeout: base.StartupTimeout, HealthInterval: "5s", HealthFailures: base.HealthFailures},
-		"health failures":      {Host: base.Host, Health: base.Health, Env: base.Env, StartupTimeout: base.StartupTimeout, HealthInterval: base.HealthInterval, HealthFailures: 3},
+		"startup timeout": {Host: base.Host, Health: base.Health, Env: base.Env, StartupTimeout: "30s", HealthInterval: base.HealthInterval, HealthFailures: base.HealthFailures},
+		"health interval": {Host: base.Host, Health: base.Health, Env: base.Env, StartupTimeout: base.StartupTimeout, HealthInterval: "5s", HealthFailures: base.HealthFailures},
+		"health failures": {Host: base.Host, Health: base.Health, Env: base.Env, StartupTimeout: base.StartupTimeout, HealthInterval: base.HealthInterval, HealthFailures: 3},
 		"restart on unhealthy": {Host: base.Host, Health: base.Health, Env: base.Env, StartupTimeout: base.StartupTimeout, HealthInterval: base.HealthInterval, HealthFailures: base.HealthFailures, RestartOnUnhealthy: true},
 	}
 	for name, changed := range cases {

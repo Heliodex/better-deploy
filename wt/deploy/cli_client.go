@@ -16,8 +16,8 @@ import (
 // clientFlagValues holds the global client flags extracted from any position.
 type clientFlagValues struct {
 	host, token, config, profile string
-	jsonOut                      bool
-	timeout                      time.Duration
+	jsonOut bool
+	timeout time.Duration
 }
 
 // extractClientFlags removes --host, --token, --config, --profile, --json and --timeout wherever they appear, leaving command flags and positionals in order.
@@ -113,12 +113,12 @@ func clientFlags(args []string, requireHost bool) (clientOptions, []string, erro
 	}
 
 	return clientOptions{
-		host:      host,
-		token:     token,
-		profile:   profileName,
+		host: host,
+		token: token,
+		profile: profileName,
 		appDomain: profile.AppDomain,
-		jsonOut:   values.jsonOut,
-		timeout:   values.timeout,
+		jsonOut: values.jsonOut,
+		timeout: values.timeout,
 	}, rest, nil
 }
 

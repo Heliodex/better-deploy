@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"io"
 
-	wit "go.bytecodealliance.org/pkg/wit/types"
 	wasi "github.com/heliodex/better-deploy/wt/packages/v2/binding/imports/wasi_http_0_3_0_types"
+	wit "go.bytecodealliance.org/pkg/wit/types"
 )
 
 // Assert `bodyReader` implements the required interfaces.
@@ -14,7 +14,7 @@ var _ io.Reader = &bodyReader{}
 var _ io.ReadCloser = &bodyReader{}
 
 type bodyReader struct {
-	stream   *wit.StreamReader[uint8]
+	stream *wit.StreamReader[uint8]
 	trailers *wit.FutureReader[wit.Result[wit.Option[*wasi.Fields], wasi.ErrorCode]]
 }
 
@@ -63,7 +63,7 @@ func newReader(
 	trailers *wit.FutureReader[wit.Result[wit.Option[*wasi.Fields], wasi.ErrorCode]],
 ) *bodyReader {
 	return &bodyReader{
-		stream:   stream,
+		stream: stream,
 		trailers: trailers,
 	}
 }

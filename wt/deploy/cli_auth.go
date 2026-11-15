@@ -17,16 +17,16 @@ const configPrivateMask = 0o077
 
 // authStatusReport is the token-free view printed by wt auth status.
 type authStatusReport struct {
-	Host          string `json:"host,omitempty"`
-	HostSource    string `json:"host_source,omitempty"`
-	TokenSource   string `json:"token_source,omitempty"`
-	Profile       string `json:"profile,omitempty"`
+	Host string `json:"host,omitempty"`
+	HostSource string `json:"host_source,omitempty"`
+	TokenSource string `json:"token_source,omitempty"`
+	Profile string `json:"profile,omitempty"`
 	ProfileSource string `json:"profile_source,omitempty"`
-	AppDomain     string `json:"app_domain,omitempty"`
-	Config        string `json:"config,omitempty"`
-	ConfigMode    string `json:"config_mode,omitempty"`
-	ConfigPrivate bool   `json:"config_private"`
-	Check         string `json:"check,omitempty"`
+	AppDomain string `json:"app_domain,omitempty"`
+	Config string `json:"config,omitempty"`
+	ConfigMode string `json:"config_mode,omitempty"`
+	ConfigPrivate bool `json:"config_private"`
+	Check string `json:"check,omitempty"`
 }
 
 // normaliseSupervisorHost adds https when needed and rejects non-HTTP schemes.
@@ -312,14 +312,14 @@ func runAuthStatus(args []string, out io.Writer) error {
 	mode, private := configMode(configPath)
 
 	report := authStatusReport{
-		Host:          host,
-		HostSource:    hostSource,
-		TokenSource:   tokenSource,
-		Profile:       profileName,
+		Host: host,
+		HostSource: hostSource,
+		TokenSource: tokenSource,
+		Profile: profileName,
 		ProfileSource: noteProfileSource(values, cfg),
-		AppDomain:     profile.AppDomain,
-		Config:        configPath,
-		ConfigMode:    mode,
+		AppDomain: profile.AppDomain,
+		Config: configPath,
+		ConfigMode: mode,
 		ConfigPrivate: private,
 	}
 

@@ -12,25 +12,25 @@ import (
 )
 
 type manifest struct {
-	Name            string            `json:"name"`
-	Host            string            `json:"host"`
-	Health          string            `json:"health"`
-	Env             map[string]string `json:"env"`
-	BuildComponent  string            `json:"build_component,omitempty"`
-	BuildStatic     string            `json:"build_static,omitempty"`
-	ComponentInputs []string          `json:"component_inputs,omitempty"`
-	StaticInputs    []string          `json:"static_inputs,omitempty"`
-	MemoryMB        int               `json:"memory_mb,omitempty"`
-	DiskMB          int               `json:"disk_mb,omitempty"`
-	MaxConcurrent   int               `json:"max_concurrency,omitempty"`
-	RequestTimeout  string            `json:"request_timeout,omitempty"`
-	IdleTimeout     string            `json:"idle_timeout,omitempty"`
-	Contract        string            `json:"contract,omitempty"`
-	Network         string            `json:"network,omitempty"`
-	ServerPaths     []string          `json:"server_paths,omitempty"`
-	ServerPages     []string          `json:"server_pages,omitempty"`
-	Schedule        []schedule        `json:"schedule,omitempty"`
-	Dev             *appDevConfig     `json:"dev,omitempty"`
+	Name string `json:"name"`
+	Host string `json:"host"`
+	Health string `json:"health"`
+	Env map[string]string `json:"env"`
+	BuildComponent string `json:"build_component,omitempty"`
+	BuildStatic string `json:"build_static,omitempty"`
+	ComponentInputs []string `json:"component_inputs,omitempty"`
+	StaticInputs []string `json:"static_inputs,omitempty"`
+	MemoryMB int `json:"memory_mb,omitempty"`
+	DiskMB int `json:"disk_mb,omitempty"`
+	MaxConcurrent int `json:"max_concurrency,omitempty"`
+	RequestTimeout string `json:"request_timeout,omitempty"`
+	IdleTimeout string `json:"idle_timeout,omitempty"`
+	Contract string `json:"contract,omitempty"`
+	Network string `json:"network,omitempty"`
+	ServerPaths []string `json:"server_paths,omitempty"`
+	ServerPages []string `json:"server_pages,omitempty"`
+	Schedule []schedule `json:"schedule,omitempty"`
+	Dev *appDevConfig `json:"dev,omitempty"`
 }
 
 // appDevConfig selects the optional SvelteKit development loop for an app.
@@ -53,17 +53,17 @@ type appDevConfig struct {
 
 // schedule is carried through the bundle so the supervisor can call the app on a timer.
 type schedule struct {
-	Name    string `json:"name,omitempty"`
-	Method  string `json:"method,omitempty"`
-	Path    string `json:"path"`
-	Every   string `json:"every"`
+	Name string `json:"name,omitempty"`
+	Method string `json:"method,omitempty"`
+	Path string `json:"path"`
+	Every string `json:"every"`
 	Timeout string `json:"timeout,omitempty"`
 }
 
 const (
 	minScheduleInterval = time.Second
 	maxScheduleInterval = 24 * time.Hour
-	maxServerPaths      = 32
+	maxServerPaths = 32
 )
 
 // validName reports whether name is a lowercase DNS label no longer than 63 characters.

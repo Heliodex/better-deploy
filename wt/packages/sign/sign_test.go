@@ -11,7 +11,9 @@ func fixedSigner() Signer {
 	return Signer{
 		Secret: []byte("secret"),
 		Window: 5 * time.Minute,
-		Now:    func() time.Time { return time.Unix(1_700_000_000, 0) },
+		Now: func() time.Time {
+			return time.Unix(1_700_000_000, 0)
+		},
 	}
 }
 
@@ -48,7 +50,7 @@ func TestVerifyRejectsBadInput(t *testing.T) {
 
 	for _, test := range []struct {
 		name, timestamp, signature string
-		want                       error
+		want error
 	}{
 		{"missing timestamp", "", signature, ErrInvalidTimestamp},
 		{"non-numeric timestamp", "soon", signature, ErrInvalidTimestamp},
@@ -80,7 +82,9 @@ func TestSignParts(t *testing.T) {
 }
 
 func TestDefaultWindow(t *testing.T) {
-	signer := Signer{Secret: []byte("secret"), Now: func() time.Time { return time.Unix(1000, 0) }}
+	signer := Signer{Secret: []byte("secret"), Now: func() time.Time {
+		return time.Unix(1000, 0)
+	}}
 	if signer.window() != DefaultWindow {
 		t.Errorf("window = %v", signer.window())
 	}

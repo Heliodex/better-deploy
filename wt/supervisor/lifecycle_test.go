@@ -26,8 +26,8 @@ func spawnTestApp(t *testing.T, s *supervisor, name string) *app {
 	}
 
 	a, err := s.spawn(name, dir, appConfig{
-		Name:   name,
-		Host:   name + ".localhost",
+		Name: name,
+		Host: name + ".localhost",
 		Health: "/",
 	})
 	if err != nil {
@@ -35,7 +35,9 @@ func spawnTestApp(t *testing.T, s *supervisor, name string) *app {
 	}
 
 	s.register(a)
-	t.Cleanup(func() { s.stop(a) })
+	t.Cleanup(func() {
+		s.stop(a)
+	})
 
 	return a
 }

@@ -14,9 +14,9 @@ func TestRouteTableMatch(t *testing.T) {
 
 	cases := []struct {
 		method, path string
-		ok           bool
-		params       map[string]string
-		allow        string
+		ok bool
+		params map[string]string
+		allow string
 	}{
 		{http.MethodGet, "/apps/demo", true, map[string]string{"name": "demo"}, ""},
 		{http.MethodGet, "/apps/demo/", true, map[string]string{"name": "demo"}, ""},

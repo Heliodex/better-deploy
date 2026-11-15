@@ -18,12 +18,12 @@ import (
 )
 
 type providerFixture struct {
-	server       *httptest.Server
-	key          *rsa.PrivateKey
-	clientID     string
+	server *httptest.Server
+	key *rsa.PrivateKey
+	clientID string
 	clientSecret string
-	kid          string
-	tokenForm    url.Values
+	kid string
+	tokenForm url.Values
 
 	keyMu sync.RWMutex
 }
@@ -58,12 +58,12 @@ func newProviderFixture(t *testing.T) *providerFixture {
 		switch r.URL.Path {
 		case "/.well-known/openid-configuration":
 			writeTestJSON(t, w, map[string]string{
-				"issuer":                 fixture.server.URL,
+				"issuer": fixture.server.URL,
 				"authorization_endpoint": fixture.server.URL + "/authorize",
-				"token_endpoint":         fixture.server.URL + "/token",
-				"userinfo_endpoint":      fixture.server.URL + "/userinfo",
-				"end_session_endpoint":   fixture.server.URL + "/endsession",
-				"jwks_uri":               fixture.server.URL + "/jwks",
+				"token_endpoint": fixture.server.URL + "/token",
+				"userinfo_endpoint": fixture.server.URL + "/userinfo",
+				"end_session_endpoint": fixture.server.URL + "/endsession",
+				"jwks_uri": fixture.server.URL + "/jwks",
 			})
 		case "/jwks":
 			currentKey, kid := fixture.signingMaterial()
@@ -71,8 +71,8 @@ func newProviderFixture(t *testing.T) *providerFixture {
 				"keys": []map[string]string{{
 					"kty": "RSA",
 					"kid": kid,
-					"n":   base64.RawURLEncoding.EncodeToString(currentKey.N.Bytes()),
-					"e":   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(currentKey.E)).Bytes()),
+					"n": base64.RawURLEncoding.EncodeToString(currentKey.N.Bytes()),
+					"e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(currentKey.E)).Bytes()),
 				}},
 			})
 		case "/token":
@@ -89,21 +89,21 @@ func newProviderFixture(t *testing.T) *providerFixture {
 
 			currentKey, kid := fixture.signingMaterial()
 			token := signedTestToken(t, currentKey, kid, claims{
-				Issuer:   fixture.server.URL,
+				Issuer: fixture.server.URL,
 				Audience: fixture.clientID,
-				Expires:  time.Now().Add(time.Hour).Unix(),
-				Issued:   time.Now().Unix(),
-				Nonce:    "nonce",
-				Subject:  "alice",
-				Name:     "Alice Example",
-				Email:    "alice@example.com",
+				Expires: time.Now().Add(time.Hour).Unix(),
+				Issued: time.Now().Unix(),
+				Nonce: "nonce",
+				Subject: "alice",
+				Name: "Alice Example",
+				Email: "alice@example.com",
 			})
 
 			writeTestJSON(t, w, map[string]any{
 				"access_token": "access",
-				"id_token":     token,
-				"token_type":   "Bearer",
-				"expires_in":   3600,
+				"id_token": token,
+				"token_type": "Bearer",
+				"expires_in": 3600,
 			})
 		case "/userinfo":
 			if r.Header.Get("Authorization") != "Bearer access" {
@@ -112,9 +112,9 @@ func newProviderFixture(t *testing.T) *providerFixture {
 			}
 
 			writeTestJSON(t, w, map[string]any{
-				"sub":                "alice",
-				"name":               "Alice Example",
-				"email":              "alice@example.com",
+				"sub": "alice",
+				"name": "Alice Example",
+				"email": "alice@example.com",
 				"preferred_username": "alice",
 			})
 		default:
@@ -164,10 +164,10 @@ func fixtureClient(t *testing.T, fixture *providerFixture) *Client {
 	t.Helper()
 
 	client, err := New(Config{
-		Issuer:       fixture.server.URL,
-		ClientID:     fixture.clientID,
+		Issuer: fixture.server.URL,
+		ClientID: fixture.clientID,
 		ClientSecret: fixture.clientSecret,
-		HTTPClient:   fixture.server.Client(),
+		HTTPClient: fixture.server.Client(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -271,23 +271,23 @@ func TestVerifyIDTokenAndUserinfo(t *testing.T) {
 	}
 
 	if _, err := client.VerifyIDToken(t.Context(), signedTestToken(t, fixture.key, fixture.kid, claims{
-		Issuer:   fixture.server.URL,
+		Issuer: fixture.server.URL,
 		Audience: "other-client",
-		Expires:  time.Now().Add(time.Hour).Unix(),
-		Issued:   time.Now().Unix(),
-		Nonce:    "nonce",
-		Subject:  "alice",
+		Expires: time.Now().Add(time.Hour).Unix(),
+		Issued: time.Now().Unix(),
+		Nonce: "nonce",
+		Subject: "alice",
 	}), "nonce"); err == nil {
 		t.Error("wrong audience was accepted")
 	}
 
 	if _, err := client.VerifyIDToken(t.Context(), signedTestToken(t, fixture.key, fixture.kid, claims{
-		Issuer:   fixture.server.URL,
+		Issuer: fixture.server.URL,
 		Audience: fixture.clientID,
-		Expires:  time.Now().Add(-time.Hour).Unix(),
-		Issued:   time.Now().Unix(),
-		Nonce:    "nonce",
-		Subject:  "alice",
+		Expires: time.Now().Add(-time.Hour).Unix(),
+		Issued: time.Now().Unix(),
+		Nonce: "nonce",
+		Subject: "alice",
 	}), "nonce"); err == nil {
 		t.Error("expired token was accepted")
 	}
@@ -298,12 +298,12 @@ func TestVerifyIDTokenAndUserinfo(t *testing.T) {
 	}
 
 	if _, err := client.VerifyIDToken(t.Context(), signedTestToken(t, otherKey, fixture.kid, claims{
-		Issuer:   fixture.server.URL,
+		Issuer: fixture.server.URL,
 		Audience: fixture.clientID,
-		Expires:  time.Now().Add(time.Hour).Unix(),
-		Issued:   time.Now().Unix(),
-		Nonce:    "nonce",
-		Subject:  "alice",
+		Expires: time.Now().Add(time.Hour).Unix(),
+		Issued: time.Now().Unix(),
+		Nonce: "nonce",
+		Subject: "alice",
 	}), "nonce"); err == nil {
 		t.Error("token with a bad signature was accepted")
 	}

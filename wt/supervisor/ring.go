@@ -2,11 +2,11 @@ package main
 
 // boundedRing keeps the newest items under both an item count and a byte limit.
 type boundedRing[T any] struct {
-	items    []T
-	bytes    int
+	items []T
+	bytes int
 	maxItems int
 	maxBytes int
-	size     func(T) int
+	size func(T) int
 }
 
 func newBoundedRing[T any](maxItems, maxBytes int, size func(T) int) *boundedRing[T] {

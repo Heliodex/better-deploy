@@ -16,7 +16,9 @@ func TestKV(t *testing.T) {
 	defer server.Close()
 
 	now := time.Now()
-	server.Now = func() time.Time { return now }
+	server.Now = func() time.Time {
+		return now
+	}
 	client := server.NewClient(server.Client())
 	ctx := t.Context()
 
@@ -62,7 +64,9 @@ func TestRateLimit(t *testing.T) {
 	defer server.Close()
 
 	now := time.Now()
-	server.Now = func() time.Time { return now }
+	server.Now = func() time.Time {
+		return now
+	}
 	client := server.NewClient(server.Client())
 	limit := RateLimit{Prefix: "rl:", Limit: 2, Window: time.Minute}
 

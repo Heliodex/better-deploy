@@ -10,10 +10,10 @@ var errTxDone = errors.New("storage: transaction is closed")
 
 // Tx is a storage session pinned to one connection and one open SQLite transaction.
 type Tx struct {
-	client    *Client
-	id        string
+	client *Client
+	id string
 	expiresAt time.Time
-	done      bool
+	done bool
 }
 
 // BeginTx opens a transaction session. Call Commit or Rollback, or use WithTx to run a callback and commit it.

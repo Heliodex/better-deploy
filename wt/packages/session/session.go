@@ -20,7 +20,7 @@ const DefaultName = "session"
 // Manager owns the cookie name, lifetime and path for one app session.
 type Manager struct {
 	Name string
-	TTL  time.Duration
+	TTL time.Duration
 	Path string
 }
 
@@ -113,12 +113,12 @@ func SetPath(w http.ResponseWriter, r *http.Request, name, value string, ttl tim
 	}
 
 	http.SetCookie(w, &http.Cookie{
-		Name:     name,
-		Value:    value,
-		Path:     path,
-		MaxAge:   int(ttl.Seconds()),
+		Name: name,
+		Value: value,
+		Path: path,
+		MaxAge: int(ttl.Seconds()),
 		HttpOnly: true,
-		Secure:   Secure(r),
+		Secure: Secure(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 }
@@ -137,12 +137,12 @@ func ClearPath(w http.ResponseWriter, r *http.Request, name, path string) {
 	}
 
 	http.SetCookie(w, &http.Cookie{
-		Name:     name,
-		Value:    "",
-		Path:     path,
-		MaxAge:   -1,
+		Name: name,
+		Value: "",
+		Path: path,
+		MaxAge: -1,
 		HttpOnly: true,
-		Secure:   Secure(r),
+		Secure: Secure(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 }

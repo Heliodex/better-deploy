@@ -85,8 +85,8 @@ func generateStaleContract(cfg *deployConfig, m manifest, stale bool) error {
 
 // phaseInputs is one build phase's command and the input hash and file count measured for its cache.
 type phaseInputs struct {
-	cmd   string
-	hash  string
+	cmd string
+	hash string
 	files int
 }
 

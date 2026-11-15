@@ -13,23 +13,23 @@ import (
 )
 
 const (
-	maxKVKeyBytes    = 512
-	maxKVValueBytes  = 64 << 10
-	maxKVKeysPerApp  = 10_000
+	maxKVKeyBytes = 512
+	maxKVValueBytes = 64 << 10
+	maxKVKeysPerApp = 10_000
 	maxKVBytesPerApp = 8 << 20
-	maxKVTTL         = 30 * 24 * time.Hour
+	maxKVTTL = 30 * 24 * time.Hour
 	// kvSweepInterval bounds how often a write scans its app's keys for expired entries.
 	kvSweepInterval = time.Minute
 )
 
 var (
 	errKVInvalid = errors.New("invalid kv request")
-	errKVFull    = errors.New("kv store is full")
-	errKVNotInt  = errors.New("kv value is not an integer")
+	errKVFull = errors.New("kv store is full")
+	errKVNotInt = errors.New("kv value is not an integer")
 )
 
 type kvItem struct {
-	value   string
+	value string
 	expires time.Time
 }
 
@@ -45,9 +45,9 @@ func (item kvItem) live(now time.Time) bool {
 
 // kvBucket is one app's keys. Expired keys are dropped when read and swept on writes.
 type kvBucket struct {
-	mu        sync.Mutex
-	items     map[string]kvItem
-	bytes     int
+	mu sync.Mutex
+	items map[string]kvItem
+	bytes int
 	lastSweep time.Time
 }
 
@@ -126,9 +126,9 @@ func (b *kvBucket) putLocked(key string, item kvItem, now time.Time) error {
 
 // kvStore holds every app's bucket. It lives in supervisor memory, so it is shared by all of an app's component instances and lost when the supervisor restarts.
 type kvStore struct {
-	mu      sync.Mutex
+	mu sync.Mutex
 	buckets map[string]*kvBucket
-	now     func() time.Time
+	now func() time.Time
 }
 
 func newKVStore() *kvStore {
@@ -181,24 +181,24 @@ func kvExpiry(now time.Time, ttlMS int64) (time.Time, error) {
 }
 
 type kvRequest struct {
-	Key   string `json:"key"`
+	Key string `json:"key"`
 	Value string `json:"value,omitempty"`
-	TTLMS int64  `json:"ttl_ms,omitempty"`
-	By    int64  `json:"by,omitempty"`
+	TTLMS int64 `json:"ttl_ms,omitempty"`
+	By int64 `json:"by,omitempty"`
 }
 
 type kvResponse struct {
-	Found bool   `json:"found"`
+	Found bool `json:"found"`
 	Value string `json:"value,omitempty"`
 	// ExpiresAt is the RFC 3339 expiry, empty for a key that never expires.
 	ExpiresAt string `json:"expires_at,omitempty"`
-	TTLMS     int64  `json:"ttl_ms,omitempty"`
+	TTLMS int64 `json:"ttl_ms,omitempty"`
 }
 
 type kvIncrResponse struct {
-	Value     int64  `json:"value"`
+	Value int64 `json:"value"`
 	ExpiresAt string `json:"expires_at,omitempty"`
-	TTLMS     int64  `json:"ttl_ms,omitempty"`
+	TTLMS int64 `json:"ttl_ms,omitempty"`
 }
 
 // kvTTL describes an item's expiry for a response.

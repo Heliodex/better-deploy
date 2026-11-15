@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	testAppName  = "demo"
-	testTarget   = "x86_64-test"
+	testAppName = "demo"
+	testTarget = "x86_64-test"
 	testHostFlag = "--host"
 )
 
@@ -28,10 +28,10 @@ func digestOf(body string) string {
 func TestBundle(t *testing.T) {
 	dir := t.TempDir()
 	for name, body := range map[string]string{
-		"app.json":          `{"name":"hello"}`,
-		"main.cwasm":        "cwasm",
-		"main.wasm":         "wasm",
-		"artefact.json":     `{"wasmtime":"wasmtime-cli 50.0.0","target":"x86_64-unknown-linux-musl"}`,
+		"app.json": `{"name":"hello"}`,
+		"main.cwasm": "cwasm",
+		"main.wasm": "wasm",
+		"artefact.json": `{"wasmtime":"wasmtime-cli 50.0.0","target":"x86_64-unknown-linux-musl"}`,
 		"static/index.html": "<html>hello</html>",
 	} {
 		path := filepath.Join(dir, name)
@@ -291,7 +291,7 @@ func TestRunCompileSkipCompileMovesStaleCwasm(t *testing.T) {
 
 func TestRunCompileSkipCompileMovesUnverifiedCwasm(t *testing.T) {
 	for name, artifactJSON := range map[string]string{
-		"missing artifact":   "",
+		"missing artifact": "",
 		"artifact no digest": `{"wasmtime":"wasmtime-cli 51.0.0","target":"x86_64-test"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -368,9 +368,9 @@ func TestRunCompileKeepsOldCwasmOnFailure(t *testing.T) {
 func TestRunBundle(t *testing.T) {
 	dir := t.TempDir()
 	for name, body := range map[string]string{
-		"app.json":      `{"name":"hello"}`,
-		"main.wasm":     "wasm",
-		"main.cwasm":    "cwasm",
+		"app.json": `{"name":"hello"}`,
+		"main.wasm": "wasm",
+		"main.cwasm": "cwasm",
 		"artefact.json": `{"wasmtime":"wasmtime-cli 50.0.0","target":"x86_64-unknown-linux-musl","wasm_sha256":"` + digestOf("wasm") + `"}`,
 		"static/app.js": "console.log('hi')",
 	} {
@@ -429,9 +429,9 @@ func TestRunBundle(t *testing.T) {
 
 func TestBaseURL(t *testing.T) {
 	for input, want := range map[string]string{
-		"http://127.0.0.1:8080":  "http://127.0.0.1:8080",
+		"http://127.0.0.1:8080": "http://127.0.0.1:8080",
 		"https://deploy.example": "https://deploy.example",
-		"deploy.example":         "https://deploy.example",
+		"deploy.example": "https://deploy.example",
 		"http://127.0.0.1:8080/": "http://127.0.0.1:8080",
 	} {
 		if got := baseURL(input); got != want {
@@ -530,14 +530,14 @@ func TestDevEnv(t *testing.T) {
 	}
 
 	for key, want := range map[string]string{
-		"WT_APPS_DIR":        "/apps",
-		"WT_STATE_DIR":       "/state",
-		"WT_LISTEN":          "127.0.0.1:8080",
-		"WT_ADMIN_LISTEN":    "127.0.0.1:8081",
-		"WT_APPS_DOMAIN":     "localhost",
-		"WT_WASMTIME":        "/bin/wasmtime",
+		"WT_APPS_DIR": "/apps",
+		"WT_STATE_DIR": "/state",
+		"WT_LISTEN": "127.0.0.1:8080",
+		"WT_ADMIN_LISTEN": "127.0.0.1:8081",
+		"WT_APPS_DOMAIN": "localhost",
+		"WT_WASMTIME": "/bin/wasmtime",
 		"WT_WASMTIME_TARGET": "triple",
-		"WT_TOKEN":           "dev",
+		"WT_TOKEN": "dev",
 	} {
 		if got[key] != want {
 			t.Errorf("%s = %q, want %q", key, got[key], want)
@@ -572,11 +572,11 @@ func TestReadManifestValidatesSchedule(t *testing.T) {
 	}
 
 	for name, body := range map[string]string{
-		"no path":       `{"name":"demo","schedule":[{"every":"10s"}]}`,
+		"no path": `{"name":"demo","schedule":[{"every":"10s"}]}`,
 		"relative path": `{"name":"demo","schedule":[{"path":"tick","every":"10s"}]}`,
-		"bad interval":  `{"name":"demo","schedule":[{"path":"/tick","every":"often"}]}`,
-		"too fast":      `{"name":"demo","schedule":[{"path":"/tick","every":"100ms"}]}`,
-		"too slow":      `{"name":"demo","schedule":[{"path":"/tick","every":"48h"}]}`,
+		"bad interval": `{"name":"demo","schedule":[{"path":"/tick","every":"often"}]}`,
+		"too fast": `{"name":"demo","schedule":[{"path":"/tick","every":"100ms"}]}`,
+		"too slow": `{"name":"demo","schedule":[{"path":"/tick","every":"48h"}]}`,
 	} {
 		write(body)
 
@@ -603,10 +603,10 @@ func TestReadManifestValidatesServerPaths(t *testing.T) {
 	}
 
 	for name, body := range map[string]string{
-		"relative":  `{"name":"demo","server_paths":["auth"]}`,
-		"empty":     `{"name":"demo","server_paths":[""]}`,
-		"query":     `{"name":"demo","server_paths":["/auth?x=1"]}`,
-		"unclean":   `{"name":"demo","server_paths":["/a/../b"]}`,
+		"relative": `{"name":"demo","server_paths":["auth"]}`,
+		"empty": `{"name":"demo","server_paths":[""]}`,
+		"query": `{"name":"demo","server_paths":["/auth?x=1"]}`,
+		"unclean": `{"name":"demo","server_paths":["/a/../b"]}`,
 		"backslash": `{"name":"demo","server_paths":["/a\\b"]}`,
 	} {
 		write(body)
@@ -634,10 +634,10 @@ func TestReadManifestValidatesServerPages(t *testing.T) {
 	}
 
 	for name, body := range map[string]string{
-		"relative":  `{"name":"demo","server_pages":["home"]}`,
-		"empty":     `{"name":"demo","server_pages":[""]}`,
-		"query":     `{"name":"demo","server_pages":["/home?x=1"]}`,
-		"unclean":   `{"name":"demo","server_pages":["/a/../b"]}`,
+		"relative": `{"name":"demo","server_pages":["home"]}`,
+		"empty": `{"name":"demo","server_pages":[""]}`,
+		"query": `{"name":"demo","server_pages":["/home?x=1"]}`,
+		"unclean": `{"name":"demo","server_pages":["/a/../b"]}`,
 		"backslash": `{"name":"demo","server_pages":["/a\\b"]}`,
 	} {
 		write(body)
@@ -672,8 +672,8 @@ func TestReadManifestValidatesIdleTimeout(t *testing.T) {
 	}
 
 	for name, body := range map[string]string{
-		"too fast":   `{"name":"demo","idle_timeout":"9s"}`,
-		"too slow":   `{"name":"demo","idle_timeout":"25h"}`,
+		"too fast": `{"name":"demo","idle_timeout":"9s"}`,
+		"too slow": `{"name":"demo","idle_timeout":"25h"}`,
 		"not a time": `{"name":"demo","idle_timeout":"soon"}`,
 	} {
 		write(body)

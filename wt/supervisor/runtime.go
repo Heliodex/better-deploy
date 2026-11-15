@@ -15,17 +15,17 @@ import (
 
 const (
 	// serveAddr lets wasmtime bind any free loopback port; the supervisor learns the chosen port from its startup line.
-	serveAddr          = "127.0.0.1:0"
+	serveAddr = "127.0.0.1:0"
 	serveAddressPrefix = "Serving HTTP on http://127.0.0.1:"
-	maxPortLineBytes   = 8 << 10
+	maxPortLineBytes = 8 << 10
 )
 
 // portFinder watches a wasmtime process's output for the actual address it bound.
 type portFinder struct {
-	mu      sync.Mutex
+	mu sync.Mutex
 	pending []byte
-	port    chan int
-	once    sync.Once
+	port chan int
+	once sync.Once
 }
 
 func newPortFinder() *portFinder {
@@ -47,7 +47,9 @@ func (p *portFinder) Write(data []byte) (int, error) {
 
 		p.pending = p.pending[index+1:]
 		if port, ok := parseServePort(line); ok {
-			p.once.Do(func() { p.port <- port })
+			p.once.Do(func() {
+				p.port <- port
+			})
 		}
 	}
 
@@ -146,7 +148,7 @@ const maxLaunchLogBytes = 8 << 10
 
 // logRing keeps the tail of a process's output for failed-launch errors, so deploys report why wasmtime exited.
 type logRing struct {
-	mu  sync.Mutex
+	mu sync.Mutex
 	buf []byte
 }
 

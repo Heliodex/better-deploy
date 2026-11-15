@@ -14,13 +14,13 @@ var version = "dev"
 
 // capabilitiesResponse describes the supervisor and its runtime.
 type capabilitiesResponse struct {
-	Version        string `json:"version"`
-	Commit         string `json:"commit,omitempty"`
-	GoVersion      string `json:"goVersion"`
-	Wasmtime       string `json:"wasmtime,omitempty"`
+	Version string `json:"version"`
+	Commit string `json:"commit,omitempty"`
+	GoVersion string `json:"goVersion"`
+	Wasmtime string `json:"wasmtime,omitempty"`
 	WasmtimeTarget string `json:"wasmtimeTarget,omitempty"`
-	Compiler       bool   `json:"compiler"`
-	Epoch          bool   `json:"epoch"`
+	Compiler bool `json:"compiler"`
+	Epoch bool `json:"epoch"`
 }
 
 // supervisorBuildInfo reads the main module version and VCS settings from the Go build.
@@ -74,12 +74,12 @@ func (s *supervisor) handleCapabilities(w http.ResponseWriter, r *http.Request) 
 
 	name, commit := supervisorBuildInfo()
 	writeJSON(w, http.StatusOK, capabilitiesResponse{
-		Version:        name,
-		Commit:         commit,
-		GoVersion:      runtime.Version(),
-		Wasmtime:       s.wasmtimeVersion(),
+		Version: name,
+		Commit: commit,
+		GoVersion: runtime.Version(),
+		Wasmtime: s.wasmtimeVersion(),
 		WasmtimeTarget: s.cfg.wasmtimeTarget,
-		Compiler:       s.canCompile(),
-		Epoch:          true,
+		Compiler: s.canCompile(),
+		Epoch: true,
 	})
 }

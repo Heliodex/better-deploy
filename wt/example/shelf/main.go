@@ -18,11 +18,11 @@ import (
 )
 
 const (
-	pageSize       = 12
-	maxTags        = 8
-	maxTitle       = 200
+	pageSize = 12
+	maxTags = 8
+	maxTitle = 200
 	maxDescription = 600
-	maxURL         = 2000
+	maxURL = 2000
 )
 
 const linkColumns = `l.id, l.url, l.title, l.description, l.created_at,
@@ -35,8 +35,8 @@ const linkFilter = `where (? = '' or instr(lower(l.title), lower(?)) > 0 or inst
 
 type link struct {
 	ID, URL, Title, Description, Host, CreatedAt, LastClickedAt string
-	Clicks                                                      int64
-	Tags                                                        []string
+	Clicks int64
+	Tags []string
 }
 
 type appStats struct {
@@ -44,9 +44,9 @@ type appStats struct {
 }
 
 type tagCount struct {
-	Tag   string
+	Tag string
 	Count int64
-	URL   string
+	URL string
 }
 
 type click struct {
@@ -54,36 +54,36 @@ type click struct {
 }
 
 type dayCount struct {
-	Day     string
-	Count   int64
+	Day string
+	Count int64
 	Percent int
 }
 
 type indexData struct {
-	Title                      string
-	Stats                      appStats
-	Links                      []link
-	Tags                       []tagCount
-	Q, Tag                     string
-	Page, Pages                int
-	Total                      int64
-	Added, Deleted             bool
-	Error                      string
-	TagURL                     func(string) string
+	Title string
+	Stats appStats
+	Links []link
+	Tags []tagCount
+	Q, Tag string
+	Page, Pages int
+	Total int64
+	Added, Deleted bool
+	Error string
+	TagURL func(string) string
 	ClearURL, PrevURL, NextURL string
 }
 
 type detailData struct {
-	Title  string
-	Link   link
+	Title string
+	Link link
 	Clicks []click
-	Days   []dayCount
+	Days []dayCount
 	TagURL func(string) string
 }
 
 type linkInput struct {
 	URL, Title, Description string
-	Tags                    []string
+	Tags []string
 }
 
 type rowScanner interface {
@@ -91,9 +91,9 @@ type rowScanner interface {
 }
 
 var (
-	store      *storage.Client
+	store *storage.Client
 	errStorage error
-	mux        *http.ServeMux
+	mux *http.ServeMux
 )
 
 func init() {
@@ -116,8 +116,8 @@ func seed(ctx context.Context) error {
 		now := time.Now().UTC()
 		seeds := []struct {
 			id, url, title, description string
-			tags                        []string
-			clicks                      int
+			tags []string
+			clicks int
 		}{
 			{"wasmtime", "https://wasmtime.dev", "Wasmtime", "Fast, secure, and configurable WebAssembly runtime.", []string{"wasm", "runtime"}, 6},
 			{"wasi", "https://wasi.dev", "WASI", "The WebAssembly System Interface.", []string{"wasm", "wasi"}, 4},
@@ -132,12 +132,12 @@ func seed(ctx context.Context) error {
 			createdAt := now.Add(-time.Duration(i*2) * 24 * time.Hour).Format(app.TimestampFormat)
 
 			statements = append(statements, storage.Statement{
-				SQL:  `insert or ignore into links (id, url, title, description, created_at) values (?, ?, ?, ?, ?)`,
+				SQL: `insert or ignore into links (id, url, title, description, created_at) values (?, ?, ?, ?, ?)`,
 				Args: []any{seed.id, seed.url, seed.title, seed.description, createdAt},
 			})
 			for _, tag := range seed.tags {
 				statements = append(statements, storage.Statement{
-					SQL:  `insert or ignore into tags (link_id, tag) values (?, ?)`,
+					SQL: `insert or ignore into tags (link_id, tag) values (?, ?)`,
 					Args: []any{seed.id, tag},
 				})
 			}
@@ -145,7 +145,7 @@ func seed(ctx context.Context) error {
 			for n := range seed.clicks {
 				clickedAt := now.Add(-time.Duration(((n/2)*3+i)%14) * 24 * time.Hour).Add(time.Duration(n) * time.Hour).Format(app.TimestampFormat)
 				statements = append(statements, storage.Statement{
-					SQL:  `insert or ignore into clicks (id, link_id, clicked_at) values (?, ?, ?)`,
+					SQL: `insert or ignore into clicks (id, link_id, clicked_at) values (?, ?, ?)`,
 					Args: []any{fmt.Sprintf("seed-%s-%d", seed.id, n), seed.id, clickedAt},
 				})
 			}
@@ -547,16 +547,18 @@ func loadIndex(ctx context.Context, q, tag string, page int) (indexData, error) 
 	}
 
 	data := indexData{
-		Title:    "Link Shelf",
-		Stats:    stats,
-		Links:    links,
-		Tags:     tags,
-		Q:        q,
-		Tag:      tag,
-		Page:     page,
-		Pages:    pages,
-		Total:    total,
-		TagURL:   func(value string) string { return tagPageURL(q, value) },
+		Title: "Link Shelf",
+		Stats: stats,
+		Links: links,
+		Tags: tags,
+		Q: q,
+		Tag: tag,
+		Page: page,
+		Pages: pages,
+		Total: total,
+		TagURL: func(value string) string {
+			return tagPageURL(q, value)
+		},
 		ClearURL: pageURL(q, "", 1),
 	}
 	if page > 1 {
@@ -610,12 +612,12 @@ func handleCreate(w http.ResponseWriter, r *http.Request) {
 	statements := make([]storage.Statement, 0, 1+len(input.Tags))
 
 	statements = append(statements, storage.Statement{
-		SQL:  `insert into links (id, url, title, description, created_at) values (?, ?, ?, ?, ?)`,
+		SQL: `insert into links (id, url, title, description, created_at) values (?, ?, ?, ?, ?)`,
 		Args: []any{id, input.URL, input.Title, input.Description, time.Now().UTC().Format(app.TimestampFormat)},
 	})
 	for _, tag := range input.Tags {
 		statements = append(statements, storage.Statement{
-			SQL:  `insert into tags (link_id, tag) values (?, ?)`,
+			SQL: `insert into tags (link_id, tag) values (?, ?)`,
 			Args: []any{id, tag},
 		})
 	}
@@ -659,10 +661,12 @@ func handleDetail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	render(w, http.StatusOK, detailTmpl, detailData{
-		Title:  item.Title,
-		Link:   item,
+		Title: item.Title,
+		Link: item,
 		Clicks: clicks,
-		Days:   days,
-		TagURL: func(value string) string { return tagPageURL("", value) },
+		Days: days,
+		TagURL: func(value string) string {
+			return tagPageURL("", value)
+		},
 	})
 }

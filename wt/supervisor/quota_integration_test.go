@@ -170,8 +170,8 @@ func TestClearAppDataQuotaUsesAppOrAllocatedUID(t *testing.T) {
 	}
 
 	s := &supervisor{
-		cfg:   config{stateDir: t.TempDir()},
-		uids:  uids,
+		cfg: config{stateDir: t.TempDir()},
+		uids: uids,
 		quota: newDataQuota(dataQuotaSetquota, "/srv/wt", t.TempDir(), "setquota", "findmnt", runner.run),
 	}
 	s.clearAppDataQuota("demo", &app{name: "demo"})

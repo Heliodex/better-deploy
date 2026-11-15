@@ -26,33 +26,33 @@ import (
 )
 
 const (
-	runnerArg            = "--wt-runner"
-	runnerSocketEnv      = "WT_RUNNER_SOCKET"
-	runnerLivenessFD     = 3
-	runnerLivenessEnv    = "WT_RUNNER_LIVENESS_FD"
+	runnerArg = "--wt-runner"
+	runnerSocketEnv = "WT_RUNNER_SOCKET"
+	runnerLivenessFD = 3
+	runnerLivenessEnv = "WT_RUNNER_LIVENESS_FD"
 	runnerRequestTimeout = 30 * time.Second
-	runnerOutputBuffer   = 1024
-	runnerScanBytes      = 8 << 20
+	runnerOutputBuffer = 1024
+	runnerScanBytes = 8 << 20
 )
 
 type runnerProcess struct {
-	mu          sync.Mutex
-	info        runnerAppInfo
-	cmd         *exec.Cmd
-	goWriter    *os.File
-	pidReader   *os.File
-	outputDone  chan struct{}
+	mu sync.Mutex
+	info runnerAppInfo
+	cmd *exec.Cmd
+	goWriter *os.File
+	pidReader *os.File
+	outputDone chan struct{}
 	portPending []byte
 }
 
 type runnerServer struct {
-	socket   string
+	socket string
 	listener net.Listener
 
-	mu      sync.Mutex
+	mu sync.Mutex
 	writeMu sync.Mutex
-	conn    net.Conn
-	apps    map[string]*runnerProcess
+	conn net.Conn
+	apps map[string]*runnerProcess
 	closing bool
 }
 
@@ -232,7 +232,9 @@ func (r *runnerServer) snapshotApps() []runnerAppInfo {
 		app.mu.Unlock()
 	}
 
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Name < out[j].Name
+	})
 
 	return out
 }
@@ -276,19 +278,19 @@ func newRunnerCommand(request runnerStartRequest, output *os.File) (*exec.Cmd, *
 func (r *runnerServer) registerProcess(request runnerStartRequest, cmd *exec.Cmd, goWriter, pidReader *os.File) *runnerProcess {
 	app := &runnerProcess{
 		info: runnerAppInfo{
-			ID:           request.ID,
-			Name:         request.Name,
-			Dir:          request.Dir,
-			PID:          cmd.Process.Pid,
-			Started:      time.Now().UTC(),
-			UID:          request.UID,
+			ID: request.ID,
+			Name: request.Name,
+			Dir: request.Dir,
+			PID: cmd.Process.Pid,
+			Started: time.Now().UTC(),
+			UID: request.UID,
 			StorageToken: request.StorageToken,
-			Namespaced:   request.Namespaced,
-			Config:       request.Config,
+			Namespaced: request.Namespaced,
+			Config: request.Config,
 		},
-		cmd:        cmd,
-		goWriter:   goWriter,
-		pidReader:  pidReader,
+		cmd: cmd,
+		goWriter: goWriter,
+		pidReader: pidReader,
 		outputDone: make(chan struct{}),
 	}
 	if !request.Namespaced {

@@ -12,7 +12,7 @@ import (
 func TestEnqueueJob(t *testing.T) {
 	var (
 		gotAuth, gotPath string
-		got              JobRequest
+		got JobRequest
 	)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -39,12 +39,12 @@ func TestEnqueueJob(t *testing.T) {
 	runAt := time.Now().Add(time.Minute).UTC()
 
 	job, created, err := EnqueueJob(t.Context(), server.Client(), JobRequest{
-		Path:           "/jobs/run",
-		Method:         http.MethodPut,
-		Body:           `{"value":"one"}`,
-		Headers:        map[string]string{"X-Test": "yes"},
-		RunAt:          runAt,
-		MaxAttempts:    5,
+		Path: "/jobs/run",
+		Method: http.MethodPut,
+		Body: `{"value":"one"}`,
+		Headers: map[string]string{"X-Test": "yes"},
+		RunAt: runAt,
+		MaxAttempts: 5,
 		IdempotencyKey: "",
 	})
 	if err != nil {

@@ -14,24 +14,24 @@ import (
 )
 
 const (
-	deploymentKeep       = 10
+	deploymentKeep = 10
 	deploymentTimeLayout = "20060102T150405.000000000Z"
-	deploymentMetaName   = "meta.json"
-	deploymentBlobDir    = ".blobs"
+	deploymentMetaName = "meta.json"
+	deploymentBlobDir = ".blobs"
 	deploymentReplayName = "idempotency.json"
 	// deploymentReplayKeep bounds one app's persisted idempotency responses.
 	deploymentReplayKeep = 64
 	// deploymentReplayTTL is how long a deploy response may be replayed.
-	deploymentReplayTTL      = 24 * time.Hour
-	deploymentStatusOK       = "success"
-	deploymentStatusFail     = "failed"
-	deploymentStatusQueued   = "queued"
-	deploymentStatusRunning  = "running"
+	deploymentReplayTTL = 24 * time.Hour
+	deploymentStatusOK = "success"
+	deploymentStatusFail = "failed"
+	deploymentStatusQueued = "queued"
+	deploymentStatusRunning = "running"
 	deploymentStatusCanceled = "canceled"
 	// deploymentErrorBytes caps the failure text kept in history.
 	deploymentErrorBytes = 4 << 10
-	deploymentLogName    = "deploy.log"
-	deploymentLogBytes   = 1 << 20
+	deploymentLogName = "deploy.log"
+	deploymentLogBytes = 1 << 20
 )
 
 // deploymentMaxBytes bounds one app's retained history. Identical artifacts are shared, so this is generous.
@@ -41,25 +41,25 @@ var errDeploymentNotFound = errors.New("deployment not found")
 
 // deploymentInfo describes one retained bundle. Failed deploy attempts are retained as metadata only, without a bundle to roll back to.
 type deploymentInfo struct {
-	ID          string            `json:"id"`
-	DeployedAt  time.Time         `json:"deployedAt"`
-	QueuedAt    time.Time         `json:"queuedAt"`
-	StartedAt   time.Time         `json:"startedAt"`
-	FinishedAt  time.Time         `json:"finishedAt"`
-	Mode        string            `json:"mode,omitempty"`
-	Digest      string            `json:"digest"`
-	Size        int64             `json:"size"`
-	WasmDigest  string            `json:"wasmDigest,omitempty"`
-	WasmBytes   int64             `json:"wasmBytes,omitempty"`
-	Runtime     string            `json:"runtime,omitempty"`
-	Target      string            `json:"target,omitempty"`
-	Rebuildable bool              `json:"rebuildable"`
-	Bytes       int64             `json:"bytes"`
-	Blobs       map[string]string `json:"blobs,omitempty"`
-	Static      map[string]string `json:"static,omitempty"`
-	Status      string            `json:"status,omitempty"`
-	Error       string            `json:"error,omitempty"`
-	Current     bool              `json:"current,omitempty"`
+	ID string `json:"id"`
+	DeployedAt time.Time `json:"deployedAt"`
+	QueuedAt time.Time `json:"queuedAt"`
+	StartedAt time.Time `json:"startedAt"`
+	FinishedAt time.Time `json:"finishedAt"`
+	Mode string `json:"mode,omitempty"`
+	Digest string `json:"digest"`
+	Size int64 `json:"size"`
+	WasmDigest string `json:"wasmDigest,omitempty"`
+	WasmBytes int64 `json:"wasmBytes,omitempty"`
+	Runtime string `json:"runtime,omitempty"`
+	Target string `json:"target,omitempty"`
+	Rebuildable bool `json:"rebuildable"`
+	Bytes int64 `json:"bytes"`
+	Blobs map[string]string `json:"blobs,omitempty"`
+	Static map[string]string `json:"static,omitempty"`
+	Status string `json:"status,omitempty"`
+	Error string `json:"error,omitempty"`
+	Current bool `json:"current,omitempty"`
 }
 
 // deploymentReplayFile is the on-disk form of one app's idempotency responses.
@@ -70,7 +70,7 @@ type deploymentReplayFile struct {
 // deploymentManager keeps a bounded history of app bundles under the state directory.
 type deploymentManager struct {
 	dir string
-	mu  sync.Mutex
+	mu sync.Mutex
 }
 
 func newDeploymentManager(dir string) *deploymentManager {
@@ -185,7 +185,7 @@ func (m *deploymentManager) storeReplay(app, key string, entry deployReplayEntry
 	if len(file.Entries) > deploymentReplayKeep {
 		type agedEntry struct {
 			key string
-			at  time.Time
+			at time.Time
 		}
 
 		aged := make([]agedEntry, 0, len(file.Entries))
@@ -193,7 +193,9 @@ func (m *deploymentManager) storeReplay(app, key string, entry deployReplayEntry
 			aged = append(aged, agedEntry{key: name, at: existing.At})
 		}
 
-		sort.Slice(aged, func(i, j int) bool { return aged[i].at.Before(aged[j].at) })
+		sort.Slice(aged, func(i, j int) bool {
+			return aged[i].at.Before(aged[j].at)
+		})
 
 		for _, item := range aged[:len(aged)-deploymentReplayKeep] {
 			delete(file.Entries, item.key)
@@ -269,7 +271,9 @@ func (m *deploymentManager) list(app string) ([]deploymentInfo, error) {
 		out = append(out, info)
 	}
 	// ids are oldest first; return newest first.
-	sort.Slice(out, func(i, j int) bool { return out[i].ID > out[j].ID })
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].ID > out[j].ID
+	})
 
 	return out, nil
 }
@@ -305,11 +309,11 @@ func (m *deploymentManager) createRun(app, digest string) (deploymentInfo, error
 	}
 
 	info := deploymentInfo{
-		ID:         id,
+		ID: id,
 		DeployedAt: now,
-		QueuedAt:   now,
-		Digest:     digest,
-		Status:     deploymentStatusQueued,
+		QueuedAt: now,
+		Digest: digest,
+		Status: deploymentStatusQueued,
 	}
 
 	data, err := json.Marshal(info)

@@ -13,7 +13,7 @@ import (
 
 const (
 	storageMaintenanceTimeout = 60 * time.Second
-	storageMaintenanceOps     = "vacuum, optimize, checkpoint, integrity_check"
+	storageMaintenanceOps = "vacuum, optimize, checkpoint, integrity_check"
 )
 
 // maintenance runs one administrative SQLite operation that raw app SQL cannot request.
@@ -25,7 +25,9 @@ func (s *storageServer) maintenance(ctx context.Context, app, op string) (string
 			if _, err := sqlite.Limit(conn, sqlite3.SQLITE_LIMIT_ATTACHED, 10); err != nil {
 				return err
 			}
-			defer func() { _, _ = sqlite.Limit(conn, sqlite3.SQLITE_LIMIT_ATTACHED, 0) }()
+			defer func() {
+				_, _ = sqlite.Limit(conn, sqlite3.SQLITE_LIMIT_ATTACHED, 0)
+			}()
 
 			_, err := conn.ExecContext(ctx, "vacuum")
 

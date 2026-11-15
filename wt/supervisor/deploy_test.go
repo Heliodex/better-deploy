@@ -165,7 +165,7 @@ func appPID(a *app) int {
 
 func TestDeployDryRunValidatesWithoutInstalling(t *testing.T) {
 	archive := writeTarGz(t, map[string]string{
-		"app.json":  `{"name":"demo","host":"demo.localhost"}`,
+		"app.json": `{"name":"demo","host":"demo.localhost"}`,
 		"main.wasm": "wasm",
 	})
 
@@ -225,8 +225,8 @@ func TestDeploySameDigestKeepsProcessAndUpdatesStatic(t *testing.T) {
 
 	appJSON := `{"name":"demo","host":"demo.localhost"}`
 	first := writeTarGz(t, map[string]string{
-		"app.json":          appJSON,
-		"main.wasm":         "wasm-one",
+		"app.json": appJSON,
+		"main.wasm": "wasm-one",
 		"static/index.html": "first",
 	})
 
@@ -274,8 +274,8 @@ func TestDeploySameDigestKeepsProcessAndUpdatesStatic(t *testing.T) {
 	}
 
 	second := writeTarGz(t, map[string]string{
-		"app.json":          appJSON,
-		"main.wasm":         "wasm-one",
+		"app.json": appJSON,
+		"main.wasm": "wasm-one",
 		"static/index.html": "second",
 	})
 
@@ -321,7 +321,7 @@ func TestDeploySameDigestKeepsProcessAndUpdatesStatic(t *testing.T) {
 	}
 
 	staticOnly := writeTarGz(t, map[string]string{
-		"app.json":          appJSON,
+		"app.json": appJSON,
 		"static/index.html": "static-only",
 	})
 
@@ -340,8 +340,8 @@ func TestDeploySameDigestKeepsProcessAndUpdatesStatic(t *testing.T) {
 
 	old := s.lookup("demo")
 	third := writeTarGz(t, map[string]string{
-		"app.json":          appJSON,
-		"main.wasm":         "wasm-two",
+		"app.json": appJSON,
+		"main.wasm": "wasm-two",
 		"static/index.html": "third",
 	})
 
@@ -380,7 +380,7 @@ func TestDeployFailureIsRecorded(t *testing.T) {
 	s.cfg.wasmtime = filepath.Join(t.TempDir(), "missing-wasmtime")
 	s.deployments = newDeploymentManager(filepath.Join(s.cfg.stateDir, ".deployments"))
 	archive := writeTarGz(t, map[string]string{
-		"app.json":  `{"name":"demo","host":"demo.localhost"}`,
+		"app.json": `{"name":"demo","host":"demo.localhost"}`,
 		"main.wasm": "wasm",
 	})
 
@@ -439,7 +439,7 @@ func TestDeployConditionalAndIdempotent(t *testing.T) {
 	})
 
 	archive := writeTarGz(t, map[string]string{
-		"app.json":  `{"name":"demo","host":"demo.localhost"}`,
+		"app.json": `{"name":"demo","host":"demo.localhost"}`,
 		"main.wasm": "wasm-conditional",
 	})
 
@@ -468,7 +468,7 @@ func TestDeployConditionalAndIdempotent(t *testing.T) {
 	}
 
 	other := writeTarGz(t, map[string]string{
-		"app.json":  `{"name":"demo","host":"demo.localhost"}`,
+		"app.json": `{"name":"demo","host":"demo.localhost"}`,
 		"main.wasm": "wasm-idempotent",
 	})
 
@@ -531,7 +531,7 @@ func TestFailedDeployKeepsOldProcess(t *testing.T) {
 	})
 
 	first := writeTarGz(t, map[string]string{
-		"app.json":  `{"name":"demo","host":"demo.localhost"}`,
+		"app.json": `{"name":"demo","host":"demo.localhost"}`,
 		"main.wasm": "wasm-old",
 	})
 	if rec := deployArchive(t, s, "demo", first, ""); rec.Code != http.StatusOK {
@@ -548,7 +548,7 @@ func TestFailedDeployKeepsOldProcess(t *testing.T) {
 	s.cfg.wasmtime = filepath.Join(t.TempDir(), "missing-wasmtime")
 
 	second := writeTarGz(t, map[string]string{
-		"app.json":  `{"name":"demo","host":"demo.localhost"}`,
+		"app.json": `{"name":"demo","host":"demo.localhost"}`,
 		"main.wasm": "wasm-new",
 	})
 	if rec := deployArchive(t, s, "demo", second, ""); rec.Code != http.StatusBadGateway {

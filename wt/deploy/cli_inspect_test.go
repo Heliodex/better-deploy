@@ -19,12 +19,12 @@ func TestCompareManifest(t *testing.T) {
 	}
 
 	comparison := compareManifest(dir, "demo", map[string]any{
-		"host":             "new.example.com",
-		"memory_mb":        float64(256),
-		"idle_timeout":     "900s",
-		"server_paths":     []any{"/auth"},
-		"server_pages":     []any{"/login"},
-		"env_keys":         []any{"A", "B"},
+		"host": "new.example.com",
+		"memory_mb": float64(256),
+		"idle_timeout": "900s",
+		"server_paths": []any{"/auth"},
+		"server_pages": []any{"/login"},
+		"env_keys": []any{"A", "B"},
 		"restart_required": false,
 	})
 	if comparison == nil {
@@ -45,8 +45,8 @@ func TestCompareManifest(t *testing.T) {
 
 func TestSameIdleTimeout(t *testing.T) {
 	for _, tc := range []struct {
-		name              string
-		local, runtime    any
+		name string
+		local, runtime any
 		scheduled, expect bool
 	}{
 		{"omitted matches the default", "", "", false, true},

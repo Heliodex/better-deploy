@@ -9,7 +9,7 @@ import (
 // routeInfo is one method and path pattern in any supervisor route table.
 type routeInfo struct {
 	method string
-	path   string
+	path string
 }
 
 // normaliseRoutePath replaces every captured segment so OpenAPI templates compare equal.

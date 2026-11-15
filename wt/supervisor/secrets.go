@@ -16,11 +16,11 @@ import (
 )
 
 const (
-	secretDirName       = ".secrets"
-	secretRefPrefix     = "secret://"
-	maxSecretKeyBytes   = 128
+	secretDirName = ".secrets"
+	secretRefPrefix = "secret://"
+	maxSecretKeyBytes = 128
 	maxSecretValueBytes = 64 << 10
-	maxSecretBodyBytes  = 80 << 10
+	maxSecretBodyBytes = 80 << 10
 )
 
 var errSecretInvalid = errors.New("invalid secret")
@@ -30,7 +30,7 @@ var errSecretInvalid = errors.New("invalid secret")
 type secretStore struct {
 	dir string
 
-	mu      sync.Mutex
+	mu sync.Mutex
 	current map[string]map[string]string
 	history map[string]map[string]struct{}
 }
@@ -50,7 +50,7 @@ func newSecretStore(dir string) (*secretStore, error) {
 	}
 
 	store := &secretStore{
-		dir:     dir,
+		dir: dir,
 		current: map[string]map[string]string{},
 		history: map[string]map[string]struct{}{},
 	}
@@ -389,8 +389,8 @@ type secretKeysResponse struct {
 }
 
 type secretMutationResponse struct {
-	Key             string `json:"key"`
-	RestartRequired bool   `json:"restart_required"`
+	Key string `json:"key"`
+	RestartRequired bool `json:"restart_required"`
 }
 
 // refreshAppSecrets updates a running app's log redaction after a secret changes.

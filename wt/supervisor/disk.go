@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	diskUsageInterval  = 10 * time.Second
+	diskUsageInterval = 10 * time.Second
 	diskBudgetInterval = time.Minute
 )
 
@@ -20,9 +20,9 @@ const (
 var maxAppEntries int64 = 100_000
 
 type diskUsageCache struct {
-	mu    sync.Mutex
+	mu sync.Mutex
 	bytes int64
-	at    time.Time
+	at time.Time
 }
 
 // appDataUsage measures /data, the app's SQLite database files and its blob store, counting every non-root directory entry
@@ -292,11 +292,11 @@ func (s *supervisor) rejectOverBudget(w http.ResponseWriter) bool {
 
 // diskUsageResponse is the authenticated GET /usage body. budgetBytes is zero when unlimited.
 type diskUsageResponse struct {
-	AppsBytes   int64 `json:"appsBytes"`
-	StateBytes  int64 `json:"stateBytes"`
-	TotalBytes  int64 `json:"totalBytes"`
+	AppsBytes int64 `json:"appsBytes"`
+	StateBytes int64 `json:"stateBytes"`
+	TotalBytes int64 `json:"totalBytes"`
 	BudgetBytes int64 `json:"budgetBytes"`
-	OverBudget  bool  `json:"overBudget"`
+	OverBudget bool `json:"overBudget"`
 }
 
 func (s *supervisor) handleUsage(w http.ResponseWriter, r *http.Request) {
@@ -312,11 +312,11 @@ func (s *supervisor) handleUsage(w http.ResponseWriter, r *http.Request) {
 
 	budget := s.cfg.diskBudgetBytes
 	writeJSON(w, http.StatusOK, diskUsageResponse{
-		AppsBytes:   totals.appsBytes,
-		StateBytes:  totals.stateBytes,
-		TotalBytes:  totals.totalBytes,
+		AppsBytes: totals.appsBytes,
+		StateBytes: totals.stateBytes,
+		TotalBytes: totals.totalBytes,
 		BudgetBytes: budget,
-		OverBudget:  overByteBudget(budget, totals.totalBytes),
+		OverBudget: overByteBudget(budget, totals.totalBytes),
 	})
 }
 

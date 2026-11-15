@@ -14,7 +14,7 @@ type routeHandler func(http.ResponseWriter, *http.Request, map[string]string)
 // An empty method matches every method; the handler then owns the method check.
 // A pattern segment "{name}" captures one segment, and a trailing "{name...}" captures the rest.
 type route struct {
-	method  string
+	method string
 	pattern []string
 	handler routeHandler
 	// action derives the audit and scope label from the captured parameters.
@@ -28,7 +28,7 @@ type routeTable struct {
 
 // routeCache builds one route table on first use.
 type routeCache struct {
-	once  sync.Once
+	once sync.Once
 	table *routeTable
 }
 
@@ -177,5 +177,7 @@ func matchRoute(pattern, segments []string) (map[string]string, bool) {
 
 // constantAction returns the same audit action for every match.
 func constantAction(action string) func(map[string]string) string {
-	return func(map[string]string) string { return action }
+	return func(map[string]string) string {
+		return action
+	}
 }

@@ -10,10 +10,10 @@ import (
 )
 
 type blobRecord struct {
-	Digest      string    `json:"digest"`
-	Size        int64     `json:"size"`
-	ContentType string    `json:"contentType"`
-	CreatedAt   time.Time `json:"createdAt"`
+	Digest string `json:"digest"`
+	Size int64 `json:"size"`
+	ContentType string `json:"contentType"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 type blobsResponse struct {
@@ -21,9 +21,9 @@ type blobsResponse struct {
 }
 
 type blobGCResult struct {
-	Deleted   []string `json:"deleted"`
-	DryRun    bool     `json:"dryRun"`
-	OlderThan string   `json:"olderThan"`
+	Deleted []string `json:"deleted"`
+	DryRun bool `json:"dryRun"`
+	OlderThan string `json:"olderThan"`
 }
 
 // runBlobsList prints an app's stored blobs.

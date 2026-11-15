@@ -189,7 +189,9 @@ func (s *supervisor) receiveBundle(w http.ResponseWriter, r *http.Request, name 
 	}
 
 	if r.MultipartForm != nil {
-		defer func() { _ = r.MultipartForm.RemoveAll() }()
+		defer func() {
+			_ = r.MultipartForm.RemoveAll()
+		}()
 	}
 
 	file, _, err := r.FormFile("artifact")
@@ -206,7 +208,9 @@ func (s *supervisor) receiveBundle(w http.ResponseWriter, r *http.Request, name 
 	}
 
 	archiveName := archive.Name()
-	cleanup = func() { _ = os.Remove(archiveName) }
+	cleanup = func() {
+		_ = os.Remove(archiveName)
+	}
 
 	if _, err := io.Copy(archive, io.LimitReader(file, maxUploadBytes)); err != nil {
 		_ = archive.Close()
@@ -275,9 +279,9 @@ func drainApp(a *app, timeout time.Duration) bool {
 }
 
 type deployValidationResponse struct {
-	Valid  bool              `json:"valid"`
+	Valid bool `json:"valid"`
 	Config appConfigResponse `json:"config"`
-	Digest string            `json:"digest,omitempty"`
+	Digest string `json:"digest,omitempty"`
 }
 
 // canDeployStatic reports whether the running process can keep serving while only app.json and static/ change.
@@ -430,17 +434,17 @@ func bundleDigest(dir string) string {
 }
 
 type deployReplayEntry struct {
-	Status int         `json:"status"`
+	Status int `json:"status"`
 	Header http.Header `json:"header,omitempty"`
-	Body   []byte      `json:"body,omitempty"`
-	At     time.Time   `json:"at"`
+	Body []byte `json:"body,omitempty"`
+	At time.Time `json:"at"`
 }
 
 type deployRecorder struct {
 	http.ResponseWriter
 
 	status int
-	body   bytes.Buffer
+	body bytes.Buffer
 }
 
 func (r *deployRecorder) WriteHeader(status int) {
@@ -497,8 +501,8 @@ func (s *supervisor) storeDeployReplay(name, key string, recorder *deployRecorde
 	entry := deployReplayEntry{
 		Status: status,
 		Header: recorder.Header().Clone(),
-		Body:   append([]byte(nil), recorder.body.Bytes()...),
-		At:     time.Now().UTC(),
+		Body: append([]byte(nil), recorder.body.Bytes()...),
+		At: time.Now().UTC(),
 	}
 	if err := s.deployments.storeReplay(name, key, entry); err != nil {
 		log.Printf("deploy replay %s: %v", name, err)
@@ -519,10 +523,10 @@ func (s *supervisor) replayDeployResponse(w http.ResponseWriter, entry deployRep
 
 // stagedDeploy is an uploaded bundle that has passed parsing and the static-only checks but is not installed yet.
 type stagedDeploy struct {
-	dir     string
-	cfg     appConfig
-	digest  string
-	etag    string
+	dir string
+	cfg appConfig
+	digest string
+	etag string
 	cleanup func()
 }
 

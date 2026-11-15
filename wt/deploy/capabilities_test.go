@@ -36,12 +36,12 @@ func capabilityTestServer(t *testing.T, caps supervisorCapabilities, status int)
 
 func TestFetchCapabilities(t *testing.T) {
 	want := supervisorCapabilities{
-		Version:        "1.2.3",
-		Commit:         "abcdef0123456789",
-		GoVersion:      "go1.27.1",
-		Wasmtime:       "wasmtime 50.0.0",
+		Version: "1.2.3",
+		Commit: "abcdef0123456789",
+		GoVersion: "go1.27.1",
+		Wasmtime: "wasmtime 50.0.0",
 		WasmtimeTarget: testTarget,
-		Compiler:       true,
+		Compiler: true,
 	}
 
 	server := capabilityTestServer(t, want, http.StatusOK)
@@ -79,10 +79,10 @@ func TestPreflightDeployUsesServerTarget(t *testing.T) {
 	bin := fakeWasmtime(t, t.TempDir())
 
 	server := capabilityTestServer(t, supervisorCapabilities{
-		Version:        "1.2.3",
-		Wasmtime:       "wasmtime 50.0.0",
+		Version: "1.2.3",
+		Wasmtime: "wasmtime 50.0.0",
 		WasmtimeTarget: testTarget,
-		Compiler:       true,
+		Compiler: true,
 	}, http.StatusOK)
 	defer server.Close()
 
@@ -104,10 +104,10 @@ func TestPreflightDeployUsesServerTarget(t *testing.T) {
 
 func TestRuntimeRelease(t *testing.T) {
 	cases := map[string]string{
-		"wasmtime 50.0.0":                        "50.0.0",
-		"wasmtime-cli 51.2.3":                    "51.2.3",
+		"wasmtime 50.0.0": "50.0.0",
+		"wasmtime-cli 51.2.3": "51.2.3",
 		"wasmtime 50.0.0 (ebe5e8df1 2026-10-20)": "50.0.0",
-		"v50.0.0":                                "50.0.0",
+		"v50.0.0": "50.0.0",
 	}
 	for input, want := range cases {
 		if got := runtimeRelease(input); got != want {
@@ -123,10 +123,10 @@ func TestPreflightDeployIgnoresWasmtimeBuildMetadata(t *testing.T) {
 	}
 
 	server := capabilityTestServer(t, supervisorCapabilities{
-		Version:        "1.2.3",
-		Wasmtime:       "wasmtime 50.0.0",
+		Version: "1.2.3",
+		Wasmtime: "wasmtime 50.0.0",
 		WasmtimeTarget: testTarget,
-		Compiler:       true,
+		Compiler: true,
 	}, http.StatusOK)
 	defer server.Close()
 
@@ -149,9 +149,9 @@ func TestRunRuntime(t *testing.T) {
 	}
 
 	server := capabilityTestServer(t, supervisorCapabilities{
-		Wasmtime:       "wasmtime 50.0.0",
+		Wasmtime: "wasmtime 50.0.0",
 		WasmtimeTarget: testTarget,
-		Compiler:       true,
+		Compiler: true,
 	}, http.StatusOK)
 	defer server.Close()
 
@@ -164,10 +164,10 @@ func TestPreflightDeployKeepsExplicitTarget(t *testing.T) {
 	bin := fakeWasmtime(t, t.TempDir())
 
 	server := capabilityTestServer(t, supervisorCapabilities{
-		Version:        "1.2.3",
-		Wasmtime:       "wasmtime 50.0.0",
+		Version: "1.2.3",
+		Wasmtime: "wasmtime 50.0.0",
 		WasmtimeTarget: testTarget,
-		Compiler:       true,
+		Compiler: true,
 	}, http.StatusOK)
 	defer server.Close()
 

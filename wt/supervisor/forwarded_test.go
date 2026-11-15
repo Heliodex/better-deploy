@@ -67,7 +67,7 @@ func TestForwardedClientIPSkipsTrustedHops(t *testing.T) {
 	s := &supervisor{cfg: config{trustedProxies: mustTrustedProxies(t, "10.0.0.0/8,192.168.0.0/16")}}
 	for _, test := range []struct {
 		chain string
-		want  string
+		want string
 	}{
 		{"203.0.113.5, 10.0.0.3, 192.168.1.1", "203.0.113.5"},
 		{"203.0.113.5, 198.51.100.7", "198.51.100.7"},
@@ -89,13 +89,13 @@ func TestProxyRewritesForwardedHeadersCleanly(t *testing.T) {
 
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got <- seen{
-			host:           r.Host,
-			forwardedHost:  r.Header.Get("X-Forwarded-Host"),
+			host: r.Host,
+			forwardedHost: r.Header.Get("X-Forwarded-Host"),
 			forwardedProto: r.Header.Get("X-Forwarded-Proto"),
-			forwardedFor:   r.Header.Get("X-Forwarded-For"),
-			realIP:         r.Header.Get("X-Real-IP"),
-			forwarded:      r.Header.Get("Forwarded"),
-			spinClient:     r.Header.Get(spinClientAddrHeader),
+			forwardedFor: r.Header.Get("X-Forwarded-For"),
+			realIP: r.Header.Get("X-Real-IP"),
+			forwarded: r.Header.Get("Forwarded"),
+			spinClient: r.Header.Get(spinClientAddrHeader),
 		}
 
 		w.WriteHeader(http.StatusNoContent)

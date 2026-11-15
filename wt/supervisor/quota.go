@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	dataQuotaMonitor  = "monitor"
+	dataQuotaMonitor = "monitor"
 	dataQuotaSetquota = "setquota"
 )
 
@@ -25,14 +25,14 @@ type quotaRunner func(bin string, args ...string) (string, error)
 // dataQuota applies standard user quotas to each app uid. The default monitor mode keeps the
 // measured byte and entry-count monitor as the only enforcement and makes every method a no-op.
 type dataQuota struct {
-	mode       string
+	mode string
 	filesystem string
-	stateDir   string
-	setquota   string
-	findmnt    string
-	run        quotaRunner
+	stateDir string
+	setquota string
+	findmnt string
+	run quotaRunner
 
-	mu       sync.Mutex
+	mu sync.Mutex
 	resolved string
 }
 
@@ -42,12 +42,12 @@ func newDataQuota(mode, filesystem, stateDir, setquota, findmnt string, runner q
 	}
 
 	return &dataQuota{
-		mode:       mode,
+		mode: mode,
 		filesystem: filesystem,
-		stateDir:   stateDir,
-		setquota:   setquota,
-		findmnt:    findmnt,
-		run:        runner,
+		stateDir: stateDir,
+		setquota: setquota,
+		findmnt: findmnt,
+		run: runner,
 	}
 }
 

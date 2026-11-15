@@ -127,7 +127,9 @@ func stubPollDelay(t *testing.T) {
 	old := verifyPollDelay
 	verifyPollDelay = time.Millisecond
 
-	t.Cleanup(func() { verifyPollDelay = old })
+	t.Cleanup(func() {
+		verifyPollDelay = old
+	})
 }
 
 func TestRouteDetail(t *testing.T) {

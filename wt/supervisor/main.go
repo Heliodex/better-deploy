@@ -21,199 +21,199 @@ import (
 )
 
 const (
-	maxUploadBytes  = 256 << 20
+	maxUploadBytes = 256 << 20
 	maxExtractBytes = 512 << 20
-	maxTarFiles     = 10_000
+	maxTarFiles = 10_000
 	// Backup archives are internal and may hold more data than an uploaded bundle.
 	maxBackupExtractBytes = 8 << 30
-	maxBackupTarFiles     = 100_000
-	stopTimeout           = 5 * time.Second
-	drainTimeout          = 10 * time.Second
-	shutdownTimeout       = 15 * time.Second
-	defaultCacheMaxBytes  = 2 << 30
+	maxBackupTarFiles = 100_000
+	stopTimeout = 5 * time.Second
+	drainTimeout = 10 * time.Second
+	shutdownTimeout = 15 * time.Second
+	defaultCacheMaxBytes = 2 << 30
 )
 
 type config struct {
 	appsDir, stateDir, cacheDir, listen, storageListen, domain string
-	wasmtime, wasmtimeCompiler, wasmtimeTarget                 string
-	token, tlsCert, tlsKey                                     string
-	tenantMode, adminListen, appFetchListen                    string
-	authFile                                                   string
-	trustedProxiesValue                                        string
-	trustedProxies                                             []netip.Prefix
-	cgroupRoot, iptables, ip6tables                            string
-	dataQuotaMode, setquota, findmnt, dataQuotaFS              string
-	appUIDBase                                                 int
-	ipv6Egress                                                 bool
-	appNamespaces, appSeccomp                                  bool
-	cacheMaxBytes                                              int64
-	diskBudgetBytes                                            int64
-	accessLog                                                  bool
-	accessLogEvery                                             int
-	storageMigrationTimeout                                    time.Duration
-	storageTmpDir                                              string
-	storageTempBudgetBytes                                     int64
+	wasmtime, wasmtimeCompiler, wasmtimeTarget string
+	token, tlsCert, tlsKey string
+	tenantMode, adminListen, appFetchListen string
+	authFile string
+	trustedProxiesValue string
+	trustedProxies []netip.Prefix
+	cgroupRoot, iptables, ip6tables string
+	dataQuotaMode, setquota, findmnt, dataQuotaFS string
+	appUIDBase int
+	ipv6Egress bool
+	appNamespaces, appSeccomp bool
+	cacheMaxBytes int64
+	diskBudgetBytes int64
+	accessLog bool
+	accessLogEvery int
+	storageMigrationTimeout time.Duration
+	storageTmpDir string
+	storageTempBudgetBytes int64
 }
 
 type appConfig struct {
-	Name               string            `json:"name"`
-	Host               string            `json:"host"`
-	Hosts              []string          `json:"hosts,omitempty"`
-	Health             string            `json:"health"`
-	Env                map[string]string `json:"env"`
-	Build              string            `json:"build,omitempty"`
-	MemoryMB           int               `json:"memory_mb,omitempty"`
-	DiskMB             int               `json:"disk_mb,omitempty"`
-	CPUMillicores      int               `json:"cpu_millicores,omitempty"`
-	PidsMax            int               `json:"pids_max,omitempty"`
-	IOWeight           int               `json:"io_weight,omitempty"`
-	MaxConcurrent      int               `json:"max_concurrency,omitempty"`
-	RequestTimeout     string            `json:"request_timeout,omitempty"`
-	StartupTimeout     string            `json:"startup_timeout,omitempty"`
-	HealthInterval     string            `json:"health_interval,omitempty"`
-	HealthFailures     int               `json:"health_failures,omitempty"`
-	RestartOnUnhealthy bool              `json:"restart_on_unhealthy,omitempty"`
-	IdleTimeout        string            `json:"idle_timeout,omitempty"`
-	Network            string            `json:"network,omitempty"`
-	Identity           string            `json:"identity,omitempty"`
-	Maintenance        bool              `json:"maintenance,omitempty"`
-	DependsOn          []string          `json:"depends_on,omitempty"`
-	JobConcurrency     int               `json:"job_concurrency,omitempty"`
-	AllowCallers       []string          `json:"allow_callers,omitempty"`
-	ServerPaths        []string          `json:"server_paths,omitempty"`
-	ServerPages        []string          `json:"server_pages,omitempty"`
-	Egress             []egressRule      `json:"egress,omitempty"`
-	Schedule           []scheduleConfig  `json:"schedule,omitempty"`
-	Dev                *appDevConfig     `json:"dev,omitempty"`
+	Name string `json:"name"`
+	Host string `json:"host"`
+	Hosts []string `json:"hosts,omitempty"`
+	Health string `json:"health"`
+	Env map[string]string `json:"env"`
+	Build string `json:"build,omitempty"`
+	MemoryMB int `json:"memory_mb,omitempty"`
+	DiskMB int `json:"disk_mb,omitempty"`
+	CPUMillicores int `json:"cpu_millicores,omitempty"`
+	PidsMax int `json:"pids_max,omitempty"`
+	IOWeight int `json:"io_weight,omitempty"`
+	MaxConcurrent int `json:"max_concurrency,omitempty"`
+	RequestTimeout string `json:"request_timeout,omitempty"`
+	StartupTimeout string `json:"startup_timeout,omitempty"`
+	HealthInterval string `json:"health_interval,omitempty"`
+	HealthFailures int `json:"health_failures,omitempty"`
+	RestartOnUnhealthy bool `json:"restart_on_unhealthy,omitempty"`
+	IdleTimeout string `json:"idle_timeout,omitempty"`
+	Network string `json:"network,omitempty"`
+	Identity string `json:"identity,omitempty"`
+	Maintenance bool `json:"maintenance,omitempty"`
+	DependsOn []string `json:"depends_on,omitempty"`
+	JobConcurrency int `json:"job_concurrency,omitempty"`
+	AllowCallers []string `json:"allow_callers,omitempty"`
+	ServerPaths []string `json:"server_paths,omitempty"`
+	ServerPages []string `json:"server_pages,omitempty"`
+	Egress []egressRule `json:"egress,omitempty"`
+	Schedule []scheduleConfig `json:"schedule,omitempty"`
+	Dev *appDevConfig `json:"dev,omitempty"`
 
 	requestTimeout time.Duration
 	startupTimeout time.Duration
 	healthInterval time.Duration
-	idleTimeout    time.Duration
+	idleTimeout time.Duration
 }
 
 // appDevConfig is the optional SvelteKit dev loop configuration carried in app.json.
 // The supervisor does not use it, but keeps it so a config PATCH does not drop it.
 type appDevConfig struct {
-	Web     string   `json:"web,omitempty"`
-	Command string   `json:"command,omitempty"`
-	Build   string   `json:"build,omitempty"`
-	Proxy   []string `json:"proxy,omitempty"`
-	Watch   []string `json:"watch,omitempty"`
-	Port    int      `json:"port,omitempty"`
+	Web string `json:"web,omitempty"`
+	Command string `json:"command,omitempty"`
+	Build string `json:"build,omitempty"`
+	Proxy []string `json:"proxy,omitempty"`
+	Watch []string `json:"watch,omitempty"`
+	Port int `json:"port,omitempty"`
 }
 
 // egressRule allows one IPv4 or IPv6 CIDR and TCP port for an untrusted app. The app's uid still reaches only these destinations plus storage and the internal fetch listener.
 type egressRule struct {
 	CIDR string `json:"cidr"`
-	Port int    `json:"port"`
+	Port int `json:"port"`
 }
 
 // scheduleConfig asks the supervisor to call an app endpoint on a timer. Components cannot run their own background loops under `wasmtime serve`, so time is driven from the host.
 type scheduleConfig struct {
 	// Name labels the entry in status and logs; it defaults to the method and path.
-	Name   string `json:"name,omitempty"`
+	Name string `json:"name,omitempty"`
 	Method string `json:"method,omitempty"`
-	Path   string `json:"path"`
-	Every  string `json:"every"`
+	Path string `json:"path"`
+	Every string `json:"every"`
 	// Timeout bounds one call; it defaults to the interval, with a floor of 5s.
 	Timeout string `json:"timeout,omitempty"`
 }
 
 const (
 	defaultScheduleMethod = http.MethodPost
-	minScheduleInterval   = time.Second
-	maxScheduleInterval   = 24 * time.Hour
-	minScheduleTimeout    = 5 * time.Second
+	minScheduleInterval = time.Second
+	maxScheduleInterval = 24 * time.Hour
+	minScheduleTimeout = 5 * time.Second
 	// scheduleHeader names the entry on each scheduled call, so one endpoint can serve several entries and tell them from user traffic.
 	scheduleHeader = "X-Wt-Schedule"
 )
 
 type app struct {
 	name, dir, digest string
-	port              int
-	uid               int
-	cfg               appConfig
-	proxy             *httputil.ReverseProxy
-	started           time.Time
-	delay             time.Duration
-	timer             *time.Timer
-	logs              *appLog
-	stats             appStats
-	disk              diskUsageCache
-	history           diskUsageCache
-	requests          sync.WaitGroup // in-flight proxied requests, drained before a replaced version stops
-	accessLines       atomic.Uint64
+	port int
+	uid int
+	cfg appConfig
+	proxy *httputil.ReverseProxy
+	started time.Time
+	delay time.Duration
+	timer *time.Timer
+	logs *appLog
+	stats appStats
+	disk diskUsageCache
+	history diskUsageCache
+	requests sync.WaitGroup // in-flight proxied requests, drained before a replaced version stops
+	accessLines atomic.Uint64
 
-	mu               sync.Mutex
-	startMu          sync.Mutex
-	scheduleCancel   context.CancelFunc
-	scheduleRuns     map[string]scheduleRun
-	cmd              *exec.Cmd
-	isolation        *isolationPlan
-	done             chan struct{}
-	exited, retired  bool
-	starting         bool
-	draining         bool
+	mu sync.Mutex
+	startMu sync.Mutex
+	scheduleCancel context.CancelFunc
+	scheduleRuns map[string]scheduleRun
+	cmd *exec.Cmd
+	isolation *isolationPlan
+	done chan struct{}
+	exited, retired bool
+	starting bool
+	draining bool
 	unhealthyRestart bool
-	idleStopped      bool
-	inflight         int
-	lastRequest      time.Time
+	idleStopped bool
+	inflight int
+	lastRequest time.Time
 
-	slots          chan struct{}
-	wasmEpoch      bool
-	workPID        int
-	healthOK       bool
-	ready          bool
+	slots chan struct{}
+	wasmEpoch bool
+	workPID int
+	healthOK bool
+	ready bool
 	healthFailures int
-	nextHealth     time.Time
-	lastHealthy    time.Time
-	lastError      string
+	nextHealth time.Time
+	lastHealthy time.Time
+	lastError string
 }
 
 type supervisor struct {
-	cfg            config
-	storage        *storageServer
-	backups        *backupManager
-	fetch          *appFetchServer
-	events         *hub
-	deployments    *deploymentManager
-	blobs          *blobStore
-	identity       *identityStore
-	bus            *eventBus
-	secrets        *secretStore
-	jobs           *jobManager
-	metrics        *metrics
-	auth           *authStore
-	audit          *auditStore
-	uids           *uidAllocator
-	cgroups        *cgroupManager
-	egress         *egressManager
-	quota          *dataQuota
-	runner         runnerConn
+	cfg config
+	storage *storageServer
+	backups *backupManager
+	fetch *appFetchServer
+	events *hub
+	deployments *deploymentManager
+	blobs *blobStore
+	identity *identityStore
+	bus *eventBus
+	secrets *secretStore
+	jobs *jobManager
+	metrics *metrics
+	auth *authStore
+	audit *auditStore
+	uids *uidAllocator
+	cgroups *cgroupManager
+	egress *egressManager
+	quota *dataQuota
+	runner runnerConn
 	runnerLiveness *os.File
 	runnerSnapshot []runnerAppInfo
 
-	mu          sync.RWMutex
+	mu sync.RWMutex
 	apps, hosts map[string]*app
 
-	deployLocks     appLocks
-	deployRunsMu    sync.Mutex
-	deployRuns      map[string]*deploymentRun
+	deployLocks appLocks
+	deployRunsMu sync.Mutex
+	deployRuns map[string]*deploymentRun
 	artifactCacheMu sync.Mutex
-	loginMu         sync.Mutex
-	loginLimiters   map[string]*loginLimiter
-	stopping        atomic.Bool
-	ready           atomic.Bool
+	loginMu sync.Mutex
+	loginLimiters map[string]*loginLimiter
+	stopping atomic.Bool
+	ready atomic.Bool
 
-	versionOnce         sync.Once
-	version             string
-	compilerOnce        sync.Once
-	compilerOK          bool
-	appRoutesCache      routeCache
+	versionOnce sync.Once
+	version string
+	compilerOnce sync.Once
+	compilerOK bool
+	appRoutesCache routeCache
 	identityRoutesCache routeCache
-	adminRoutesCache    routeCache
-	publicRoutesCache   routeCache
+	adminRoutesCache routeCache
+	publicRoutesCache routeCache
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -331,26 +331,26 @@ func (s *supervisor) allApps() []*app {
 }
 
 type appInfo struct {
-	Name           string    `json:"name"`
-	Host           string    `json:"host"`
-	Port           int       `json:"port"`
-	UID            int       `json:"uid,omitempty"`
-	Status         string    `json:"status"`
-	PID            int       `json:"pid,omitempty"`
-	StartedAt      time.Time `json:"startedAt"`
-	CPUPercent     float64   `json:"cpuPercent"`
-	MemoryBytes    int64     `json:"memoryBytes"`
-	DiskBytes      int64     `json:"diskBytes"`
-	DiskLimitBytes int64     `json:"diskLimitBytes,omitempty"`
-	HistoryBytes   int64     `json:"historyBytes"`
-	OverQuota      bool      `json:"overQuota,omitempty"`
-	Maintenance    bool      `json:"maintenance,omitempty"`
-	Idle           bool      `json:"idle,omitempty"`
-	SampledAt      time.Time `json:"sampledAt"`
-	LastHealthy    time.Time `json:"lastHealthy"`
-	LastError      string    `json:"lastError,omitempty"`
-	CurrentDigest  string    `json:"currentDigest,omitempty"`
-	Ready          bool      `json:"ready"`
+	Name string `json:"name"`
+	Host string `json:"host"`
+	Port int `json:"port"`
+	UID int `json:"uid,omitempty"`
+	Status string `json:"status"`
+	PID int `json:"pid,omitempty"`
+	StartedAt time.Time `json:"startedAt"`
+	CPUPercent float64 `json:"cpuPercent"`
+	MemoryBytes int64 `json:"memoryBytes"`
+	DiskBytes int64 `json:"diskBytes"`
+	DiskLimitBytes int64 `json:"diskLimitBytes,omitempty"`
+	HistoryBytes int64 `json:"historyBytes"`
+	OverQuota bool `json:"overQuota,omitempty"`
+	Maintenance bool `json:"maintenance,omitempty"`
+	Idle bool `json:"idle,omitempty"`
+	SampledAt time.Time `json:"sampledAt"`
+	LastHealthy time.Time `json:"lastHealthy"`
+	LastError string `json:"lastError,omitempty"`
+	CurrentDigest string `json:"currentDigest,omitempty"`
+	Ready bool `json:"ready"`
 	// Schedules reports the last call of each schedule entry since the app started.
 	Schedules []scheduleRun `json:"schedules,omitempty"`
 }

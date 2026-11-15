@@ -128,7 +128,9 @@ func (c *contentStore) putReader(src io.Reader, maxBytes int64) (digest string, 
 	}
 
 	name := temp.Name()
-	cleanup := func() { _ = os.Remove(name) }
+	cleanup := func() {
+		_ = os.Remove(name)
+	}
 	hash := sha256.New()
 	written, err := io.Copy(io.MultiWriter(temp, hash), io.LimitReader(src, maxBytes+1))
 	closeErr := temp.Close()

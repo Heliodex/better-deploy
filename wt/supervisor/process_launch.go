@@ -23,13 +23,13 @@ var errEpochMismatch = errors.New("cwasm epoch setting does not match the host")
 
 // launchSession carries the resolved inputs shared by the runner and direct launch paths.
 type launchSession struct {
-	id         string
-	cfg        appConfig
-	source     string
-	args, env  []string
-	iso        *isolationPlan
-	plan       []byte
-	deadline   time.Time
+	id string
+	cfg appConfig
+	source string
+	args, env []string
+	iso *isolationPlan
+	plan []byte
+	deadline time.Time
 	namespaced bool
 }
 
@@ -256,9 +256,9 @@ func (s *supervisor) launchOnce(a *app, source string) error {
 // prepareLaunchSession resolves the environment, isolation and namespace inputs before any process starts.
 func (s *supervisor) prepareLaunchSession(a *app, source string, cfg appConfig, deadline time.Time) (*launchSession, error) {
 	session := &launchSession{
-		cfg:        cfg,
-		source:     source,
-		deadline:   deadline,
+		cfg: cfg,
+		source: source,
+		deadline: deadline,
 		namespaced: s.cfg.appNamespaces,
 	}
 
@@ -316,15 +316,15 @@ func (s *supervisor) launchRunner(a *app, l *launchSession) error {
 	configData, _ := json.Marshal(l.cfg)
 
 	request := runnerStartRequest{
-		ID:         l.id,
-		Name:       a.name,
-		Dir:        a.dir,
-		Path:       s.cfg.wasmtime,
-		Args:       l.args,
-		Env:        mergeEnv(minimalEnv(), l.env),
-		Config:     configData,
+		ID: l.id,
+		Name: a.name,
+		Dir: a.dir,
+		Path: s.cfg.wasmtime,
+		Args: l.args,
+		Env: mergeEnv(minimalEnv(), l.env),
+		Config: configData,
 		Namespaced: l.namespaced,
-		UID:        l.iso.uid,
+		UID: l.iso.uid,
 	}
 	if s.storage != nil {
 		request.StorageToken = s.storage.tokenFor(a.name)

@@ -32,7 +32,7 @@ func (m *cgroupManager) path(name string) string {
 
 // missingControllersError reports which controllers a cgroup directory does not expose.
 type missingControllersError struct {
-	dir     string
+	dir string
 	missing []string
 }
 

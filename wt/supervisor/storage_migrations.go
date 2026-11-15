@@ -17,18 +17,18 @@ const (
 )
 
 type storageMigrationRecord struct {
-	Version   int    `json:"version"`
-	Checksum  string `json:"checksum"`
+	Version int `json:"version"`
+	Checksum string `json:"checksum"`
 	AppliedAt string `json:"appliedAt"`
 }
 
 type storageMigrationRequest struct {
-	Version    int                `json:"version"`
+	Version int `json:"version"`
 	Statements []storageStatement `json:"statements,omitempty"`
 }
 
 type storageMigrationResponse struct {
-	Version int  `json:"version"`
+	Version int `json:"version"`
 	Applied bool `json:"applied"`
 }
 
@@ -92,7 +92,9 @@ func applyMigration(ctx context.Context, conn *sql.Conn, version int, statements
 	if err != nil {
 		return false, err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer func() {
+		_ = tx.Rollback()
+	}()
 
 	if err := ensureStorageMigrationsTable(ctx, tx); err != nil {
 		return false, err
@@ -124,7 +126,9 @@ func applyMigration(ctx context.Context, conn *sql.Conn, version int, statements
 	if err != nil {
 		return false, err
 	}
-	defer func() { _ = unregister() }()
+	defer func() {
+		_ = unregister()
+	}()
 
 	for i, statement := range statements {
 		if _, err := tx.ExecContext(ctx, statement.SQL, params[i]...); err != nil {

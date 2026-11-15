@@ -15,74 +15,74 @@ import (
 )
 
 const (
-	identityDirName             = ".identity"
-	identityUsersName           = "users.json"
-	identitySessionsName        = "sessions.json"
-	identityModePlatform        = "platform"
-	identityCookieName          = "wt_user"
-	identityCSRFHeader          = "X-Csrf-Token"
-	identitySessionTTL          = 30 * 24 * time.Hour
-	identityPasswordIter        = 600_000
-	identityPasswordMin         = 10
-	identityPasswordMax         = 1024
-	identityEmailMax            = 254
-	identityNameMax             = 100
-	identityGroupMax            = 32
-	identityGroupBytes          = 64
-	identityMaxUsers            = 10_000
-	identityMaxSessions         = 100_000
-	identityVersion             = 1
-	identitySecretEnv           = "WT_IDENTITY_SECRET" //nolint:gosec // Environment variable name, not a credential.
-	identityUserIDHeader        = "X-WT-User-Id"
-	identityUserEmail           = "X-WT-User-Email"
-	identityUserName            = "X-WT-User-Name"
-	identityUserGroups          = "X-WT-User-Groups"
+	identityDirName = ".identity"
+	identityUsersName = "users.json"
+	identitySessionsName = "sessions.json"
+	identityModePlatform = "platform"
+	identityCookieName = "wt_user"
+	identityCSRFHeader = "X-Csrf-Token"
+	identitySessionTTL = 30 * 24 * time.Hour
+	identityPasswordIter = 600_000
+	identityPasswordMin = 10
+	identityPasswordMax = 1024
+	identityEmailMax = 254
+	identityNameMax = 100
+	identityGroupMax = 32
+	identityGroupBytes = 64
+	identityMaxUsers = 10_000
+	identityMaxSessions = 100_000
+	identityVersion = 1
+	identitySecretEnv = "WT_IDENTITY_SECRET" //nolint:gosec // Environment variable name, not a credential.
+	identityUserIDHeader = "X-WT-User-Id"
+	identityUserEmail = "X-WT-User-Email"
+	identityUserName = "X-WT-User-Name"
+	identityUserGroups = "X-WT-User-Groups"
 	identityUserSignatureHeader = "X-WT-User-Signature"
-	identityHeaderPrefix        = "X-WT-User-"
+	identityHeaderPrefix = "X-WT-User-"
 )
 
 var (
-	errIdentityUserExists  = errors.New("a user with that email already exists")
-	errIdentityNoUser      = errors.New("unknown email or password")
-	errIdentityDisabled    = errors.New("this user is disabled")
-	errIdentityNoSession   = errors.New("sign in required")
-	errIdentityCSRF        = errors.New("invalid CSRF token")
+	errIdentityUserExists = errors.New("a user with that email already exists")
+	errIdentityNoUser = errors.New("unknown email or password")
+	errIdentityDisabled = errors.New("this user is disabled")
+	errIdentityNoSession = errors.New("sign in required")
+	errIdentityCSRF = errors.New("invalid CSRF token")
 	errIdentityUserMissing = errors.New("user not found")
-	errIdentityPassword    = errors.New("password must be between 10 and 1024 characters")
-	errIdentityEmail       = errors.New("enter a valid email address")
-	errIdentityName        = errors.New("enter a name")
-	errIdentityGroups      = errors.New("groups are invalid")
+	errIdentityPassword = errors.New("password must be between 10 and 1024 characters")
+	errIdentityEmail = errors.New("enter a valid email address")
+	errIdentityName = errors.New("enter a name")
+	errIdentityGroups = errors.New("groups are invalid")
 )
 
 // identityUser is the persisted record. Only a PBKDF2 hash is stored.
 type identityUser struct {
-	ID        string    `json:"id"`
-	Email     string    `json:"email"`
-	Name      string    `json:"name"`
-	Groups    []string  `json:"groups,omitempty"`
-	Password  string    `json:"password"`
-	Disabled  bool      `json:"disabled,omitempty"`
+	ID string `json:"id"`
+	Email string `json:"email"`
+	Name string `json:"name"`
+	Groups []string `json:"groups,omitempty"`
+	Password string `json:"password"`
+	Disabled bool `json:"disabled,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 type identitySession struct {
-	ID         string    `json:"id"`
-	UserID     string    `json:"userId"`
-	TokenHash  string    `json:"tokenHash"`
-	CSRF       string    `json:"csrf"`
-	CreatedAt  time.Time `json:"createdAt"`
-	ExpiresAt  time.Time `json:"expiresAt"`
+	ID string `json:"id"`
+	UserID string `json:"userId"`
+	TokenHash string `json:"tokenHash"`
+	CSRF string `json:"csrf"`
+	CreatedAt time.Time `json:"createdAt"`
+	ExpiresAt time.Time `json:"expiresAt"`
 	LastSeenAt time.Time `json:"lastSeenAt"`
 }
 
 // identityUserInfo is the public view; it never includes the password hash.
 type identityUserInfo struct {
-	ID        string    `json:"id"`
-	Email     string    `json:"email"`
-	Name      string    `json:"name"`
-	Groups    []string  `json:"groups"`
-	Disabled  bool      `json:"disabled,omitempty"`
+	ID string `json:"id"`
+	Email string `json:"email"`
+	Name string `json:"name"`
+	Groups []string `json:"groups"`
+	Disabled bool `json:"disabled,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 }
 
@@ -98,9 +98,9 @@ func (u identityUser) info() identityUserInfo {
 type identityStore struct {
 	dir string
 
-	mu       sync.Mutex
-	users    map[string]*identityUser
-	byEmail  map[string]string
+	mu sync.Mutex
+	users map[string]*identityUser
+	byEmail map[string]string
 	sessions map[string]*identitySession
 }
 
@@ -380,7 +380,7 @@ func (s *identityStore) authenticate(email, password string) (identityUserInfo, 
 
 	var (
 		disabled bool
-		info     identityUserInfo
+		info identityUserInfo
 	)
 
 	if found {
@@ -416,12 +416,12 @@ func (s *identityStore) newSession(userID string) (string, *identitySession, err
 
 	now := time.Now().UTC()
 	session := &identitySession{
-		ID:         "ses_" + csrf[:16],
-		UserID:     userID,
-		TokenHash:  identityTokenHash(token),
-		CSRF:       csrf,
-		CreatedAt:  now,
-		ExpiresAt:  now.Add(identitySessionTTL),
+		ID: "ses_" + csrf[:16],
+		UserID: userID,
+		TokenHash: identityTokenHash(token),
+		CSRF: csrf,
+		CreatedAt: now,
+		ExpiresAt: now.Add(identitySessionTTL),
 		LastSeenAt: now,
 	}
 

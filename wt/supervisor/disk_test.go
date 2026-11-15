@@ -76,7 +76,9 @@ func TestUntrustedEntryQuotaStopsApp(t *testing.T) {
 	old := maxAppEntries
 
 	maxAppEntries = 2
-	defer func() { maxAppEntries = old }()
+	defer func() {
+		maxAppEntries = old
+	}()
 
 	s := testSupervisor()
 	s.cfg.tenantMode = tenantUntrusted
@@ -116,7 +118,9 @@ func TestTrustedEntryQuotaStaysSoft(t *testing.T) {
 	old := maxAppEntries
 
 	maxAppEntries = 1
-	defer func() { maxAppEntries = old }()
+	defer func() {
+		maxAppEntries = old
+	}()
 
 	s := testSupervisor()
 	s.cfg.stateDir = t.TempDir()

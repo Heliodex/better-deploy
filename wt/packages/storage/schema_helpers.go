@@ -136,7 +136,9 @@ func (c *Client) rebuildReferences(ctx context.Context, table string) ([]string,
 			return nil, err
 		}
 
-		if slices.ContainsFunc(targets, func(target string) bool { return strings.EqualFold(target, table) }) {
+		if slices.ContainsFunc(targets, func(target string) bool {
+			return strings.EqualFold(target, table)
+		}) {
 			names = append(names, name)
 		}
 	}

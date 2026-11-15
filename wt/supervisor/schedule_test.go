@@ -15,9 +15,9 @@ import (
 
 func TestParseScheduleInterval(t *testing.T) {
 	valid := map[string]time.Duration{
-		"1s":  time.Second,
+		"1s": time.Second,
 		"10s": 10 * time.Second,
-		"1m":  time.Minute,
+		"1m": time.Minute,
 		"24h": maxScheduleInterval,
 	}
 	for every, want := range valid {
@@ -52,11 +52,11 @@ func TestReadAppConfigValidatesSchedule(t *testing.T) {
 	}
 
 	for name, body := range map[string]string{
-		"no path":        `{"schedule":[{"every":"10s"}]}`,
-		"relative path":  `{"schedule":[{"path":"tick","every":"10s"}]}`,
-		"bad interval":   `{"schedule":[{"path":"/tick","every":"often"}]}`,
+		"no path": `{"schedule":[{"every":"10s"}]}`,
+		"relative path": `{"schedule":[{"path":"tick","every":"10s"}]}`,
+		"bad interval": `{"schedule":[{"path":"/tick","every":"often"}]}`,
 		"interval floor": `{"schedule":[{"path":"/tick","every":"100ms"}]}`,
-		"bad timeout":    `{"schedule":[{"path":"/tick","every":"10s","timeout":"forever"}]}`,
+		"bad timeout": `{"schedule":[{"path":"/tick","every":"10s","timeout":"forever"}]}`,
 		"duplicate name": `{"schedule":[{"name":"a","path":"/x","every":"10s"},{"name":"a","path":"/y","every":"10s"}]}`,
 	} {
 		if _, err := readAppConfig(writeConfig(t, body), "demo", "localhost", tenantTrusted); err == nil {

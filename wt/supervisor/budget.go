@@ -4,7 +4,7 @@ import "log"
 
 // byteBudget is a named byte limit where zero means unlimited.
 type byteBudget struct {
-	name  string
+	name string
 	limit int64
 	watch budgetWatch
 }

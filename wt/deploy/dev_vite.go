@@ -15,9 +15,9 @@ import (
 // viteDev is the frontend dev server configuration for one app.
 type viteDev struct {
 	appDir, webDir, command, build string
-	watch, proxy                   []string
-	port                           int
-	host, configPath               string
+	watch, proxy []string
+	port int
+	host, configPath string
 }
 
 // freeLocalPort asks the kernel for an unused loopback port.
@@ -83,14 +83,14 @@ func resolveViteDev(appDir string, m manifest, host string) (*viteDev, bool, err
 	proxy = mergeProxyPrefixes(proxy, supervisorProxy)
 
 	return &viteDev{
-		appDir:  appDir,
-		webDir:  webDir,
+		appDir: appDir,
+		webDir: webDir,
 		command: command,
-		build:   dev.Build,
-		watch:   append([]string(nil), dev.Watch...),
-		proxy:   proxy,
-		port:    port,
-		host:    host,
+		build: dev.Build,
+		watch: append([]string(nil), dev.Watch...),
+		proxy: proxy,
+		port: port,
+		host: host,
 	}, true, nil
 }
 

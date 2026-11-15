@@ -29,10 +29,10 @@ func handleTick(w http.ResponseWriter, r *http.Request) {
 	app.Logf(beatLevels[int(slot%int64(len(beatLevels)))], "ticker beat")
 
 	job, created, err := app.EnqueueJob(r.Context(), wasihttp.NewClient(), app.JobRequest{
-		Path:           "/jobs/beat",
-		Method:         http.MethodPost,
-		Body:           fmt.Sprintf(`{"slot":%d,"at":%q}`, slot, now.Format(time.RFC3339Nano)),
-		MaxAttempts:    3,
+		Path: "/jobs/beat",
+		Method: http.MethodPost,
+		Body: fmt.Sprintf(`{"slot":%d,"at":%q}`, slot, now.Format(time.RFC3339Nano)),
+		MaxAttempts: 3,
 		IdempotencyKey: fmt.Sprintf("ticker-%d", slot),
 	})
 	if err != nil {

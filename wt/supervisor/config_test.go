@@ -299,10 +299,10 @@ func TestAppConfigPatchesHealthSettings(t *testing.T) {
 
 func TestNormaliseServerPaths(t *testing.T) {
 	cfg, err := normaliseAppConfig(appConfig{
-		Name:        "demo",
-		Host:        "demo.localhost",
-		Health:      "/",
-		Env:         map[string]string{},
+		Name: "demo",
+		Host: "demo.localhost",
+		Health: "/",
+		Env: map[string]string{},
 		ServerPaths: []string{"/auth/", "/api/v1", "/auth", "/"},
 	}, "demo", "localhost", tenantTrusted)
 	if err != nil {
@@ -327,10 +327,10 @@ func TestNormaliseServerPaths(t *testing.T) {
 
 func TestNormaliseServerPages(t *testing.T) {
 	cfg, err := normaliseAppConfig(appConfig{
-		Name:        "demo",
-		Host:        "demo.localhost",
-		Health:      "/",
-		Env:         map[string]string{},
+		Name: "demo",
+		Host: "demo.localhost",
+		Health: "/",
+		Env: map[string]string{},
 		ServerPages: []string{"/login/", "/", "/login", "/home"},
 	}, "demo", "localhost", tenantTrusted)
 	if err != nil {

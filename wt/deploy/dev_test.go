@@ -37,15 +37,15 @@ func TestNormaliseDevConfig(t *testing.T) {
 	}
 
 	for name, bad := range map[string]*appDevConfig{
-		"absolute web":              {Web: "/tmp/web"},
-		"parent web":                {Web: "../web"},
-		"absolute watch":            {Watch: []string{"/tmp/file"}},
-		"parent watch":              {Watch: []string{"../file"}},
-		"relative proxy":            {Proxy: []string{"api"}},
-		"parent proxy":              {Proxy: []string{"/../api"}},
+		"absolute web": {Web: "/tmp/web"},
+		"parent web": {Web: "../web"},
+		"absolute watch": {Watch: []string{"/tmp/file"}},
+		"parent watch": {Watch: []string{"../file"}},
+		"relative proxy": {Proxy: []string{"api"}},
+		"parent proxy": {Proxy: []string{"/../api"}},
 		"relative supervisor proxy": {SupervisorProxy: []string{"v1/events"}},
-		"parent supervisor proxy":   {SupervisorProxy: []string{"/../events"}},
-		"large port":                {Port: 70000},
+		"parent supervisor proxy": {SupervisorProxy: []string{"/../events"}},
+		"large port": {Port: 70000},
 	} {
 		if err := normaliseDevConfig(bad); err == nil {
 			t.Errorf("%s was accepted", name)
@@ -80,7 +80,7 @@ func TestViteDevConfigIncludesProxy(t *testing.T) {
 
 	m := manifest{
 		Name: testAppName,
-		Dev:  &appDevConfig{Port: 5199, Proxy: []string{"/api", "/v1"}},
+		Dev: &appDevConfig{Port: 5199, Proxy: []string{"/api", "/v1"}},
 	}
 	if err := normaliseDevConfig(m.Dev); err != nil {
 		t.Fatal(err)

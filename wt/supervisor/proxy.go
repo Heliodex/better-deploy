@@ -16,20 +16,20 @@ import (
 )
 
 var (
-	proxyDialTimeout           = 5 * time.Second
+	proxyDialTimeout = 5 * time.Second
 	proxyResponseHeaderTimeout = 30 * time.Second
 )
 
 const (
 	proxyIdleConnTimeout = 90 * time.Second
-	proxyMaxIdlePerHost  = 16
-	proxyExpectContinue  = time.Second
+	proxyMaxIdlePerHost = 16
+	proxyExpectContinue = time.Second
 
-	requestIDHeader      = "X-Request-ID"
-	spinFullURLHeader    = "Spin-Full-Url"
+	requestIDHeader = "X-Request-ID"
+	spinFullURLHeader = "Spin-Full-Url"
 	spinClientAddrHeader = "Spin-Client-Addr"
-	spinBasePathHeader   = "Spin-Base-Path"
-	spinPathInfoHeader   = "Spin-Path-Info"
+	spinBasePathHeader = "Spin-Base-Path"
+	spinPathInfoHeader = "Spin-Path-Info"
 )
 
 // newRequestID returns a short random identifier that ties a proxy, app and storage request together.
@@ -59,10 +59,10 @@ func (s *supervisor) newProxy(a *app) *httputil.ReverseProxy {
 		},
 		// A hung app must not hold client connections forever: header and dial deadlines bound the wait before the response starts.
 		Transport: &http.Transport{
-			DialContext:           (&net.Dialer{Timeout: proxyDialTimeout, KeepAlive: 30 * time.Second}).DialContext,
+			DialContext: (&net.Dialer{Timeout: proxyDialTimeout, KeepAlive: 30 * time.Second}).DialContext,
 			ResponseHeaderTimeout: proxyResponseHeaderTimeout,
-			IdleConnTimeout:       proxyIdleConnTimeout,
-			MaxIdleConnsPerHost:   proxyMaxIdlePerHost,
+			IdleConnTimeout: proxyIdleConnTimeout,
+			MaxIdleConnsPerHost: proxyMaxIdlePerHost,
 			ExpectContinueTimeout: proxyExpectContinue,
 		},
 		Rewrite: func(r *httputil.ProxyRequest) {
@@ -262,7 +262,9 @@ func (s *supervisor) proxyRequest(w http.ResponseWriter, r *http.Request, a *app
 	if slots != nil {
 		select {
 		case slots <- struct{}{}:
-			defer func() { <-slots }()
+			defer func() {
+				<-slots
+			}()
 		default:
 			http.Error(w, "app is busy", http.StatusTooManyRequests)
 			return false

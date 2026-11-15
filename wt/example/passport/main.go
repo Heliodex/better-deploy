@@ -24,41 +24,41 @@ import (
 var errNoSession = errors.New("no session")
 
 const (
-	maxMessage    = 280
-	maxBody       = 4 << 10
-	defaultLimit  = 50
-	maxLimit      = 100
-	sessionTTL    = 8 * time.Hour
-	flowTTL       = 10 * time.Minute
+	maxMessage = 280
+	maxBody = 4 << 10
+	defaultLimit = 50
+	maxLimit = 100
+	sessionTTL = 8 * time.Hour
+	flowTTL = 10 * time.Minute
 	sessionCookie = "passport_session"
-	stateCookie   = "passport_oauth_state"
+	stateCookie = "passport_oauth_state"
 )
 
 // passportApp owns the store, OAuth client and routes so handler tests can build one without wasmtime.
 type passportApp struct {
-	store        *storage.Client
-	mux          *http.ServeMux
-	oauth        *oauth.Client
+	store *storage.Client
+	mux *http.ServeMux
+	oauth *oauth.Client
 	providerName string
-	sessions     session.Manager
+	sessions session.Manager
 }
 
 // userSession is one signed-in browser, loaded from the hashed cookie token on each request.
 type userSession struct {
-	identity  oauth.Identity
+	identity oauth.Identity
 	expiresAt time.Time
-	idToken   string
+	idToken string
 }
 
 // sessionResponse builds the public session response, with empty user fields when signed out.
 func (a *passportApp) sessionResponse(sess *userSession) contract.SessionResponse {
 	cfg := a.oauth.Config()
 	response := contract.SessionResponse{
-		Authenticated:  sess != nil,
-		ClientID:       cfg.ClientID,
+		Authenticated: sess != nil,
+		ClientID: cfg.ClientID,
 		ProviderIssuer: cfg.Issuer,
-		ProviderName:   a.providerName,
-		Scopes:         cfg.Scopes,
+		ProviderName: a.providerName,
+		Scopes: cfg.Scopes,
 	}
 
 	if sess == nil {
@@ -99,7 +99,7 @@ func (a *passportApp) loadSession(ctx context.Context, r *http.Request) (*userSe
 	}
 
 	var (
-		sess      userSession
+		sess userSession
 		expiresAt string
 	)
 
@@ -253,13 +253,13 @@ func (a *passportApp) handleCreateCheckin(w http.ResponseWriter, r *http.Request
 	}
 
 	entry := contract.Checkin{
-		AuthorName:    sess.identity.Name,
+		AuthorName: sess.identity.Name,
 		AuthorPicture: sess.identity.Picture,
-		AuthorSub:     sess.identity.Subject,
-		CreatedAt:     time.Now().UTC().Format(app.TimestampFormat),
-		ID:            app.NewID(),
-		Message:       message,
-		Mine:          true,
+		AuthorSub: sess.identity.Subject,
+		CreatedAt: time.Now().UTC().Format(app.TimestampFormat),
+		ID: app.NewID(),
+		Message: message,
+		Mine: true,
 	}
 
 	if _, err := a.store.Exec(r.Context(), `insert into checkins (id, message, author_sub, author_name, author_picture, created_at)
@@ -386,11 +386,11 @@ func (a *passportApp) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	_, err = a.store.Batch(r.Context(),
 		storage.Statement{
-			SQL:  `delete from login_flows where created_at < ?`,
+			SQL: `delete from login_flows where created_at < ?`,
 			Args: []any{time.Now().UTC().Add(-flowTTL).Format(app.TimestampFormat)},
 		},
 		storage.Statement{
-			SQL:  `insert into login_flows (state, verifier, nonce, redirect_uri, created_at) values (?, ?, ?, ?, ?)`,
+			SQL: `insert into login_flows (state, verifier, nonce, redirect_uri, created_at) values (?, ?, ?, ?, ?)`,
 			Args: []any{state, verifier, nonce, redirectURI, time.Now().UTC().Format(app.TimestampFormat)},
 		},
 	)
@@ -414,7 +414,7 @@ type callbackFlow struct {
 // takeFlow consumes a login flow so a callback code cannot be replayed.
 func (a *passportApp) takeFlow(ctx context.Context, state string) (callbackFlow, error) {
 	var (
-		flow      callbackFlow
+		flow callbackFlow
 		createdAt string
 	)
 
@@ -492,7 +492,7 @@ func (a *passportApp) storeSession(w http.ResponseWriter, r *http.Request, ident
 
 	_, err = a.store.Batch(r.Context(),
 		storage.Statement{
-			SQL:  `delete from sessions where expires_at <= ?`,
+			SQL: `delete from sessions where expires_at <= ?`,
 			Args: []any{now.Format(app.TimestampFormat)},
 		},
 		storage.Statement{
@@ -620,11 +620,11 @@ func newPassportApp(store *storage.Client, client *http.Client) (*passportApp, e
 	}
 
 	a := &passportApp{
-		store:        store,
-		mux:          http.NewServeMux(),
-		oauth:        oauthClient,
+		store: store,
+		mux: http.NewServeMux(),
+		oauth: oauthClient,
 		providerName: providerName,
-		sessions:     session.New(sessionCookie, sessionTTL),
+		sessions: session.New(sessionCookie, sessionTTL),
 	}
 
 	a.mux.HandleFunc("GET /api/session", a.handleSession)

@@ -24,7 +24,7 @@ var adminFiles embed.FS
 
 // hub fans out app snapshots to SSE subscribers. Snapshots carry full state, so a slow subscriber that misses an update converges on the next one.
 type hub struct {
-	mu   sync.Mutex
+	mu sync.Mutex
 	subs map[chan []byte]struct{}
 }
 
@@ -72,7 +72,7 @@ func (h *hub) publish(message []byte) {
 }
 
 type snapshotMessage struct {
-	Type string    `json:"type"`
+	Type string `json:"type"`
 	Apps []appInfo `json:"apps"`
 }
 
@@ -81,7 +81,9 @@ func (s *supervisor) snapshot() []appInfo {
 	// Sampling here keeps REST and SSE snapshots current; the method throttles itself.
 	s.sampleAll()
 	apps := s.allApps()
-	sort.Slice(apps, func(i, j int) bool { return apps[i].name < apps[j].name })
+	sort.Slice(apps, func(i, j int) bool {
+		return apps[i].name < apps[j].name
+	})
 
 	out := make([]appInfo, 0, len(apps))
 	for _, a := range apps {
@@ -419,7 +421,9 @@ func (s *supervisor) handleBackupImport(w http.ResponseWriter, r *http.Request, 
 	}
 
 	if r.MultipartForm != nil {
-		defer func() { _ = r.MultipartForm.RemoveAll() }()
+		defer func() {
+			_ = r.MultipartForm.RemoveAll()
+		}()
 	}
 
 	file, _, err := r.FormFile("snapshot")

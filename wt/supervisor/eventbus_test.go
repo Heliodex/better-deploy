@@ -112,7 +112,7 @@ func TestStorageChangePublishesBusEvent(t *testing.T) {
 	bus := newEventBus()
 	storage := &storageServer{bus: bus}
 	storage.publishStorageChange("demo", storageChange{
-		RequestID:    "req-1",
+		RequestID: "req-1",
 		RowsAffected: 1,
 		Rows: []rowChange{
 			{Table: "items", Op: "insert"},

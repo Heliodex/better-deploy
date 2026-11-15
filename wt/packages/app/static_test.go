@@ -27,7 +27,7 @@ func TestStaticPageNamesTheSupervisorPage(t *testing.T) {
 func TestStaticFilesCachesHashedAssets(t *testing.T) {
 	handler := StaticFiles(fstest.MapFS{
 		"_app/immutable/chunk.js": &fstest.MapFile{Data: []byte("js")},
-		"index.html":              &fstest.MapFile{Data: []byte("html")},
+		"index.html": &fstest.MapFile{Data: []byte("html")},
 	})
 
 	cases := []struct {

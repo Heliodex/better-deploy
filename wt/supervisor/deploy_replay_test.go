@@ -16,8 +16,8 @@ func TestDeploymentReplayPersists(t *testing.T) {
 	entry := deployReplayEntry{
 		Status: http.StatusOK,
 		Header: http.Header{"Etag": {`"etag"`}},
-		Body:   []byte("deployed"),
-		At:     time.Now().UTC(),
+		Body: []byte("deployed"),
+		At: time.Now().UTC(),
 	}
 	if err := m.storeReplay("demo", "key", entry); err != nil {
 		t.Fatal(err)

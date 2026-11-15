@@ -228,7 +228,9 @@ func TestSupervisorHandoverKeepsAppPID(t *testing.T) {
 	}
 
 	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
+	go func() {
+		done <- cmd.Wait()
+	}()
 
 	select {
 	case err := <-done:

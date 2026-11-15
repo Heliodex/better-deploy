@@ -32,9 +32,9 @@ func logTailParam(w http.ResponseWriter, r *http.Request) (int, bool) {
 // logFilterParam parses level, source, text and time filters and writes 400 on invalid input.
 func logFilterParam(w http.ResponseWriter, r *http.Request) (logFilter, bool) {
 	filter := logFilter{
-		level:  strings.ToLower(strings.TrimSpace(r.URL.Query().Get("level"))),
+		level: strings.ToLower(strings.TrimSpace(r.URL.Query().Get("level"))),
 		source: strings.ToLower(strings.TrimSpace(r.URL.Query().Get("source"))),
-		query:  strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q"))),
+		query: strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q"))),
 	}
 	if filter.source != "" && filter.source != "app" && filter.source != "supervisor" {
 		writeError(w, http.StatusBadRequest, "source must be app or supervisor")
@@ -154,9 +154,9 @@ func (s *supervisor) handleLogExport(w http.ResponseWriter, r *http.Request, a *
 
 // logStreamMessage is one SSE frame: the backlog on connect, then single lines.
 type logStreamMessage struct {
-	Type string     `json:"type"`
+	Type string `json:"type"`
 	Logs []logEntry `json:"logs,omitempty"`
-	Log  *logEntry  `json:"log,omitempty"`
+	Log *logEntry `json:"log,omitempty"`
 }
 
 // handleLogStream streams an app's log: the recent backlog on connect, then each new line as the supervisor writes it, with comment pings to hold the connection.

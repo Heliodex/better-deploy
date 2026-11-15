@@ -71,12 +71,12 @@ func TestRunnerStartsStreamsAndStopsAnApp(t *testing.T) {
 	client, _, _ := startTestRunner(t)
 
 	stream, started, err := client.Start(runnerStartRequest{
-		ID:   "demo",
+		ID: "demo",
 		Name: "demo",
-		Dir:  t.TempDir(),
+		Dir: t.TempDir(),
 		Path: os.Args[0],
 		Args: []string{"--addr", "127.0.0.1:0"},
-		Env:  minimalEnv(),
+		Env: minimalEnv(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -106,12 +106,12 @@ func TestRunnerSnapshotSurvivesAReconnect(t *testing.T) {
 	client, _, socket := startTestRunner(t)
 
 	stream, _, err := client.Start(runnerStartRequest{
-		ID:   "demo",
+		ID: "demo",
 		Name: "demo",
-		Dir:  t.TempDir(),
+		Dir: t.TempDir(),
 		Path: os.Args[0],
 		Args: []string{"--addr", "127.0.0.1:0"},
-		Env:  minimalEnv(),
+		Env: minimalEnv(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -140,12 +140,12 @@ func TestRunnerLivenessStopsApps(t *testing.T) {
 	client, write, socket := startTestRunner(t)
 
 	_, _, err := client.Start(runnerStartRequest{
-		ID:   "demo",
+		ID: "demo",
 		Name: "demo",
-		Dir:  t.TempDir(),
+		Dir: t.TempDir(),
 		Path: os.Args[0],
 		Args: []string{"--addr", "127.0.0.1:0"},
-		Env:  minimalEnv(),
+		Env: minimalEnv(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -203,12 +203,12 @@ func TestAdoptAppFromRunner(t *testing.T) {
 	}
 
 	stream, started, err := client.Start(runnerStartRequest{
-		ID:     "demo",
-		Name:   "demo",
-		Dir:    dir,
-		Path:   os.Args[0],
-		Args:   []string{"--addr", "127.0.0.1:0"},
-		Env:    minimalEnv(),
+		ID: "demo",
+		Name: "demo",
+		Dir: dir,
+		Path: os.Args[0],
+		Args: []string{"--addr", "127.0.0.1:0"},
+		Env: minimalEnv(),
 		Config: []byte(config),
 	})
 	if err != nil {

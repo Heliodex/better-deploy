@@ -330,14 +330,14 @@ func (s *supervisor) createApp(name, dir string, cfg appConfig, asleep bool) (*a
 
 	logs.setSecrets(s.appRedactionValues(name))
 	a := &app{
-		name:      name,
-		dir:       dir,
-		digest:    sourceDigest(dir),
-		cfg:       cfg,
-		logs:      logs,
-		done:      make(chan struct{}),
-		started:   time.Now().UTC(),
-		delay:     time.Second,
+		name: name,
+		dir: dir,
+		digest: sourceDigest(dir),
+		cfg: cfg,
+		logs: logs,
+		done: make(chan struct{}),
+		started: time.Now().UTC(),
+		delay: time.Second,
 		wasmEpoch: epoch,
 	}
 	s.loadResourceHistory(a)
@@ -474,20 +474,20 @@ func (s *supervisor) adoptApp(name, dir string, cfg appConfig, info runnerAppInf
 	}
 
 	a := &app{
-		name:      name,
-		dir:       dir,
-		digest:    sourceDigest(dir),
-		cfg:       cfg,
-		logs:      logs,
-		done:      make(chan struct{}),
-		started:   info.Started,
-		delay:     time.Second,
+		name: name,
+		dir: dir,
+		digest: sourceDigest(dir),
+		cfg: cfg,
+		logs: logs,
+		done: make(chan struct{}),
+		started: info.Started,
+		delay: time.Second,
 		wasmEpoch: epoch,
-		uid:       info.UID,
-		port:      info.Port,
-		workPID:   info.WorkPID,
-		ready:     true,
-		healthOK:  true,
+		uid: info.UID,
+		port: info.Port,
+		workPID: info.WorkPID,
+		ready: true,
+		healthOK: true,
 	}
 	if a.started.IsZero() {
 		a.started = time.Now().UTC()

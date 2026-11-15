@@ -35,16 +35,16 @@ func wasm_stream_drop_readable_u8(handle int32)
 func wasm_stream_drop_writable_u8(handle int32)
 
 var wasm_stream_vtable_u8 = witTypes.StreamVtable[uint8]{
-	Size:         1,
-	Align:        1,
-	Read:         wasm_stream_read_u8,
-	Write:        wasm_stream_write_u8,
-	CancelRead:   nil,
-	CancelWrite:  nil,
+	Size: 1,
+	Align: 1,
+	Read: wasm_stream_read_u8,
+	Write: wasm_stream_write_u8,
+	CancelRead: nil,
+	CancelWrite: nil,
 	DropReadable: wasm_stream_drop_readable_u8,
 	DropWritable: wasm_stream_drop_writable_u8,
-	Lift:         nil,
-	Lower:        nil,
+	Lift: nil,
+	Lower: nil,
 }
 
 func MakeStreamU8() (*witTypes.StreamWriter[uint8], *witTypes.StreamReader[uint8]) {
@@ -112,16 +112,16 @@ func wasm_future_lower_result_unit_wasi_cli_0_3_0_types_error_code(
 }
 
 var wasm_future_vtable_result_unit_wasi_cli_0_3_0_types_error_code = witTypes.FutureVtable[witTypes.Result[witTypes.Unit, wasi_cli_0_3_0_types.ErrorCode]]{
-	Size:         2,
-	Align:        1,
-	Read:         wasm_future_read_result_unit_wasi_cli_0_3_0_types_error_code,
-	Write:        wasm_future_write_result_unit_wasi_cli_0_3_0_types_error_code,
-	CancelRead:   nil,
-	CancelWrite:  nil,
+	Size: 2,
+	Align: 1,
+	Read: wasm_future_read_result_unit_wasi_cli_0_3_0_types_error_code,
+	Write: wasm_future_write_result_unit_wasi_cli_0_3_0_types_error_code,
+	CancelRead: nil,
+	CancelWrite: nil,
 	DropReadable: wasm_future_drop_readable_result_unit_wasi_cli_0_3_0_types_error_code,
 	DropWritable: wasm_future_drop_writable_result_unit_wasi_cli_0_3_0_types_error_code,
-	Lift:         wasm_future_lift_result_unit_wasi_cli_0_3_0_types_error_code,
-	Lower:        wasm_future_lower_result_unit_wasi_cli_0_3_0_types_error_code,
+	Lift: wasm_future_lift_result_unit_wasi_cli_0_3_0_types_error_code,
+	Lower: wasm_future_lower_result_unit_wasi_cli_0_3_0_types_error_code,
 }
 
 func MakeFutureResultUnitWasiCli030TypesErrorCode() (*witTypes.FutureWriter[witTypes.Result[witTypes.Unit, wasi_cli_0_3_0_types.ErrorCode]], *witTypes.FutureReader[witTypes.Result[witTypes.Unit, wasi_cli_0_3_0_types.ErrorCode]]) {

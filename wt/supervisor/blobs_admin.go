@@ -7,15 +7,15 @@ import (
 )
 
 type blobGCRequest struct {
-	OlderThan string   `json:"olderThan"`
-	Keep      []string `json:"keep,omitempty"`
-	DryRun    bool     `json:"dryRun,omitempty"`
+	OlderThan string `json:"olderThan"`
+	Keep []string `json:"keep,omitempty"`
+	DryRun bool `json:"dryRun,omitempty"`
 }
 
 type blobGCResponse struct {
-	Deleted   []string `json:"deleted"`
-	DryRun    bool     `json:"dryRun"`
-	OlderThan string   `json:"olderThan"`
+	Deleted []string `json:"deleted"`
+	DryRun bool `json:"dryRun"`
+	OlderThan string `json:"olderThan"`
 }
 
 // handleAppBlobs lists one app's stored blobs, including ones whose metadata sidecar is missing.

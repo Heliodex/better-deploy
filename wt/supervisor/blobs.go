@@ -22,36 +22,36 @@ import (
 )
 
 const (
-	blobPrefix        = "/_wt/blobs"
-	blobDirName       = ".blobs"
-	blobSecretName    = ".blob-secret"
-	blobMaxTTL        = 24 * time.Hour
-	blobMaxUpload     = 256 << 20
-	blobContentType   = 256
+	blobPrefix = "/_wt/blobs"
+	blobDirName = ".blobs"
+	blobSecretName = ".blob-secret"
+	blobMaxTTL = 24 * time.Hour
+	blobMaxUpload = 256 << 20
+	blobContentType = 256
 	blobSignatureSize = 32
-	blobSecretEnv     = "WT_BLOB_SECRET" //nolint:gosec // Environment variable name, not a credential.
-	blobPrefixEnv     = "WT_BLOB_PREFIX"
+	blobSecretEnv = "WT_BLOB_SECRET" //nolint:gosec // Environment variable name, not a credential.
+	blobPrefixEnv = "WT_BLOB_PREFIX"
 )
 
 var (
-	errBlobTooLarge   = errors.New("blob is too large")
-	errBlobSignature  = errors.New("invalid blob signature")
-	errBlobExpired    = errors.New("blob URL has expired")
-	errBlobInvalid    = errors.New("invalid blob request")
-	errBlobNotFound   = errors.New("blob not found")
-	errBlobQuota      = errors.New("blob quota exceeded")
+	errBlobTooLarge = errors.New("blob is too large")
+	errBlobSignature = errors.New("invalid blob signature")
+	errBlobExpired = errors.New("blob URL has expired")
+	errBlobInvalid = errors.New("invalid blob request")
+	errBlobNotFound = errors.New("blob not found")
+	errBlobQuota = errors.New("blob quota exceeded")
 	errBlobStoreEmpty = errors.New("blob store is unavailable")
 )
 
 type blobInfo struct {
-	Digest      string    `json:"digest"`
-	Size        int64     `json:"size"`
-	ContentType string    `json:"contentType"`
-	CreatedAt   time.Time `json:"createdAt"`
+	Digest string `json:"digest"`
+	Size int64 `json:"size"`
+	ContentType string `json:"contentType"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 type blobStore struct {
-	dir    string
+	dir string
 	secret []byte
 }
 

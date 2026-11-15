@@ -32,30 +32,30 @@ type TestServer struct {
 
 	db *sql.DB
 
-	mu         sync.Mutex
-	sessions   map[string]*sql.Tx
+	mu sync.Mutex
+	sessions map[string]*sql.Tx
 	migrations int
-	checksums  map[int]string
-	kv         map[string]testKVItem
+	checksums map[int]string
+	kv map[string]testKVItem
 }
 
 type testKVItem struct {
-	value   string
+	value string
 	expires time.Time
 }
 
 var testServerSequence atomic.Uint64
 
 type testStatement struct {
-	SQL    string `json:"sql"`
-	Params []any  `json:"params,omitempty"`
-	Query  bool   `json:"query,omitempty"`
+	SQL string `json:"sql"`
+	Params []any `json:"params,omitempty"`
+	Query bool `json:"query,omitempty"`
 }
 
 type testRequest struct {
-	SQL     string `json:"sql"`
-	Params  []any  `json:"params,omitempty"`
-	MaxRows int    `json:"max_rows,omitempty"`
+	SQL string `json:"sql"`
+	Params []any `json:"params,omitempty"`
+	MaxRows int `json:"max_rows,omitempty"`
 }
 
 type testStatements struct {
@@ -63,16 +63,16 @@ type testStatements struct {
 }
 
 type testMigration struct {
-	Version    int             `json:"version"`
+	Version int `json:"version"`
 	Statements []testStatement `json:"statements,omitempty"`
 }
 
 type testResponse struct {
-	Columns      []string `json:"columns"`
-	Rows         [][]any  `json:"rows"`
-	RowsAffected int64    `json:"rows_affected,omitempty"`
-	LastInsertID int64    `json:"last_insert_id,omitempty"`
-	Truncated    bool     `json:"truncated,omitempty"`
+	Columns []string `json:"columns"`
+	Rows [][]any `json:"rows"`
+	RowsAffected int64 `json:"rows_affected,omitempty"`
+	LastInsertID int64 `json:"last_insert_id,omitempty"`
+	Truncated bool `json:"truncated,omitempty"`
 }
 
 type testResults struct {

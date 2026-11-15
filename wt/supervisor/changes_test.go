@@ -211,7 +211,7 @@ func TestStorageBatchRowChanges(t *testing.T) {
 
 func TestStorageChangeLogTrimsHugeParams(t *testing.T) {
 	change := storageChange{
-		SQL:    `insert into items (value) values (?)`,
+		SQL: `insert into items (value) values (?)`,
 		Params: []jsontext.Value{jsontext.Value([]byte(`"` + strings.Repeat("x", maxChangeEntrySize) + `"`))},
 	}
 

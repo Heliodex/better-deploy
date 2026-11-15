@@ -13,9 +13,9 @@ import (
 
 // authInput reads prompts from a terminal or a pipe and hides the token only on a terminal.
 type authInput struct {
-	reader      *bufio.Reader
-	file        *os.File
-	errOut      io.Writer
+	reader *bufio.Reader
+	file *os.File
+	errOut io.Writer
 	interactive bool
 }
 

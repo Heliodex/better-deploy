@@ -15,34 +15,34 @@ import (
 
 const (
 	defaultDatabaseRows = 50
-	maxDatabaseRows     = 500
+	maxDatabaseRows = 500
 )
 
 var errDatabaseTableNotFound = errors.New("table not found")
 
 type databaseOverviewResponse struct {
-	Database bool                 `json:"database"`
-	Tables   []string             `json:"tables"`
-	Version  int                  `json:"version"`
-	Stats    []databaseTableStats `json:"stats,omitempty"`
+	Database bool `json:"database"`
+	Tables []string `json:"tables"`
+	Version int `json:"version"`
+	Stats []databaseTableStats `json:"stats,omitempty"`
 }
 
 // databaseTableStats is the optional row count and page size for one table in the panel overview.
 type databaseTableStats struct {
-	Name  string `json:"name"`
-	Rows  int64  `json:"rows"`
-	Bytes int64  `json:"bytes"`
+	Name string `json:"name"`
+	Rows int64 `json:"rows"`
+	Bytes int64 `json:"bytes"`
 }
 
 // databaseRowsResponse is one page of a table, with values encoded like the app-facing SQL service.
 type databaseRowsResponse struct {
-	Table     string   `json:"table"`
-	Columns   []string `json:"columns"`
-	Rows      [][]any  `json:"rows"`
-	Total     int      `json:"total"`
-	Limit     int      `json:"limit"`
-	Offset    int      `json:"offset"`
-	Truncated bool     `json:"truncated"`
+	Table string `json:"table"`
+	Columns []string `json:"columns"`
+	Rows [][]any `json:"rows"`
+	Total int `json:"total"`
+	Limit int `json:"limit"`
+	Offset int `json:"offset"`
+	Truncated bool `json:"truncated"`
 }
 
 // databaseTables lists the app's user tables, excluding SQLite's internal tables and migration bookkeeping.
@@ -122,11 +122,11 @@ func quoteSQLiteIdentifier(name string) string {
 // databaseRows returns one page from a table. The table name is checked against sqlite_master before it is quoted into SQL, so the query parameter can never select anything other than an existing table in this app's database.
 func (s *storageServer) databaseRows(ctx context.Context, app, table string, limit, offset int) (databaseRowsResponse, error) {
 	result := databaseRowsResponse{
-		Table:   table,
+		Table: table,
 		Columns: []string{},
-		Rows:    [][]any{},
-		Limit:   limit,
-		Offset:  offset,
+		Rows: [][]any{},
+		Limit: limit,
+		Offset: offset,
 	}
 
 	err := s.withConn(ctx, app, func(conn *sql.Conn) error {
@@ -308,7 +308,7 @@ type databaseMaintenanceRequest struct {
 }
 
 type databaseMaintenanceResponse struct {
-	Op     string `json:"op"`
+	Op string `json:"op"`
 	Result string `json:"result,omitempty"`
 }
 
@@ -373,7 +373,9 @@ func (s *supervisor) handleDatabaseImport(w http.ResponseWriter, r *http.Request
 	}
 
 	if r.MultipartForm != nil {
-		defer func() { _ = r.MultipartForm.RemoveAll() }()
+		defer func() {
+			_ = r.MultipartForm.RemoveAll()
+		}()
 	}
 
 	file, _, err := r.FormFile("database")

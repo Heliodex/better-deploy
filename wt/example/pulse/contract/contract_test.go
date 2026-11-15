@@ -9,10 +9,10 @@ import (
 func TestMonitorOmitsEmptyLast(t *testing.T) {
 	data, err := json.Marshal(Monitor{
 		CreatedAt: "2026-11-02T00:00:00.000000000Z",
-		History:   []Check{},
-		ID:        "one",
-		Name:      "One",
-		URL:       "https://example.com",
+		History: []Check{},
+		ID: "one",
+		Name: "One",
+		URL: "https://example.com",
 	})
 	if err != nil {
 		t.Fatal(err)

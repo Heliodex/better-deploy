@@ -17,8 +17,8 @@ const buildCacheName = ".wt-build.json"
 // buildCache records the input hash and output digest of each build phase. A phase whose hash and output are unchanged is reused.
 type buildCache struct {
 	ComponentHash string `json:"componentHash,omitempty"`
-	StaticHash    string `json:"staticHash,omitempty"`
-	WasmDigest    string `json:"wasmDigest,omitempty"`
+	StaticHash string `json:"staticHash,omitempty"`
+	WasmDigest string `json:"wasmDigest,omitempty"`
 }
 
 // writeBuildCache records a successful phase. Write errors are ignored because the cache only skips future work.

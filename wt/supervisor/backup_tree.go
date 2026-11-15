@@ -173,7 +173,9 @@ func reconcileTree(tree *backupTree, files []backupInfo) bool {
 	}
 
 	chronological := append([]backupInfo(nil), files...)
-	sort.Slice(chronological, func(i, j int) bool { return chronological[i].CreatedAt.Before(chronological[j].CreatedAt) })
+	sort.Slice(chronological, func(i, j int) bool {
+		return chronological[i].CreatedAt.Before(chronological[j].CreatedAt)
+	})
 
 	if chainMissingNodes(tree, chronological) {
 		changed = true

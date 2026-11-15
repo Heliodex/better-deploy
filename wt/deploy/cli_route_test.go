@@ -59,10 +59,10 @@ func TestCheckDeployRouteSkipsLocal(t *testing.T) {
 
 func TestLocalHost(t *testing.T) {
 	for value, want := range map[string]bool{
-		"http://127.0.0.1:8080":  true,
-		"passport.localhost":     true,
+		"http://127.0.0.1:8080": true,
+		"passport.localhost": true,
 		"https://wt.example.com": false,
-		"example.com":            false,
+		"example.com": false,
 	} {
 		if got := localHost(value); got != want {
 			t.Errorf("localHost(%q) = %v, want %v", value, got, want)

@@ -32,32 +32,32 @@ func TestCompareContractTrees(t *testing.T) {
 	}
 
 	tests := []struct {
-		name       string
-		generated  map[string]string
-		current    map[string]string
+		name string
+		generated map[string]string
+		current map[string]string
 		wantErrors []string
 	}{
 		{
-			name:      "matching",
+			name: "matching",
 			generated: baseSchemas,
-			current:   baseSchemas,
+			current: baseSchemas,
 		},
 		{
-			name:       "missing schema",
-			generated:  baseSchemas,
-			current:    map[string]string{},
+			name: "missing schema",
+			generated: baseSchemas,
+			current: map[string]string{},
 			wantErrors: []string{"contract/schemas/note.json is missing"},
 		},
 		{
-			name:       "stale schema",
-			generated:  map[string]string{},
-			current:    baseSchemas,
+			name: "stale schema",
+			generated: map[string]string{},
+			current: baseSchemas,
 			wantErrors: []string{"contract/schemas/note.json is stale"},
 		},
 		{
-			name:       "different schema",
-			generated:  baseSchemas,
-			current:    map[string]string{"note.json": `{"title":"Old"}`},
+			name: "different schema",
+			generated: baseSchemas,
+			current: map[string]string{"note.json": `{"title":"Old"}`},
 			wantErrors: []string{"contract/schemas/note.json differs"},
 		},
 	}

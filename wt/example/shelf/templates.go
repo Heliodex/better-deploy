@@ -15,7 +15,7 @@ import (
 var templateFiles embed.FS
 
 var (
-	indexTmpl  = parseTemplate("index", "templates/base.html", "templates/index.html")
+	indexTmpl = parseTemplate("index", "templates/base.html", "templates/index.html")
 	detailTmpl = parseTemplate("detail", "templates/base.html", "templates/detail.html")
 )
 

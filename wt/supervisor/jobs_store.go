@@ -23,9 +23,9 @@ func newJobID() string {
 // jobDraft is a validated enqueue request, ready to become a stored job.
 type jobDraft struct {
 	path, method string
-	runAt        time.Time
-	attempts     int
-	headers      map[string]string
+	runAt time.Time
+	attempts int
+	headers map[string]string
 }
 
 // validateEnqueue checks an enqueue request and normalises its path, method, run time, attempt limit and headers. It does not touch the queue.
@@ -134,16 +134,16 @@ func (s *jobStore) enqueue(req jobEnqueueRequest) (appJob, bool, error) {
 	}
 
 	job := appJob{
-		ID:             newJobID(),
-		Path:           draft.path,
-		Method:         draft.method,
-		Body:           req.Body,
-		Headers:        draft.headers,
-		Status:         jobStatusPending,
-		RunAt:          draft.runAt,
-		CreatedAt:      now,
-		UpdatedAt:      now,
-		MaxAttempts:    draft.attempts,
+		ID: newJobID(),
+		Path: draft.path,
+		Method: draft.method,
+		Body: req.Body,
+		Headers: draft.headers,
+		Status: jobStatusPending,
+		RunAt: draft.runAt,
+		CreatedAt: now,
+		UpdatedAt: now,
+		MaxAttempts: draft.attempts,
 		IdempotencyKey: req.IdempotencyKey,
 	}
 

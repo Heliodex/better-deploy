@@ -13,23 +13,23 @@ import (
 
 const (
 	defaultLogTail = 200
-	maxLogTail     = 5000
-	maxLogBytes    = 1 << 20
-	logTimeFormat  = time.RFC3339Nano
+	maxLogTail = 5000
+	maxLogBytes = 1 << 20
+	logTimeFormat = time.RFC3339Nano
 )
 
 // appLog appends an app's output to capped log files for the admin panel. Files live outside the app's /data preopen so components cannot read them. Each line is stamped with the time the supervisor received it, so timestamps do not depend on how an app logs. The app's own output goes to output.log; supervisor-side lines for the app, such as proxied requests, go to supervisor.log so the two read apart.
 type appLog struct {
-	mu             sync.Mutex
-	dir            string
-	file           *os.File
-	size           int64
+	mu sync.Mutex
+	dir string
+	file *os.File
+	size int64
 	supervisorFile *os.File
 	supervisorSize int64
-	pending        []byte
-	subs           map[chan logEntry]struct{}
-	secrets        []string
-	closed         bool
+	pending []byte
+	subs map[chan logEntry]struct{}
+	secrets []string
+	closed bool
 }
 
 // setSecrets replaces the values redacted from app and supervisor log lines. Longer values sort first so one secret cannot mask part of another.
@@ -287,9 +287,9 @@ var logLevels = []string{"TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"}
 
 // logEntry is one log line with the time the supervisor received it, its level, and which side wrote it: the app process or the supervisor. Lines written before sources existed have no marker and read as app output.
 type logEntry struct {
-	Time    string `json:"time"`
-	Level   string `json:"level"`
-	Source  string `json:"source"`
+	Time string `json:"time"`
+	Level string `json:"level"`
+	Source string `json:"source"`
 	Message string `json:"message"`
 }
 
@@ -348,7 +348,7 @@ func parseLogLine(line string) logEntry {
 // logFilter narrows a log tail or export by level, source, text and time.
 type logFilter struct {
 	level, source, query string
-	since, until         time.Time
+	since, until time.Time
 }
 
 func (f logFilter) matches(entry logEntry) bool {
@@ -415,7 +415,9 @@ func (l *appLog) readLocked() ([]logEntry, error) {
 		}
 	}
 
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Time < out[j].Time })
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].Time < out[j].Time
+	})
 
 	return out, nil
 }

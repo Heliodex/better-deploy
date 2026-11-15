@@ -30,7 +30,9 @@ func seedStorageDB(tb testing.TB, db *sql.DB) {
 		tb.Fatal(err)
 	}
 
-	defer func() { _ = tx.Rollback() }()
+	defer func() {
+		_ = tx.Rollback()
+	}()
 
 	for i := range 50 {
 		if _, err := tx.Exec(`insert into notes (id, body, created_at) values (?, ?, ?)`,
@@ -66,9 +68,9 @@ func benchmarkStorageServer(b *testing.B) (*storageServer, string) {
 
 func benchmarkHTTPClient() *http.Client {
 	transport := &http.Transport{
-		MaxIdleConns:        16,
+		MaxIdleConns: 16,
 		MaxIdleConnsPerHost: 16,
-		DisableCompression:  true,
+		DisableCompression: true,
 	}
 
 	return &http.Client{Transport: transport}

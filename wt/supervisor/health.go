@@ -16,12 +16,12 @@ const (
 	defaultHealthPath = "/healthz"
 	// defaultHealthInterval is how often a running app's health endpoint is probed unless app.json overrides it.
 	defaultHealthInterval = 10 * time.Second
-	minHealthInterval     = time.Second
-	maxHealthInterval     = time.Hour
+	minHealthInterval = time.Second
+	maxHealthInterval = time.Hour
 	// defaultHealthFailures is the number of consecutive failures before an app is marked unready.
 	defaultHealthFailures = 2
-	minHealthFailures     = 1
-	maxHealthFailures     = 100
+	minHealthFailures = 1
+	maxHealthFailures = 100
 	// healthMonitorInterval is the base tick that decides which apps are due for a probe.
 	healthMonitorInterval = time.Second
 	// healthCheckTimeout caps one probe, so a hung app does not stall the loop.
@@ -31,7 +31,7 @@ const (
 var healthClient = &http.Client{
 	Timeout: healthCheckTimeout,
 	Transport: &http.Transport{
-		DialContext:       (&net.Dialer{Timeout: healthCheckTimeout}).DialContext,
+		DialContext: (&net.Dialer{Timeout: healthCheckTimeout}).DialContext,
 		DisableKeepAlives: true,
 	},
 }

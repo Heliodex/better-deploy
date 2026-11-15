@@ -9,11 +9,11 @@ import (
 )
 
 type storageQueryResponse struct {
-	Columns      []string `json:"columns"`
-	Rows         [][]any  `json:"rows"`
-	RowsAffected int64    `json:"rows_affected"`
-	LastInsertID int64    `json:"last_insert_id"`
-	Truncated    bool     `json:"truncated"`
+	Columns []string `json:"columns"`
+	Rows [][]any `json:"rows"`
+	RowsAffected int64 `json:"rows_affected"`
+	LastInsertID int64 `json:"last_insert_id"`
+	Truncated bool `json:"truncated"`
 }
 
 // runDBQuery runs one read-only SQL statement on an app's remote database.

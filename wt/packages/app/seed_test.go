@@ -15,9 +15,9 @@ import (
 
 func TestSeedOnce(t *testing.T) {
 	cases := []struct {
-		name         string
+		name string
 		seeded, rows int64
-		wantSeed     bool
+		wantSeed bool
 	}{
 		{"empty table seeds", 0, 0, true},
 		{"existing rows only mark seeded", 0, 3, false},

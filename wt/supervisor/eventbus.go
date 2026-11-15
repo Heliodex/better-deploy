@@ -14,27 +14,27 @@ import (
 
 const (
 	eventBusMaxEvents = 256
-	eventBusMaxBytes  = 1 << 20
-	eventSubBuffer    = 64
-	eventMaxTopic     = 128
-	eventMaxBody      = 64 << 10
+	eventBusMaxBytes = 1 << 20
+	eventSubBuffer = 64
+	eventMaxTopic = 128
+	eventMaxBody = 64 << 10
 )
 
 // busEvent is one published value. The ID is monotonic per app and is the cursor a subscriber sends back as since or Last-Event-ID.
 type busEvent struct {
-	ID    int64          `json:"id"`
-	Topic string         `json:"topic"`
-	Time  time.Time      `json:"time"`
-	Data  jsontext.Value `json:"data"`
+	ID int64 `json:"id"`
+	Topic string `json:"topic"`
+	Time time.Time `json:"time"`
+	Data jsontext.Value `json:"data"`
 }
 
 type busSubscriber struct {
 	topic string
-	ch    chan busEvent
+	ch chan busEvent
 }
 
 type appEventLog struct {
-	mu   sync.Mutex
+	mu sync.Mutex
 	next int64
 	ring *boundedRing[busEvent]
 	subs map[*busSubscriber]struct{}
@@ -46,7 +46,7 @@ func busEventSize(event busEvent) int {
 }
 
 type eventBus struct {
-	mu   sync.Mutex
+	mu sync.Mutex
 	apps map[string]*appEventLog
 }
 

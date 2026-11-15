@@ -20,13 +20,13 @@ const artifactName = "artefact.json"
 
 // artifactInfo records how a bundle's main.cwasm was produced, so a runtime upgrade can detect a stale artifact.
 type artifactInfo struct {
-	Wasmtime   string    `json:"wasmtime,omitempty"`
-	Target     string    `json:"target,omitempty"`
+	Wasmtime string `json:"wasmtime,omitempty"`
+	Target string `json:"target,omitempty"`
 	CompiledAt time.Time `json:"compiled_at"`
 	// Epoch marks a cwasm compiled with epoch interruption, which the host must enable and per-request timeouts require.
-	Epoch      bool   `json:"epoch_interruption,omitempty"`
+	Epoch bool `json:"epoch_interruption,omitempty"`
 	WasmSHA256 string `json:"wasm_sha256,omitempty"`
-	WasmBytes  int64  `json:"wasm_bytes,omitempty"`
+	WasmBytes int64 `json:"wasm_bytes,omitempty"`
 	// CPU records the CPU feature policy used for compilation.
 	// Both compilers pass --target, so this is the target's baseline feature set.
 	CPU string `json:"cpu,omitempty"`
@@ -39,10 +39,10 @@ const artifactCPUFeatures = "baseline"
 // artifactKey names a cached cwasm by the wasm content and the runtime that compiled it.
 type artifactKey struct {
 	WasmSHA256 string
-	Wasmtime   string
-	Target     string
-	CPU        string
-	Epoch      bool
+	Wasmtime string
+	Target string
+	CPU string
+	Epoch bool
 }
 
 func (k artifactKey) digest() string {
@@ -357,7 +357,7 @@ func (s *supervisor) pruneArtifactCache(keep string) {
 	type cacheEntry struct {
 		path string
 		size int64
-		mod  time.Time
+		mod time.Time
 	}
 
 	var (
@@ -392,7 +392,9 @@ func (s *supervisor) pruneArtifactCache(keep string) {
 		return
 	}
 
-	sort.Slice(files, func(i, j int) bool { return files[i].mod.Before(files[j].mod) })
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].mod.Before(files[j].mod)
+	})
 
 	for _, file := range files {
 		if !budget.exceeded(total) {

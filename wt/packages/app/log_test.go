@@ -14,7 +14,9 @@ func captureLogs(t *testing.T) *bytes.Buffer {
 	previous := output
 	output = buffer
 
-	t.Cleanup(func() { output = previous })
+	t.Cleanup(func() {
+		output = previous
+	})
 
 	return buffer
 }

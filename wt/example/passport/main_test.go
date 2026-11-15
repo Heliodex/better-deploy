@@ -33,10 +33,10 @@ func testIssuer(t *testing.T) string {
 		w.Header().Set("Content-Type", "application/json")
 
 		document, err := json.Marshal(map[string]string{
-			"issuer":                 server.URL,
+			"issuer": server.URL,
 			"authorization_endpoint": server.URL + "/authorize",
-			"token_endpoint":         server.URL + "/token",
-			"end_session_endpoint":   server.URL + "/endsession",
+			"token_endpoint": server.URL + "/token",
+			"end_session_endpoint": server.URL + "/endsession",
 		})
 		if err != nil {
 			t.Errorf("encode discovery: %v", err)

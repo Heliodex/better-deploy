@@ -60,16 +60,16 @@ func wasm_stream_lower_tcp_socket(
 }
 
 var wasm_stream_vtable_tcp_socket = witTypes.StreamVtable[*TcpSocket]{
-	Size:         4,
-	Align:        4,
-	Read:         wasm_stream_read_tcp_socket,
-	Write:        wasm_stream_write_tcp_socket,
-	CancelRead:   nil,
-	CancelWrite:  nil,
+	Size: 4,
+	Align: 4,
+	Read: wasm_stream_read_tcp_socket,
+	Write: wasm_stream_write_tcp_socket,
+	CancelRead: nil,
+	CancelWrite: nil,
 	DropReadable: wasm_stream_drop_readable_tcp_socket,
 	DropWritable: wasm_stream_drop_writable_tcp_socket,
-	Lift:         wasm_stream_lift_tcp_socket,
-	Lower:        wasm_stream_lower_tcp_socket,
+	Lift: wasm_stream_lift_tcp_socket,
+	Lower: wasm_stream_lower_tcp_socket,
 }
 
 func MakeStreamTcpSocket() (*witTypes.StreamWriter[*TcpSocket], *witTypes.StreamReader[*TcpSocket]) {
@@ -98,16 +98,16 @@ func wasm_stream_drop_readable_u8(handle int32)
 func wasm_stream_drop_writable_u8(handle int32)
 
 var wasm_stream_vtable_u8 = witTypes.StreamVtable[uint8]{
-	Size:         1,
-	Align:        1,
-	Read:         wasm_stream_read_u8,
-	Write:        wasm_stream_write_u8,
-	CancelRead:   nil,
-	CancelWrite:  nil,
+	Size: 1,
+	Align: 1,
+	Read: wasm_stream_read_u8,
+	Write: wasm_stream_write_u8,
+	CancelRead: nil,
+	CancelWrite: nil,
 	DropReadable: wasm_stream_drop_readable_u8,
 	DropWritable: wasm_stream_drop_writable_u8,
-	Lift:         nil,
-	Lower:        nil,
+	Lift: nil,
+	Lower: nil,
 }
 
 func MakeStreamU8() (*witTypes.StreamWriter[uint8], *witTypes.StreamReader[uint8]) {
@@ -332,16 +332,16 @@ func wasm_future_lower_result_unit_error_code(
 }
 
 var wasm_future_vtable_result_unit_error_code = witTypes.FutureVtable[witTypes.Result[witTypes.Unit, ErrorCode]]{
-	Size:         (5 * 4),
-	Align:        4,
-	Read:         wasm_future_read_result_unit_error_code,
-	Write:        wasm_future_write_result_unit_error_code,
-	CancelRead:   nil,
-	CancelWrite:  nil,
+	Size: (5 * 4),
+	Align: 4,
+	Read: wasm_future_read_result_unit_error_code,
+	Write: wasm_future_write_result_unit_error_code,
+	CancelRead: nil,
+	CancelWrite: nil,
 	DropReadable: wasm_future_drop_readable_result_unit_error_code,
 	DropWritable: wasm_future_drop_writable_result_unit_error_code,
-	Lift:         wasm_future_lift_result_unit_error_code,
-	Lower:        wasm_future_lower_result_unit_error_code,
+	Lift: wasm_future_lift_result_unit_error_code,
+	Lower: wasm_future_lower_result_unit_error_code,
 }
 
 func MakeFutureResultUnitErrorCode() (*witTypes.FutureWriter[witTypes.Result[witTypes.Unit, ErrorCode]], *witTypes.FutureReader[witTypes.Result[witTypes.Unit, ErrorCode]]) {
@@ -431,7 +431,7 @@ const (
 //
 // See each individual API for what the POSIX equivalents are. They sometimes differ per API.
 type ErrorCode struct {
-	tag   uint8
+	tag uint8
 	value any
 }
 
@@ -509,7 +509,7 @@ const (
 )
 
 type IpAddress struct {
-	tag   uint8
+	tag uint8
 	value any
 }
 
@@ -561,7 +561,7 @@ const (
 )
 
 type IpSocketAddress struct {
-	tag   uint8
+	tag uint8
 	value any
 }
 

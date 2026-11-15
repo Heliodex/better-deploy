@@ -20,23 +20,23 @@ import (
 )
 
 const (
-	appFetchPathPrefix   = "/apps/"
-	appCallerHeader      = "X-WT-App-Caller"
-	appTimestampHeader   = "X-WT-App-Timestamp"
+	appFetchPathPrefix = "/apps/"
+	appCallerHeader = "X-WT-App-Caller"
+	appTimestampHeader = "X-WT-App-Timestamp"
 	appSignatureV2Header = "X-WT-App-Signature-V2"
-	appBodyHashHeader    = "X-WT-App-Body-SHA256"
-	maxAppFetchBody      = 8 << 20
-	appFetchURLEnv       = "WT_APP_FETCH_URL"
-	appNameEnv           = "WT_APP_NAME"
-	appTokenEnv          = "WT_APP_TOKEN" //nolint:gosec // Environment variable name, not a credential.
-	appURLEnvPrefix      = "WT_APP_URL_"
+	appBodyHashHeader = "X-WT-App-Body-SHA256"
+	maxAppFetchBody = 8 << 20
+	appFetchURLEnv = "WT_APP_FETCH_URL"
+	appNameEnv = "WT_APP_NAME"
+	appTokenEnv = "WT_APP_TOKEN" //nolint:gosec // Environment variable name, not a credential.
+	appURLEnvPrefix = "WT_APP_URL_"
 )
 
 // appFetchServer serves the internal app-to-app endpoint on loopback. It is separate from storage and the admin listener so an app never needs the admin surface.
 type appFetchServer struct {
-	listener   net.Listener
-	server     *http.Server
-	baseURL    string
+	listener net.Listener
+	server *http.Server
+	baseURL string
 	supervisor *supervisor
 }
 
@@ -53,15 +53,15 @@ func newAppFetchServer(listen string, s *supervisor) (*appFetchServer, error) {
 
 func newAppFetchServerOn(listener net.Listener, s *supervisor) (*appFetchServer, error) {
 	fetch := &appFetchServer{
-		listener:   listener,
-		baseURL:    "http://" + listener.Addr().String(),
+		listener: listener,
+		baseURL: "http://" + listener.Addr().String(),
 		supervisor: s,
 	}
 
 	fetch.server = &http.Server{
-		Handler:           http.HandlerFunc(fetch.handle),
+		Handler: http.HandlerFunc(fetch.handle),
 		ReadHeaderTimeout: 5 * time.Second,
-		IdleTimeout:       60 * time.Second,
+		IdleTimeout: 60 * time.Second,
 	}
 	go func() {
 		if err := fetch.server.Serve(listener); err != nil && err != http.ErrServerClosed {

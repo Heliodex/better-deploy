@@ -8,12 +8,12 @@ import (
 )
 
 type quotaCall struct {
-	bin  string
+	bin string
 	args []string
 }
 
 type fakeQuotaRunner struct {
-	calls   []quotaCall
+	calls []quotaCall
 	respond func(bin string, args []string) (string, error)
 }
 
@@ -94,7 +94,9 @@ func TestDataQuotaDetectsAndCachesFilesystem(t *testing.T) {
 
 func TestDataQuotaFilesystemDetectionErrors(t *testing.T) {
 	tests := map[string]func(string, []string) (string, error){
-		"empty output": func(string, []string) (string, error) { return " \n", nil },
+		"empty output": func(string, []string) (string, error) {
+			return " \n", nil
+		},
 		"command failure": func(string, []string) (string, error) {
 			return "", errors.New("findmnt: not found")
 		},
@@ -148,8 +150,8 @@ func TestExecQuotaCommandWrapsCommandAndOutput(t *testing.T) {
 
 func TestDataQuotaModeValidation(t *testing.T) {
 	cases := map[string]string{
-		"":         dataQuotaMonitor,
-		"monitor":  dataQuotaMonitor,
+		"": dataQuotaMonitor,
+		"monitor": dataQuotaMonitor,
 		" MONITOR": dataQuotaMonitor, //nolint:gocritic // The leading space is intentional for the trim test.
 		"setquota": dataQuotaSetquota,
 	}

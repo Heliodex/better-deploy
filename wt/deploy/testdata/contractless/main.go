@@ -13,16 +13,16 @@ import (
 )
 
 const (
-	maxBody      = 16 << 10
-	maxNoteText  = 280
+	maxBody = 16 << 10
+	maxNoteText = 280
 	defaultLimit = 50
-	maxLimit     = 100
+	maxLimit = 100
 )
 
 // note is the hand-written response shape. Keep it in step with web/src/lib/contract.ts.
 type note struct {
-	ID        string `json:"id"`
-	Text      string `json:"text"`
+	ID string `json:"id"`
+	Text string `json:"text"`
 	CreatedAt string `json:"createdAt"`
 }
 
@@ -37,7 +37,7 @@ type createNoteRequest struct {
 // notesApp owns the store and routes so handler tests can construct it without wasmtime or package globals.
 type notesApp struct {
 	store *storage.Client
-	mux   *http.ServeMux
+	mux *http.ServeMux
 }
 
 // migrate creates the schema through the app's store.
@@ -113,8 +113,8 @@ func (a *notesApp) handleCreateNote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	item := note{
-		ID:        app.NewID(),
-		Text:      text,
+		ID: app.NewID(),
+		Text: text,
 		CreatedAt: time.Now().UTC().Format(app.TimestampFormat),
 	}
 	if _, err := a.store.Exec(r.Context(), `insert into notes (id, text, created_at) values (?, ?, ?)`,

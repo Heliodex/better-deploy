@@ -12,15 +12,15 @@ import (
 
 // scheduleRun is the outcome of an entry's latest call, reported in the app's info.
 type scheduleRun struct {
-	Name     string    `json:"name"`
-	Every    string    `json:"every"`
-	LastRun  time.Time `json:"lastRun,omitzero"`
-	Duration string    `json:"duration,omitempty"`
-	Status   int       `json:"status,omitempty"`
-	Error    string    `json:"error,omitempty"`
+	Name string `json:"name"`
+	Every string `json:"every"`
+	LastRun time.Time `json:"lastRun,omitzero"`
+	Duration string `json:"duration,omitempty"`
+	Status int `json:"status,omitempty"`
+	Error string `json:"error,omitempty"`
 	// Failures counts consecutive failed calls; a success resets it.
-	Failures int       `json:"failures,omitempty"`
-	NextRun  time.Time `json:"nextRun,omitzero"`
+	Failures int `json:"failures,omitempty"`
+	NextRun time.Time `json:"nextRun,omitzero"`
 }
 
 // scheduleLabels names each entry: its name, or its method and path. Repeated default labels get a #n suffix, so every entry keeps its own status.

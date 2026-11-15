@@ -19,11 +19,11 @@ func jobTestSupervisor(t *testing.T, port int) (*supervisor, *jobManager) {
 
 	s := testSupervisor()
 	a := &app{
-		name:  "demo",
-		cfg:   appConfig{Host: "demo.localhost", JobConcurrency: 1},
-		cmd:   &exec.Cmd{},
+		name: "demo",
+		cfg: appConfig{Host: "demo.localhost", JobConcurrency: 1},
+		cmd: &exec.Cmd{},
 		ready: true,
-		port:  port,
+		port: port,
 	}
 	s.apps["demo"] = a
 	s.hosts["demo.localhost"] = a
@@ -103,8 +103,8 @@ func TestJobQueueRunsAndPersists(t *testing.T) {
 	store := manager.store("demo")
 
 	job, created, err := store.enqueue(jobEnqueueRequest{
-		Path:    "/work",
-		Body:    `{"value":"one"}`,
+		Path: "/work",
+		Body: `{"value":"one"}`,
 		Headers: map[string]string{"X-Test": "yes"},
 	})
 	if err != nil || !created {

@@ -16,35 +16,35 @@ import (
 
 const (
 	defaultStartupTimeout = 15 * time.Second
-	minStartupTimeout     = time.Second
-	maxStartupTimeout     = 10 * time.Minute
+	minStartupTimeout = time.Second
+	maxStartupTimeout = 10 * time.Minute
 
 	// defaultIdleTimeout is how long an app may go without component traffic before it sleeps. Empty idle_timeout means this; 0/none/off disable it.
 	defaultIdleTimeout = 10 * time.Minute
-	minIdleTimeout     = 10 * time.Second
-	maxIdleTimeout     = 24 * time.Hour
+	minIdleTimeout = 10 * time.Second
+	maxIdleTimeout = 24 * time.Hour
 
-	tenantTrusted   = "trusted"
+	tenantTrusted = "trusted"
 	tenantUntrusted = "untrusted"
 
 	defaultCPUMillicores = 1000
-	defaultPidsMax       = 128
-	defaultIOWeight      = 100
-	maxIOWeight          = 10000
-	maxMemoryMB          = 1 << 20
-	maxDiskMB            = 1 << 20
-	maxCPUMillicores     = 1_000_000
-	maxPidsMax           = 1_000_000
+	defaultPidsMax = 128
+	defaultIOWeight = 100
+	maxIOWeight = 10000
+	maxMemoryMB = 1 << 20
+	maxDiskMB = 1 << 20
+	maxCPUMillicores = 1_000_000
+	maxPidsMax = 1_000_000
 
 	// Untrusted tenancy defaults are deliberately finite: an app with omitted fields must not inherit unbounded CPU, memory, disk or time.
 	untrustedDefaultRequestTimeout = "30s"
-	untrustedDefaultMemoryMB       = 256
-	untrustedDefaultDiskMB         = 256
-	untrustedDefaultNetwork        = "storage"
-	maxAllowCallers                = 128
-	maxDependsOn                   = 32
-	maxServerPaths                 = 32
-	maxEgressRules                 = 128
+	untrustedDefaultMemoryMB = 256
+	untrustedDefaultDiskMB = 256
+	untrustedDefaultNetwork = "storage"
+	maxAllowCallers = 128
+	maxDependsOn = 32
+	maxServerPaths = 32
+	maxEgressRules = 128
 )
 
 // untrusted reports whether apps are treated as hostile tenants that need enforced isolation.

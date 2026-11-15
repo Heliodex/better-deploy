@@ -27,7 +27,7 @@ func TestStorageMigrationChecksums(t *testing.T) {
 		defer resp.Body.Close()
 
 		var (
-			result  storageMigrationResponse
+			result storageMigrationResponse
 			failure storageErrorResponse
 		)
 		if resp.StatusCode == http.StatusOK {
@@ -176,7 +176,7 @@ func TestStorageRejectsLegacyMigrationVersionWithoutChecksum(t *testing.T) {
 	}
 
 	resp := storageSQL(t, s, token, "/v1/migrate", map[string]any{
-		"version":    2,
+		"version": 2,
 		"statements": []map[string]any{{"sql": `create table must_not_exist (id integer primary key)`}},
 	})
 	if resp.StatusCode != http.StatusConflict {
@@ -190,7 +190,7 @@ func TestStorageRejectsLegacyMigrationVersionWithoutChecksum(t *testing.T) {
 	}
 
 	resp = storageSQL(t, s, token, "/v1/migrate", map[string]any{
-		"version":    3,
+		"version": 3,
 		"statements": []map[string]any{{"sql": `create table new_items (id integer primary key)`}},
 	})
 	if resp.StatusCode != http.StatusOK {
@@ -241,7 +241,7 @@ func TestStorageSchemaDetailsAndStats(t *testing.T) {
 
 	for i := range 7 {
 		resp = storageSQL(t, s, token, "/v1/exec", map[string]any{
-			"sql":    `insert into children (id, parent_id, note) values (?, 1, ?)`,
+			"sql": `insert into children (id, parent_id, note) values (?, 1, ?)`,
 			"params": []any{i + 1, nil},
 		})
 		if resp.StatusCode != http.StatusOK {

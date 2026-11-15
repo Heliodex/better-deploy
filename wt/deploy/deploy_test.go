@@ -25,7 +25,7 @@ func TestCheckDeploySecretsFindsMissing(t *testing.T) {
 
 	cfg := &deployConfig{host: server.URL}
 	m := manifest{Name: "demo", Env: map[string]string{
-		"FIRST":  "secret://HAVE",
+		"FIRST": "secret://HAVE",
 		"SECOND": "secret://MISSING",
 	}}
 

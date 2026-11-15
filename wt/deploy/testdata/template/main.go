@@ -13,15 +13,15 @@ import (
 )
 
 const (
-	maxBody      = 16 << 10
+	maxBody = 16 << 10
 	defaultLimit = 50
-	maxLimit     = 100
+	maxLimit = 100
 )
 
 // notesApp owns the store and routes so handler tests can construct it without wasmtime or package globals.
 type notesApp struct {
 	store *storage.Client
-	mux   *http.ServeMux
+	mux *http.ServeMux
 }
 
 // migrate creates the schema through the app's store.
@@ -87,8 +87,8 @@ func (a *notesApp) handleCreateNote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	item := contract.Note{
-		ID:        app.NewID(),
-		Text:      strings.TrimSpace(request.Text),
+		ID: app.NewID(),
+		Text: strings.TrimSpace(request.Text),
 		CreatedAt: time.Now().UTC().Format(app.TimestampFormat),
 	}
 

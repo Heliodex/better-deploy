@@ -4,7 +4,7 @@ import "sync"
 
 // appLocks hands out one mutex per app name so unrelated apps can deploy, restart and edit config concurrently.
 type appLocks struct {
-	mu    sync.Mutex
+	mu sync.Mutex
 	locks map[string]*sync.Mutex
 }
 

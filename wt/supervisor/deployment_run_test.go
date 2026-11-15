@@ -82,7 +82,7 @@ func TestAsyncDeploymentResource(t *testing.T) {
 	})
 
 	archive := writeTarGz(t, map[string]string{
-		"app.json":  `{"name":"demo","host":"demo.localhost"}`,
+		"app.json": `{"name":"demo","host":"demo.localhost"}`,
 		"main.wasm": "wasm",
 	})
 

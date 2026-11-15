@@ -56,7 +56,7 @@ func insertItem(t *testing.T, storage *storageServer, token, value string) {
 	t.Helper()
 
 	resp := storageSQL(t, storage, token, "/v1/exec", map[string]any{
-		"sql":    `insert into items (value) values (?)`,
+		"sql": `insert into items (value) values (?)`,
 		"params": []any{value},
 	})
 	if resp.StatusCode != http.StatusOK {
@@ -666,11 +666,15 @@ func TestBackupCheckDelayUsesBoundedJitter(t *testing.T) {
 	lowest := backupCheckInterval - backupCheckJitter
 	highest := backupCheckInterval + backupCheckJitter
 
-	if got := backupCheckDelay(func(int64) int64 { return 0 }); got != lowest {
+	if got := backupCheckDelay(func(int64) int64 {
+		return 0
+	}); got != lowest {
 		t.Errorf("minimum delay = %s, want %s", got, lowest)
 	}
 
-	if got := backupCheckDelay(func(span int64) int64 { return span - 1 }); got != highest {
+	if got := backupCheckDelay(func(span int64) int64 {
+		return span - 1
+	}); got != highest {
 		t.Errorf("maximum delay = %s, want %s", got, highest)
 	}
 }

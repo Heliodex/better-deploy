@@ -67,7 +67,7 @@ func TestValidHostPattern(t *testing.T) {
 
 func TestNormaliseAppHostAliases(t *testing.T) {
 	cfg, err := normaliseAppConfig(appConfig{
-		Host:  "Demo.LocalHost",
+		Host: "Demo.LocalHost",
 		Hosts: []string{"Old.Example.com", "*.Apps.Example.com", "demo.localhost", "old.example.com"},
 	}, "demo", "localhost", tenantTrusted)
 	if err != nil {
@@ -199,10 +199,10 @@ func TestAppConfigHostAliases(t *testing.T) {
 	dir := t.TempDir()
 
 	cfg, err := normaliseAppConfig(appConfig{
-		Name:  "demo",
-		Host:  "demo.example.com",
+		Name: "demo",
+		Host: "demo.example.com",
 		Hosts: []string{"*.apps.example.com", "old.example.com"},
-		Env:   map[string]string{},
+		Env: map[string]string{},
 	}, "demo", "example.com", tenantTrusted)
 	if err != nil {
 		t.Fatal(err)
@@ -263,8 +263,8 @@ func TestInstallStaticUpdatesHostAliases(t *testing.T) {
 
 	a := &app{
 		name: "demo",
-		dir:  appDir,
-		cfg:  appConfig{Name: "demo", Host: "demo.example.com", Hosts: []string{"old.example.com"}},
+		dir: appDir,
+		cfg: appConfig{Name: "demo", Host: "demo.example.com", Hosts: []string{"old.example.com"}},
 	}
 	s.register(a)
 

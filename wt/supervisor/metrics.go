@@ -40,26 +40,26 @@ type outcomeKey struct {
 type metrics struct {
 	mu sync.Mutex
 
-	requests   map[requestMetricKey]uint64
-	durations  map[durationMetricKey]durationStat
-	inflight   map[string]int64
-	storage    map[storageMetricKey]uint64
+	requests map[requestMetricKey]uint64
+	durations map[durationMetricKey]durationStat
+	inflight map[string]int64
+	storage map[storageMetricKey]uint64
 	storageDur map[storageDurationKey]durationStat
-	deploys    map[outcomeKey]uint64
-	backups    map[outcomeKey]uint64
-	jobs       map[outcomeKey]uint64
+	deploys map[outcomeKey]uint64
+	backups map[outcomeKey]uint64
+	jobs map[outcomeKey]uint64
 }
 
 func newMetrics() *metrics {
 	return &metrics{
-		requests:   map[requestMetricKey]uint64{},
-		durations:  map[durationMetricKey]durationStat{},
-		inflight:   map[string]int64{},
-		storage:    map[storageMetricKey]uint64{},
+		requests: map[requestMetricKey]uint64{},
+		durations: map[durationMetricKey]durationStat{},
+		inflight: map[string]int64{},
+		storage: map[storageMetricKey]uint64{},
 		storageDur: map[storageDurationKey]durationStat{},
-		deploys:    map[outcomeKey]uint64{},
-		backups:    map[outcomeKey]uint64{},
-		jobs:       map[outcomeKey]uint64{},
+		deploys: map[outcomeKey]uint64{},
+		backups: map[outcomeKey]uint64{},
+		jobs: map[outcomeKey]uint64{},
 	}
 }
 

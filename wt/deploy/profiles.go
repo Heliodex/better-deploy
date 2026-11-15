@@ -11,21 +11,21 @@ import (
 
 // fileProfile is one named deploy target: its supervisor, token and optional app-host suffix.
 type fileProfile struct {
-	Host      string `json:"host,omitempty"`
-	Token     string `json:"token,omitempty"`
+	Host string `json:"host,omitempty"`
+	Token string `json:"token,omitempty"`
 	AppDomain string `json:"app_domain,omitempty"`
 }
 
 // fileConfig is the optional ~/.config/wt/config.json shared by CLI commands.
 type fileConfig struct {
-	Host      string                 `json:"host,omitempty"`
-	Token     string                 `json:"token,omitempty"`
-	Profile   string                 `json:"profile,omitempty"`
-	Profiles  map[string]fileProfile `json:"profiles,omitempty"`
-	Wasmtime  string                 `json:"wasmtime,omitempty"`
-	Target    string                 `json:"target,omitempty"`
-	AppHost   string                 `json:"app_host,omitempty"`
-	AppDomain string                 `json:"app_domain,omitempty"`
+	Host string `json:"host,omitempty"`
+	Token string `json:"token,omitempty"`
+	Profile string `json:"profile,omitempty"`
+	Profiles map[string]fileProfile `json:"profiles,omitempty"`
+	Wasmtime string `json:"wasmtime,omitempty"`
+	Target string `json:"target,omitempty"`
+	AppHost string `json:"app_host,omitempty"`
+	AppDomain string `json:"app_domain,omitempty"`
 }
 
 // flagValueArg finds the last value of a global flag before parsing, matching the flag package's repeated-flag behaviour.

@@ -22,40 +22,40 @@ import (
 )
 
 const (
-	changeLogName        = "changes.log"
-	changeLogBackup      = "changes.log.1"
-	maxChangeLogBytes    = 1 << 20
-	maxChangeEntrySize   = 256 << 10
-	maxCollectedChanges  = 500
+	changeLogName = "changes.log"
+	changeLogBackup = "changes.log.1"
+	maxChangeLogBytes = 1 << 20
+	maxChangeEntrySize = 256 << 10
+	maxCollectedChanges = 500
 	maxCollectedRowBytes = 256 << 10
-	defaultChangeLimit   = 200
-	maxChangeLimit       = 1000
+	defaultChangeLimit = 200
+	maxChangeLimit = 1000
 )
 
 // storageChange is one successful write through the app-facing storage service.
 type storageChange struct {
-	Time          time.Time        `json:"time"`
-	RequestID     string           `json:"requestId,omitempty"`
-	SQL           string           `json:"sql"`
-	Params        []jsontext.Value `json:"params"`
-	RowsAffected  int64            `json:"rowsAffected"`
-	Rows          []rowChange      `json:"rows,omitempty"`
-	RowsTruncated bool             `json:"rowsTruncated,omitempty"`
+	Time time.Time `json:"time"`
+	RequestID string `json:"requestId,omitempty"`
+	SQL string `json:"sql"`
+	Params []jsontext.Value `json:"params"`
+	RowsAffected int64 `json:"rowsAffected"`
+	Rows []rowChange `json:"rows,omitempty"`
+	RowsTruncated bool `json:"rowsTruncated,omitempty"`
 }
 
 // rowChange is one row touched by a statement. Old is set for updates and deletes, New for inserts and updates.
 type rowChange struct {
-	Table   string   `json:"table"`
-	Op      string   `json:"op"`
-	RowID   int64    `json:"rowId,omitempty"`
+	Table string `json:"table"`
+	Op string `json:"op"`
+	RowID int64 `json:"rowId,omitempty"`
 	Columns []string `json:"columns"`
-	Old     []any    `json:"old,omitempty"`
-	New     []any    `json:"new,omitempty"`
+	Old []any `json:"old,omitempty"`
+	New []any `json:"new,omitempty"`
 }
 
 // rowChangeCollector receives pre-update rows for one write operation.
 type rowChangeCollector struct {
-	rows           []rowChange
+	rows []rowChange
 	omitted, bytes int
 }
 
@@ -193,8 +193,8 @@ func tableColumns(ctx context.Context, conn *sql.Conn, table string) ([]string, 
 	for rows.Next() {
 		var (
 			cid, notnull, pk, hidden int
-			name, columnType         string
-			defaultValue             any
+			name, columnType string
+			defaultValue any
 		)
 		if err := rows.Scan(&cid, &name, &columnType, &notnull, &defaultValue, &pk, &hidden); err != nil {
 			return nil, err
@@ -388,10 +388,10 @@ func (s *storageServer) logChanges(app string, changes []storageChange) {
 }
 
 type storageBusEvent struct {
-	RequestID    string   `json:"requestId,omitempty"`
-	RowsAffected int64    `json:"rowsAffected"`
-	Tables       []string `json:"tables,omitempty"`
-	Ops          []string `json:"ops,omitempty"`
+	RequestID string `json:"requestId,omitempty"`
+	RowsAffected int64 `json:"rowsAffected"`
+	Tables []string `json:"tables,omitempty"`
+	Ops []string `json:"ops,omitempty"`
 }
 
 // publishStorageChange sends a compact trigger on the reserved storage topic after a committed write.
@@ -464,7 +464,9 @@ func (s *storageServer) recentChanges(app string, limit int) ([]storageChange, e
 		}
 	}
 
-	sort.SliceStable(changes, func(i, j int) bool { return changes[i].Time.Before(changes[j].Time) })
+	sort.SliceStable(changes, func(i, j int) bool {
+		return changes[i].Time.Before(changes[j].Time)
+	})
 
 	if len(changes) > limit {
 		changes = changes[len(changes)-limit:]

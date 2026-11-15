@@ -11,8 +11,8 @@ import (
 )
 
 type deleteAppResponse struct {
-	Name   string `json:"name"`
-	Purged bool   `json:"purged"`
+	Name string `json:"name"`
+	Purged bool `json:"purged"`
 }
 
 var errNoComponent = errors.New("app has no precompiled component")

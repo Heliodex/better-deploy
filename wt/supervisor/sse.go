@@ -7,7 +7,7 @@ import (
 
 // sseStream writes Server-Sent Events with a flushed event-stream header.
 type sseStream struct {
-	w       http.ResponseWriter
+	w http.ResponseWriter
 	flusher http.Flusher
 }
 

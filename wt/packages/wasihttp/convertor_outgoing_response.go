@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"net/http"
 
-	wit "go.bytecodealliance.org/pkg/wit/types"
 	wasi "github.com/heliodex/better-deploy/wt/packages/v2/binding/imports/wasi_http_0_3_0_types"
+	wit "go.bytecodealliance.org/pkg/wit/types"
 )
 
 // Assert that `responseWriter` implements the required interface.
@@ -30,10 +30,10 @@ type responseWriter struct {
 
 func newHTTPResponseWriter(cancel context.CancelFunc) *responseWriter {
 	return &responseWriter{
-		channel:    make(chan wit.Result[*wasi.Response, wasi.ErrorCode]),
-		headers:    http.Header{},
+		channel: make(chan wit.Result[*wasi.Response, wasi.ErrorCode]),
+		headers: http.Header{},
 		statusCode: 200,
-		cancel:     cancel,
+		cancel: cancel,
 	}
 }
 

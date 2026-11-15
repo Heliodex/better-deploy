@@ -59,14 +59,14 @@ func Send(req *http.Request) (*http.Response, error) {
 	}
 
 	resp := &http.Response{
-		Status:        statusLine,
-		StatusCode:    statusCode,
-		Proto:         "HTTP/1.1",
-		ProtoMajor:    1,
-		ProtoMinor:    1,
-		Body:          body,
-		Header:        http.Header{},
-		Request:       req,
+		Status: statusLine,
+		StatusCode: statusCode,
+		Proto: "HTTP/1.1",
+		ProtoMajor: 1,
+		ProtoMinor: 1,
+		Body: body,
+		Header: http.Header{},
+		Request: req,
 		ContentLength: -1,
 	}
 
@@ -95,7 +95,7 @@ func NewTransport() http.RoundTripper {
 func NewClient() *http.Client {
 	return &http.Client{
 		Transport: &Transport{},
-		Timeout:   defaultClientTimeout,
+		Timeout: defaultClientTimeout,
 	}
 }
 

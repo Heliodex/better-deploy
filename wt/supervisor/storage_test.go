@@ -103,7 +103,7 @@ func TestStorageSQL(t *testing.T) {
 	}
 
 	resp := storageSQL(t, s, token, "/v1/query", map[string]any{
-		"sql":      `select id, body, created_at from notes order by created_at`,
+		"sql": `select id, body, created_at from notes order by created_at`,
 		"max_rows": 10,
 	})
 	if resp.StatusCode != http.StatusOK {
@@ -124,7 +124,7 @@ func TestStorageSQL(t *testing.T) {
 	}
 
 	resp = storageSQL(t, s, token, "/v1/query", map[string]any{
-		"sql":      `select id from notes order by created_at`,
+		"sql": `select id from notes order by created_at`,
 		"max_rows": 1,
 	})
 
@@ -134,7 +134,7 @@ func TestStorageSQL(t *testing.T) {
 	}
 
 	resp = storageSQL(t, s, token, "/v1/exec", map[string]any{
-		"sql":    `insert into notes (id, body, created_at) values (?, ?, ?)`,
+		"sql": `insert into notes (id, body, created_at) values (?, ?, ?)`,
 		"params": []any{"c", "again", "2026-01-03T00:00:00Z"},
 	})
 
@@ -159,7 +159,7 @@ func TestStorageSQLBlob(t *testing.T) {
 	}
 
 	if resp := storageSQL(t, s, token, "/v1/exec", map[string]any{
-		"sql":    `insert into blobs (value) values (?)`,
+		"sql": `insert into blobs (value) values (?)`,
 		"params": []any{map[string]string{"$b64": "AAEC"}},
 	}); resp.StatusCode != http.StatusOK {
 		t.Fatalf("insert: %d %s", resp.StatusCode, readBody(t, resp))
@@ -176,7 +176,7 @@ func TestStorageSQLBlob(t *testing.T) {
 	}
 
 	resp = storageSQL(t, s, token, "/v1/exec", map[string]any{
-		"sql":    `insert into blobs (value) values (?)`,
+		"sql": `insert into blobs (value) values (?)`,
 		"params": []any{strings.Repeat("x", maxStorageValue+1)},
 	})
 	if resp.StatusCode != http.StatusBadRequest {
@@ -386,7 +386,7 @@ func TestStorageSchemaAndMigrate(t *testing.T) {
 
 	// A failing statement rolls back the whole migration, including the version bump.
 	resp = storageSQL(t, s, token, "/v1/migrate", map[string]any{
-		"version":    3,
+		"version": 3,
 		"statements": []map[string]any{{"sql": `alter table notes add column extra text`}, {"sql": `insert into missing values (1)`}},
 	})
 	if resp.StatusCode == http.StatusOK {
@@ -573,7 +573,7 @@ func TestStorageSessionCommit(t *testing.T) {
 	base := "/v1/sessions/" + session.ID
 
 	resp = storageSQL(t, s, token, base+"/exec", map[string]any{
-		"sql":    `insert into items (id, value) values (?, ?)`,
+		"sql": `insert into items (id, value) values (?, ?)`,
 		"params": []any{"a", "one"},
 	})
 	if resp.StatusCode != http.StatusOK {
@@ -642,7 +642,7 @@ func TestStorageSessionRollback(t *testing.T) {
 	base := "/v1/sessions/" + session.ID
 
 	resp = storageSQL(t, s, token, base+"/exec", map[string]any{
-		"sql":    `insert into items (id, value) values (?, ?)`,
+		"sql": `insert into items (id, value) values (?, ?)`,
 		"params": []any{"b", "two"},
 	})
 	if resp.StatusCode != http.StatusOK {
@@ -694,7 +694,7 @@ func TestStorageSessionLeaseExpiryRollsBack(t *testing.T) {
 	base := "/v1/sessions/" + session.ID
 
 	resp = storageSQL(t, s, token, base+"/exec", map[string]any{
-		"sql":    `insert into items (id, value) values (?, ?)`,
+		"sql": `insert into items (id, value) values (?, ?)`,
 		"params": []any{"c", "three"},
 	})
 	if resp.StatusCode != http.StatusOK {
@@ -875,7 +875,7 @@ func TestStorageWriteReturning(t *testing.T) {
 	resp.Body.Close()
 
 	resp = storageSQL(t, s, token, "/v1/write", map[string]any{
-		"sql":    `insert into items (id, value) values (?, ?) returning id, value`,
+		"sql": `insert into items (id, value) values (?, ?) returning id, value`,
 		"params": []any{"a", "one"},
 	})
 	if resp.StatusCode != http.StatusOK {
@@ -1015,8 +1015,8 @@ func TestStorageUnknownSQLIsInternal(t *testing.T) {
 
 func TestStorageSQLiteErrorMapping(t *testing.T) {
 	for _, tc := range []struct {
-		code             int
-		status           int
+		code int
+		status int
 		name, constraint string
 	}{
 		{sqlite3.SQLITE_CONSTRAINT_CHECK, http.StatusConflict, "constraint", "CHECK"},

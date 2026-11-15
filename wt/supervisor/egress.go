@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	egressChain  = "WT-EGRESS"
+	egressChain = "WT-EGRESS"
 	egressChain6 = "WT-EGRESS6"
 )
 
@@ -28,23 +28,23 @@ type egressAppRules struct {
 
 // egressManager owns the IPv4 and IPv6 chains and the rules for each app. The runners are injectable so tests never touch a live firewall.
 type egressManager struct {
-	mu                 sync.Mutex
-	storageIP          string
-	storagePort        int
-	internalIP         string
-	internalPort       int
-	run4, run6         egressRun
-	ipv6               bool
+	mu sync.Mutex
+	storageIP string
+	storagePort int
+	internalIP string
+	internalPort int
+	run4, run6 egressRun
+	ipv6 bool
 	chainReady, chain6 bool
-	rules              map[string]egressAppRules
+	rules map[string]egressAppRules
 }
 
 func newEgressManager(bin, bin6 string, storageIP string, storagePort int, runner func(args ...string) error) *egressManager {
 	manager := &egressManager{
-		storageIP:   storageIP,
+		storageIP: storageIP,
 		storagePort: storagePort,
-		ipv6:        true,
-		rules:       map[string]egressAppRules{},
+		ipv6: true,
+		rules: map[string]egressAppRules{},
 	}
 	if runner != nil {
 		manager.run4 = runner
@@ -281,8 +281,8 @@ func (m *egressManager) shutdown() error {
 	var firstErr error
 
 	for _, chain := range []struct {
-		name  string
-		run   egressRun
+		name string
+		run egressRun
 		ready *bool
 	}{
 		{egressChain, m.run4, &m.chainReady},

@@ -61,7 +61,7 @@ func (s *supervisor) identityProxyHeaders(r *http.Request, appName string, enabl
 
 	var (
 		user identityUserInfo
-		ok   bool
+		ok bool
 	)
 	if enabled {
 		_, user, _, ok = s.identityRequest(r)

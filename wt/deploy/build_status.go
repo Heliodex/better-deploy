@@ -8,9 +8,9 @@ import (
 // buildStatus reports which phases ran, which were reused and the resulting component digest.
 type buildStatus struct {
 	ComponentBuilt, ComponentReused, ComponentRecompiled, StaticBuilt, StaticReused, StaticSkipped, BuildSkipped bool
-	ComponentHash, StaticHash                                                                                    string
-	ComponentFiles, StaticFiles                                                                                  int
-	WasmDigest                                                                                                   string
+	ComponentHash, StaticHash string
+	ComponentFiles, StaticFiles int
+	WasmDigest string
 }
 
 // buildDetail renders the auditable cache evidence for one phase: the short input hash and the file count behind it.

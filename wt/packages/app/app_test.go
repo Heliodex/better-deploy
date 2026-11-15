@@ -136,16 +136,16 @@ func TestWriteError(t *testing.T) {
 
 func TestErrorCode(t *testing.T) {
 	cases := map[int]string{
-		http.StatusBadRequest:          "invalid",
-		http.StatusUnauthorized:        "unauthorized",
-		http.StatusForbidden:           "forbidden",
-		http.StatusNotFound:            "not_found",
-		http.StatusConflict:            "conflict",
+		http.StatusBadRequest: "invalid",
+		http.StatusUnauthorized: "unauthorized",
+		http.StatusForbidden: "forbidden",
+		http.StatusNotFound: "not_found",
+		http.StatusConflict: "conflict",
 		http.StatusUnprocessableEntity: "invalid",
-		http.StatusTooManyRequests:     "rate_limited",
+		http.StatusTooManyRequests: "rate_limited",
 		http.StatusInternalServerError: "internal",
-		http.StatusServiceUnavailable:  "unavailable",
-		http.StatusTeapot:              "invalid",
+		http.StatusServiceUnavailable: "unavailable",
+		http.StatusTeapot: "invalid",
 	}
 	for status, want := range cases {
 		if got := ErrorCode(status); got != want {
@@ -275,7 +275,9 @@ func TestServeStorageNormalPath(t *testing.T) {
 		served.Add(1)
 		w.WriteHeader(http.StatusNoContent)
 	})
-	handler := ServeStorage(nil, func(context.Context) error { return nil }, next)
+	handler := ServeStorage(nil, func(context.Context) error {
+		return nil
+	}, next)
 
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))

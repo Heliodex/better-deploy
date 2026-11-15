@@ -17,10 +17,10 @@ import (
 
 func testSupervisor() *supervisor {
 	return &supervisor{
-		cfg:    config{token: "secret"},
+		cfg: config{token: "secret"},
 		events: newHub(),
-		apps:   map[string]*app{},
-		hosts:  map[string]*app{},
+		apps: map[string]*app{},
+		hosts: map[string]*app{},
 	}
 }
 
@@ -310,12 +310,12 @@ func TestHubBroadcast(t *testing.T) {
 
 // safeRecorder is a ResponseWriter that can be read while a streaming handler writes.
 type safeRecorder struct {
-	mu     sync.Mutex
+	mu sync.Mutex
 	header http.Header
-	body   strings.Builder
+	body strings.Builder
 	status int
-	wrote  chan struct{}
-	once   sync.Once
+	wrote chan struct{}
+	once sync.Once
 }
 
 func newSafeRecorder() *safeRecorder {
@@ -344,7 +344,9 @@ func (r *safeRecorder) Write(p []byte) (int, error) {
 	}
 
 	n, err := r.body.Write(p)
-	r.once.Do(func() { close(r.wrote) })
+	r.once.Do(func() {
+		close(r.wrote)
+	})
 
 	return n, err
 }

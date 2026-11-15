@@ -48,11 +48,11 @@ func TestCgroupManagerWritesLimitsAndCleansUp(t *testing.T) {
 	}
 
 	cases := map[string]string{
-		"cpu.max":         "50000 100000",
-		"memory.max":      "268435456",
+		"cpu.max": "50000 100000",
+		"memory.max": "268435456",
 		"memory.swap.max": "0",
-		"pids.max":        "128",
-		"io.weight":       "default 100",
+		"pids.max": "128",
+		"io.weight": "default 100",
 	}
 	for name, want := range cases {
 		if got := readTestFile(t, filepath.Join(path, name)); got != want {
@@ -208,8 +208,8 @@ func TestCgroupManagerFailsWithoutControllers(t *testing.T) {
 func TestCPUAndMemoryMaxRendering(t *testing.T) {
 	cases := map[int]string{
 		1000: "100000 100000",
-		500:  "50000 100000",
-		1:    "1000 100000",
+		500: "50000 100000",
+		1: "1000 100000",
 	}
 	for millicores, want := range cases {
 		if got := cpuMax(millicores); got != want {

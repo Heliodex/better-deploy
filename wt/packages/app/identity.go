@@ -12,20 +12,20 @@ import (
 
 const (
 	// IdentityPrefix is the reserved app-host path for platform login, logout, me and password.
-	IdentityPrefix              = "/_wt/identity"
-	identitySecretEnv           = "WT_IDENTITY_SECRET" //nolint:gosec // Environment variable name, not a credential.
-	identityUserIDHeader        = "X-WT-User-Id"
-	identityUserEmailHeader     = "X-WT-User-Email"
-	identityUserNameHeader      = "X-WT-User-Name"
-	identityUserGroupsHeader    = "X-WT-User-Groups"
+	IdentityPrefix = "/_wt/identity"
+	identitySecretEnv = "WT_IDENTITY_SECRET" //nolint:gosec // Environment variable name, not a credential.
+	identityUserIDHeader = "X-WT-User-Id"
+	identityUserEmailHeader = "X-WT-User-Email"
+	identityUserNameHeader = "X-WT-User-Name"
+	identityUserGroupsHeader = "X-WT-User-Groups"
 	identityUserSignatureHeader = "X-WT-User-Signature"
 )
 
 // User is the platform user the supervisor attached to this request.
 type User struct {
-	ID     string   `json:"id"`
-	Email  string   `json:"email"`
-	Name   string   `json:"name"`
+	ID string `json:"id"`
+	Email string `json:"email"`
+	Name string `json:"name"`
 	Groups []string `json:"groups"`
 }
 

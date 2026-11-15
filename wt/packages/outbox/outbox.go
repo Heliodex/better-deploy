@@ -33,18 +33,18 @@ const (
 
 	timeFormat = "2006-01-02T15:04:05.000000000Z07:00"
 
-	statusPending   = "pending"
-	statusSending   = "sending"
+	statusPending = "pending"
+	statusSending = "sending"
 	statusDelivered = "delivered"
-	statusFailed    = "failed"
+	statusFailed = "failed"
 )
 
 // Status values returned on a Record.
 const (
-	StatusPending   = statusPending
-	StatusSending   = statusSending
+	StatusPending = statusPending
+	StatusSending = statusSending
 	StatusDelivered = statusDelivered
-	StatusFailed    = statusFailed
+	StatusFailed = statusFailed
 )
 
 // DefaultRetry is the default retry ladder after the first failed attempt.
@@ -63,65 +63,65 @@ var tablePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // Message is one webhook delivery waiting to be sent.
 type Message struct {
-	ID          string
-	Event       string
-	DedupeKey   string
-	Payload     []byte
-	URL         string
-	Headers     map[string]string
-	Metadata    map[string]string
-	RunAt       time.Time
+	ID string
+	Event string
+	DedupeKey string
+	Payload []byte
+	URL string
+	Headers map[string]string
+	Metadata map[string]string
+	RunAt time.Time
 	MaxAttempts int
-	DeliveryID  string
+	DeliveryID string
 }
 
 // Delivery is one signed attempt handed to a Sender.
 type Delivery struct {
 	Message
 
-	Attempt   int
+	Attempt int
 	Timestamp string
 	Signature string
 }
 
 // Record is the stored state of one message.
 type Record struct {
-	ID             string
-	Event          string
-	DedupeKey      string
-	Payload        []byte
-	URL            string
-	Headers        map[string]string
-	Metadata       map[string]string
-	Status         string
-	Attempts       int
-	MaxAttempts    int
-	NextAttemptAt  time.Time
+	ID string
+	Event string
+	DedupeKey string
+	Payload []byte
+	URL string
+	Headers map[string]string
+	Metadata map[string]string
+	Status string
+	Attempts int
+	MaxAttempts int
+	NextAttemptAt time.Time
 	LastHTTPStatus int
-	LastError      string
-	DeliveryID     string
-	CreatedAt      time.Time
-	DeliveredAt    *time.Time
+	LastError string
+	DeliveryID string
+	CreatedAt time.Time
+	DeliveredAt *time.Time
 }
 
 // Summary counts one DeliverDue run.
 type Summary struct {
 	Delivered int
-	Retried   int
-	Failed    int
-	Reaped    int
+	Retried int
+	Failed int
+	Reaped int
 }
 
 // Outbox owns one delivery table and its retry policy.
 type Outbox struct {
-	Table       string
-	Signer      sign.Signer
-	HTTP        *http.Client
-	Now         func() time.Time
-	Retry       []time.Duration
+	Table string
+	Signer sign.Signer
+	HTTP *http.Client
+	Now func() time.Time
+	Retry []time.Duration
 	MaxAttempts int
-	Lease       time.Duration
-	Sender      Sender
+	Lease time.Duration
+	Sender Sender
 }
 
 // Sender performs one delivery attempt. status is the HTTP status; err is a transport error.
@@ -316,8 +316,8 @@ const recordColumns = `id, event, dedupe_key, payload, url, headers, metadata, s
 // scanRecord scans one row of recordColumns.
 func scanRecord(row interface{ Scan(dest ...any) error }) (Record, error) {
 	var (
-		record                              Record
-		payload, headers, metadata          string
+		record Record
+		payload, headers, metadata string
 		nextAttempt, createdAt, deliveredAt string
 	)
 

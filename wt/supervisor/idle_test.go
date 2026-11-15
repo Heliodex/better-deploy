@@ -25,7 +25,7 @@ func TestParseIdleTimeout(t *testing.T) {
 
 	for _, tc := range []struct {
 		value string
-		want  time.Duration
+		want time.Duration
 	}{
 		{"10s", 10 * time.Second},
 		{"15m", 15 * time.Minute},
@@ -49,9 +49,9 @@ func TestIdleDue(t *testing.T) {
 
 	newApp := func() *app {
 		return &app{
-			name:    "demo",
-			cfg:     appConfig{idleTimeout: 10 * time.Second},
-			cmd:     &exec.Cmd{Process: &os.Process{Pid: os.Getpid()}},
+			name: "demo",
+			cfg: appConfig{idleTimeout: 10 * time.Second},
+			cmd: &exec.Cmd{Process: &os.Process{Pid: os.Getpid()}},
 			started: now.Add(-11 * time.Second),
 		}
 	}
@@ -106,9 +106,9 @@ func TestIdleDue(t *testing.T) {
 func TestMarkIdleStopped(t *testing.T) {
 	now := time.Now()
 	a := &app{
-		name:    "demo",
-		cfg:     appConfig{idleTimeout: 10 * time.Second},
-		cmd:     &exec.Cmd{Process: &os.Process{Pid: os.Getpid()}},
+		name: "demo",
+		cfg: appConfig{idleTimeout: 10 * time.Second},
+		cmd: &exec.Cmd{Process: &os.Process{Pid: os.Getpid()}},
 		started: now.Add(-11 * time.Second),
 	}
 
@@ -178,7 +178,9 @@ func TestLoadAppsStartsAsleepByDefault(t *testing.T) {
 		t.Fatal("app was not loaded")
 	}
 
-	t.Cleanup(func() { s.stop(a) })
+	t.Cleanup(func() {
+		s.stop(a)
+	})
 
 	a.mu.Lock()
 	running, idle, ready, proxy, timeout := a.cmd != nil, a.idleStopped, a.ready, a.proxy, a.cfg.idleTimeout
@@ -234,7 +236,9 @@ func TestLoadAppsStartsWithExplicitOptOut(t *testing.T) {
 		t.Fatal("app was not loaded")
 	}
 
-	t.Cleanup(func() { s.stop(a) })
+	t.Cleanup(func() {
+		s.stop(a)
+	})
 
 	a.mu.Lock()
 	running, idle, timeout := a.cmd != nil, a.idleStopped, a.cfg.idleTimeout
@@ -267,10 +271,10 @@ func TestStopIdleAppsStopsProcess(t *testing.T) {
 
 	now := time.Now()
 	a := &app{
-		name:    "demo",
-		cfg:     appConfig{idleTimeout: 10 * time.Second},
-		cmd:     cmd,
-		done:    done,
+		name: "demo",
+		cfg: appConfig{idleTimeout: 10 * time.Second},
+		cmd: cmd,
+		done: done,
 		started: now.Add(-time.Minute),
 	}
 

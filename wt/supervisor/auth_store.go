@@ -21,27 +21,27 @@ var errAuthTokenNotFound = errors.New("token not found")
 
 // authToken is the stored form of a scoped token. Only the SHA-256 of the bearer value is kept.
 type authToken struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Hash      string    `json:"sha256"`
-	Role      string    `json:"role"`
-	Apps      []string  `json:"apps,omitempty"`
+	ID string `json:"id"`
+	Name string `json:"name"`
+	Hash string `json:"sha256"`
+	Role string `json:"role"`
+	Apps []string `json:"apps,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
 type authTokenFile struct {
-	Version int         `json:"version"`
-	Tokens  []authToken `json:"tokens"`
+	Version int `json:"version"`
+	Tokens []authToken `json:"tokens"`
 }
 
 // authTokenInfo is the public view of a token; the bearer value and its hash never appear.
 type authTokenInfo struct {
-	ID        string     `json:"id"`
-	Name      string     `json:"name"`
-	Role      string     `json:"role"`
-	Apps      []string   `json:"apps"`
-	CreatedAt time.Time  `json:"createdAt"`
+	ID string `json:"id"`
+	Name string `json:"name"`
+	Role string `json:"role"`
+	Apps []string `json:"apps"`
+	CreatedAt time.Time `json:"createdAt"`
 	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
 }
 
@@ -49,7 +49,7 @@ type authTokenInfo struct {
 type authStore struct {
 	path string
 
-	mu     sync.RWMutex
+	mu sync.RWMutex
 	tokens []authToken
 }
 
@@ -250,10 +250,10 @@ func (s *authStore) list() []authTokenInfo {
 		}
 
 		out = append(out, authTokenInfo{
-			ID:        token.ID,
-			Name:      token.Name,
-			Role:      token.Role,
-			Apps:      append([]string(nil), token.Apps...),
+			ID: token.ID,
+			Name: token.Name,
+			Role: token.Role,
+			Apps: append([]string(nil), token.Apps...),
 			CreatedAt: token.CreatedAt,
 			ExpiresAt: expiresAt,
 		})
@@ -307,11 +307,11 @@ func (s *authStore) create(name, role string, apps []string, expiresAt time.Time
 	token := base64.RawURLEncoding.EncodeToString(secret[:])
 	now := time.Now().UTC()
 	stored := authToken{
-		ID:        hex.EncodeToString(idBytes[:]),
-		Name:      name,
-		Hash:      tokenHash(token),
-		Role:      role,
-		Apps:      apps,
+		ID: hex.EncodeToString(idBytes[:]),
+		Name: name,
+		Hash: tokenHash(token),
+		Role: role,
+		Apps: apps,
 		CreatedAt: now,
 		ExpiresAt: expiresAt.UTC(),
 	}

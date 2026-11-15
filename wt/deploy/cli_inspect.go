@@ -13,27 +13,27 @@ import (
 )
 
 type inspectDeployment struct {
-	ID         string    `json:"id"`
+	ID string `json:"id"`
 	DeployedAt time.Time `json:"deployedAt"`
-	Mode       string    `json:"mode"`
-	Digest     string    `json:"digest"`
-	Runtime    string    `json:"runtime"`
-	Target     string    `json:"target"`
+	Mode string `json:"mode"`
+	Digest string `json:"digest"`
+	Runtime string `json:"runtime"`
+	Target string `json:"target"`
 }
 
 // inspectReport is the machine-readable view printed by --json.
 type inspectReport struct {
 	Supervisor supervisorCapabilities `json:"supervisor"`
-	App        routeAppInfo           `json:"app"`
-	URL        string                 `json:"url"`
-	Route      routeReport            `json:"route"`
-	Config     map[string]any         `json:"config"`
-	Deployment *inspectDeployment     `json:"deployment,omitempty"`
-	Manifest   *manifestComparison    `json:"manifest,omitempty"`
+	App routeAppInfo `json:"app"`
+	URL string `json:"url"`
+	Route routeReport `json:"route"`
+	Config map[string]any `json:"config"`
+	Deployment *inspectDeployment `json:"deployment,omitempty"`
+	Manifest *manifestComparison `json:"manifest,omitempty"`
 }
 
 type manifestComparison struct {
-	Path        string   `json:"path"`
+	Path string `json:"path"`
 	Differences []string `json:"differences,omitempty"`
 }
 
@@ -367,12 +367,12 @@ func runInspect(args []string) error {
 
 	report := inspectReport{
 		Supervisor: caps,
-		App:        info,
-		URL:        appURLForHost(cfg.host, info.Host),
-		Route:      route,
-		Config:     config,
+		App: info,
+		URL: appURLForHost(cfg.host, info.Host),
+		Route: route,
+		Config: config,
 		Deployment: reportDeployment,
-		Manifest:   compareManifest(dir, name, config),
+		Manifest: compareManifest(dir, name, config),
 	}
 
 	if cfg.jsonOut {

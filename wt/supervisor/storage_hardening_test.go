@@ -123,13 +123,13 @@ func TestStorageDSNSetsHardenedPragmas(t *testing.T) {
 
 func TestJournalSizeLimit(t *testing.T) {
 	cases := map[int64]int64{
-		0:        defaultJournalSizeLimit,
-		1 << 20:  256 << 10,
-		8 << 20:  1 << 20,
+		0: defaultJournalSizeLimit,
+		1 << 20: 256 << 10,
+		8 << 20: 1 << 20,
 		64 << 20: 8 << 20,
-		1 << 30:  defaultJournalSizeLimit,
-		1 << 40:  defaultJournalSizeLimit,
-		-1:       defaultJournalSizeLimit,
+		1 << 30: defaultJournalSizeLimit,
+		1 << 40: defaultJournalSizeLimit,
+		-1: defaultJournalSizeLimit,
 	}
 	for quota, want := range cases {
 		if got := journalSizeLimit(quota); got != want {
@@ -140,11 +140,11 @@ func TestJournalSizeLimit(t *testing.T) {
 
 func TestWALAutoCheckpoint(t *testing.T) {
 	cases := map[int64]int{
-		0:        storageWALAutoCheckpoint,
-		1 << 20:  64,
-		8 << 20:  512,
+		0: storageWALAutoCheckpoint,
+		1 << 20: 64,
+		8 << 20: 512,
 		64 << 20: storageWALAutoCheckpoint,
-		1 << 30:  storageWALAutoCheckpoint,
+		1 << 30: storageWALAutoCheckpoint,
 	}
 	for quota, want := range cases {
 		if got := walAutoCheckpoint(quota); got != want {

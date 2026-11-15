@@ -17,24 +17,24 @@ import (
 
 const (
 	backupConfigName = "config.json"
-	backupTreeName   = "tree.json"
+	backupTreeName = "tree.json"
 	backupFilePrefix = "storage-"
 	backupFileSuffix = ".db"
 	backupDataSuffix = ".data.tar.gz"
 	backupTempSuffix = ".tmp"
 
-	backupKindManual    = "manual"
+	backupKindManual = "manual"
 	backupKindAutomatic = "auto"
-	backupKindImport    = "import"
+	backupKindImport = "import"
 	// backupKindLegacy marks snapshots that predate the tree index, so the panel can show them as plain backups.
 	backupKindLegacy = ""
 
 	defaultBackupEvery = "24h"
-	defaultBackupKeep  = 7
-	minBackupEvery     = time.Minute
-	maxBackupEvery     = 30 * 24 * time.Hour
-	minBackupKeep      = 1
-	maxBackupKeep      = 100
+	defaultBackupKeep = 7
+	minBackupEvery = time.Minute
+	maxBackupEvery = 30 * 24 * time.Hour
+	minBackupKeep = 1
+	maxBackupKeep = 100
 	// backupCheckInterval is how often the manager looks for apps whose next snapshot is due. Intervals are stored as durations, so this only bounds how late a snapshot can be.
 	backupCheckInterval = time.Minute
 	// backupCheckJitter spreads the due check so several supervisors do not all archive at the same second.
@@ -50,16 +50,16 @@ const backupTimeLayout = "20060102T150405.000000000Z"
 
 var (
 	errNoStorageDatabase = errors.New("app has no storage database yet")
-	errBackupNotFound    = errors.New("backup not found")
+	errBackupNotFound = errors.New("backup not found")
 	errInvalidBackupName = errors.New("invalid backup name")
-	errBackupUnchanged   = errors.New("database has not changed since the current snapshot")
+	errBackupUnchanged = errors.New("database has not changed since the current snapshot")
 )
 
 // backupSettings is one app's snapshot policy. Snapshots are on by default so a fresh deployment is protected without configuration.
 type backupSettings struct {
-	Enabled bool   `json:"enabled"`
-	Every   string `json:"every"`
-	Keep    int    `json:"keep"`
+	Enabled bool `json:"enabled"`
+	Every string `json:"every"`
+	Keep int `json:"keep"`
 }
 
 func defaultBackupSettings() backupSettings {
@@ -93,19 +93,19 @@ func (b backupSettings) validate() error {
 
 // backupInfo describes one snapshot on disk and its place in the app's backup tree.
 type backupInfo struct {
-	Name      string    `json:"name"`
-	Size      int64     `json:"size"`
-	DataSize  int64     `json:"dataSize,omitempty"`
-	HasData   bool      `json:"hasData,omitempty"`
+	Name string `json:"name"`
+	Size int64 `json:"size"`
+	DataSize int64 `json:"dataSize,omitempty"`
+	HasData bool `json:"hasData,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
-	Parent    string    `json:"parent"`
-	Kind      string    `json:"kind"`
+	Parent string `json:"parent"`
+	Kind string `json:"kind"`
 }
 
 // backupNode is the tree metadata kept beside the snapshot files. A snapshot's parent is the snapshot the database was based on when it was taken, so reverting and taking another snapshot branches the tree.
 type backupNode struct {
 	Parent string `json:"parent,omitempty"`
-	Kind   string `json:"kind,omitempty"`
+	Kind string `json:"kind,omitempty"`
 	// Hash is the SHA-256 of the snapshot file, used to reject a snapshot that would duplicate the current node.
 	Hash string `json:"hash,omitempty"`
 }
@@ -114,22 +114,22 @@ type backupNode struct {
 type backupTree struct {
 	Current string `json:"current,omitempty"`
 	// Checked is the last time a snapshot was made or found unchanged. It keeps the scheduler from retrying an unchanged database every minute.
-	Checked time.Time             `json:"checked"`
-	Nodes   map[string]backupNode `json:"nodes"`
+	Checked time.Time `json:"checked"`
+	Nodes map[string]backupNode `json:"nodes"`
 }
 
 // backupState is the snapshot files and their tree metadata, always loaded together.
 type backupState struct {
 	Files []backupInfo
-	Tree  backupTree
+	Tree backupTree
 }
 
 // backupsResponse is the state the admin panel needs for an app's backup section.
 type backupsResponse struct {
 	Settings backupSettings `json:"settings"`
-	Backups  []backupInfo   `json:"backups"`
-	Database bool           `json:"database"`
-	Current  string         `json:"current"`
+	Backups []backupInfo `json:"backups"`
+	Database bool `json:"database"`
+	Current string `json:"current"`
 	// Created is set only by a POST that made a snapshot; it stays empty when the database was unchanged.
 	Created string `json:"created,omitempty"`
 }
@@ -137,11 +137,11 @@ type backupsResponse struct {
 // backupManager owns per-app snapshot policies and files. Snapshots live outside the storage directory so an app can never read or delete them through its SQL service.
 type backupManager struct {
 	dir, dataDir string
-	storage      *storageServer
+	storage *storageServer
 
 	// locksMu guards locks. Each app has its own mutex, so a large /data archive, export or restore for one app does not block another app's backups.
 	locksMu sync.Mutex
-	locks   map[string]*sync.Mutex
+	locks map[string]*sync.Mutex
 }
 
 func newBackupManager(dir string, storage *storageServer, dataDir string) *backupManager {
@@ -351,7 +351,9 @@ func (m *backupManager) filesLocked(app string) ([]backupInfo, error) {
 		}
 	}
 
-	sort.Slice(infos, func(i, j int) bool { return infos[i].CreatedAt.After(infos[j].CreatedAt) })
+	sort.Slice(infos, func(i, j int) bool {
+		return infos[i].CreatedAt.After(infos[j].CreatedAt)
+	})
 
 	return infos, nil
 }
@@ -418,9 +420,9 @@ func (m *backupManager) overview(app string) (backupsResponse, error) {
 
 	return backupsResponse{
 		Settings: settings,
-		Backups:  state.Files,
+		Backups: state.Files,
 		Database: m.storage.hasDatabase(app),
-		Current:  state.Tree.Current,
+		Current: state.Tree.Current,
 	}, nil
 }
 

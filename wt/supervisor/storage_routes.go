@@ -62,7 +62,7 @@ func (s *storageServer) exec(w http.ResponseWriter, r *http.Request, app string)
 	defer cancel()
 
 	var (
-		result    storageResult
+		result storageResult
 		collector *rowChangeCollector
 	)
 
@@ -74,7 +74,9 @@ func (s *storageServer) exec(w http.ResponseWriter, r *http.Request, app string)
 			return err
 		}
 
-		defer func() { _ = unregister() }()
+		defer func() {
+			_ = unregister()
+		}()
 
 		res, err := conn.ExecContext(ctx, req.SQL, params...)
 		if err != nil {
@@ -101,12 +103,12 @@ func (s *storageServer) exec(w http.ResponseWriter, r *http.Request, app string)
 	}
 
 	s.logChanges(app, []storageChange{{
-		Time:          time.Now().UTC(),
-		RequestID:     r.Header.Get(requestIDHeader),
-		SQL:           req.SQL,
-		Params:        req.Params,
-		RowsAffected:  result.RowsAffected,
-		Rows:          rows,
+		Time: time.Now().UTC(),
+		RequestID: r.Header.Get(requestIDHeader),
+		SQL: req.SQL,
+		Params: req.Params,
+		RowsAffected: result.RowsAffected,
+		Rows: rows,
 		RowsTruncated: truncated,
 	}})
 	writeJSON(w, http.StatusOK, result)
@@ -126,12 +128,12 @@ func (s *storageServer) logBatchChanges(app string, r *http.Request, req storage
 		}
 
 		changes[i] = storageChange{
-			Time:          time.Now().UTC(),
-			RequestID:     r.Header.Get(requestIDHeader),
-			SQL:           statement.SQL,
-			Params:        statement.Params,
-			RowsAffected:  results[i].RowsAffected,
-			Rows:          rows,
+			Time: time.Now().UTC(),
+			RequestID: r.Header.Get(requestIDHeader),
+			SQL: statement.SQL,
+			Params: statement.Params,
+			RowsAffected: results[i].RowsAffected,
+			Rows: rows,
 			RowsTruncated: truncated,
 		}
 	}
@@ -261,7 +263,9 @@ func (s *storageServer) query(w http.ResponseWriter, r *http.Request, app string
 		if err != nil {
 			return err
 		}
-		defer func() { _ = unregister() }()
+		defer func() {
+			_ = unregister()
+		}()
 
 		rows, err := conn.QueryContext(ctx, req.SQL, params...)
 		if err != nil {
@@ -319,7 +323,9 @@ func (s *storageServer) writeReturning(w http.ResponseWriter, r *http.Request, a
 			return err
 		}
 
-		defer func() { _ = unregister() }()
+		defer func() {
+			_ = unregister()
+		}()
 
 		rows, err := conn.QueryContext(ctx, req.SQL, params...)
 		if err != nil {
@@ -354,12 +360,12 @@ func (s *storageServer) writeReturning(w http.ResponseWriter, r *http.Request, a
 	}
 
 	s.logChanges(app, []storageChange{{
-		Time:          time.Now().UTC(),
-		RequestID:     r.Header.Get(requestIDHeader),
-		SQL:           req.SQL,
-		Params:        req.Params,
-		RowsAffected:  result.RowsAffected,
-		Rows:          rows,
+		Time: time.Now().UTC(),
+		RequestID: r.Header.Get(requestIDHeader),
+		SQL: req.SQL,
+		Params: req.Params,
+		RowsAffected: result.RowsAffected,
+		Rows: rows,
 		RowsTruncated: truncated,
 	}})
 	writeJSON(w, http.StatusOK, result)
@@ -407,7 +413,9 @@ func (s *storageServer) handle(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if s.querySem != nil {
-			defer func() { <-s.querySem }()
+			defer func() {
+				<-s.querySem
+			}()
 		}
 	}
 

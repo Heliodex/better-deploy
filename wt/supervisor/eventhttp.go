@@ -14,14 +14,14 @@ import (
 const eventKeepAlive = 20 * time.Second
 
 type eventPublishRequest struct {
-	Topic string         `json:"topic"`
-	Data  jsontext.Value `json:"data"`
+	Topic string `json:"topic"`
+	Data jsontext.Value `json:"data"`
 }
 
 type eventPublishResponse struct {
-	ID    int64     `json:"id"`
-	Topic string    `json:"topic"`
-	Time  time.Time `json:"time"`
+	ID int64 `json:"id"`
+	Topic string `json:"topic"`
+	Time time.Time `json:"time"`
 }
 
 // handleEventPublish is shared by the storage loopback service and the authenticated app-fetch publish path.

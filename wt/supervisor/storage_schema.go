@@ -9,54 +9,54 @@ import (
 )
 
 type storageColumn struct {
-	Name       string  `json:"name"`
-	Type       string  `json:"type"`
-	NotNull    bool    `json:"notNull"`
-	Default    *string `json:"default,omitempty"`
-	PrimaryKey int     `json:"primaryKey,omitempty"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+	NotNull bool `json:"notNull"`
+	Default *string `json:"default,omitempty"`
+	PrimaryKey int `json:"primaryKey,omitempty"`
 }
 
 // storageIndexColumn is one key column in index order. A nil name is an expression or rowid column, which SQLite reports with a NULL name.
 type storageIndexColumn = *string
 
 type storageIndex struct {
-	Name    string               `json:"name"`
-	Unique  bool                 `json:"unique"`
-	Origin  string               `json:"origin"`
-	Partial bool                 `json:"partial"`
+	Name string `json:"name"`
+	Unique bool `json:"unique"`
+	Origin string `json:"origin"`
+	Partial bool `json:"partial"`
 	Columns []storageIndexColumn `json:"columns"`
 }
 
 type storageForeignKey struct {
-	ID       int     `json:"id"`
-	Seq      int     `json:"seq"`
-	Table    string  `json:"table"`
-	From     string  `json:"from"`
-	To       *string `json:"to"`
-	OnUpdate string  `json:"onUpdate"`
-	OnDelete string  `json:"onDelete"`
-	Match    string  `json:"match"`
+	ID int `json:"id"`
+	Seq int `json:"seq"`
+	Table string `json:"table"`
+	From string `json:"from"`
+	To *string `json:"to"`
+	OnUpdate string `json:"onUpdate"`
+	OnDelete string `json:"onDelete"`
+	Match string `json:"match"`
 }
 
 type storageTable struct {
-	Name        string              `json:"name"`
-	Columns     []storageColumn     `json:"columns"`
-	Indexes     []storageIndex      `json:"indexes"`
+	Name string `json:"name"`
+	Columns []storageColumn `json:"columns"`
+	Indexes []storageIndex `json:"indexes"`
 	ForeignKeys []storageForeignKey `json:"foreignKeys"`
-	Rows        *int64              `json:"rows,omitempty"`
-	Bytes       *int64              `json:"bytes,omitempty"`
+	Rows *int64 `json:"rows,omitempty"`
+	Bytes *int64 `json:"bytes,omitempty"`
 }
 
 type storageView struct {
-	Name    string          `json:"name"`
-	SQL     string          `json:"sql"`
+	Name string `json:"name"`
+	SQL string `json:"sql"`
 	Columns []storageColumn `json:"columns"`
 }
 
 type storageSchema struct {
-	Version    int                      `json:"version"`
-	Tables     []storageTable           `json:"tables"`
-	Views      []storageView            `json:"views"`
+	Version int `json:"version"`
+	Tables []storageTable `json:"tables"`
+	Views []storageView `json:"views"`
 	Migrations []storageMigrationRecord `json:"migrations"`
 }
 
@@ -92,13 +92,13 @@ func schemaTableColumns(ctx context.Context, conn *sql.Conn, table string) ([]st
 
 	for rows.Next() {
 		var (
-			cid     int
-			name    string
-			kind    string
+			cid int
+			name string
+			kind string
 			notNull int
-			def     sql.NullString
-			pk      int
-			hidden  int
+			def sql.NullString
+			pk int
+			hidden int
 		)
 		if err := rows.Scan(&cid, &name, &kind, &notNull, &def, &pk, &hidden); err != nil {
 			return nil, err
@@ -128,15 +128,15 @@ func schemaTableIndexes(ctx context.Context, conn *sql.Conn, table string) ([]st
 
 	var (
 		indexes []storageIndex
-		names   []string
+		names []string
 	)
 
 	for rows.Next() {
 		var (
-			seq     int
-			name    string
-			unique  int
-			origin  string
+			seq int
+			name string
+			unique int
+			origin string
 			partial int
 		)
 		if err := rows.Scan(&seq, &name, &unique, &origin, &partial); err != nil {
@@ -165,7 +165,7 @@ func schemaTableIndexes(ctx context.Context, conn *sql.Conn, table string) ([]st
 		for columnRows.Next() {
 			var (
 				seqno int
-				cid   int
+				cid int
 				value sql.NullString
 			)
 			if err := columnRows.Scan(&seqno, &cid, &value); err != nil {
@@ -207,27 +207,27 @@ func schemaTableForeignKeys(ctx context.Context, conn *sql.Conn, table string) (
 
 	for rows.Next() {
 		var (
-			id       int
-			seq      int
+			id int
+			seq int
 			refTable string
-			from     sql.NullString
-			to       sql.NullString
+			from sql.NullString
+			to sql.NullString
 			onUpdate string
 			onDelete string
-			match    string
+			match string
 		)
 		if err := rows.Scan(&id, &seq, &refTable, &from, &to, &onUpdate, &onDelete, &match); err != nil {
 			return nil, err
 		}
 
 		foreignKey := storageForeignKey{
-			ID:       id,
-			Seq:      seq,
-			Table:    refTable,
-			From:     from.String,
+			ID: id,
+			Seq: seq,
+			Table: refTable,
+			From: from.String,
 			OnUpdate: onUpdate,
 			OnDelete: onDelete,
-			Match:    match,
+			Match: match,
 		}
 		if to.Valid {
 			target := to.String
@@ -270,7 +270,7 @@ func schemaViews(ctx context.Context, conn *sql.Conn) ([]storageView, error) {
 	for rows.Next() {
 		var (
 			name string
-			ddl  sql.NullString
+			ddl sql.NullString
 		)
 		if err := rows.Scan(&name, &ddl); err != nil {
 			closeErr := rows.Close() //nolint:sqlclosecheck // Rows are closed explicitly so the close error can be returned.
@@ -336,8 +336,8 @@ func schemaMigrations(ctx context.Context, conn *sql.Conn) ([]storageMigrationRe
 // schema returns the database's user_version, tables with their indexes and foreign keys, views and migration checksums, so an app can inspect what its migrations produced.
 func (s *storageServer) schema(ctx context.Context, app string, stats bool) (storageSchema, error) {
 	result := storageSchema{
-		Tables:     []storageTable{},
-		Views:      []storageView{},
+		Tables: []storageTable{},
+		Views: []storageView{},
 		Migrations: []storageMigrationRecord{},
 	}
 	err := s.withConn(ctx, app, func(conn *sql.Conn) error {

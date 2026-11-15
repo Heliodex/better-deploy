@@ -13,15 +13,15 @@ import (
 
 type deployConfig struct {
 	dir, app, host, token, wasmtime, target, appHost, appDomain, profile, out string
-	buildComponentCommand                                                     string
-	skipBuild, skipCompile, skipStatic, jsonOut, forceBuild, skipRouteCheck   bool
-	overlayEnv                                                                bool
-	targetConfigured                                                          bool
-	verify                                                                    bool
-	verifyPath                                                                string
-	verifyTimeout                                                             time.Duration
-	envVars                                                                   []string
-	start                                                                     time.Time
+	buildComponentCommand string
+	skipBuild, skipCompile, skipStatic, jsonOut, forceBuild, skipRouteCheck bool
+	overlayEnv bool
+	targetConfigured bool
+	verify bool
+	verifyPath string
+	verifyTimeout time.Duration
+	envVars []string
+	start time.Time
 }
 
 func env(key string) string {
@@ -31,8 +31,8 @@ func env(key string) string {
 // profileSelection is the config file and profile that deploy and bundle flags default from.
 type profileSelection struct {
 	path, name string
-	file       fileConfig
-	profile    fileProfile
+	file fileConfig
+	profile fileProfile
 }
 
 // selectProfile loads the config file named by args and resolves the profile that the flags select.
@@ -164,25 +164,25 @@ func resolveConfig(args []string) (*deployConfig, error) {
 	}
 
 	return &deployConfig{
-		dir:              *dir,
-		app:              *app,
-		host:             *host,
-		token:            *token,
-		wasmtime:         *wasmtime,
-		target:           *target,
-		skipBuild:        *skipBuild,
-		skipCompile:      *skipCompile,
-		forceBuild:       *forceBuild,
-		skipRouteCheck:   *skipRouteCheck,
-		appHost:          *appHost,
-		appDomain:        *appDomain,
-		profile:          strings.TrimSpace(*profileFlag),
-		jsonOut:          *jsonOut,
+		dir: *dir,
+		app: *app,
+		host: *host,
+		token: *token,
+		wasmtime: *wasmtime,
+		target: *target,
+		skipBuild: *skipBuild,
+		skipCompile: *skipCompile,
+		forceBuild: *forceBuild,
+		skipRouteCheck: *skipRouteCheck,
+		appHost: *appHost,
+		appDomain: *appDomain,
+		profile: strings.TrimSpace(*profileFlag),
+		jsonOut: *jsonOut,
 		targetConfigured: targetConfigured,
-		verify:           *verify,
-		verifyPath:       *verifyPath,
-		verifyTimeout:    *verifyTimeout,
-		envVars:          *envVars,
+		verify: *verify,
+		verifyPath: *verifyPath,
+		verifyTimeout: *verifyTimeout,
+		envVars: *envVars,
 	}, nil
 }
 
@@ -217,15 +217,15 @@ func resolveBundleConfig(args []string) (*deployConfig, error) {
 	}
 
 	return &deployConfig{
-		dir:         *dir,
-		wasmtime:    *wasmtime,
-		target:      *target,
-		profile:     strings.TrimSpace(*profileFlag),
-		appDomain:   *appDomain,
-		skipBuild:   *skipBuild,
+		dir: *dir,
+		wasmtime: *wasmtime,
+		target: *target,
+		profile: strings.TrimSpace(*profileFlag),
+		appDomain: *appDomain,
+		skipBuild: *skipBuild,
 		skipCompile: *skipCompile,
-		forceBuild:  *forceBuild,
-		out:         *out,
+		forceBuild: *forceBuild,
+		out: *out,
 	}, nil
 }
 

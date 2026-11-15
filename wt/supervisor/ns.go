@@ -19,11 +19,11 @@ import (
 )
 
 const (
-	nsInitArg       = "--wt-ns-init"
-	nsPlanEnv       = "WT_INTERNAL_NS_PLAN"
-	nsPIDFile       = 3
-	nsGoFile        = 4
-	defaultTmpfsMB  = 64
+	nsInitArg = "--wt-ns-init"
+	nsPlanEnv = "WT_INTERNAL_NS_PLAN"
+	nsPIDFile = 3
+	nsGoFile = 4
+	defaultTmpfsMB = 64
 	defaultTmpfsDir = 16
 )
 
@@ -32,15 +32,15 @@ const (
 // The helper receives this as JSON in nsPlanEnv.
 type nsPlan struct {
 	Root, Hostname, AppDir, DataDir, Wasmtime, BinPath string
-	Files, LibDirs                                     []string
-	TmpfsMB                                            int
-	Dynamic, ClearGroups, Seccomp                      bool
-	Rlimits                                            []rlimitSpec
+	Files, LibDirs []string
+	TmpfsMB int
+	Dynamic, ClearGroups, Seccomp bool
+	Rlimits []rlimitSpec
 }
 
 // nsLaunch carries the helper's process attributes plus the plan.
 type nsLaunch struct {
-	plan            nsPlan
+	plan nsPlan
 	hostID, hostGID int
 }
 
@@ -250,19 +250,19 @@ func (s *supervisor) buildNamespacePlan(a *app, root string, clearGroups bool) (
 	}
 
 	return nsPlan{
-		Root:        root,
-		Hostname:    a.name,
-		AppDir:      appDir,
-		DataDir:     dataDir,
-		Wasmtime:    wasmtime,
-		BinPath:     "/bin/wasmtime",
-		Dynamic:     dynamic,
-		Files:       namespaceFiles(dynamic),
-		LibDirs:     namespaceLibDirs(interp),
-		TmpfsMB:     defaultTmpfsMB,
+		Root: root,
+		Hostname: a.name,
+		AppDir: appDir,
+		DataDir: dataDir,
+		Wasmtime: wasmtime,
+		BinPath: "/bin/wasmtime",
+		Dynamic: dynamic,
+		Files: namespaceFiles(dynamic),
+		LibDirs: namespaceLibDirs(interp),
+		TmpfsMB: defaultTmpfsMB,
 		ClearGroups: clearGroups,
-		Seccomp:     s.cfg.appSeccomp,
-		Rlimits:     limits,
+		Seccomp: s.cfg.appSeccomp,
+		Rlimits: limits,
 	}, nil
 }
 
@@ -270,10 +270,10 @@ func (s *supervisor) buildNamespacePlan(a *app, root string, clearGroups bool) (
 // The helper stays root inside the namespace until it has finished mounting, then switches to container 0 and drops capabilities.
 func namespaceSysProcAttr(hostID, hostGID int, allowSetgroups bool) *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{
-		Pdeathsig:                  syscall.SIGTERM,
-		Cloneflags:                 syscall.CLONE_NEWUSER | syscall.CLONE_NEWPID | syscall.CLONE_NEWNS | syscall.CLONE_NEWIPC | syscall.CLONE_NEWUTS,
-		UidMappings:                []syscall.SysProcIDMap{{ContainerID: 0, HostID: hostID, Size: 1}},
-		GidMappings:                []syscall.SysProcIDMap{{ContainerID: 0, HostID: hostGID, Size: 1}},
+		Pdeathsig: syscall.SIGTERM,
+		Cloneflags: syscall.CLONE_NEWUSER | syscall.CLONE_NEWPID | syscall.CLONE_NEWNS | syscall.CLONE_NEWIPC | syscall.CLONE_NEWUTS,
+		UidMappings: []syscall.SysProcIDMap{{ContainerID: 0, HostID: hostID, Size: 1}},
+		GidMappings: []syscall.SysProcIDMap{{ContainerID: 0, HostID: hostGID, Size: 1}},
 		GidMappingsEnableSetgroups: allowSetgroups,
 	}
 }

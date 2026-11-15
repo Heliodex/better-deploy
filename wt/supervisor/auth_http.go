@@ -9,10 +9,10 @@ import (
 )
 
 type authTokenCreateRequest struct {
-	Name      string   `json:"name"`
-	Role      string   `json:"role"`
-	Apps      []string `json:"apps"`
-	ExpiresIn string   `json:"expires_in"`
+	Name string `json:"name"`
+	Role string `json:"role"`
+	Apps []string `json:"apps"`
+	ExpiresIn string `json:"expires_in"`
 }
 
 type authTokenCreateResponse struct {

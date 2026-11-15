@@ -32,8 +32,8 @@ func TestAppArgsForNamespaceUsesInsidePaths(t *testing.T) {
 	s.cfg.stateDir = t.TempDir()
 	a := &app{
 		name: "demo",
-		dir:  t.TempDir(),
-		cfg:  appConfig{Name: "demo", Host: "demo.localhost", Env: map[string]string{}},
+		dir: t.TempDir(),
+		cfg: appConfig{Name: "demo", Host: "demo.localhost", Env: map[string]string{}},
 	}
 
 	args, env, err := s.appArgsFor(a, filepath.Join(a.dir, "main.cwasm"), true)
@@ -62,8 +62,8 @@ func TestAppArgsForNamespaceLetsAppOverrideDefaults(t *testing.T) {
 	s.cfg.stateDir = t.TempDir()
 	a := &app{
 		name: "demo",
-		dir:  t.TempDir(),
-		cfg:  appConfig{Name: "demo", Host: "demo.localhost", Env: map[string]string{"TMPDIR": "/custom"}},
+		dir: t.TempDir(),
+		cfg: appConfig{Name: "demo", Host: "demo.localhost", Env: map[string]string{"TMPDIR": "/custom"}},
 	}
 
 	_, env, err := s.appArgsFor(a, "host/main.cwasm", true)
@@ -261,7 +261,9 @@ func TestNamespaceLaunch(t *testing.T) {
 
 	root := t.TempDir()
 
-	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	t.Cleanup(func() {
+		_ = os.RemoveAll(root)
+	})
 
 	if err := os.Chmod(root, 0o700); err != nil {
 		t.Fatal(err)
@@ -280,19 +282,19 @@ func TestNamespaceLaunch(t *testing.T) {
 	}
 
 	plan := nsPlan{
-		Root:        root,
-		Hostname:    "wt-ns-test",
-		AppDir:      appDir,
-		DataDir:     dataDir,
-		Wasmtime:    "/bin/sh",
-		BinPath:     "/bin/sh",
-		Dynamic:     interp != "",
-		Files:       namespaceFiles(interp != ""),
-		LibDirs:     namespaceLibDirs(interp),
-		TmpfsMB:     defaultTmpfsMB,
+		Root: root,
+		Hostname: "wt-ns-test",
+		AppDir: appDir,
+		DataDir: dataDir,
+		Wasmtime: "/bin/sh",
+		BinPath: "/bin/sh",
+		Dynamic: interp != "",
+		Files: namespaceFiles(interp != ""),
+		LibDirs: namespaceLibDirs(interp),
+		TmpfsMB: defaultTmpfsMB,
 		ClearGroups: false,
-		Seccomp:     true,
-		Rlimits:     rlimitPlan(appConfig{}),
+		Seccomp: true,
+		Rlimits: rlimitPlan(appConfig{}),
 	}
 
 	raw, err := json.Marshal(plan)

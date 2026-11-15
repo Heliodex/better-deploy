@@ -148,10 +148,10 @@ func runBackupList(cfg clientOptions, name string) error {
 	var result struct {
 		Current string `json:"current"`
 		Backups []struct {
-			Name    string `json:"name"`
-			Kind    string `json:"kind"`
-			Size    int64  `json:"size"`
-			HasData bool   `json:"hasData"`
+			Name string `json:"name"`
+			Kind string `json:"kind"`
+			Size int64 `json:"size"`
+			HasData bool `json:"hasData"`
 		} `json:"backups"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {

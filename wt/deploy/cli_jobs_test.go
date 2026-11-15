@@ -11,7 +11,7 @@ import (
 func TestRunJobsEnqueue(t *testing.T) {
 	var (
 		gotAuth, gotPath string
-		got              map[string]any
+		got map[string]any
 	)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

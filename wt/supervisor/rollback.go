@@ -16,18 +16,18 @@ const rollbackJournalDir = ".rollback"
 
 // rollbackJournal records the paths a coordinated code + data rollback moved, so a crash mid-swap can be undone on startup.
 type rollbackJournal struct {
-	Name       string `json:"name"`
-	Snapshot   string `json:"snapshot"`
-	AppDir     string `json:"appDir"`
-	AppBackup  string `json:"appBackup"`
-	DataDir    string `json:"dataDir,omitempty"`
+	Name string `json:"name"`
+	Snapshot string `json:"snapshot"`
+	AppDir string `json:"appDir"`
+	AppBackup string `json:"appBackup"`
+	DataDir string `json:"dataDir,omitempty"`
 	DataBackup string `json:"dataBackup,omitempty"`
-	DB         string `json:"db,omitempty"`
-	DBBackup   string `json:"dbBackup,omitempty"`
-	StagedApp  string `json:"stagedApp"`
+	DB string `json:"db,omitempty"`
+	DBBackup string `json:"dbBackup,omitempty"`
+	StagedApp string `json:"stagedApp"`
 	StagedData string `json:"stagedData,omitempty"`
-	StagedDB   string `json:"stagedDB,omitempty"`
-	Committed  bool   `json:"committed"`
+	StagedDB string `json:"stagedDB,omitempty"`
+	Committed bool `json:"committed"`
 }
 
 func writeRollbackJournal(stateDir string, journal rollbackJournal) (string, error) {
@@ -261,16 +261,16 @@ func (s *supervisor) failRollback(w http.ResponseWriter, journalPath string, jou
 
 // rollbackPlan carries the staged paths and journal through the code, data and database swaps.
 type rollbackPlan struct {
-	s           *supervisor
-	journal     rollbackJournal
+	s *supervisor
+	journal rollbackJournal
 	journalPath string
-	old         *app
-	running     bool
-	dataDir     string
-	hasData     bool
-	stagedDB    string
-	appMoved    bool
-	dataMoved   bool
+	old *app
+	running bool
+	dataDir string
+	hasData bool
+	stagedDB string
+	appMoved bool
+	dataMoved bool
 }
 
 // stageRollback validates the snapshot request, stages its halves and writes the recovery journal.
@@ -317,17 +317,17 @@ func (s *supervisor) stageRollback(w http.ResponseWriter, name, stagedApp, snaps
 	liveDB := s.storage.databasePath(name)
 	suffix := fmt.Sprintf(".rollback-%d", time.Now().UnixNano())
 	journal := rollbackJournal{
-		Name:       name,
-		Snapshot:   snapshot,
-		AppDir:     liveApp,
-		AppBackup:  liveApp + suffix,
-		DataDir:    liveData,
+		Name: name,
+		Snapshot: snapshot,
+		AppDir: liveApp,
+		AppBackup: liveApp + suffix,
+		DataDir: liveData,
 		DataBackup: liveData + suffix,
-		DB:         liveDB,
-		DBBackup:   liveDB + suffix,
-		StagedApp:  stagedApp,
+		DB: liveDB,
+		DBBackup: liveDB + suffix,
+		StagedApp: stagedApp,
 		StagedData: dataDir,
-		StagedDB:   stagedDB,
+		StagedDB: stagedDB,
 	}
 
 	journalPath, err := writeRollbackJournal(s.cfg.stateDir, journal)
@@ -340,14 +340,14 @@ func (s *supervisor) stageRollback(w http.ResponseWriter, name, stagedApp, snaps
 	}
 
 	return &rollbackPlan{
-		s:           s,
-		journal:     journal,
+		s: s,
+		journal: journal,
 		journalPath: journalPath,
-		old:         old,
-		running:     running,
-		dataDir:     dataDir,
-		hasData:     hasData,
-		stagedDB:    stagedDB,
+		old: old,
+		running: running,
+		dataDir: dataDir,
+		hasData: hasData,
+		stagedDB: stagedDB,
 	}, true
 }
 

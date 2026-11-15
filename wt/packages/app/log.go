@@ -13,8 +13,8 @@ type Level string
 const (
 	LevelTrace Level = "TRACE"
 	LevelDebug Level = "DEBUG"
-	LevelInfo  Level = "INFO"
-	LevelWarn  Level = "WARN"
+	LevelInfo Level = "INFO"
+	LevelWarn Level = "WARN"
 	LevelError Level = "ERROR"
 	LevelFatal Level = "FATAL"
 )
@@ -37,15 +37,25 @@ func Logf(level Level, format string, args ...any) {
 	_, _ = io.WriteString(output, builder.String())
 }
 
-func Tracef(format string, args ...any) { Logf(LevelTrace, format, args...) }
+func Tracef(format string, args ...any) {
+	Logf(LevelTrace, format, args...)
+}
 
-func Debugf(format string, args ...any) { Logf(LevelDebug, format, args...) }
+func Debugf(format string, args ...any) {
+	Logf(LevelDebug, format, args...)
+}
 
-func Infof(format string, args ...any) { Logf(LevelInfo, format, args...) }
+func Infof(format string, args ...any) {
+	Logf(LevelInfo, format, args...)
+}
 
-func Warnf(format string, args ...any) { Logf(LevelWarn, format, args...) }
+func Warnf(format string, args ...any) {
+	Logf(LevelWarn, format, args...)
+}
 
-func Errorf(format string, args ...any) { Logf(LevelError, format, args...) }
+func Errorf(format string, args ...any) {
+	Logf(LevelError, format, args...)
+}
 
 // Fatalf logs at FATAL and exits the component. A component instance should not normally exit mid-request, so prefer Errorf unless the process really is done.
 func Fatalf(format string, args ...any) {

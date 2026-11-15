@@ -39,7 +39,7 @@ func TestHelpCoversEveryCommandAndSubcommand(t *testing.T) {
 
 func TestHelpShowsFlagsAndExamples(t *testing.T) {
 	tests := []struct {
-		args      []string
+		args []string
 		fragments []string
 	}{
 		{[]string{"logs"}, []string{"--follow", "--tail N", "wt logs notes --follow"}},

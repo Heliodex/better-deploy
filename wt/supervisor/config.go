@@ -18,65 +18,65 @@ const maxConfigRequestBytes = 64 << 10
 
 // appConfigPatch changes only the fields it names. A null env value removes that key.
 type appConfigPatch struct {
-	Host               *string            `json:"host"`
-	Hosts              *[]string          `json:"hosts"`
-	Health             *string            `json:"health"`
-	Env                map[string]*string `json:"env"`
-	MemoryMB           *int               `json:"memory_mb"`
-	DiskMB             *int               `json:"disk_mb"`
-	CPUMillicores      *int               `json:"cpu_millicores"`
-	PidsMax            *int               `json:"pids_max"`
-	IOWeight           *int               `json:"io_weight"`
-	MaxConcurrent      *int               `json:"max_concurrency"`
-	RequestTimeout     *string            `json:"request_timeout"`
-	StartupTimeout     *string            `json:"startup_timeout"`
-	HealthInterval     *string            `json:"health_interval"`
-	HealthFailures     *int               `json:"health_failures"`
-	RestartOnUnhealthy *bool              `json:"restart_on_unhealthy"`
-	IdleTimeout        *string            `json:"idle_timeout"`
-	Network            *string            `json:"network"`
-	Identity           *string            `json:"identity"`
-	Maintenance        *bool              `json:"maintenance"`
-	DependsOn          *[]string          `json:"depends_on"`
-	JobConcurrency     *int               `json:"job_concurrency"`
-	AllowCallers       *[]string          `json:"allow_callers"`
-	ServerPaths        *[]string          `json:"server_paths"`
-	ServerPages        *[]string          `json:"server_pages"`
-	Egress             *[]egressRule      `json:"egress"`
-	Schedule           *[]scheduleConfig  `json:"schedule"`
+	Host *string `json:"host"`
+	Hosts *[]string `json:"hosts"`
+	Health *string `json:"health"`
+	Env map[string]*string `json:"env"`
+	MemoryMB *int `json:"memory_mb"`
+	DiskMB *int `json:"disk_mb"`
+	CPUMillicores *int `json:"cpu_millicores"`
+	PidsMax *int `json:"pids_max"`
+	IOWeight *int `json:"io_weight"`
+	MaxConcurrent *int `json:"max_concurrency"`
+	RequestTimeout *string `json:"request_timeout"`
+	StartupTimeout *string `json:"startup_timeout"`
+	HealthInterval *string `json:"health_interval"`
+	HealthFailures *int `json:"health_failures"`
+	RestartOnUnhealthy *bool `json:"restart_on_unhealthy"`
+	IdleTimeout *string `json:"idle_timeout"`
+	Network *string `json:"network"`
+	Identity *string `json:"identity"`
+	Maintenance *bool `json:"maintenance"`
+	DependsOn *[]string `json:"depends_on"`
+	JobConcurrency *int `json:"job_concurrency"`
+	AllowCallers *[]string `json:"allow_callers"`
+	ServerPaths *[]string `json:"server_paths"`
+	ServerPages *[]string `json:"server_pages"`
+	Egress *[]egressRule `json:"egress"`
+	Schedule *[]scheduleConfig `json:"schedule"`
 }
 
 // appConfigResponse is the runtime config the panel may show. Env values stay hidden; only their keys are listed.
 type appConfigResponse struct {
-	Name               string           `json:"name"`
-	Host               string           `json:"host"`
-	Hosts              []string         `json:"hosts"`
-	Health             string           `json:"health"`
-	EnvKeys            []string         `json:"env_keys"`
-	SecretKeys         []string         `json:"secret_keys"`
-	MemoryMB           int              `json:"memory_mb"`
-	DiskMB             int              `json:"disk_mb"`
-	CPUMillicores      int              `json:"cpu_millicores"`
-	PidsMax            int              `json:"pids_max"`
-	IOWeight           int              `json:"io_weight"`
-	MaxConcurrent      int              `json:"max_concurrency"`
-	RequestTimeout     string           `json:"request_timeout"`
-	StartupTimeout     string           `json:"startup_timeout"`
-	HealthInterval     string           `json:"health_interval"`
-	HealthFailures     int              `json:"health_failures"`
-	RestartOnUnhealthy bool             `json:"restart_on_unhealthy"`
-	IdleTimeout        string           `json:"idle_timeout"`
-	Network            string           `json:"network"`
-	Identity           string           `json:"identity"`
-	Maintenance        bool             `json:"maintenance"`
-	DependsOn          []string         `json:"depends_on"`
-	JobConcurrency     int              `json:"job_concurrency"`
-	AllowCallers       []string         `json:"allow_callers"`
-	ServerPaths        []string         `json:"server_paths"`
-	ServerPages        []string         `json:"server_pages"`
-	Egress             []egressRule     `json:"egress"`
-	Schedule           []scheduleConfig `json:"schedule"`
-	RestartRequired    bool             `json:"restart_required,omitempty"`
+	Name string `json:"name"`
+	Host string `json:"host"`
+	Hosts []string `json:"hosts"`
+	Health string `json:"health"`
+	EnvKeys []string `json:"env_keys"`
+	SecretKeys []string `json:"secret_keys"`
+	MemoryMB int `json:"memory_mb"`
+	DiskMB int `json:"disk_mb"`
+	CPUMillicores int `json:"cpu_millicores"`
+	PidsMax int `json:"pids_max"`
+	IOWeight int `json:"io_weight"`
+	MaxConcurrent int `json:"max_concurrency"`
+	RequestTimeout string `json:"request_timeout"`
+	StartupTimeout string `json:"startup_timeout"`
+	HealthInterval string `json:"health_interval"`
+	HealthFailures int `json:"health_failures"`
+	RestartOnUnhealthy bool `json:"restart_on_unhealthy"`
+	IdleTimeout string `json:"idle_timeout"`
+	Network string `json:"network"`
+	Identity string `json:"identity"`
+	Maintenance bool `json:"maintenance"`
+	DependsOn []string `json:"depends_on"`
+	JobConcurrency int `json:"job_concurrency"`
+	AllowCallers []string `json:"allow_callers"`
+	ServerPaths []string `json:"server_paths"`
+	ServerPages []string `json:"server_pages"`
+	Egress []egressRule `json:"egress"`
+	Schedule []scheduleConfig `json:"schedule"`
+	RestartRequired bool `json:"restart_required,omitempty"`
 }
 
 // configETag fingerprints the runtime config for conditional reads and writes.
@@ -137,34 +137,34 @@ func configResponse(cfg appConfig) appConfigResponse {
 	}
 
 	return appConfigResponse{
-		Name:               cfg.Name,
-		Host:               cfg.Host,
-		Hosts:              hosts,
-		Health:             cfg.Health,
-		EnvKeys:            sortedKeys(cfg.Env),
-		SecretKeys:         []string{},
-		MemoryMB:           cfg.MemoryMB,
-		DiskMB:             cfg.DiskMB,
-		CPUMillicores:      cfg.CPUMillicores,
-		PidsMax:            cfg.PidsMax,
-		IOWeight:           cfg.IOWeight,
-		MaxConcurrent:      cfg.MaxConcurrent,
-		RequestTimeout:     cfg.RequestTimeout,
-		StartupTimeout:     cfg.StartupTimeout,
-		HealthInterval:     cfg.HealthInterval,
-		HealthFailures:     cfg.HealthFailures,
+		Name: cfg.Name,
+		Host: cfg.Host,
+		Hosts: hosts,
+		Health: cfg.Health,
+		EnvKeys: sortedKeys(cfg.Env),
+		SecretKeys: []string{},
+		MemoryMB: cfg.MemoryMB,
+		DiskMB: cfg.DiskMB,
+		CPUMillicores: cfg.CPUMillicores,
+		PidsMax: cfg.PidsMax,
+		IOWeight: cfg.IOWeight,
+		MaxConcurrent: cfg.MaxConcurrent,
+		RequestTimeout: cfg.RequestTimeout,
+		StartupTimeout: cfg.StartupTimeout,
+		HealthInterval: cfg.HealthInterval,
+		HealthFailures: cfg.HealthFailures,
 		RestartOnUnhealthy: cfg.RestartOnUnhealthy,
-		IdleTimeout:        cfg.IdleTimeout,
-		Network:            cfg.Network,
-		Identity:           cfg.Identity,
-		Maintenance:        cfg.Maintenance,
-		DependsOn:          dependsOn,
-		JobConcurrency:     cfg.JobConcurrency,
-		AllowCallers:       callers,
-		ServerPaths:        serverPaths,
-		ServerPages:        serverPages,
-		Egress:             egress,
-		Schedule:           schedule,
+		IdleTimeout: cfg.IdleTimeout,
+		Network: cfg.Network,
+		Identity: cfg.Identity,
+		Maintenance: cfg.Maintenance,
+		DependsOn: dependsOn,
+		JobConcurrency: cfg.JobConcurrency,
+		AllowCallers: callers,
+		ServerPaths: serverPaths,
+		ServerPages: serverPages,
+		Egress: egress,
+		Schedule: schedule,
 	}
 }
 

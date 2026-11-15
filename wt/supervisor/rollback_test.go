@@ -236,17 +236,17 @@ func TestRecoverRollbackJournalRestoresOldHalves(t *testing.T) {
 	write(stagedDB, "staged")
 
 	journal := rollbackJournal{
-		Name:       "demo",
-		Snapshot:   "storage-20260101T000000.000000000Z.db",
-		AppDir:     appDir,
-		AppBackup:  appBackup,
-		DataDir:    dataDir,
+		Name: "demo",
+		Snapshot: "storage-20260101T000000.000000000Z.db",
+		AppDir: appDir,
+		AppBackup: appBackup,
+		DataDir: dataDir,
 		DataBackup: dataBackup,
-		DB:         db,
-		DBBackup:   dbBackup,
-		StagedApp:  stagedApp,
+		DB: db,
+		DBBackup: dbBackup,
+		StagedApp: stagedApp,
 		StagedData: stagedData,
-		StagedDB:   stagedDB,
+		StagedDB: stagedDB,
 	}
 
 	path, err := writeRollbackJournal(stateDir, journal)
@@ -262,8 +262,8 @@ func TestRecoverRollbackJournalRestoresOldHalves(t *testing.T) {
 
 	for path, want := range map[string]string{
 		filepath.Join(appDir, "main.cwasm"): "old code",
-		filepath.Join(dataDir, "data.txt"):  "old data",
-		db:                                  "old db",
+		filepath.Join(dataDir, "data.txt"): "old data",
+		db: "old db",
 	} {
 		body, err := os.ReadFile(path)
 		if err != nil {

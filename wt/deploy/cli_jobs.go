@@ -14,23 +14,23 @@ import (
 
 // jobRecord is the subset of the supervisor's job resource the CLI prints.
 type jobRecord struct {
-	ID             string            `json:"id"`
-	Path           string            `json:"path"`
-	Method         string            `json:"method"`
-	Body           string            `json:"body,omitempty"`
-	Headers        map[string]string `json:"headers,omitempty"`
-	Status         string            `json:"status"`
-	RunAt          time.Time         `json:"runAt"`
-	CreatedAt      time.Time         `json:"createdAt"`
-	UpdatedAt      time.Time         `json:"updatedAt"`
-	StartedAt      time.Time         `json:"startedAt"`
-	FinishedAt     time.Time         `json:"finishedAt"`
-	Attempts       int               `json:"attempts"`
-	MaxAttempts    int               `json:"maxAttempts"`
-	IdempotencyKey string            `json:"idempotencyKey,omitempty"`
-	LeaseUntil     time.Time         `json:"leaseUntil"`
-	LastError      string            `json:"lastError,omitempty"`
-	StatusCode     int               `json:"statusCode,omitempty"`
+	ID string `json:"id"`
+	Path string `json:"path"`
+	Method string `json:"method"`
+	Body string `json:"body,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Status string `json:"status"`
+	RunAt time.Time `json:"runAt"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+	StartedAt time.Time `json:"startedAt"`
+	FinishedAt time.Time `json:"finishedAt"`
+	Attempts int `json:"attempts"`
+	MaxAttempts int `json:"maxAttempts"`
+	IdempotencyKey string `json:"idempotencyKey,omitempty"`
+	LeaseUntil time.Time `json:"leaseUntil"`
+	LastError string `json:"lastError,omitempty"`
+	StatusCode int `json:"statusCode,omitempty"`
 }
 
 type jobsResponse struct {
@@ -212,8 +212,8 @@ func headerFlagValue(value string) (string, string, error) {
 // enqueueRequest holds the enqueue flags before they are checked and encoded as the create-job body.
 type enqueueRequest struct {
 	path, method, body, file, runAt, idempotencyKey string
-	maxAttempts                                     int
-	headers                                         map[string]string
+	maxAttempts int
+	headers map[string]string
 }
 
 // validate checks the flags that do not need the request body or the clock.
@@ -308,14 +308,14 @@ func jobsEnqueue(cfg clientOptions, name string, args []string) error {
 	}
 
 	req := enqueueRequest{
-		path:           *path,
-		method:         *method,
-		body:           *body,
-		file:           *file,
-		runAt:          *runAt,
+		path: *path,
+		method: *method,
+		body: *body,
+		file: *file,
+		runAt: *runAt,
 		idempotencyKey: *idempotencyKey,
-		maxAttempts:    *maxAttempts,
-		headers:        headers,
+		maxAttempts: *maxAttempts,
+		headers: headers,
 	}
 	if err := req.validate(); err != nil {
 		return err

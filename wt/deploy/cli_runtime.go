@@ -34,9 +34,9 @@ func runRuntime(args []string) error {
 	if cfg.jsonOut {
 		report := map[string]any{
 			"supervisor": caps.Wasmtime,
-			"target":     caps.WasmtimeTarget,
-			"compiler":   caps.Compiler,
-			"local":      local,
+			"target": caps.WasmtimeTarget,
+			"compiler": caps.Compiler,
+			"local": local,
 		}
 		if localErr != nil {
 			report["error"] = localErr.Error()

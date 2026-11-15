@@ -13,11 +13,11 @@ import (
 
 // forwardedInfo is the effective public view of a request after applying only trusted forwarding headers.
 type forwardedInfo struct {
-	Host      string
+	Host string
 	Authority string
-	Proto     string
-	ClientIP  string
-	Trusted   bool
+	Proto string
+	ClientIP string
+	Trusted bool
 }
 
 // parseTrustedProxies reads a comma- or space-separated list of IPs and CIDRs. An entry without a prefix is one host.

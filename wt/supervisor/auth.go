@@ -9,15 +9,15 @@ import (
 )
 
 const (
-	roleAdmin  = "admin"
+	roleAdmin = "admin"
 	roleDeploy = "deploy"
-	roleRead   = "read"
+	roleRead = "read"
 
-	authFileVersion  = 1
+	authFileVersion = 1
 	maxAuthTokenName = 64
-	maxAuthTokens    = 256
-	minTokenExpiry   = time.Minute
-	maxTokenExpiry   = 10 * 365 * 24 * time.Hour
+	maxAuthTokens = 256
+	minTokenExpiry = time.Minute
+	maxTokenExpiry = 10 * 365 * 24 * time.Hour
 )
 
 // authIdentity is the caller a request authenticated as. A stored token narrows the apps and actions it may touch.

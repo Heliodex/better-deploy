@@ -23,9 +23,9 @@ func TestReadJSON(t *testing.T) {
 
 func TestJSONErrorField(t *testing.T) {
 	cases := map[string]string{
-		`field body pattern match: must match \S`:                                  "body",
-		`field Name length: must be <= 40`:                                         "name",
-		`field URL pattern match: must match ^https?`:                              "url",
+		`field body pattern match: must match \S`: "body",
+		`field Name length: must be <= 40`: "name",
+		`field URL pattern match: must match ^https?`: "url",
 		`json: cannot unmarshal number into Go struct field X.body of type string`: "fallback",
 	}
 	for message, want := range cases {

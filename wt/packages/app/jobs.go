@@ -17,44 +17,44 @@ const jobsPath = "/v1/jobs"
 
 // Job status values returned by the supervisor.
 const (
-	JobPending   = "pending"
-	JobRunning   = "running"
+	JobPending = "pending"
+	JobRunning = "running"
 	JobSucceeded = "succeeded"
-	JobFailed    = "failed"
-	JobDead      = "dead"
-	JobCanceled  = "canceled"
+	JobFailed = "failed"
+	JobDead = "dead"
+	JobCanceled = "canceled"
 )
 
 // Job is one durable unit of work as returned by the supervisor.
 type Job struct {
-	ID             string            `json:"id"`
-	Path           string            `json:"path"`
-	Method         string            `json:"method"`
-	Body           string            `json:"body,omitempty"`
-	Headers        map[string]string `json:"headers,omitempty"`
-	Status         string            `json:"status"`
-	RunAt          time.Time         `json:"runAt"`
-	CreatedAt      time.Time         `json:"createdAt"`
-	UpdatedAt      time.Time         `json:"updatedAt"`
-	StartedAt      time.Time         `json:"startedAt"`
-	FinishedAt     time.Time         `json:"finishedAt"`
-	Attempts       int               `json:"attempts"`
-	MaxAttempts    int               `json:"maxAttempts"`
-	IdempotencyKey string            `json:"idempotencyKey,omitempty"`
-	LeaseUntil     time.Time         `json:"leaseUntil"`
-	LastError      string            `json:"lastError,omitempty"`
-	StatusCode     int               `json:"statusCode,omitempty"`
+	ID string `json:"id"`
+	Path string `json:"path"`
+	Method string `json:"method"`
+	Body string `json:"body,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Status string `json:"status"`
+	RunAt time.Time `json:"runAt"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+	StartedAt time.Time `json:"startedAt"`
+	FinishedAt time.Time `json:"finishedAt"`
+	Attempts int `json:"attempts"`
+	MaxAttempts int `json:"maxAttempts"`
+	IdempotencyKey string `json:"idempotencyKey,omitempty"`
+	LeaseUntil time.Time `json:"leaseUntil"`
+	LastError string `json:"lastError,omitempty"`
+	StatusCode int `json:"statusCode,omitempty"`
 }
 
 // JobRequest is the body for a new job. Body is already-encoded JSON or text; it is sent verbatim to the app.
 type JobRequest struct {
-	Path           string            `json:"path"`
-	Method         string            `json:"method,omitempty"`
-	Body           string            `json:"body,omitempty"`
-	Headers        map[string]string `json:"headers,omitempty"`
-	RunAt          time.Time         `json:"runAt,omitzero"`
-	MaxAttempts    int               `json:"maxAttempts,omitempty"`
-	IdempotencyKey string            `json:"idempotencyKey,omitempty"`
+	Path string `json:"path"`
+	Method string `json:"method,omitempty"`
+	Body string `json:"body,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+	RunAt time.Time `json:"runAt,omitzero"`
+	MaxAttempts int `json:"maxAttempts,omitempty"`
+	IdempotencyKey string `json:"idempotencyKey,omitempty"`
 }
 
 type jobsResponse struct {

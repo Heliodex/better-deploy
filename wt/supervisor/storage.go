@@ -20,32 +20,32 @@ import (
 )
 
 const (
-	maxStorageValue      = 1 << 20
-	maxStorageBody       = 8 << 20
-	maxStorageSQL        = 64 << 10
-	maxStorageParams     = 128
-	maxStorageRows       = 10_000
+	maxStorageValue = 1 << 20
+	maxStorageBody = 8 << 20
+	maxStorageSQL = 64 << 10
+	maxStorageParams = 128
+	maxStorageRows = 10_000
 	maxStorageStatements = 64
-	maxStorageColumns    = 256
-	maxStorageResult     = 8 << 20
-	maxStorageSessions   = 8
-	maxStorageReadConns  = 4
-	storageTimeout       = 5 * time.Second
-	storageSessionLease  = 30 * time.Second
+	maxStorageColumns = 256
+	maxStorageResult = 8 << 20
+	maxStorageSessions = 8
+	maxStorageReadConns = 4
+	storageTimeout = 5 * time.Second
+	storageSessionLease = 30 * time.Second
 	// Migrations may build indexes or backfill rows, so they get their own longer and configurable deadline.
 	defaultStorageMigrationTimeout = 5 * time.Minute
-	minStorageMigrationTimeout     = time.Second
-	maxStorageMigrationTimeout     = time.Hour
+	minStorageMigrationTimeout = time.Second
+	maxStorageMigrationTimeout = time.Hour
 	// maxStorageConcurrentQueries bounds all apps' storage work together, so many tenants cannot exhaust the supervisor.
 	maxStorageConcurrentQueries = 16
-	storageQueueTimeout         = 5 * time.Second
+	storageQueueTimeout = 5 * time.Second
 	// storagePageSize is SQLite's default page size for a new database. Per-app max_page_count is derived from it.
 	storagePageSize = 4096
 	// storageWALAutoCheckpoint checkpoints the WAL after this many pages, keeping the WAL near 4 MiB between checkpoints.
 	storageWALAutoCheckpoint = 1000
 	// journalSizeLimit bounds the WAL after a checkpoint. It is capped at 64 MiB and scaled down for small quotas.
 	defaultJournalSizeLimit = 64 << 20
-	minJournalSizeLimit     = 256 << 10
+	minJournalSizeLimit = 256 << 10
 	// storageTempMonitorInterval bounds how often the global SQLite temp directory is measured.
 	storageTempMonitorInterval = 10 * time.Second
 	// defaultStorageTempBudgetMB is the default global temp directory budget.
@@ -54,15 +54,15 @@ const (
 
 var (
 	errStorageUnavailable = errors.New("storage unavailable")
-	errStorageInvalid     = errors.New("invalid storage request")
-	errStorageTempBudget  = errors.New("storage temp budget exceeded")
+	errStorageInvalid = errors.New("invalid storage request")
+	errStorageTempBudget = errors.New("storage temp budget exceeded")
 )
 
 // storageServer is a tiny per-app SQLite API. It listens on loopback and authenticates apps with a token, so app processes never touch the database files directly.
 type storageServer struct {
 	dir, baseURL string
-	listener     net.Listener
-	server       *http.Server
+	listener net.Listener
+	server *http.Server
 
 	mu, changeMu sync.Mutex
 	// opMu blocks new queries while a restore or quota change replaces a database pool; normal queries share it as readers.
@@ -70,54 +70,54 @@ type storageServer struct {
 	// quotas is the per-app database byte quota; zero means unlimited. Guarded by mu.
 	quotas map[string]int64
 	tokens map[string]string // token -> app name
-	dbs    map[string]*sql.DB
+	dbs map[string]*sql.DB
 	// readDBs are query-only pools. They let /v1/query run without any write capability, even a mistaken one.
 	readDBs map[string]*sql.DB
 
 	// tempDir is the process-wide SQLite temp directory; tempBudget is its byte budget, zero for unlimited.
 	// tempOver is set by the monitor and rejects new storage requests until usage falls back under the budget.
-	tempDir    string
+	tempDir string
 	tempBudget *byteBudget
-	tempOver   atomic.Bool
+	tempOver atomic.Bool
 
-	sessionMu      sync.Mutex
-	sessionCond    *sync.Cond
-	sessions       map[string]*storageSession
+	sessionMu sync.Mutex
+	sessionCond *sync.Cond
+	sessions map[string]*storageSession
 	sessionsPaused int
-	sessionClosed  bool
-	sessionStop    chan struct{}
-	sessionDone    chan struct{}
+	sessionClosed bool
+	sessionStop chan struct{}
+	sessionDone chan struct{}
 
 	migrationTimeout time.Duration
 
 	querySem chan struct{}
 
 	metrics *metrics
-	bus     *eventBus
-	jobs    *jobManager
-	blobs   *blobStore
-	kv      *kvStore
+	bus *eventBus
+	jobs *jobManager
+	blobs *blobStore
+	kv *kvStore
 
 	routesCache routeCache
 }
 
 type storageRequest struct {
-	SQL     string           `json:"sql"`
-	Params  []jsontext.Value `json:"params,omitempty"`
-	MaxRows int              `json:"max_rows,omitempty"`
+	SQL string `json:"sql"`
+	Params []jsontext.Value `json:"params,omitempty"`
+	MaxRows int `json:"max_rows,omitempty"`
 }
 
 type storageResult struct {
-	Columns      []string `json:"columns"`
-	Rows         [][]any  `json:"rows"`
-	RowsAffected int64    `json:"rows_affected"`
-	LastInsertID int64    `json:"last_insert_id"`
-	Truncated    bool     `json:"truncated"`
+	Columns []string `json:"columns"`
+	Rows [][]any `json:"rows"`
+	RowsAffected int64 `json:"rows_affected"`
+	LastInsertID int64 `json:"last_insert_id"`
+	Truncated bool `json:"truncated"`
 }
 
 // storageStatement is one SQL statement in a batch, transaction or migration.
 type storageStatement struct {
-	SQL    string           `json:"sql"`
+	SQL string `json:"sql"`
 	Params []jsontext.Value `json:"params,omitempty"`
 	// Query marks statements whose rows should be returned; otherwise the result carries rows_affected and last_insert_id.
 	Query bool `json:"query,omitempty"`
@@ -148,17 +148,17 @@ func newStorageServerOn(dir string, listener net.Listener) (*storageServer, erro
 	}
 
 	s := &storageServer{
-		dir:         dir,
-		baseURL:     "http://" + listener.Addr().String(),
-		quotas:      map[string]int64{},
-		tokens:      map[string]string{},
-		dbs:         map[string]*sql.DB{},
-		readDBs:     map[string]*sql.DB{},
-		sessions:    map[string]*storageSession{},
+		dir: dir,
+		baseURL: "http://" + listener.Addr().String(),
+		quotas: map[string]int64{},
+		tokens: map[string]string{},
+		dbs: map[string]*sql.DB{},
+		readDBs: map[string]*sql.DB{},
+		sessions: map[string]*storageSession{},
 		sessionStop: make(chan struct{}),
 		sessionDone: make(chan struct{}),
-		querySem:    make(chan struct{}, maxStorageConcurrentQueries),
-		kv:          newKVStore(),
+		querySem: make(chan struct{}, maxStorageConcurrentQueries),
+		kv: newKVStore(),
 
 		migrationTimeout: defaultStorageMigrationTimeout,
 	}
@@ -166,7 +166,7 @@ func newStorageServerOn(dir string, listener net.Listener) (*storageServer, erro
 	s.listener = listener
 
 	s.server = &http.Server{
-		Handler:           http.HandlerFunc(s.handle),
+		Handler: http.HandlerFunc(s.handle),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go func() {

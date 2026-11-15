@@ -8,11 +8,11 @@ import (
 
 func TestApplyAppDomain(t *testing.T) {
 	tests := []struct {
-		name   string
-		host   string
-		app    string
+		name string
+		host string
+		app string
 		domain string
-		want   string
+		want string
 	}{
 		{"default local host", "notes.localhost", "notes", "example.com", "notes.example.com"},
 		{"empty host", "", "notes", "example.com", "notes.example.com"},
@@ -36,11 +36,11 @@ func TestApplyAppDomain(t *testing.T) {
 
 func TestCheckAppHostTarget(t *testing.T) {
 	tests := []struct {
-		name       string
+		name string
 		supervisor string
-		appHost    string
-		appName    string
-		wantError  bool
+		appHost string
+		appName string
+		wantError bool
 	}{
 		{"remote public host", "https://wt.example.com", "notes.example.com", "notes", false},
 		{"remote localhost host", "https://wt.example.com", "notes.localhost", "notes", true},
@@ -93,11 +93,11 @@ func TestPrepareManifestAppliesAppDomain(t *testing.T) {
 
 func TestAppDomainForTarget(t *testing.T) {
 	tests := []struct {
-		name       string
-		profile    string
+		name string
+		profile string
 		supervisor string
-		domain     string
-		want       string
+		domain string
+		want string
 	}{
 		{"same remote target", "https://wt.example.com", "https://other.example.com", "example.com", "example.com"},
 		{"same local target", "http://127.0.0.1:8080", "http://localhost:8080", "localhost", "localhost"},

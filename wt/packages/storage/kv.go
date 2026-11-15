@@ -14,20 +14,20 @@ type KVEntry struct {
 }
 
 type kvRequest struct {
-	Key   string `json:"key"`
+	Key string `json:"key"`
 	Value string `json:"value,omitempty"`
-	TTLMS int64  `json:"ttl_ms,omitempty"`
-	By    int64  `json:"by,omitempty"`
+	TTLMS int64 `json:"ttl_ms,omitempty"`
+	By int64 `json:"by,omitempty"`
 }
 
 type kvResponse struct {
-	Found     bool   `json:"found"`
-	Value     string `json:"value,omitempty"`
+	Found bool `json:"found"`
+	Value string `json:"value,omitempty"`
 	ExpiresAt string `json:"expires_at,omitempty"`
 }
 
 type kvIncrResponse struct {
-	Value     int64  `json:"value"`
+	Value int64 `json:"value"`
 	ExpiresAt string `json:"expires_at,omitempty"`
 }
 
@@ -107,7 +107,7 @@ type RateLimit struct {
 	// Prefix namespaces the counter keys, such as "rl:login:".
 	Prefix string
 	// Limit is the number of calls a key may make in one Window.
-	Limit  int64
+	Limit int64
 	Window time.Duration
 }
 
@@ -117,7 +117,7 @@ type RateDecision struct {
 	// Count is the calls made in this window so far, including this one.
 	Count, Limit int64
 	// Reset is when the window ends; RetryAfter is how long until then.
-	Reset      time.Time
+	Reset time.Time
 	RetryAfter time.Duration
 }
 

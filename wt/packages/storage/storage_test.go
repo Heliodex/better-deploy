@@ -47,11 +47,11 @@ func TestClientQueryScan(t *testing.T) {
 	}
 
 	var (
-		id    string
+		id string
 		count int64
-		ok    bool
-		at    time.Time
-		blob  []byte
+		ok bool
+		at time.Time
+		blob []byte
 	)
 	if err := rows.Scan(&id, &count, &ok, &at, &blob); err != nil {
 		t.Fatal(err)

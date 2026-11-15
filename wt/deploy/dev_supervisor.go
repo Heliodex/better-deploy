@@ -95,16 +95,16 @@ func waitHealthy(url string, timeout time.Duration) error {
 // devEnv overrides the supervisor settings for local development, keeping the rest of the environment.
 func devEnv(appsDir, stateDir, addr, adminAddr, wasmtime, target string) []string {
 	values := map[string]string{
-		"WT_APPS_DIR":        appsDir,
-		"WT_STATE_DIR":       stateDir,
-		"WT_LISTEN":          addr,
-		"WT_ADMIN_LISTEN":    adminAddr,
-		"WT_APPS_DOMAIN":     "localhost",
-		"WT_WASMTIME":        wasmtime,
+		"WT_APPS_DIR": appsDir,
+		"WT_STATE_DIR": stateDir,
+		"WT_LISTEN": addr,
+		"WT_ADMIN_LISTEN": adminAddr,
+		"WT_APPS_DOMAIN": "localhost",
+		"WT_WASMTIME": wasmtime,
 		"WT_WASMTIME_TARGET": target,
-		"WT_TOKEN":           "dev",
-		"WT_TLS_CERT":        "",
-		"WT_TLS_KEY":         "",
+		"WT_TOKEN": "dev",
+		"WT_TLS_CERT": "",
+		"WT_TLS_KEY": "",
 	}
 
 	out := make([]string, 0, len(os.Environ())+len(values))

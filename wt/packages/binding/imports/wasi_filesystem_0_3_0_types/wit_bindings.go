@@ -36,16 +36,16 @@ func wasm_stream_drop_readable_u8(handle int32)
 func wasm_stream_drop_writable_u8(handle int32)
 
 var wasm_stream_vtable_u8 = witTypes.StreamVtable[uint8]{
-	Size:         1,
-	Align:        1,
-	Read:         wasm_stream_read_u8,
-	Write:        wasm_stream_write_u8,
-	CancelRead:   nil,
-	CancelWrite:  nil,
+	Size: 1,
+	Align: 1,
+	Read: wasm_stream_read_u8,
+	Write: wasm_stream_write_u8,
+	CancelRead: nil,
+	CancelWrite: nil,
 	DropReadable: wasm_stream_drop_readable_u8,
 	DropWritable: wasm_stream_drop_writable_u8,
-	Lift:         nil,
-	Lower:        nil,
+	Lift: nil,
+	Lower: nil,
 }
 
 func MakeStreamU8() (*witTypes.StreamWriter[uint8], *witTypes.StreamReader[uint8]) {
@@ -446,16 +446,16 @@ func wasm_future_lower_result_unit_error_code(
 }
 
 var wasm_future_vtable_result_unit_error_code = witTypes.FutureVtable[witTypes.Result[witTypes.Unit, ErrorCode]]{
-	Size:         (5 * 4),
-	Align:        4,
-	Read:         wasm_future_read_result_unit_error_code,
-	Write:        wasm_future_write_result_unit_error_code,
-	CancelRead:   nil,
-	CancelWrite:  nil,
+	Size: (5 * 4),
+	Align: 4,
+	Read: wasm_future_read_result_unit_error_code,
+	Write: wasm_future_write_result_unit_error_code,
+	CancelRead: nil,
+	CancelWrite: nil,
 	DropReadable: wasm_future_drop_readable_result_unit_error_code,
 	DropWritable: wasm_future_drop_writable_result_unit_error_code,
-	Lift:         wasm_future_lift_result_unit_error_code,
-	Lower:        wasm_future_lower_result_unit_error_code,
+	Lift: wasm_future_lift_result_unit_error_code,
+	Lower: wasm_future_lower_result_unit_error_code,
 }
 
 func MakeFutureResultUnitErrorCode() (*witTypes.FutureWriter[witTypes.Result[witTypes.Unit, ErrorCode]], *witTypes.FutureReader[witTypes.Result[witTypes.Unit, ErrorCode]]) {
@@ -605,16 +605,16 @@ func wasm_stream_lower_directory_entry(
 }
 
 var wasm_stream_vtable_directory_entry = witTypes.StreamVtable[DirectoryEntry]{
-	Size:         (6 * 4),
-	Align:        4,
-	Read:         wasm_stream_read_directory_entry,
-	Write:        wasm_stream_write_directory_entry,
-	CancelRead:   nil,
-	CancelWrite:  nil,
+	Size: (6 * 4),
+	Align: 4,
+	Read: wasm_stream_read_directory_entry,
+	Write: wasm_stream_write_directory_entry,
+	CancelRead: nil,
+	CancelWrite: nil,
 	DropReadable: wasm_stream_drop_readable_directory_entry,
 	DropWritable: wasm_stream_drop_writable_directory_entry,
-	Lift:         wasm_stream_lift_directory_entry,
-	Lower:        wasm_stream_lower_directory_entry,
+	Lift: wasm_stream_lift_directory_entry,
+	Lower: wasm_stream_lower_directory_entry,
 }
 
 func MakeStreamDirectoryEntry() (*witTypes.StreamWriter[DirectoryEntry], *witTypes.StreamReader[DirectoryEntry]) {
@@ -656,7 +656,7 @@ const (
 //
 // Note: This was called `filetype` in earlier versions of WASI.
 type DescriptorType struct {
-	tag   uint8
+	tag uint8
 	value any
 }
 
@@ -807,7 +807,7 @@ const (
 
 // When setting a timestamp, this gives the value to set it to.
 type NewTimestamp struct {
-	tag   uint8
+	tag uint8
 	value any
 }
 
@@ -924,7 +924,7 @@ const (
 // API; some are used in higher-level library layers, and others are provided
 // merely for alignment with POSIX.
 type ErrorCode struct {
-	tag   uint8
+	tag uint8
 	value any
 }
 

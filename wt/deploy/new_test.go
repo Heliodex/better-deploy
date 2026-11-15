@@ -232,11 +232,11 @@ func TestRunNew(t *testing.T) {
 	}
 
 	var manifest struct {
-		Name           string `json:"name"`
-		Host           string `json:"host"`
+		Name string `json:"name"`
+		Host string `json:"host"`
 		BuildComponent string `json:"build_component"`
-		BuildStatic    string `json:"build_static"`
-		Contract       string `json:"contract"`
+		BuildStatic string `json:"build_static"`
+		Contract string `json:"contract"`
 	}
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		t.Fatal(err)

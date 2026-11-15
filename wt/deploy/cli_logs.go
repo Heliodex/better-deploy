@@ -13,9 +13,9 @@ import (
 )
 
 type logLine struct {
-	Time    string `json:"time"`
-	Level   string `json:"level"`
-	Source  string `json:"source"`
+	Time string `json:"time"`
+	Level string `json:"level"`
+	Source string `json:"source"`
 	Message string `json:"message"`
 }
 
@@ -55,9 +55,9 @@ func followLogs(cfg clientOptions, path string) error {
 		}
 
 		var message struct {
-			Type string    `json:"type"`
+			Type string `json:"type"`
 			Logs []logLine `json:"logs"`
-			Log  *logLine  `json:"log"`
+			Log *logLine `json:"log"`
 		}
 		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &message); err != nil {
 			continue
@@ -109,8 +109,8 @@ func printLogs(cfg clientOptions, path string) error {
 // logOptions are the filters accepted by wt logs.
 type logOptions struct {
 	level, source, query string
-	tail                 int
-	follow               bool
+	tail int
+	follow bool
 }
 
 // parseLogOptions parses wt logs filters and defaults to the last 200 entries.

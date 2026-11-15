@@ -74,10 +74,10 @@ func TestRebuildTable(t *testing.T) {
 	}
 
 	rebuild := TableRebuild{
-		Table:  "answer",
+		Table: "answer",
 		Create: `create table answer_new (id text primary key, question text not null, reviewer text not null, unique (question, reviewer))`,
-		Copy:   `insert into answer_new (id, question, reviewer) select id, question, coalesce(reviewer, 'legacy') from answer`,
-		After:  []string{`create index answer_reviewer_idx on answer(reviewer)`},
+		Copy: `insert into answer_new (id, question, reviewer) select id, question, coalesce(reviewer, 'legacy') from answer`,
+		After: []string{`create index answer_reviewer_idx on answer(reviewer)`},
 	}
 	if err := client.RebuildTable(ctx, rebuild); err != nil {
 		t.Fatal(err)
@@ -116,9 +116,9 @@ func TestRebuildTableRefusesReferencedTable(t *testing.T) {
 	}
 
 	err := client.RebuildTable(ctx, TableRebuild{
-		Table:  "parent",
+		Table: "parent",
 		Create: `create table parent_new (id text primary key, name text)`,
-		Copy:   `insert into parent_new (id) select id from parent`,
+		Copy: `insert into parent_new (id) select id from parent`,
 	})
 	if !errors.Is(err, errRebuildReferenced) || !strings.Contains(err.Error(), "child") {
 		t.Errorf("err = %v, want a referenced-table error naming child", err)

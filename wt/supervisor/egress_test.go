@@ -10,7 +10,7 @@ import (
 
 type fakeRunner struct {
 	commands [][]string
-	fail     func(args []string) error
+	fail func(args []string) error
 }
 
 func (f *fakeRunner) run(args ...string) error {

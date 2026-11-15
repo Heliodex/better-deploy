@@ -128,7 +128,7 @@ func TestSecretAPIValidatesInput(t *testing.T) {
 
 	cases := []struct {
 		body string
-		key  string
+		key string
 	}{
 		{`{"value":"x"}`, "1BAD"},
 		{`{}`, "GOOD_KEY"},
@@ -245,10 +245,10 @@ func TestLaunchAbortsBeforeProcessOnMissingSecret(t *testing.T) {
 	}
 
 	_, err = s.spawn("demo", dir, appConfig{
-		Name:   "demo",
-		Host:   "demo.localhost",
+		Name: "demo",
+		Host: "demo.localhost",
 		Health: "/",
-		Env:    map[string]string{"API_KEY": "secret://MISSING"},
+		Env: map[string]string{"API_KEY": "secret://MISSING"},
 	})
 	if err == nil || !strings.Contains(err.Error(), `secret "MISSING"`) {
 		t.Fatalf("spawn error = %v", err)

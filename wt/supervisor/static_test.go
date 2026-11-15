@@ -19,14 +19,14 @@ func staticTestApp(t *testing.T) *app {
 	dir := t.TempDir()
 
 	files := map[string]string{
-		"static/index.html":               "<html>spa</html>",
-		"static/_app/immutable/app.js":    "console.log('app')",
-		"static/assets/logo.svg":          "<svg></svg>",
+		"static/index.html": "<html>spa</html>",
+		"static/_app/immutable/app.js": "console.log('app')",
+		"static/assets/logo.svg": "<svg></svg>",
 		"static/auth/callback/index.html": "<html>callback</html>",
-		"static/about.html":               "<html>about</html>",
-		"static/admin/page.html":          "<html>admin</html>",
-		"static/home.html":                "<html>home</html>",
-		"static/login/index.html":         "<html>login</html>",
+		"static/about.html": "<html>about</html>",
+		"static/admin/page.html": "<html>admin</html>",
+		"static/home.html": "<html>home</html>",
+		"static/login/index.html": "<html>login</html>",
 	}
 	for name, body := range files {
 		path := filepath.Join(dir, name)
@@ -47,7 +47,7 @@ func TestServeStaticFiles(t *testing.T) {
 
 	cases := []struct {
 		path, accept, body, cache string
-		served                    bool
+		served bool
 	}{
 		{"/", "text/html", "<html>spa</html>", "no-cache", true},
 		{"/_app/immutable/app.js", "*/*", "console.log('app')", "public, max-age=31536000, immutable", true},
@@ -102,7 +102,7 @@ func TestServeStaticRespectsServerPaths(t *testing.T) {
 
 	cases := []struct {
 		path, accept, body string
-		served             bool
+		served bool
 	}{
 		{"/auth/login", "text/html", "", false},
 		{"/auth/login", "*/*", "", false},
@@ -143,7 +143,7 @@ func TestServeStaticRespectsServerPages(t *testing.T) {
 
 	cases := []struct {
 		path, accept, body string
-		served             bool
+		served bool
 	}{
 		{"/", "text/html", "", false},
 		{"/about", "*/*", "<html>about</html>", true},
@@ -168,9 +168,9 @@ func TestServeStaticRespectsServerPages(t *testing.T) {
 	a.cfg.ServerPages = []string{"/login"}
 
 	for path, want := range map[string]bool{
-		"/login":      false,
-		"/login/":     false,
-		"/loginfoo":   true,
+		"/login": false,
+		"/login/": false,
+		"/loginfoo": true,
 		"/login/page": false,
 	} {
 		req := httptest.NewRequest(http.MethodGet, "http://demo.localhost"+path, nil)
@@ -186,14 +186,14 @@ func TestStaticPageFile(t *testing.T) {
 	a := staticTestApp(t)
 
 	for path, want := range map[string]string{
-		"/":                      "static/index.html",
-		"/home":                  "static/home.html",
-		"/login":                 "static/login/index.html",
-		"/login/":                "static/login/index.html",
-		"/about":                 "static/about.html",
+		"/": "static/index.html",
+		"/home": "static/home.html",
+		"/login": "static/login/index.html",
+		"/login/": "static/login/index.html",
+		"/about": "static/about.html",
 		"/_app/immutable/app.js": "",
-		"/../main.cwasm":         "",
-		"/missing":               "",
+		"/../main.cwasm": "",
+		"/missing": "",
 	} {
 		got, ok := staticPageFile(a.staticDir(), path)
 		if want == "" {
@@ -404,13 +404,13 @@ func TestServerPathMatch(t *testing.T) {
 	prefixes := []string{"/auth", "/api/v1"}
 
 	for path, want := range map[string]bool{
-		"/auth":         true,
-		"/auth/":        true,
-		"/auth/login":   true,
-		"/authentic":    false,
-		"/api/v1":       true,
+		"/auth": true,
+		"/auth/": true,
+		"/auth/login": true,
+		"/authentic": false,
+		"/api/v1": true,
 		"/api/v1/users": true,
-		"/api/v2":       false,
+		"/api/v2": false,
 	} {
 		if got := serverPathMatch(path, prefixes); got != want {
 			t.Errorf("serverPathMatch(%q) = %v, want %v", path, got, want)

@@ -14,25 +14,25 @@ import (
 )
 
 const (
-	jobStatusPending   = "pending"
-	jobStatusRunning   = "running"
+	jobStatusPending = "pending"
+	jobStatusRunning = "running"
 	jobStatusSucceeded = "succeeded"
-	jobStatusFailed    = "failed"
-	jobStatusDead      = "dead"
-	jobStatusCanceled  = "canceled"
+	jobStatusFailed = "failed"
+	jobStatusDead = "dead"
+	jobStatusCanceled = "canceled"
 
 	jobDefaultConcurrency = 1
-	jobMaxConcurrency     = 16
-	jobDefaultAttempts    = 3
-	jobMaxAttempts        = 20
-	jobMaxBodyBytes       = 64 << 10
-	jobMaxKeyBytes        = 128
-	jobMaxJobs            = 1000
-	jobTerminalRetention  = 500
-	jobLease              = 2 * time.Minute
-	jobTimeout            = 2 * time.Minute
-	jobPollInterval       = 250 * time.Millisecond
-	jobIdleInterval       = 500 * time.Millisecond
+	jobMaxConcurrency = 16
+	jobDefaultAttempts = 3
+	jobMaxAttempts = 20
+	jobMaxBodyBytes = 64 << 10
+	jobMaxKeyBytes = 128
+	jobMaxJobs = 1000
+	jobTerminalRetention = 500
+	jobLease = 2 * time.Minute
+	jobTimeout = 2 * time.Minute
+	jobPollInterval = 250 * time.Millisecond
+	jobIdleInterval = 500 * time.Millisecond
 )
 
 // terminalJob reports whether a job has finished and can be pruned from the retained history.
@@ -71,23 +71,23 @@ func pruneTerminalJobs(jobs []appJob) []appJob {
 
 // appJob is one durable unit of work for an app. Status is terminal for succeeded, dead and canceled.
 type appJob struct {
-	ID             string            `json:"id"`
-	Path           string            `json:"path"`
-	Method         string            `json:"method"`
-	Body           string            `json:"body,omitempty"`
-	Headers        map[string]string `json:"headers,omitempty"`
-	Status         string            `json:"status"`
-	RunAt          time.Time         `json:"runAt"`
-	CreatedAt      time.Time         `json:"createdAt"`
-	UpdatedAt      time.Time         `json:"updatedAt"`
-	StartedAt      time.Time         `json:"startedAt"`
-	FinishedAt     time.Time         `json:"finishedAt"`
-	Attempts       int               `json:"attempts"`
-	MaxAttempts    int               `json:"maxAttempts"`
-	IdempotencyKey string            `json:"idempotencyKey,omitempty"`
-	LeaseUntil     time.Time         `json:"leaseUntil"`
-	LastError      string            `json:"lastError,omitempty"`
-	StatusCode     int               `json:"statusCode,omitempty"`
+	ID string `json:"id"`
+	Path string `json:"path"`
+	Method string `json:"method"`
+	Body string `json:"body,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Status string `json:"status"`
+	RunAt time.Time `json:"runAt"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+	StartedAt time.Time `json:"startedAt"`
+	FinishedAt time.Time `json:"finishedAt"`
+	Attempts int `json:"attempts"`
+	MaxAttempts int `json:"maxAttempts"`
+	IdempotencyKey string `json:"idempotencyKey,omitempty"`
+	LeaseUntil time.Time `json:"leaseUntil"`
+	LastError string `json:"lastError,omitempty"`
+	StatusCode int `json:"statusCode,omitempty"`
 }
 
 type jobFile struct {
@@ -99,21 +99,21 @@ type jobsResponse struct {
 }
 
 type jobEnqueueRequest struct {
-	Path           string            `json:"path"`
-	Method         string            `json:"method"`
-	Body           string            `json:"body"`
-	Headers        map[string]string `json:"headers"`
-	RunAt          time.Time         `json:"runAt"`
-	MaxAttempts    int               `json:"maxAttempts"`
-	IdempotencyKey string            `json:"idempotencyKey"`
+	Path string `json:"path"`
+	Method string `json:"method"`
+	Body string `json:"body"`
+	Headers map[string]string `json:"headers"`
+	RunAt time.Time `json:"runAt"`
+	MaxAttempts int `json:"maxAttempts"`
+	IdempotencyKey string `json:"idempotencyKey"`
 }
 
 // jobManager owns one worker loop per app. Jobs live outside /data so an app's own code cannot change its queue.
 type jobManager struct {
 	dir string
-	s   *supervisor
+	s *supervisor
 
-	mu     sync.Mutex
+	mu sync.Mutex
 	stores map[string]*jobStore
 }
 
@@ -227,17 +227,17 @@ func (m *jobManager) busy(app string) bool {
 // jobStore is the durable queue and worker loop for one app.
 type jobStore struct {
 	manager *jobManager
-	app     string
-	path    string
+	app string
+	path string
 
-	mu          sync.Mutex
-	jobs        []appJob
+	mu sync.Mutex
+	jobs []appJob
 	concurrency int
-	running     int
-	closed      bool
-	wake        chan struct{}
-	ctx         context.Context
-	cancelFunc  context.CancelFunc
+	running int
+	closed bool
+	wake chan struct{}
+	ctx context.Context
+	cancelFunc context.CancelFunc
 }
 
 func newJobStore(manager *jobManager, app, path string, concurrency int) (*jobStore, error) {
@@ -250,11 +250,11 @@ func newJobStore(manager *jobManager, app, path string, concurrency int) (*jobSt
 	}
 
 	store := &jobStore{
-		manager:     manager,
-		app:         app,
-		path:        path,
+		manager: manager,
+		app: app,
+		path: path,
 		concurrency: normaliseJobConcurrency(concurrency),
-		wake:        make(chan struct{}, 1),
+		wake: make(chan struct{}, 1),
 	}
 
 	store.ctx, store.cancelFunc = context.WithCancel(context.Background())

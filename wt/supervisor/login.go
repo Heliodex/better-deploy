@@ -11,8 +11,8 @@ import (
 const (
 	authCookieMaxAge = 365 * 24 * 60 * 60
 	loginMaxFailures = 5
-	loginWindow      = time.Minute
-	loginLockout     = time.Minute
+	loginWindow = time.Minute
+	loginLockout = time.Minute
 
 	// loginMaxTrackedAddresses triggers pruning so unauthenticated requests from many addresses cannot grow the limiter without bound.
 	loginMaxTrackedAddresses = 10_000
@@ -23,14 +23,14 @@ type loginRequest struct {
 }
 
 type loginAttempt struct {
-	failures     int
+	failures int
 	firstFailure time.Time
 	blockedUntil time.Time
 }
 
 // loginLimiter rate-limits failed token attempts by remote host. The supervisor is normally single-operator, so an in-memory window is enough and resets on restart.
 type loginLimiter struct {
-	mu       sync.Mutex
+	mu sync.Mutex
 	attempts map[string]loginAttempt
 }
 

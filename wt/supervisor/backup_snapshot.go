@@ -382,10 +382,10 @@ func (m *backupManager) parentSnapshotHash(app, parent string, tree *backupTree)
 
 // snapshotCandidate is the temporary pair of files that becomes one snapshot.
 type snapshotCandidate struct {
-	app            string
+	app string
 	path, dataPath string
 	temp, dataTemp string
-	hasDatabase    bool
+	hasDatabase bool
 }
 
 // writeSnapshotCandidate writes the database dump and /data archive into their temporary files.
@@ -470,8 +470,8 @@ func (m *backupManager) createLocked(ctx context.Context, app, kind string) (bac
 	now := time.Now().UTC()
 	name, now := m.backupName(app, now)
 	candidate := snapshotCandidate{
-		app:      app,
-		path:     filepath.Join(m.appDir(app), name),
+		app: app,
+		path: filepath.Join(m.appDir(app), name),
 		dataPath: m.dataPath(app, name),
 	}
 	candidate.temp = candidate.path + backupTempSuffix

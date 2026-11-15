@@ -14,12 +14,12 @@ import (
 )
 
 const (
-	defaultTimeout    = 15 * time.Second
-	defaultUserAgent  = "wt-outbox"
-	timestampHeader   = "X-Webhook-Timestamp"
-	deliveryIDHeader  = "X-Webhook-Delivery-Id"
-	signatureHeader   = "X-Webhook-Signature"
-	maxResponseBody   = 4 << 10
+	defaultTimeout = 15 * time.Second
+	defaultUserAgent = "wt-outbox"
+	timestampHeader = "X-Webhook-Timestamp"
+	deliveryIDHeader = "X-Webhook-Delivery-Id"
+	signatureHeader = "X-Webhook-Signature"
+	maxResponseBody = 4 << 10
 	maxLastErrorChars = 1024
 )
 
@@ -67,15 +67,15 @@ func claimRecord(ctx context.Context, client *storage.Client, table, id, nowText
 // recordMessage returns the message fields of a stored record.
 func recordMessage(record Record) Message {
 	return Message{
-		ID:          record.ID,
-		Event:       record.Event,
-		DedupeKey:   record.DedupeKey,
-		Payload:     record.Payload,
-		URL:         record.URL,
-		Headers:     record.Headers,
-		Metadata:    record.Metadata,
+		ID: record.ID,
+		Event: record.Event,
+		DedupeKey: record.DedupeKey,
+		Payload: record.Payload,
+		URL: record.URL,
+		Headers: record.Headers,
+		Metadata: record.Metadata,
 		MaxAttempts: record.MaxAttempts,
-		DeliveryID:  record.DeliveryID,
+		DeliveryID: record.DeliveryID,
 	}
 }
 
@@ -160,11 +160,11 @@ func headerOrDefault(value, fallback string) string {
 
 // HTTPSender posts one signed delivery with net/http.
 type HTTPSender struct {
-	Client          *http.Client
+	Client *http.Client
 	TimestampHeader string
-	DeliveryHeader  string
+	DeliveryHeader string
 	SignatureHeader string
-	UserAgent       string
+	UserAgent string
 }
 
 // Send performs one HTTP POST and returns its status. Redirects follow the configured client.
@@ -229,8 +229,8 @@ func (o Outbox) deliverClaimed(ctx context.Context, client *storage.Client, tabl
 	attempt := record.Attempts + 1
 	timestamp, signature := o.Signer.Sign(record.DeliveryID, record.Payload)
 	delivery := Delivery{
-		Message:   recordMessage(record),
-		Attempt:   attempt,
+		Message: recordMessage(record),
+		Attempt: attempt,
 		Timestamp: timestamp,
 		Signature: signature,
 	}

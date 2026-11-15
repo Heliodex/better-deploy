@@ -18,13 +18,13 @@ const artifactName = "artefact.json"
 
 // artifact records how main.cwasm was produced so the supervisor can cache or rebuild it by wasm content.
 type artifact struct {
-	Wasmtime   string    `json:"wasmtime,omitempty"`
-	Target     string    `json:"target,omitempty"`
+	Wasmtime string `json:"wasmtime,omitempty"`
+	Target string `json:"target,omitempty"`
 	CompiledAt time.Time `json:"compiled_at"`
 	// Epoch records epoch-interruption instrumentation, which per-request wasmtime timeouts require.
-	Epoch      bool   `json:"epoch_interruption,omitempty"`
+	Epoch bool `json:"epoch_interruption,omitempty"`
 	WasmSHA256 string `json:"wasm_sha256,omitempty"`
-	WasmBytes  int64  `json:"wasm_bytes,omitempty"`
+	WasmBytes int64 `json:"wasm_bytes,omitempty"`
 	// CPU records the feature policy; compile always passes --target, so it is the baseline set.
 	CPU string `json:"cpu,omitempty"`
 }
