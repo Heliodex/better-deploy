@@ -48,6 +48,14 @@ const (
 	maxLogTail = 5000
 )
 
+var (
+	// guestStderr matches wasmtime's prefix for a guest's own stderr/stdout, e.g. "stderr [1] :: ".
+	guestStderr = regexp.MustCompile(`^(?:stderr|stdout) \[\d+\] :: `)
+
+	// logLevels are the prefixes an app may put at the start of a line, most verbose first.
+	logLevels = []string{"TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"}
+)
+
 func (l *appLog) backupPath() string {
 	return filepath.Join(l.dir, "output.log.1")
 }
@@ -254,9 +262,6 @@ func rotateLogFile(file *os.File, path, backup string) (*os.File, int64, error) 
 	return openLogFile(path)
 }
 
-// guestStderr matches wasmtime's prefix for a guest's own stderr/stdout, e.g. "stderr [1] :: ".
-var guestStderr = regexp.MustCompile(`^(?:stderr|stdout) \[\d+\] :: `)
-
 // splitLevelPrefix pulls an app's "<LEVEL> " prefix off a line. Anything unrecognized is part of the message and the level is info.
 func splitLevelPrefix(line string) (string, string) {
 	token, rest, ok := strings.Cut(line, " ")
@@ -309,9 +314,6 @@ func (l *appLog) writeLine(line string) error {
 	})
 	return nil
 }
-
-// logLevels are the prefixes an app may put at the start of a line, most verbose first.
-var logLevels = []string{"TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"}
 
 // Write implements io.Writer. Output arrives in arbitrary chunks, so lines are buffered until their newline and each one is written with a receive timestamp.
 func (l *appLog) Write(p []byte) (int, error) {

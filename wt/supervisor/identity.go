@@ -94,6 +94,16 @@ var (
 	errIdentityEmail = errors.New("enter a valid email address")
 	errIdentityName = errors.New("enter a name")
 	errIdentityGroups = errors.New("groups are invalid")
+
+	// identityDummyHash is verified for unknown emails so a miss costs as much as a real password check.
+	identityDummyHash = sync.OnceValue(func() string {
+		hash, err := hashIdentityPassword("timing-equaliser-password")
+		if err != nil {
+			return ""
+		}
+
+		return hash
+	})
 )
 
 // deleteSession removes a session by its raw token.
@@ -383,16 +393,6 @@ func (s *identityStore) authenticate(email, password string) (identityUserInfo, 
 
 	return info, nil
 }
-
-// identityDummyHash is verified for unknown emails so a miss costs as much as a real password check.
-var identityDummyHash = sync.OnceValue(func() string {
-	hash, err := hashIdentityPassword("timing-equaliser-password")
-	if err != nil {
-		return ""
-	}
-
-	return hash
-})
 
 // normaliseIdentityGroups trims, deduplicates and sorts group names.
 func normaliseIdentityGroups(groups []string) ([]string, error) {

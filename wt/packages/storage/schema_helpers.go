@@ -20,6 +20,9 @@ type TableRebuild struct {
 	After []string
 }
 
+// errRebuildReferenced stops a rebuild that would cascade through other tables' foreign keys.
+var errRebuildReferenced = errors.New("storage: table is referenced by foreign keys")
+
 // TableSQL returns the create statement SQLite stored for table. ok is false when the table does not exist.
 func (c *Client) TableSQL(ctx context.Context, table string) (definition string, ok bool, err error) {
 	err = c.QueryRow(ctx, `select sql from sqlite_master where type = 'table' and name = ? collate nocase`, table).Scan(&definition)
@@ -141,9 +144,6 @@ func (c *Client) AddColumnIfMissing(ctx context.Context, table, column, definiti
 
 	return true, nil
 }
-
-// errRebuildReferenced stops a rebuild that would cascade through other tables' foreign keys.
-var errRebuildReferenced = errors.New("storage: table is referenced by foreign keys")
 
 // TempTable is the name the replacement table is created under before the swap.
 func (r TableRebuild) TempTable() string {

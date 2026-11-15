@@ -36,6 +36,7 @@ const (
 )
 
 var (
+
 	// defaultHandler is a placeholder for returning a useful error to stderr when the handler is not set.
 	defaultHandler = func(http.ResponseWriter, *http.Request) {
 		fmt.Fprintln(os.Stderr, "http handler undefined")
@@ -43,19 +44,7 @@ var (
 
 	// handlerFn is the function called by the HTTP trigger.
 	handlerFn = defaultHandler
-)
 
-// Handle sets the handler function for the http trigger. It must be set in an init() function.
-func Handle(fn func(http.ResponseWriter, *http.Request)) {
-	handlerFn = fn
-}
-
-// RequestID returns the request identifier set by the host or an empty string.
-func RequestID(r *http.Request) string {
-	return r.Header.Get(HeaderRequestID)
-}
-
-var (
 	// handleErr is wit.Err instantiated for the handler result, so the call sites don't need explicit type arguments.
 	handleErr = wit.Err[*wasi.Response, wasi.ErrorCode]
 	wasiHandle = func(request *wasi.Request) wit.Result[*wasi.Response, wasi.ErrorCode] {
@@ -99,6 +88,16 @@ var (
 		return (<-httpRes.channel)
 	}
 )
+
+// Handle sets the handler function for the http trigger. It must be set in an init() function.
+func Handle(fn func(http.ResponseWriter, *http.Request)) {
+	handlerFn = fn
+}
+
+// RequestID returns the request identifier set by the host or an empty string.
+func RequestID(r *http.Request) string {
+	return r.Header.Get(HeaderRequestID)
+}
 
 func init() {
 	handler.Exports.Handle = wasiHandle
