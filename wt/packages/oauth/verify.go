@@ -82,13 +82,13 @@ func (c *Client) fetchKeys(ctx context.Context, provider Provider) (map[string]*
 			continue
 		}
 
-		exponentInt := new(big.Int).SetBytes(exponent)
+		exponentInt := (&big.Int{}).SetBytes(exponent)
 		if !exponentInt.IsInt64() || exponentInt.Int64() > int64(^uint(0)>>1) {
 			continue
 		}
 
 		keys[key.Kid] = &rsa.PublicKey{
-			N: new(big.Int).SetBytes(modulus),
+			N: (&big.Int{}).SetBytes(modulus),
 			E: int(exponentInt.Int64()),
 		}
 	}
