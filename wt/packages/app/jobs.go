@@ -56,7 +56,7 @@ const (
 	JobDead = "dead"
 	JobFailed = "failed"
 
-	// Job status values returned by the supervisor.
+	// JobPending, JobRunning and JobSucceeded are the job status values returned by the supervisor.
 	JobPending = "pending"
 	JobRunning = "running"
 	JobSucceeded = "succeeded"
