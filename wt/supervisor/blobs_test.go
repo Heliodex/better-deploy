@@ -35,8 +35,7 @@ func signedBlobURL(t *testing.T, s *supervisor, a *app, method, digest string, m
 	signature := blobSignature(s.blobs.secretFor(a.name), method, a.name, digest, expires.Unix(), maxBytes, contentType)
 	query := "exp=" + strconv.FormatInt(expires.Unix(), 10) + "&sig=" + signature
 
-	switch method {
-	case "upload":
+	if method == "upload" {
 		return blobPrefix + "?max=" + strconv.FormatInt(maxBytes, 10) + "&ct=" + contentType + "&" + query
 	}
 
