@@ -97,7 +97,7 @@ func TestDeploymentHistoryKeepsSecretReferences(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	appJSON := `{"name":"demo","host":"demo.localhost","env":{"API_KEY":"secret://API_KEY"}}`
+	const appJSON string = `{"name":"demo","host":"demo.localhost","env":{"API_KEY":"secret://API_KEY"}}`
 
 	if err := os.WriteFile(filepath.Join(source, "app.json"), []byte(appJSON), 0o644); err != nil {
 		t.Fatal(err)

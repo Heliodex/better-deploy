@@ -14,7 +14,8 @@ func TestUIDAllocatorRejectsBadBase(t *testing.T) {
 
 func TestUIDAllocatorResolvesCollisions(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".uids.json")
-	data := `{"apps":{"beta":20000,"alpha":20000,"below":100}}` + "\n"
+
+	const data string = `{"apps":{"beta":20000,"alpha":20000,"below":100}}` + "\n"
 
 	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)

@@ -44,7 +44,9 @@ func TestAppDiskUsageAndQuota(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if want := int64(2 * 600 << 10); bytes != want {
+	const want int64 = int64(2 * 600 << 10)
+
+	if bytes != want {
 		t.Errorf("app data bytes = %d, want %d (changes.log must be excluded)", bytes, want)
 	}
 

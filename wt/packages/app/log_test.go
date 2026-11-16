@@ -41,7 +41,8 @@ func TestLogfSplitsLines(t *testing.T) {
 
 	Warnf("first\nsecond\n")
 
-	want := "WARN first\nWARN second\n"
+	const want string = "WARN first\nWARN second\n"
+
 	if got := buffer.String(); got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -55,7 +56,8 @@ func TestWriterPrefixesLines(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	want := "INFO one\nINFO two\n"
+	const want string = "INFO one\nINFO two\n"
+
 	if got := buffer.String(); got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}

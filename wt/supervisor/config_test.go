@@ -92,7 +92,8 @@ func TestAppConfigConditionalRequests(t *testing.T) {
 
 func TestAppConfigGetAndPatch(t *testing.T) {
 	dir := t.TempDir()
-	original := `{"name":"demo","host":"demo.localhost","health":"/","env":{"A":"1","SECRET":"x"},"build":"make app","memory_mb":128,"server_pages":["/"]}`
+
+	const original string = `{"name":"demo","host":"demo.localhost","health":"/","env":{"A":"1","SECRET":"x"},"build":"make app","memory_mb":128,"server_pages":["/"]}`
 
 	if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(original), 0o644); err != nil {
 		t.Fatal(err)
@@ -134,7 +135,8 @@ func TestAppConfigGetAndPatch(t *testing.T) {
 		t.Errorf("GET config = %+v", got)
 	}
 
-	patch := `{"host":"new.localhost","health":"/ready","env":{"A":"2","SECRET":null,"NEW":"3"},"memory_mb":256,"disk_mb":512,"idle_timeout":"15m","schedule":[],"server_pages":["/","/login"]}`
+	const patch string = `{"host":"new.localhost","health":"/ready","env":{"A":"2","SECRET":null,"NEW":"3"},"memory_mb":256,"disk_mb":512,"idle_timeout":"15m","schedule":[],"server_pages":["/","/login"]}`
+
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(patch))
 
@@ -382,7 +384,9 @@ func TestAppConfigPatchesHealthSettings(t *testing.T) {
 	}
 	s.apps["demo"] = a
 	s.hosts[cfg.Host] = a
-	patch := `{"startup_timeout":"30s","health_interval":"5s","health_failures":3,"restart_on_unhealthy":true}`
+
+	const patch string = `{"startup_timeout":"30s","health_interval":"5s","health_failures":3,"restart_on_unhealthy":true}`
+
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(patch))
 
@@ -436,7 +440,9 @@ func TestAppConfigRejectsIdleTimeoutWithSchedule(t *testing.T) {
 	}
 	s.apps["demo"] = a
 	s.hosts[cfg.Host] = a
-	patch := `{"idle_timeout":"5m","schedule":[{"path":"/tick","every":"1m"}]}`
+
+	const patch string = `{"idle_timeout":"5m","schedule":[{"path":"/tick","every":"1m"}]}`
+
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(patch))
 

@@ -154,7 +154,8 @@ func TestBundleOmitsMissingCwasm(t *testing.T) {
 
 func TestBundlePreservesUnknownManifestFields(t *testing.T) {
 	dir := t.TempDir()
-	appJSON := `{"name":"demo","host":"old.localhost","identity":"platform","allow_callers":["peer"],"job_concurrency":2,"future_field":{"keep":true}}`
+
+	const appJSON string = `{"name":"demo","host":"old.localhost","identity":"platform","allow_callers":["peer"],"job_concurrency":2,"future_field":{"keep":true}}`
 
 	if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(appJSON), privateFileMode); err != nil {
 		t.Fatal(err)

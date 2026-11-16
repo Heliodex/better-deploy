@@ -17,7 +17,8 @@ import (
 
 func TestBlobSignatureVector(t *testing.T) {
 	digest := strings.Repeat("a", 64)
-	secret := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+	const secret string = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 	if got := blobSignature(secret, "download", "demo", digest, 1700000000, 0, ""); got != "60761d4c71d09d7761f861bf9d685efbda078603748f5d5de4fa2fd6516ffce4" {
 		t.Errorf("download signature = %s", got)

@@ -497,7 +497,8 @@ func writeStaticFile(t *testing.T, source, rel, body string) {
 func TestDeploymentHistoryChangedStaticGetsNewBlob(t *testing.T) {
 	manager := newDeploymentManager(t.TempDir())
 	source := writeDeploymentSource(t, "demo.localhost")
-	rel := "_app/immutable/app.js"
+
+	const rel string = "_app/immutable/app.js"
 
 	writeStaticFile(t, source, rel, "one")
 
@@ -566,7 +567,8 @@ func TestDeploymentHistoryPrunesStaticBlobs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rel := "_app/immutable/app.js"
+	const rel string = "_app/immutable/app.js"
+
 	blob := filepath.Join(manager.blobDir("demo"), first.Static[rel])
 
 	if err := os.RemoveAll(filepath.Join(manager.appDir("demo"), first.ID)); err != nil {
@@ -620,7 +622,8 @@ func TestDeploymentHistorySharesStatic(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rel := "_app/immutable/app.js"
+	const rel string = "_app/immutable/app.js"
+
 	if first.Static[rel] == "" {
 		t.Fatalf("static metadata = %v, want the file digest", first.Static)
 	}

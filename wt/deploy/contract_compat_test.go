@@ -47,8 +47,11 @@ func TestCompatDanglingRefFails(t *testing.T) {
 }
 
 func TestCompatRefInlineEquivalentPasses(t *testing.T) {
-	inline := `{"type":"object","properties":{"a":{"type":"string"}}}`
-	shared := `{"type":"object","properties":{"a":{"type":"string"}}}`
+	const (
+		inline string = `{"type":"object","properties":{"a":{"type":"string"}}}`
+		shared string = `{"type":"object","properties":{"a":{"type":"string"}}}`
+	)
+
 	baseline := map[string]map[string]any{
 		"t.json": compatDoc(t, `{"$ref":"shared.json"}`),
 		"shared.json": compatDoc(t, shared),
@@ -61,8 +64,11 @@ func TestCompatRefInlineEquivalentPasses(t *testing.T) {
 }
 
 func TestCompatSameRefPasses(t *testing.T) {
-	ref := `{"$ref":"shared.json"}`
-	shared := `{"type":"object","properties":{"a":{"type":"string"}}}`
+	const (
+		ref string = `{"$ref":"shared.json"}`
+		shared string = `{"type":"object","properties":{"a":{"type":"string"}}}`
+	)
+
 	baseline := map[string]map[string]any{"t.json": compatDoc(t, ref), "shared.json": compatDoc(t, shared)}
 	current := map[string]map[string]any{"t.json": compatDoc(t, ref), "shared.json": compatDoc(t, shared)}
 
@@ -96,8 +102,10 @@ func diffCompatSchemas(t *testing.T, name, oldBody, newBody string) []compatBrea
 }
 
 func TestCompatAddedOptionalPasses(t *testing.T) {
-	newBody := `{"type":"object","properties":{"a":{"type":"string"},"b":{"type":"integer"}},"required":["a"]}`
-	oldBody := `{"type":"object","properties":{"a":{"type":"string"}},"required":["a"]}`
+	const (
+		newBody string = `{"type":"object","properties":{"a":{"type":"string"},"b":{"type":"integer"}},"required":["a"]}`
+		oldBody string = `{"type":"object","properties":{"a":{"type":"string"}},"required":["a"]}`
+	)
 
 	if breaks := diffCompatSchemas(t, "t.json", oldBody, newBody); len(breaks) != 0 {
 		t.Errorf("breaks = %v", breaks)
@@ -105,8 +113,10 @@ func TestCompatAddedOptionalPasses(t *testing.T) {
 }
 
 func TestCompatAddedRequiredFails(t *testing.T) {
-	newBody := `{"type":"object","properties":{"a":{"type":"string"},"b":{"type":"integer"}},"required":["a","b"]}`
-	oldBody := `{"type":"object","properties":{"a":{"type":"string"}},"required":["a"]}`
+	const (
+		newBody string = `{"type":"object","properties":{"a":{"type":"string"},"b":{"type":"integer"}},"required":["a","b"]}`
+		oldBody string = `{"type":"object","properties":{"a":{"type":"string"}},"required":["a"]}`
+	)
 
 	if breaks := diffCompatSchemas(t, "t.json", oldBody, newBody); len(breaks) != 1 || breaks[0].Rule != "field added required" || breaks[0].Path != "b" {
 		t.Errorf("breaks = %v, want one added-required report", breaks)
@@ -114,13 +124,14 @@ func TestCompatAddedRequiredFails(t *testing.T) {
 }
 
 func TestCompatCompositionKeywordChangeFails(t *testing.T) {
-	body := `{"type":"object","properties":{"v":{"anyOf":[{"type":"string"},{"type":"integer"}]}}}`
+	const body string = `{"type":"object","properties":{"v":{"anyOf":[{"type":"string"},{"type":"integer"}]}}}`
 
 	if breaks := diffCompatSchemas(t, "t.json", body, body); len(breaks) != 0 {
 		t.Errorf("unchanged composition breaks = %v", breaks)
 	}
 
-	changed := `{"type":"object","properties":{"v":{"anyOf":[{"type":"string"},{"type":"boolean"}]}}}`
+	const changed string = `{"type":"object","properties":{"v":{"anyOf":[{"type":"string"},{"type":"boolean"}]}}}`
+
 	breaks := diffCompatSchemas(t, "t.json", body, changed)
 	if len(breaks) != 1 || !strings.Contains(breaks[0].Rule, "anyOf") {
 		t.Errorf("changed composition breaks = %v", breaks)
@@ -128,8 +139,10 @@ func TestCompatCompositionKeywordChangeFails(t *testing.T) {
 }
 
 func TestCompatConstraintRuleNamesKeyword(t *testing.T) {
-	newBody := `{"type":"string","minLength":3}`
-	oldBody := `{"type":"string","minLength":1}`
+	const (
+		newBody string = `{"type":"string","minLength":3}`
+		oldBody string = `{"type":"string","minLength":1}`
+	)
 
 	if breaks := diffCompatSchemas(t, "t.json", oldBody, newBody); len(breaks) != 1 || breaks[0].Rule != "keyword minLength changed" {
 		t.Errorf("breaks = %v", breaks)
@@ -153,8 +166,10 @@ func TestCompatConstraintsBothDirectionsFail(t *testing.T) {
 }
 
 func TestCompatEnumAndPatternFail(t *testing.T) {
-	newBody := `{"type":"object","properties":{"d":{"type":"string","pattern":"^(a|b|c)$"}}}`
-	oldBody := `{"type":"object","properties":{"d":{"type":"string","pattern":"^(a|b)$"}}}`
+	const (
+		newBody string = `{"type":"object","properties":{"d":{"type":"string","pattern":"^(a|b|c)$"}}}`
+		oldBody string = `{"type":"object","properties":{"d":{"type":"string","pattern":"^(a|b)$"}}}`
+	)
 
 	if breaks := diffCompatSchemas(t, "t.json", oldBody, newBody); len(breaks) != 1 || !strings.Contains(breaks[0].Rule, "pattern") {
 		t.Errorf("breaks = %v", breaks)
@@ -162,7 +177,7 @@ func TestCompatEnumAndPatternFail(t *testing.T) {
 }
 
 func TestCompatIdenticalPasses(t *testing.T) {
-	body := `{"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"title":"T"}`
+	const body string = `{"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"title":"T"}`
 
 	if breaks := diffCompatSchemas(t, "t.json", body, body); len(breaks) != 0 {
 		t.Errorf("breaks = %v", breaks)
@@ -170,8 +185,10 @@ func TestCompatIdenticalPasses(t *testing.T) {
 }
 
 func TestCompatIgnoresMetadata(t *testing.T) {
-	newBody := `{"type":"object","title":"New","description":"v2","$id":"b","properties":{}}`
-	oldBody := `{"type":"object","title":"Old","description":"v1","$id":"a","properties":{}}`
+	const (
+		newBody string = `{"type":"object","title":"New","description":"v2","$id":"b","properties":{}}`
+		oldBody string = `{"type":"object","title":"Old","description":"v1","$id":"a","properties":{}}`
+	)
 
 	if breaks := diffCompatSchemas(t, "t.json", oldBody, newBody); len(breaks) != 0 {
 		t.Errorf("breaks = %v", breaks)
@@ -196,8 +213,10 @@ func TestCompatNullability(t *testing.T) {
 }
 
 func TestCompatRemovedFieldFails(t *testing.T) {
-	newBody := `{"type":"object","properties":{"a":{"type":"string"}},"required":["a"]}`
-	oldBody := `{"type":"object","properties":{"a":{"type":"string"},"b":{"type":"string"}},"required":["a"]}`
+	const (
+		newBody string = `{"type":"object","properties":{"a":{"type":"string"}},"required":["a"]}`
+		oldBody string = `{"type":"object","properties":{"a":{"type":"string"},"b":{"type":"string"}},"required":["a"]}`
+	)
 
 	if breaks := diffCompatSchemas(t, "t.json", oldBody, newBody); len(breaks) != 1 || breaks[0].Rule != "field removed" || breaks[0].Path != "b" {
 		t.Errorf("breaks = %v", breaks)
@@ -205,8 +224,11 @@ func TestCompatRemovedFieldFails(t *testing.T) {
 }
 
 func TestCompatRenameReportsOnce(t *testing.T) {
-	newBody := `{"type":"object","properties":{"name":{"type":"string","minLength":1}}}`
-	oldBody := `{"type":"object","properties":{"title":{"type":"string","minLength":1}}}`
+	const (
+		newBody string = `{"type":"object","properties":{"name":{"type":"string","minLength":1}}}`
+		oldBody string = `{"type":"object","properties":{"title":{"type":"string","minLength":1}}}`
+	)
+
 	breaks := diffCompatSchemas(t, "t.json", oldBody, newBody)
 	if len(breaks) != 1 || breaks[0].Rule != "field renamed" {
 		t.Errorf("breaks = %v, want one rename", breaks)
@@ -218,8 +240,11 @@ func TestCompatRenameReportsOnce(t *testing.T) {
 }
 
 func TestCompatReportsNestedPaths(t *testing.T) {
-	newBody := `{"type":"object","properties":{"counts":{"type":"object","properties":{"ready":{"type":"integer"},"fast":{"type":"integer"}},"required":["ready","fast"]}}}`
-	oldBody := `{"type":"object","properties":{"counts":{"type":"object","properties":{"ready":{"type":"integer"}},"required":["ready"]}}}`
+	const (
+		newBody string = `{"type":"object","properties":{"counts":{"type":"object","properties":{"ready":{"type":"integer"},"fast":{"type":"integer"}},"required":["ready","fast"]}}}`
+		oldBody string = `{"type":"object","properties":{"counts":{"type":"object","properties":{"ready":{"type":"integer"}},"required":["ready"]}}}`
+	)
+
 	breaks := diffCompatSchemas(t, "queue.json", oldBody, newBody)
 	if len(breaks) != 1 || breaks[0].Path != "counts.fast" || breaks[0].Rule != "field added required" {
 		t.Fatalf("breaks = %v", breaks)
@@ -231,8 +256,11 @@ func TestCompatReportsNestedPaths(t *testing.T) {
 }
 
 func TestCompatRequiredFlipsFail(t *testing.T) {
-	newBody := `{"type":"object","properties":{"a":{"type":"string"}}}`
-	oldBody := `{"type":"object","properties":{"a":{"type":"string"}},"required":["a"]}`
+	const (
+		newBody string = `{"type":"object","properties":{"a":{"type":"string"}}}`
+		oldBody string = `{"type":"object","properties":{"a":{"type":"string"}},"required":["a"]}`
+	)
+
 	breaks := diffCompatSchemas(t, "t.json", oldBody, newBody)
 	if len(breaks) != 1 || breaks[0].Rule != "now optional" {
 		t.Errorf("required→optional breaks = %v", breaks)
@@ -246,8 +274,10 @@ func TestCompatRequiredFlipsFail(t *testing.T) {
 }
 
 func TestCompatTypeChangeFails(t *testing.T) {
-	newBody := `{"type":"object","properties":{"n":{"type":"string"}}}`
-	oldBody := `{"type":"object","properties":{"n":{"type":"integer"}}}`
+	const (
+		newBody string = `{"type":"object","properties":{"n":{"type":"string"}}}`
+		oldBody string = `{"type":"object","properties":{"n":{"type":"integer"}}}`
+	)
 
 	if breaks := diffCompatSchemas(t, "t.json", oldBody, newBody); len(breaks) != 1 || breaks[0].Rule != "type changed" || breaks[0].Path != "n" {
 		t.Errorf("breaks = %v", breaks)
@@ -255,8 +285,10 @@ func TestCompatTypeChangeFails(t *testing.T) {
 }
 
 func TestCompatUnknownKeywordFails(t *testing.T) {
-	newBody := `{"type":"object","properties":{},"customValidation":{"strict":true}}`
-	oldBody := `{"type":"object","properties":{}}`
+	const (
+		newBody string = `{"type":"object","properties":{},"customValidation":{"strict":true}}`
+		oldBody string = `{"type":"object","properties":{}}`
+	)
 
 	if breaks := diffCompatSchemas(t, "t.json", oldBody, newBody); len(breaks) != 1 || !strings.Contains(breaks[0].Rule, "customValidation") {
 		t.Errorf("breaks = %v", breaks)

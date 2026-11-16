@@ -348,7 +348,8 @@ func TestDeploySameDigestKeepsProcessAndUpdatesStatic(t *testing.T) {
 		}
 	})
 
-	appJSON := `{"name":"demo","host":"demo.localhost"}`
+	const appJSON string = `{"name":"demo","host":"demo.localhost"}`
+
 	first := writeTarGz(t, map[string]string{"app.json": appJSON, "main.wasm": "wasm-one", "static/index.html": "first"})
 	rec := deployArchive(t, s, "demo", first, "")
 	if rec.Code != http.StatusOK {

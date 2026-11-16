@@ -25,7 +25,9 @@ func TestConfigPatchResourceLimitsInUntrustedMode(t *testing.T) {
 	}
 	s.apps["demo"] = a
 	s.hosts["demo.localhost"] = a
-	patch := `{"cpu_millicores":250,"pids_max":32,"io_weight":25}`
+
+	const patch string = `{"cpu_millicores":250,"pids_max":32,"io_weight":25}`
+
 	req := httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(patch))
 
 	req.Header.Set("Authorization", "Bearer secret")

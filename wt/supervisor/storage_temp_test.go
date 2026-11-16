@@ -137,8 +137,11 @@ func TestStorageTempBudgetRejectsRequests(t *testing.T) {
 }
 
 func TestValidateStorageTempDir(t *testing.T) {
-	apps := "/var/lib/wt/apps"
-	state := "/var/lib/wt"
+	const (
+		apps string = "/var/lib/wt/apps"
+		state string = "/var/lib/wt"
+	)
+
 	cases := []struct {
 		tmp string
 		want bool

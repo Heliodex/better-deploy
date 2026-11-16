@@ -362,7 +362,8 @@ func TestCorrectArtifactEpoch(t *testing.T) {
 func TestEnsureArtifactUsesExistingCwasmWithoutCompiler(t *testing.T) {
 	dir := t.TempDir()
 	compiler := filepath.Join(dir, "wasmtime")
-	script := `#!/bin/sh
+
+	const script string = `#!/bin/sh
 case "$1" in
 --version)
   echo "wasmtime-cli 51.0.0"
@@ -377,7 +378,8 @@ esac
 		t.Fatal(err)
 	}
 
-	wasm := "wasm"
+	const wasm string = "wasm"
+
 	artifact := fmt.Sprintf(`{"wasmtime":"wasmtime-cli 51.0.0","target":"x86_64-test","epoch_interruption":true,"wasm_sha256":"%s","wasm_bytes":%d,"cpu":"baseline"}`, digestText(wasm), len(wasm))
 	bundle := writeBundleDir(t, wasm, "current", artifact)
 	epoch, err := artifactSupervisor(t, compiler).ensureArtifact(bundle, true)
@@ -516,7 +518,9 @@ func TestEnsureArtifactIgnoresLegacyArtifactWithoutDigest(t *testing.T) {
 func TestEnsureArtifactKeepsMatchingArtifact(t *testing.T) {
 	counter := filepath.Join(t.TempDir(), "compiles")
 	compiler := writeCompilerWithCounter(t, "wasmtime-cli 51.0.0", "rebuilt", counter, false)
-	wasm := "wasm"
+
+	const wasm string = "wasm"
+
 	artifact := fmt.Sprintf(`{"wasmtime":"wasmtime-cli 51.0.0","target":"x86_64-test","epoch_interruption":true,"wasm_sha256":"%s","wasm_bytes":%d,"cpu":"baseline"}`, digestText(wasm), len(wasm))
 	dir := writeBundleDir(t, wasm, "current", artifact)
 	epoch, err := artifactSupervisor(t, compiler).ensureArtifact(dir, true)
@@ -545,7 +549,9 @@ func TestEnsureArtifactKeepsMatchingArtifact(t *testing.T) {
 func TestEnsureArtifactMatchesReleaseWithBuildMetadata(t *testing.T) {
 	counter := filepath.Join(t.TempDir(), "compiles")
 	compiler := writeCompilerWithCounter(t, "wasmtime-cli 51.0.0", "rebuilt", counter, false)
-	wasm := "wasm"
+
+	const wasm string = "wasm"
+
 	artifact := fmt.Sprintf(`{"wasmtime":"wasmtime-cli 51.0.0 (abc123 2026-10-20)","target":"x86_64-test","epoch_interruption":true,"wasm_sha256":"%s","wasm_bytes":%d,"cpu":"baseline"}`, digestText(wasm), len(wasm))
 	dir := writeBundleDir(t, wasm, "current", artifact)
 

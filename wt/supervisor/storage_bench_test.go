@@ -157,7 +157,8 @@ func benchmarkStorageServer(b *testing.B) (*storageServer, string) {
 func BenchmarkStorageExecHTTP(b *testing.B) {
 	s, token := benchmarkStorageServer(b)
 	client := benchmarkHTTPClient()
-	body := `{"sql":"insert or replace into notes (id, body, created_at) values ('bench', 'value', '2026-01-01T00:00:00Z')"}`
+
+	const body string = `{"sql":"insert or replace into notes (id, body, created_at) values ('bench', 'value', '2026-01-01T00:00:00Z')"}`
 
 	b.ReportAllocs()
 	for b.Loop() {
@@ -168,7 +169,8 @@ func BenchmarkStorageExecHTTP(b *testing.B) {
 func BenchmarkStoragePointQueryHTTP(b *testing.B) {
 	s, token := benchmarkStorageServer(b)
 	client := benchmarkHTTPClient()
-	body := `{"sql":"select id, body, created_at from notes where id = ?","params":["id-00"]}`
+
+	const body string = `{"sql":"select id, body, created_at from notes where id = ?","params":["id-00"]}`
 
 	b.ReportAllocs()
 	for b.Loop() {
@@ -179,7 +181,8 @@ func BenchmarkStoragePointQueryHTTP(b *testing.B) {
 func BenchmarkStorageQueryHTTP(b *testing.B) {
 	s, token := benchmarkStorageServer(b)
 	client := benchmarkHTTPClient()
-	body := `{"sql":"` + benchmarkNotesQuery + `","max_rows":100}`
+
+	const body string = `{"sql":"` + benchmarkNotesQuery + `","max_rows":100}`
 
 	b.ReportAllocs()
 	for b.Loop() {

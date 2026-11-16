@@ -146,7 +146,7 @@ func TestAdoptAppFromRunner(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	config := `{"name":"demo","host":"demo.localhost","health":"/"}`
+	const config string = `{"name":"demo","host":"demo.localhost","health":"/"}`
 
 	if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(config), 0o644); err != nil {
 		t.Fatal(err)

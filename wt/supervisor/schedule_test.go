@@ -52,7 +52,8 @@ func TestReadAppConfigValidatesSchedule(t *testing.T) {
 
 		return dir
 	}
-	good := `{"schedule":[{"path":"/tick","every":"10s"},{"path":"/tick","every":"1m"},{"name":"prune","path":"/prune","every":"1h","timeout":"10m"}]}`
+
+	const good string = `{"schedule":[{"path":"/tick","every":"10s"},{"path":"/tick","every":"1m"},{"name":"prune","path":"/prune","every":"1h","timeout":"10m"}]}`
 
 	if _, err := readAppConfig(writeConfig(t, good), "demo", "localhost", tenantTrusted); err != nil {
 		t.Errorf("valid schedule rejected: %v", err)

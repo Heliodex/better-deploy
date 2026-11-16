@@ -15,7 +15,8 @@ func TestIdentitySignatureVector(t *testing.T) {
 func TestUserFromRequest(t *testing.T) {
 	t.Setenv(identitySecretEnv, "identity-secret")
 
-	groups := "admins,beta"
+	const groups string = "admins,beta"
+
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 
 	req.Header.Set(identityUserIDHeader, "usr_1")
