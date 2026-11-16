@@ -303,9 +303,9 @@ func (c *Client) QueryPage(ctx context.Context, query string, page Page, args ..
 	pageArgs = append(pageArgs, args...)
 	pageArgs = append(pageArgs, page.Limit, page.Offset)
 
-	rows, err := c.QueryOptions(ctx, "select * from ("+query+") limit ? offset ?", QueryOptions{
+	rows, err := c.QueryOptions(ctx, "select * from ("+query+") limit ? offset ?", QueryOptions{ //nolint:unqueryvet // The caller supplies the projected query.
 		MaxRows: page.Limit,
-	}, pageArgs...) //nolint:unqueryvet // The caller supplies the projected query.
+	}, pageArgs...)
 	if err != nil {
 		return nil, err
 	}
