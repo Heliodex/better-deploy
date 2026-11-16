@@ -211,10 +211,9 @@ func testIdentitySupervisor(t *testing.T) (*supervisor, *app, identityUserInfo) 
 }
 
 func TestIdentityAdminUsers(t *testing.T) {
-	s, _, _ := testIdentitySupervisor(t)
-
 	const body string = `{"email":"grace@example.com","name":"Grace","password":"a long password","groups":["beta"]}`
 
+	s, _, _ := testIdentitySupervisor(t)
 	req := httptest.NewRequest(http.MethodPost, "/identity/users", strings.NewReader(body))
 
 	req.Header.Set("Authorization", "Bearer secret")

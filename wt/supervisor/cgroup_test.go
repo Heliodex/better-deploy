@@ -93,6 +93,7 @@ func TestCgroupManagerEnablesParentControllers(t *testing.T) {
 	if err := os.MkdirAll(child, 0o755); err != nil {
 		t.Fatal(err)
 	}
+
 	// A real hierarchy repopulates child/cgroup.controllers after the parent enables a controller.
 	// Pointing the fake child file at the parent's subtree file models that transition.
 	if err := os.Symlink(filepath.Join(parent, "cgroup.subtree_control"), filepath.Join(child, "cgroup.controllers")); err != nil {
@@ -225,6 +226,7 @@ func TestCgroupManagerWritesLimitsAndCleansUp(t *testing.T) {
 	if got := readTestFile(t, filepath.Join(path, "cgroup.procs")); got != "4242" {
 		t.Errorf("cgroup.procs = %q, want 4242", got)
 	}
+
 	// A symlink models cgroup.kill: remove writes 1 into it, then deletes the cgroup directory.
 	killTarget := filepath.Join(root, "kill-result")
 

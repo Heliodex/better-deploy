@@ -8,6 +8,8 @@ import (
 )
 
 func TestAppDiskUsageAndQuota(t *testing.T) {
+	const want int64 = int64(2 * 600 << 10)
+
 	s := testSupervisor()
 	s.cfg.stateDir = t.TempDir()
 	a := &app{
@@ -43,8 +45,6 @@ func TestAppDiskUsageAndQuota(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	const want int64 = int64(2 * 600 << 10)
 
 	if bytes != want {
 		t.Errorf("app data bytes = %d, want %d (changes.log must be excluded)", bytes, want)

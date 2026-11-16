@@ -40,6 +40,7 @@ func (s *supervisor) loginKey(r *http.Request) string {
 // setSessionCookie writes an HttpOnly, SameSite=Lax session cookie with the forwarded scheme.
 func (s *supervisor) setSessionCookie(w http.ResponseWriter, r *http.Request, name, value string, maxAge int) {
 	secure := s.forwardedInfo(r).Proto == "https"
+
 	//nolint:gosec // Secure follows the forwarded request scheme.
 	http.SetCookie(w, &http.Cookie{
 		Name: name,

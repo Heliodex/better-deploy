@@ -191,6 +191,7 @@ func (c *Client) RebuildTable(ctx context.Context, rebuild TableRebuild) error {
 			SQL: statement,
 		})
 	}
+
 	// Transaction splits large calls into separate commits, which would expose a half-swapped table.
 	if len(statements) > MaxTransactionStatements {
 		return fmt.Errorf("storage: RebuildTable has %d statements, more than the %d one transaction allows", len(statements), MaxTransactionStatements)

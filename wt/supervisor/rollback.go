@@ -297,6 +297,7 @@ func (p *rollbackPlan) installDatabase(w http.ResponseWriter) bool {
 	}
 
 	s := p.s
+
 	// Block sessions and database viewers (and any other storage user) while the file is swapped.
 	s.storage.pauseSessions()
 	s.storage.closeSessionsForPaused(p.journal.Name)

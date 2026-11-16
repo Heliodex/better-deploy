@@ -310,6 +310,7 @@ func TestDeploymentHistoryPrunesUnreferencedBlobs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	// One shared wasm blob plus one cwasm per retained bundle.
 	if len(blobs) != deploymentKeep+1 {
 		t.Errorf("blob count = %d, want %d", len(blobs), deploymentKeep+1)
@@ -495,10 +496,10 @@ func writeStaticFile(t *testing.T, source, rel, body string) {
 }
 
 func TestDeploymentHistoryChangedStaticGetsNewBlob(t *testing.T) {
+	const rel string = "_app/immutable/app.js"
+
 	manager := newDeploymentManager(t.TempDir())
 	source := writeDeploymentSource(t, "demo.localhost")
-
-	const rel string = "_app/immutable/app.js"
 
 	writeStaticFile(t, source, rel, "one")
 
@@ -521,6 +522,7 @@ func TestDeploymentHistoryChangedStaticGetsNewBlob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	// One shared cwasm plus one blob per static version.
 	if len(blobs) != 3 {
 		t.Errorf("blob count = %d, want 3", len(blobs))
@@ -552,6 +554,8 @@ func TestDeploymentHistoryChangedStaticGetsNewBlob(t *testing.T) {
 }
 
 func TestDeploymentHistoryPrunesStaticBlobs(t *testing.T) {
+	const rel string = "_app/immutable/app.js"
+
 	manager := newDeploymentManager(t.TempDir())
 	source := writeDeploymentSource(t, "demo.localhost")
 
@@ -566,8 +570,6 @@ func TestDeploymentHistoryPrunesStaticBlobs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	const rel string = "_app/immutable/app.js"
 
 	blob := filepath.Join(manager.blobDir("demo"), first.Static[rel])
 
@@ -611,6 +613,8 @@ func TestDeploymentHistoryPrunesStaticBlobs(t *testing.T) {
 }
 
 func TestDeploymentHistorySharesStatic(t *testing.T) {
+	const rel string = "_app/immutable/app.js"
+
 	manager := newDeploymentManager(t.TempDir())
 	source := writeDeploymentSource(t, "demo.localhost")
 	body := bytes.Repeat([]byte("s"), 8<<10)
@@ -621,8 +625,6 @@ func TestDeploymentHistorySharesStatic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	const rel string = "_app/immutable/app.js"
 
 	if first.Static[rel] == "" {
 		t.Fatalf("static metadata = %v, want the file digest", first.Static)

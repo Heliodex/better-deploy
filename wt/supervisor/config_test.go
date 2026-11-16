@@ -91,9 +91,12 @@ func TestAppConfigConditionalRequests(t *testing.T) {
 }
 
 func TestAppConfigGetAndPatch(t *testing.T) {
-	dir := t.TempDir()
+	const (
+		original string = `{"name":"demo","host":"demo.localhost","health":"/","env":{"A":"1","SECRET":"x"},"build":"make app","memory_mb":128,"server_pages":["/"]}`
+		patch string = `{"host":"new.localhost","health":"/ready","env":{"A":"2","SECRET":null,"NEW":"3"},"memory_mb":256,"disk_mb":512,"idle_timeout":"15m","schedule":[],"server_pages":["/","/login"]}`
+	)
 
-	const original string = `{"name":"demo","host":"demo.localhost","health":"/","env":{"A":"1","SECRET":"x"},"build":"make app","memory_mb":128,"server_pages":["/"]}`
+	dir := t.TempDir()
 
 	if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(original), 0o644); err != nil {
 		t.Fatal(err)
@@ -134,8 +137,6 @@ func TestAppConfigGetAndPatch(t *testing.T) {
 	if got.Host != "demo.localhost" || got.MemoryMB != 128 || len(got.EnvKeys) != 2 || len(got.ServerPages) != 1 || got.ServerPages[0] != "/" {
 		t.Errorf("GET config = %+v", got)
 	}
-
-	const patch string = `{"host":"new.localhost","health":"/ready","env":{"A":"2","SECRET":null,"NEW":"3"},"memory_mb":256,"disk_mb":512,"idle_timeout":"15m","schedule":[],"server_pages":["/","/login"]}`
 
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(patch))
@@ -360,6 +361,8 @@ func TestAppConfigPatchesCallersAndEgress(t *testing.T) {
 }
 
 func TestAppConfigPatchesHealthSettings(t *testing.T) {
+	const patch string = `{"startup_timeout":"30s","health_interval":"5s","health_failures":3,"restart_on_unhealthy":true}`
+
 	dir := t.TempDir()
 	cfg := appConfig{
 		Name: "demo",
@@ -384,9 +387,6 @@ func TestAppConfigPatchesHealthSettings(t *testing.T) {
 	}
 	s.apps["demo"] = a
 	s.hosts[cfg.Host] = a
-
-	const patch string = `{"startup_timeout":"30s","health_interval":"5s","health_failures":3,"restart_on_unhealthy":true}`
-
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(patch))
 
@@ -416,6 +416,8 @@ func TestAppConfigPatchesHealthSettings(t *testing.T) {
 }
 
 func TestAppConfigRejectsIdleTimeoutWithSchedule(t *testing.T) {
+	const patch string = `{"idle_timeout":"5m","schedule":[{"path":"/tick","every":"1m"}]}`
+
 	dir := t.TempDir()
 	cfg := appConfig{
 		Name: "demo",
@@ -440,9 +442,6 @@ func TestAppConfigRejectsIdleTimeoutWithSchedule(t *testing.T) {
 	}
 	s.apps["demo"] = a
 	s.hosts[cfg.Host] = a
-
-	const patch string = `{"idle_timeout":"5m","schedule":[{"path":"/tick","every":"1m"}]}`
-
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPatch, "/apps/demo/config", strings.NewReader(patch))
 

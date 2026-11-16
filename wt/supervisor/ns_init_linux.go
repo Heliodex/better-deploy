@@ -122,11 +122,13 @@ func clearCaps() error {
 	if errno == 0 {
 		return nil
 	}
+
 	// AllThreadsSyscall returns ENOTSUP in cgo binaries.
 	// The goroutine is locked to its thread, so clearing that thread is enough for the child to inherit no capabilities.
 	if err := unix.Capset(&header, &empty[0]); err == nil {
 		return nil
 	}
+
 	// setuid to a non-zero uid may already have cleared the sets.
 	// Verify before treating an EPERM from capset as a setup failure.
 	var current [2]unix.CapUserData

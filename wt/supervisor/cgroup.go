@@ -134,6 +134,7 @@ func enableControllersAt(dir string, required []string) error {
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("read %s: %w", subtreePath, err)
 	}
+
 	// cgroup.subtree_control reads back bare names ("cpu memory") but only accepts "+name"/"-name" writes.
 	enabled := map[string]bool{}
 	tokens := make([]string, 0, len(required))

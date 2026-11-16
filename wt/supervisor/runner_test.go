@@ -138,6 +138,8 @@ func waitRunnerEvent(t *testing.T, stream *runnerStream, op string) runnerEvent 
 }
 
 func TestAdoptAppFromRunner(t *testing.T) {
+	const config string = `{"name":"demo","host":"demo.localhost","health":"/"}`
+
 	client, _, socket := startTestRunner(t)
 	appsDir := t.TempDir()
 	dir := filepath.Join(appsDir, "demo")
@@ -145,8 +147,6 @@ func TestAdoptAppFromRunner(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-
-	const config string = `{"name":"demo","host":"demo.localhost","health":"/"}`
 
 	if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(config), 0o644); err != nil {
 		t.Fatal(err)

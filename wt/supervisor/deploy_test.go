@@ -331,6 +331,8 @@ func TestDeployFailureIsRecorded(t *testing.T) {
 }
 
 func TestDeploySameDigestKeepsProcessAndUpdatesStatic(t *testing.T) {
+	const appJSON string = `{"name":"demo","host":"demo.localhost"}`
+
 	s := newLifecycleSupervisor(t)
 	s.cfg.domain = "localhost"
 	s.cfg.wasmtime = os.Args[0]
@@ -347,8 +349,6 @@ func TestDeploySameDigestKeepsProcessAndUpdatesStatic(t *testing.T) {
 			s.stop(a)
 		}
 	})
-
-	const appJSON string = `{"name":"demo","host":"demo.localhost"}`
 
 	first := writeTarGz(t, map[string]string{"app.json": appJSON, "main.wasm": "wasm-one", "static/index.html": "first"})
 	rec := deployArchive(t, s, "demo", first, "")

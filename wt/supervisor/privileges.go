@@ -30,6 +30,7 @@ func dropPrivileges() {
 			log.Fatalf("drop privileges: chown %s: %v", dir, err)
 		}
 	}
+
 	// TMPDIR is the volume root in the image, so it must be writable by the app user too.
 
 	if parent := filepath.Dir(stateDir); parent != "." && parent != "/" {

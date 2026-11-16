@@ -469,6 +469,7 @@ func (m *deploymentManager) prune(app string) error {
 	if err != nil {
 		return err
 	}
+
 	// Never prune a deployment that is still queued or running; its status and log are live.
 	removeOldest := func() (bool, error) {
 		for i, id := range ids {

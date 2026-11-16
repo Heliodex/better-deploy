@@ -89,6 +89,7 @@ func TestStorageAuthoriserPolicy(t *testing.T) {
 			t.Errorf("read action %d = %d, want allow", action, got)
 		}
 	}
+
 	// A table-valued pragma function is allowed, but a real writable PRAGMA statement is not, even after a pragma_ read.
 	if got := read(sqlite.AuthRead, "pragma_table_info", "", "", ""); got != sqlite.AuthorizerOK {
 		t.Errorf("pragma_table_info read = %d, want allow", got)

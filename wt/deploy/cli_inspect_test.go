@@ -11,9 +11,9 @@ import (
 )
 
 func TestCompareManifest(t *testing.T) {
-	dir := t.TempDir()
-
 	const manifest string = `{"name":"demo","host":"old.example.com","memory_mb":128,"idle_timeout":"15m","server_paths":["/auth"],"server_pages":["/"],"env":{"A":"one"}}`
+
+	dir := t.TempDir()
 
 	if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(manifest), privateFileMode); err != nil {
 		t.Fatal(err)

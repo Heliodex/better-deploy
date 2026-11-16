@@ -145,10 +145,9 @@ func routeClientEntries() []routeClientEntry {
 }
 
 func TestGeneratedRouteClient(t *testing.T) {
-	want := renderRouteClient(routeClientEntries())
-
 	const path = "web/src/lib/routes.gen.ts"
 
+	want := renderRouteClient(routeClientEntries())
 	got, err := os.ReadFile(path)
 
 	if *updateRouteClient {

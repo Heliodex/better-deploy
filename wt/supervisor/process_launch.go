@@ -69,6 +69,7 @@ func appServeArgs(target string, cfg appConfig, epoch bool) []string {
 		if timeout <= 0 {
 			timeout = epochIdleTimeout
 		}
+
 		// wasmtime parses whole seconds or milliseconds, not Go's "1h0m0s" form.
 		args = append(args, "-W", "timeout="+strconv.FormatInt(timeout.Milliseconds(), 10)+"ms")
 	}

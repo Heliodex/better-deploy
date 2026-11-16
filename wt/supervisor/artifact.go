@@ -292,6 +292,7 @@ func (s *supervisor) keepExistingArtifact(dir, cwasm string, recorded artifactIn
 	if _, statErr := os.Stat(cwasm); statErr != nil {
 		return false, fmt.Errorf("compile main.wasm: %w", compileErr)
 	}
+
 	// A runtime-only wasmtime cannot compile. Keep a precompiled artifact so upgrades still work when nothing changed.
 	if recordErr == nil && recorded.WasmSHA256 != "" && recorded.WasmSHA256 != current.WasmSHA256 {
 		return false, fmt.Errorf("main.cwasm is for wasm %s, not %s: %w", recorded.WasmSHA256, current.WasmSHA256, compileErr)
@@ -306,6 +307,7 @@ func (s *supervisor) keepExistingArtifact(dir, cwasm string, recorded artifactIn
 	if recordErr == nil && artifactMatches(recorded, current) {
 		return recorded.Epoch, nil
 	}
+
 	// The cwasm was kept, so launch with the epoch flag it was compiled with even when the cache key differs only by a runtime version suffix.
 	if recordErr == nil {
 		return recorded.Epoch, nil
@@ -316,16 +318,15 @@ func (s *supervisor) keepExistingArtifact(dir, cwasm string, recorded artifactIn
 
 // pruneArtifactCache removes the oldest entries until the cache fits its byte cap, never removing the entry just stored.
 func (s *supervisor) pruneArtifactCache(keep string) {
-	dir := filepath.Join(s.artifactCacheDir(), "cwasm")
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
-
 	type cacheEntry struct {
 		path string
 		size int64
 		mod time.Time
+	}
+	dir := filepath.Join(s.artifactCacheDir(), "cwasm")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
 	}
 
 	var (

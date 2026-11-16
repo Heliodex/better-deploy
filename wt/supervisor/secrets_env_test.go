@@ -90,14 +90,14 @@ func TestAppArgsResolvesSecretReferencesWithoutValuesInArgv(t *testing.T) {
 }
 
 func TestDeploymentHistoryKeepsSecretReferences(t *testing.T) {
+	const appJSON string = `{"name":"demo","host":"demo.localhost","env":{"API_KEY":"secret://API_KEY"}}`
+
 	manager := newDeploymentManager(t.TempDir())
 	source := t.TempDir()
 
 	if err := os.WriteFile(filepath.Join(source, "main.cwasm"), []byte("cwasm"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-
-	const appJSON string = `{"name":"demo","host":"demo.localhost","env":{"API_KEY":"secret://API_KEY"}}`
 
 	if err := os.WriteFile(filepath.Join(source, "app.json"), []byte(appJSON), 0o644); err != nil {
 		t.Fatal(err)

@@ -65,6 +65,7 @@ func (m *backupManager) recordImportedSnapshot(app, name string, now time.Time, 
 
 		return backupInfo{}, err
 	}
+
 	// Keep the imported snapshot even when the app's keep limit is already full; the next snapshot or settings change prunes it.
 	info := backupInfo{
 		Name: name,

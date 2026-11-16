@@ -528,6 +528,7 @@ func (s *supervisor) stageDeploy(w http.ResponseWriter, r *http.Request, name st
 		cfg: cfg,
 		cleanup: cleanup,
 	}
+
 	// A bundle without a component keeps the running one, which makes a frontend-only deploy cheap.
 	if !exists(dir, "main.wasm") {
 		a := s.lookup(name)

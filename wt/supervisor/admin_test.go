@@ -167,6 +167,7 @@ func TestAppLogStampsCompleteLines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	// Output arrives in arbitrary chunks: "hel" + "lo\nwor" + "ld\n".
 	for _, chunk := range []string{"hel", "lo\nwor", "ld\n"} {
 		if _, err := io.WriteString(logs, chunk); err != nil {

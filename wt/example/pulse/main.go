@@ -288,6 +288,7 @@ func probe(ctx context.Context, target string) check {
 	}
 
 	defer resp.Body.Close()
+
 	// Drain a bounded amount so the adapter can reuse the connection without buffering a whole page.
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
 	entry.Status = resp.StatusCode

@@ -113,6 +113,7 @@ func seccompFilter(arch uint32, denied []uintptr) []unix.SockFilter {
 			K: seccompRetErrno | uint32(unix.EPERM),
 		})
 	}
+
 	// Deny prctl(PR_SET_SECCOMP) and prctl(PR_SET_MM); a non-prctl syscall skips all five following instructions.
 	filter = append(filter, unix.SockFilter{
 		Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K,

@@ -142,6 +142,7 @@ func applyMigration(ctx context.Context, conn *sql.Conn, version int, statements
 			return false, fmt.Errorf("statement %d: %w", i+1, err)
 		}
 	}
+
 	// The version bump and checksum are host bookkeeping, not app SQL, so they run without the app authoriser.
 	if err := unregister(); err != nil {
 		return false, err

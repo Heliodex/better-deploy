@@ -179,6 +179,7 @@ func (s *identityStore) newSession(userID string) (string, *identitySession, err
 	s.mu.Lock()
 
 	defer s.mu.Unlock()
+
 	// Keep the store bounded by dropping expired sessions whenever a new one is created.
 	if len(s.sessions) >= identityMaxSessions {
 		for hash, existing := range s.sessions {

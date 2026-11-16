@@ -306,6 +306,7 @@ func (c *Client) QueryPage(ctx context.Context, query string, page Page, args ..
 	}
 
 	rows.page = page
+
 	// A full offset page may have more rows behind it; an exactly-full final page simply yields one empty follow-up page.
 	if len(rows.rows) >= page.Limit {
 		rows.Truncated = true

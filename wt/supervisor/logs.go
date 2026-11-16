@@ -340,6 +340,7 @@ func (l *appLog) Write(p []byte) (int, error) {
 			return 0, err
 		}
 	}
+
 	// A writer that never emits a newline must not grow the buffer without bound.
 	if len(l.pending) > maxLogBytes {
 		l.pending = append([]byte{}, l.pending[len(l.pending)-maxLogBytes:]...)

@@ -215,6 +215,7 @@ func (a *blobApp) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 		app.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	// The row is gone; a failed blob delete leaves an orphan for the admin GC, not a broken reference.
 	if err := app.DeleteBlob(r.Context(), a.client, digest); err != nil {
 		app.Errorf("blob delete %s: %v", digest, err)

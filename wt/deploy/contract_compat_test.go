@@ -124,13 +124,14 @@ func TestCompatAddedRequiredFails(t *testing.T) {
 }
 
 func TestCompatCompositionKeywordChangeFails(t *testing.T) {
-	const body string = `{"type":"object","properties":{"v":{"anyOf":[{"type":"string"},{"type":"integer"}]}}}`
+	const (
+		body string = `{"type":"object","properties":{"v":{"anyOf":[{"type":"string"},{"type":"integer"}]}}}`
+		changed string = `{"type":"object","properties":{"v":{"anyOf":[{"type":"string"},{"type":"boolean"}]}}}`
+	)
 
 	if breaks := diffCompatSchemas(t, "t.json", body, body); len(breaks) != 0 {
 		t.Errorf("unchanged composition breaks = %v", breaks)
 	}
-
-	const changed string = `{"type":"object","properties":{"v":{"anyOf":[{"type":"string"},{"type":"boolean"}]}}}`
 
 	breaks := diffCompatSchemas(t, "t.json", body, changed)
 	if len(breaks) != 1 || !strings.Contains(breaks[0].Rule, "anyOf") {

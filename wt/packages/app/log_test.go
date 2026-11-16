@@ -37,26 +37,25 @@ func TestLogfPrefixesEveryLevel(t *testing.T) {
 }
 
 func TestLogfSplitsLines(t *testing.T) {
+	const want string = "WARN first\nWARN second\n"
+
 	buffer := captureLogs(t)
 
 	Warnf("first\nsecond\n")
-
-	const want string = "WARN first\nWARN second\n"
-
 	if got := buffer.String(); got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
 
 func TestWriterPrefixesLines(t *testing.T) {
+	const want string = "INFO one\nINFO two\n"
+
 	buffer := captureLogs(t)
 	writer := Writer(LevelInfo)
 
 	if _, err := io.WriteString(writer, "one\ntwo\n"); err != nil {
 		t.Fatal(err)
 	}
-
-	const want string = "INFO one\nINFO two\n"
 
 	if got := buffer.String(); got != want {
 		t.Errorf("got %q, want %q", got, want)

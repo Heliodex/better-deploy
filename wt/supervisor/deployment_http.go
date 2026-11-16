@@ -63,6 +63,7 @@ func (s *supervisor) handleDeployments(w http.ResponseWriter, _ *http.Request, n
 
 		a.mu.Unlock()
 	}
+
 	// list is newest first, so the first successful record matching the running digest is the current one.
 	for i := range list {
 		if list[i].Status != "" && list[i].Status != deploymentStatusOK {
@@ -122,6 +123,7 @@ func (s *supervisor) handleRollback(w http.ResponseWriter, r *http.Request, name
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
+
 	// ?backup=<snapshot> swaps code, database and /data as one operation, with compensation on failure.
 	if backup := r.URL.Query().Get("backup"); backup != "" {
 		if s.backups == nil {

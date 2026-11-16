@@ -454,6 +454,7 @@ func (m *backupManager) restore(ctx context.Context, app, name string) error {
 			Kind: backupKindLegacy,
 		}
 	}
+
 	// Later snapshots continue from the restored node, which is what makes the next backup a new branch.
 	tree.Current = name
 

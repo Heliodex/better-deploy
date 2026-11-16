@@ -158,6 +158,7 @@ func (s *supervisor) newProxy(a *app) *httputil.ReverseProxy {
 			info := s.forwardedInfo(r.In)
 
 			r.SetURL(target)
+
 			// Replace the whole inbound chain, so a client cannot prepend a spoofed address. When a trusted proxy supplied X-Forwarded-For, the first entry is the resolved client and the last is the immediate proxy.
 			chain := info.ClientIP
 

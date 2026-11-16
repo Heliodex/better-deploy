@@ -106,6 +106,7 @@ func bundle(dir string, m manifest, includeComponent bool) ([]byte, error) {
 		if err := writeTarFile(tw, "main.wasm", wasm); err != nil {
 			return nil, err
 		}
+
 		// main.cwasm is only a precompiled hint; the supervisor can compile from main.wasm or reuse its cache.
 		for _, name := range []string{"main.cwasm", artifactName} {
 			extra, err := os.ReadFile(filepath.Join(dir, name))
@@ -122,6 +123,7 @@ func bundle(dir string, m manifest, includeComponent bool) ([]byte, error) {
 			}
 		}
 	}
+
 	// Static files are served by the supervisor, so a frontend change does not need to be inside the component.
 	static := filepath.Join(dir, "static")
 

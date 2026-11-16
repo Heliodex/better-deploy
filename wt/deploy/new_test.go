@@ -59,6 +59,7 @@ func TestNewMatchesTemplate(t *testing.T) {
 
 				return nil
 			}
+
 			// Generated output that bun install and svelte-kit sync leave behind.
 			if name == ".svelte-kit" || strings.HasPrefix(name, ".svelte-kit/") || name == "build" || strings.HasPrefix(name, "build/") {
 				if entry.IsDir() {

@@ -98,6 +98,7 @@ func (q *dataQuota) apply(uid int, bytes, entries int64) error {
 	if bytes < 0 || entries < 0 {
 		return errors.New("data quota limits must not be negative")
 	}
+
 	// setquota counts blocks in 1 KiB units. disk_mb is a whole number of MiB, so this is exact.
 	return q.set(uid, bytes>>10, entries)
 }

@@ -318,6 +318,7 @@ func (s *jobStore) load() error {
 		if job.ID == "" || job.Path == "" || !validJobStatus(job.Status) {
 			continue
 		}
+
 		// A supervisor restart means no worker owns a running lease. Run it again instead of waiting for the lease.
 		if job.Status == jobStatusRunning {
 			job.Status = jobStatusPending

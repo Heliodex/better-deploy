@@ -104,6 +104,7 @@ func ServeStorage(storeErr error, migrate func(context.Context) error, next http
 		if ready {
 			return nil
 		}
+
 		// A probe or migrate request may disconnect while the schema change is running.
 		// Keep the context values but not its cancellation, and let the storage service enforce its own migration timeout.
 		if err := migrate(context.WithoutCancel(ctx)); err != nil {
@@ -140,6 +141,7 @@ func ServeStorage(storeErr error, migrate func(context.Context) error, next http
 			http.Error(w, "storage schema: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
+
 		// The supervisor readiness probe answers after migrations have run, so it never reports ready against an unmigrated store.
 		if r.URL.Path == HealthPath && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
 			w.WriteHeader(http.StatusNoContent)
