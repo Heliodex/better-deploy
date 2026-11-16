@@ -249,11 +249,14 @@ func runApp(plan *nsPlan, args []string) int {
 // setupNamespace builds the new root and pivots into it.
 // All mounts happen in the helper's private mount namespace, so the host never sees them.
 func setupNamespace(plan *nsPlan) error {
+	const (
+		rootFlags uintptr = unix.MS_NOSUID | unix.MS_NODEV
+		tmpFlags uintptr = unix.MS_NOSUID | unix.MS_NODEV | unix.MS_NOEXEC
+	)
+
 	if err := unix.Mount("", "/", "", unix.MS_REC|unix.MS_PRIVATE, ""); err != nil {
 		return fmt.Errorf("make mounts private: %w", err)
 	}
-
-	rootFlags := uintptr(unix.MS_NOSUID | unix.MS_NODEV)
 
 	if err := unix.Mount("tmpfs", plan.Root, "tmpfs", rootFlags, fmt.Sprintf("size=%dm,mode=0755", plan.TmpfsMB)); err != nil {
 		return fmt.Errorf("mount root tmpfs: %w", err)
@@ -292,8 +295,6 @@ func setupNamespace(plan *nsPlan) error {
 	if err := unix.Mount("proc", insideRoot(plan.Root, "/proc"), "proc", unix.MS_NOSUID|unix.MS_NODEV|unix.MS_NOEXEC, ""); err != nil {
 		return fmt.Errorf("mount /proc: %w", err)
 	}
-
-	tmpFlags := uintptr(unix.MS_NOSUID | unix.MS_NODEV | unix.MS_NOEXEC)
 
 	if err := unix.Mount("tmpfs", insideRoot(plan.Root, "/tmp"), "tmpfs", tmpFlags, fmt.Sprintf("size=%dm,mode=1777", defaultTmpfsDir)); err != nil {
 		return fmt.Errorf("mount /tmp: %w", err)

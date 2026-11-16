@@ -525,7 +525,6 @@ func TestViteDevProxy(t *testing.T) {
 	}
 
 	response, err = client.Get(base + "/v1/events?topic=checks")
-
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -543,7 +542,6 @@ func TestViteDevProxy(t *testing.T) {
 	}
 
 	response, err = client.Get(base + "/_wt/blobs/test")
-
 	if err != nil {
 		t.Fatal(err)
 	}

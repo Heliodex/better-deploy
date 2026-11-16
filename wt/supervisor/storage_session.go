@@ -560,7 +560,6 @@ func (s *storageServer) sessionQuery(w http.ResponseWriter, r *http.Request, app
 		defer rows.Close()
 
 		result.Columns, result.Rows, result.Truncated, err = readStorageRows(rows, maxRows)
-
 		if err != nil {
 			session.collector.rows = session.collector.rows[:start]
 

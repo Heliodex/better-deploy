@@ -402,7 +402,6 @@ func TestMain(m *testing.M) {
 		err = http.Serve(listener, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusNoContent)
 		}))
-
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)

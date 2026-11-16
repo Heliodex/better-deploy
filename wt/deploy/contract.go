@@ -115,7 +115,6 @@ func runClientEmitter(webDir, outPath string, quiet bool) error {
 	}
 
 	outPath, err = filepath.Abs(outPath)
-
 	if err != nil {
 		return err
 	}
@@ -294,7 +293,6 @@ func generateContractTo(dir, web, appName, outDir string, quiet bool) error {
 		outDir = filepath.Join(dir, "contract")
 	} else {
 		outDir, err = filepath.Abs(outDir)
-
 		if err != nil {
 			return err
 		}

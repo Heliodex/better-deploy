@@ -18,6 +18,7 @@ type (
 
 	authTokenCreateResponse struct {
 		authTokenInfo
+
 		Token string `json:"token"`
 	}
 

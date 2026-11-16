@@ -199,10 +199,10 @@ func archiveData(src, dst string) error {
 
 	gz := gzip.NewWriter(file)
 	tw := tar.NewWriter(gz)
+
 	err = filepath.WalkDir(src, func(path string, entry fs.DirEntry, err error) error {
 		return addDataEntry(tw, src, path, entry, err)
 	})
-
 	if err == nil {
 		err = tw.Close()
 	}

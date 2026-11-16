@@ -105,7 +105,6 @@ func resolveViteDev(appDir string, m manifest, host string) (*viteDev, bool, err
 	port := dev.Port
 	if port == 0 {
 		port, err = freeLocalPort()
-
 		if err != nil {
 			return nil, false, fmt.Errorf("find vite port: %w", err)
 		}

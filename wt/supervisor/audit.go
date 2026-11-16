@@ -46,6 +46,7 @@ type (
 	// auditWriter captures the status and a bounded error body for the audit entry without changing the response.
 	auditWriter struct {
 		http.ResponseWriter
+
 		status int
 		body bytes.Buffer
 	}

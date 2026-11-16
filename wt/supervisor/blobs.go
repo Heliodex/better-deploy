@@ -36,6 +36,7 @@ type (
 
 	blobUploadResponse struct {
 		blobInfo
+
 		URL string `json:"url"`
 	}
 )

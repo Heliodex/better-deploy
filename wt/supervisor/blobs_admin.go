@@ -99,7 +99,6 @@ func (s *supervisor) handleAppBlobGC(w http.ResponseWriter, r *http.Request, nam
 		}
 	} else {
 		deleted, err = s.blobs.gc(name, cutoff, keep)
-
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return

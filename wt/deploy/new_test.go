@@ -35,6 +35,7 @@ func TestNewMatchesTemplate(t *testing.T) {
 	}
 
 	onDisk := map[string]bool{}
+
 	err = filepath.WalkDir("testdata/template", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -79,7 +80,6 @@ func TestNewMatchesTemplate(t *testing.T) {
 
 		return nil
 	})
-
 	if err != nil {
 		t.Fatal(err)
 	}

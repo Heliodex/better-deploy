@@ -117,7 +117,7 @@ var (
 
 // backupCheckDelay returns the next due check interval with up to a fifth of the interval of jitter in either direction.
 func backupCheckDelay(draw func(int64) int64) time.Duration {
-	span := int64(backupCheckJitter)*2 + 1
+	const span int64 = int64(backupCheckJitter)*2 + 1
 
 	return backupCheckInterval - backupCheckJitter + time.Duration(draw(span))
 }

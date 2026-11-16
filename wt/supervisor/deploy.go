@@ -22,6 +22,7 @@ import (
 type (
 	deployRecorder struct {
 		http.ResponseWriter
+
 		status int
 		body bytes.Buffer
 	}
@@ -469,7 +470,6 @@ func (s *supervisor) receiveBundle(w http.ResponseWriter, r *http.Request, name 
 	}
 
 	dir, err = os.MkdirTemp(s.cfg.appsDir, "."+name+".upload-")
-
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "create upload directory")
 		return "", appConfig{}, cleanup, false
@@ -486,7 +486,6 @@ func (s *supervisor) receiveBundle(w http.ResponseWriter, r *http.Request, name 
 	}
 
 	cfg, err = readAppConfig(dir, name, s.cfg.domain, s.cfg.tenantMode)
-
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return "", appConfig{}, cleanup, false

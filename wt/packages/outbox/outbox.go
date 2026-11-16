@@ -36,6 +36,7 @@ type (
 	// Delivery is one signed attempt handed to a Sender.
 	Delivery struct {
 		Message
+
 		Attempt int
 		Timestamp, Signature string
 	}

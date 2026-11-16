@@ -37,6 +37,7 @@ type (
 	// TestServer is an in-memory storage service for handler tests. It speaks the same HTTP wire format as the supervisor's storage service, backed by SQLite, and is excluded from wasm builds.
 	TestServer struct {
 		*httptest.Server
+
 		Token string
 		// Now is the clock for key-value TTLs; nil uses time.Now. Set it before the first request to test expiry.
 		Now func() time.Time

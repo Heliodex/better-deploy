@@ -417,6 +417,8 @@ func validateIsolationConfig(cfg config) error {
 // validateStorageTempDir keeps the SQLite temp directory from being the state or apps root, or a parent of either.
 // The temp directory is cleaned of SQLite's etilqs_ files at startup and its size is counted, so pointing it at a shared or broad directory would be misleading.
 func validateStorageTempDir(tmp, state, apps string) error {
+	const separator string = string(filepath.Separator)
+
 	tmp = filepath.Clean(tmp)
 	state = filepath.Clean(state)
 	apps = filepath.Clean(apps)
@@ -429,7 +431,7 @@ func validateStorageTempDir(tmp, state, apps string) error {
 		return fmt.Errorf("storage temp dir %s must be a dedicated directory, not the state or apps directory", tmp)
 	}
 
-	if separator := string(filepath.Separator); strings.HasPrefix(state, tmp+separator) || strings.HasPrefix(apps, tmp+separator) {
+	if strings.HasPrefix(state, tmp+separator) || strings.HasPrefix(apps, tmp+separator) {
 		return fmt.Errorf("storage temp dir %s must not be a parent of the state or apps directory", tmp)
 	}
 

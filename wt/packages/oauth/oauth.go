@@ -68,6 +68,7 @@ type (
 	// cancelOnClose releases the request deadline when the body is closed.
 	cancelOnClose struct {
 		io.ReadCloser
+
 		cancel context.CancelFunc
 	}
 

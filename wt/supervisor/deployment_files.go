@@ -213,7 +213,6 @@ func (m *deploymentManager) storeStatic(app, source, dst string) (map[string]str
 
 		return nil
 	})
-
 	if err != nil {
 		return nil, 0, err
 	}

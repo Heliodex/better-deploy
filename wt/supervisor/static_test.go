@@ -236,7 +236,6 @@ func TestServeAppRoutesServerPageToComponent(t *testing.T) {
 	}
 
 	a.port, err = strconv.Atoi(parsed.Port())
-
 	if err != nil {
 		t.Fatal(err)
 	}

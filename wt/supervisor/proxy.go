@@ -18,6 +18,7 @@ import (
 // statusWriter captures the status code a proxied response is written with. Unwrap hands the underlying writer's optional interfaces (Flusher, Hijacker) through.
 type statusWriter struct {
 	http.ResponseWriter
+
 	status int
 }
 

@@ -154,8 +154,8 @@ func TestBlobAdminLifecycle(t *testing.T) {
 	}
 
 	info.CreatedAt = time.Now().Add(-48 * time.Hour)
-	data, err = json.Marshal(info)
 
+	data, err = json.Marshal(info)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -291,8 +291,10 @@ func TestNamespacePlanUsesDynamicRuntimeLibs(t *testing.T) {
 }
 
 func TestNamespaceSysProcAttr(t *testing.T) {
+	const wantFlags uintptr = syscall.CLONE_NEWUSER | syscall.CLONE_NEWPID | syscall.CLONE_NEWNS | syscall.CLONE_NEWIPC | syscall.CLONE_NEWUTS
+
 	attr := namespaceSysProcAttr(20001, 20002, true)
-	if wantFlags := uintptr(syscall.CLONE_NEWUSER | syscall.CLONE_NEWPID | syscall.CLONE_NEWNS | syscall.CLONE_NEWIPC | syscall.CLONE_NEWUTS); attr.Cloneflags != wantFlags {
+	if attr.Cloneflags != wantFlags {
 		t.Errorf("clone flags = %#x, want %#x", attr.Cloneflags, wantFlags)
 	}
 
@@ -330,7 +332,6 @@ func TestResetNamespaceRoots(t *testing.T) {
 	}
 
 	info, err = os.Stat(filepath.Join(dir, ".ns"))
-
 	if err != nil {
 		t.Fatal(err)
 	}

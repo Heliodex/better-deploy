@@ -17,6 +17,7 @@ type (
 
 	compressedBody struct {
 		*io.PipeReader
+
 		original io.ReadCloser
 		once sync.Once
 	}
