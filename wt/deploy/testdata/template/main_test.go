@@ -28,6 +28,7 @@ func TestNotesHandler(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/notes", strings.NewReader(`{"text":"hello"}`)))
+
 	if rec.Code != http.StatusCreated {
 		server.Close()
 		t.Fatalf("create = %d: %s", rec.Code, rec.Body.String())
@@ -36,6 +37,7 @@ func TestNotesHandler(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/notes", nil))
+
 	if rec.Code != http.StatusOK {
 		server.Close()
 		t.Fatalf("list = %d: %s", rec.Code, rec.Body.String())
@@ -55,6 +57,7 @@ func TestNotesHandler(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/notes", strings.NewReader(`{"text":""}`)))
+
 	if rec.Code != http.StatusBadRequest {
 		server.Close()
 		t.Fatalf("invalid create = %d: %s", rec.Code, rec.Body.String())
@@ -70,11 +73,13 @@ func TestNotesHandler(t *testing.T) {
 	if body["code"] != "invalid" || body["field"] != "text" {
 		t.Errorf("validation body = %+v", body)
 	}
+
 	server.Close()
 
 	rec = httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/notes", nil))
+
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("storage failure = %d, want 500", rec.Code)
 	}

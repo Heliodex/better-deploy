@@ -88,6 +88,7 @@ func (s *storageServer) executeTransaction(ctx context.Context, app string, req 
 
 	err := s.withWriteConn(ctx, app, func(conn *sql.Conn, changes *rowChangeCollector) error {
 		collector = changes
+
 		tx, err := conn.BeginTx(ctx, nil)
 		if err != nil {
 			return err
@@ -192,6 +193,7 @@ func (s *storageServer) transaction(w http.ResponseWriter, r *http.Request, app 
 		writeStorageError(w, err)
 		return
 	}
+
 	s.logChanges(app, transactionChanges(req, results, starts, ends, collector))
 	writeJSON(w, http.StatusOK, storageStatementsResponse{
 		Results: results,

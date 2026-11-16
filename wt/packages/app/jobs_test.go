@@ -28,6 +28,7 @@ func TestEnqueueJob(t *testing.T) {
 		if got.IdempotencyKey != "" {
 			status = http.StatusOK
 		}
+
 		w.WriteHeader(status)
 		writeTestJSON(w, Job{
 			ID: "job-1",
@@ -43,6 +44,7 @@ func TestEnqueueJob(t *testing.T) {
 	t.Setenv(storageTokenEnv, "secret")
 
 	runAt := time.Now().Add(time.Minute).UTC()
+
 	job, created, err := EnqueueJob(t.Context(), server.Client(), JobRequest{
 		Path: "/jobs/run",
 		Method: http.MethodPut,
@@ -72,7 +74,6 @@ func TestEnqueueJob(t *testing.T) {
 		Path: "/jobs/run",
 		IdempotencyKey: "same",
 	})
-
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,6 +86,7 @@ func TestEnqueueJob(t *testing.T) {
 func TestJobRequiresStorageEnv(t *testing.T) {
 	t.Setenv(storageURLEnv, "")
 	t.Setenv(storageTokenEnv, "")
+
 	if _, _, err := EnqueueJob(t.Context(), http.DefaultClient, JobRequest{
 		Path: "/jobs/run",
 	}); err == nil || !strings.Contains(err.Error(), storageURLEnv) {
@@ -107,6 +109,7 @@ func TestListAndJobActions(t *testing.T) {
 					},
 				},
 			})
+
 			return
 		}
 

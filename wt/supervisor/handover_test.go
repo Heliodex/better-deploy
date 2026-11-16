@@ -38,6 +38,7 @@ func supervisorAppPID(t *testing.T, base, token string) int {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	request.Header.Set("Authorization", "Bearer "+token)
 
 	response, err := http.DefaultClient.Do(request)
@@ -76,6 +77,7 @@ func waitHTTP(t *testing.T, url string, headers map[string]string, want int) {
 				request.Host = value
 				continue
 			}
+
 			request.Header.Set(key, value)
 		}
 
@@ -85,12 +87,14 @@ func waitHTTP(t *testing.T, url string, headers map[string]string, want int) {
 				response.Body.Close()
 				return
 			}
+
 			response.Body.Close()
 		}
 
 		if time.Now().After(deadline) {
 			t.Fatalf("GET %s did not return %d: %v", url, want, err)
 		}
+
 		time.Sleep(50 * time.Millisecond)
 	}
 }
@@ -109,6 +113,7 @@ func waitLog(t *testing.T, path string, done func(string) bool) {
 		if time.Now().After(deadline) {
 			t.Fatalf("timed out waiting for the supervisor log:\n%s", data)
 		}
+
 		time.Sleep(50 * time.Millisecond)
 	}
 }
@@ -149,6 +154,7 @@ func TestSupervisorHandoverKeepsAppPID(t *testing.T) {
 
 	base := "http://127.0.0.1:" + port
 	cmd := exec.Command(os.Args[0], "-listen", "127.0.0.1:"+port, "-apps", appsDir, "-state", stateDir, "-wasmtime", os.Args[0], "-token", "test", "-domain", "localhost")
+
 	cmd.Env = append(os.Environ(), "WT_TEST_SUPERVISOR=1")
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
@@ -156,6 +162,7 @@ func TestSupervisorHandoverKeepsAppPID(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() {
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
@@ -173,11 +180,13 @@ func TestSupervisorHandoverKeepsAppPID(t *testing.T) {
 	if err := cmd.Process.Signal(syscall.SIGHUP); err != nil {
 		t.Fatal(err)
 	}
+
 	waitLog(t, logFile.Name(), func(text string) bool {
 		return strings.Contains(text, "handover: exec") && strings.Count(text, "supervisor listening") >= 2
 	})
 	waitHTTP(t, base+"/healthz", nil, http.StatusOK)
 	waitHTTP(t, base+"/", map[string]string{"Host": "demo.localhost"}, http.StatusNoContent)
+
 	if after := supervisorAppPID(t, base, "test"); after != before {
 		t.Errorf("app pid changed from %d to %d across handover", before, after)
 	}
@@ -185,11 +194,13 @@ func TestSupervisorHandoverKeepsAppPID(t *testing.T) {
 	if err := cmd.Process.Signal(syscall.SIGHUP); err != nil {
 		t.Fatal(err)
 	}
+
 	waitLog(t, logFile.Name(), func(text string) bool {
 		return strings.Count(text, "supervisor listening") >= 3
 	})
 	waitHTTP(t, base+"/healthz", nil, http.StatusOK)
 	waitHTTP(t, base+"/", map[string]string{"Host": "demo.localhost"}, http.StatusNoContent)
+
 	if second := supervisorAppPID(t, base, "test"); second != before {
 		t.Errorf("app pid changed from %d to %d across the second handover", before, second)
 	}

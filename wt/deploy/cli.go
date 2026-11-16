@@ -83,12 +83,15 @@ func runApps(args []string) error {
 		fmt.Println("no apps")
 		return nil
 	}
+
 	fmt.Printf("%-24s %-32s %-10s %-6s %-7s %s\n", "NAME", "HOST", "STATUS", "READY", "PID", "DIGEST")
+
 	for _, app := range apps {
 		digest := app.CurrentDigest
 		if len(digest) > shortHashLength {
 			digest = digest[:shortHashLength]
 		}
+
 		fmt.Printf("%-24s %-32s %-10s %-6v %-7d %s\n", app.Name, app.Host, app.Status, app.Ready, app.PID, digest)
 	}
 
@@ -111,6 +114,7 @@ func runRollback(args []string) error {
 		if rest[index] == "--backup" && index+1 < len(rest) {
 			index++
 			backup = rest[index]
+
 			continue
 		}
 
@@ -136,6 +140,8 @@ func runRollback(args []string) error {
 	if err := checkAPI(status, body); err != nil {
 		return err
 	}
+
 	printRawOrJSON(cfg, body)
+
 	return nil
 }

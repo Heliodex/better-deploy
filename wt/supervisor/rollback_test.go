@@ -24,6 +24,7 @@ func TestRecoverRollbackJournalRestoresOldHalves(t *testing.T) {
 	stagedDB := filepath.Join(stateDir, ".demo.staged.db")
 	write := func(path, body string) {
 		t.Helper()
+
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -56,6 +57,7 @@ func TestRecoverRollbackJournalRestoresOldHalves(t *testing.T) {
 		StagedData: stagedData,
 		StagedDB: stagedDB,
 	}
+
 	path, err := writeRollbackJournal(stateDir, journal)
 	if err != nil {
 		t.Fatal(err)
@@ -96,6 +98,7 @@ func TestRollbackJournalRoundTrip(t *testing.T) {
 		Snapshot: "snapshot",
 		AppDir: "/apps/demo",
 	}
+
 	path, err := writeRollbackJournal(stateDir, journal)
 	if err != nil {
 		t.Fatal(err)
@@ -121,10 +124,12 @@ func atomicRollbackSupervisor(t *testing.T) (*supervisor, *storageServer, string
 	t.Helper()
 
 	s := newLifecycleSupervisor(t)
+
 	storage, err := newStorageServer(t.TempDir(), "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(storage.close)
 
 	s.storage = storage
@@ -158,6 +163,7 @@ func TestAtomicRollbackCompensatesWhenNewCodeFails(t *testing.T) {
 
 	// Break the retained bundle so the swapped code cannot start, then change live data and the database.
 	s.cfg.wasmtimeCompiler = filepath.Join(t.TempDir(), "missing-wasmtime")
+
 	bundle, err := s.deployments.bundle("demo", deployment.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -170,7 +176,9 @@ func TestAtomicRollbackCompensatesWhenNewCodeFails(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(bundle, "main.wasm"), []byte("wasm"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
 	insertItem(t, storage, token, "two")
+
 	if err := os.WriteFile(dataFile, []byte("new"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -180,6 +188,7 @@ func TestAtomicRollbackCompensatesWhenNewCodeFails(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleRollback(rec, req, "demo", deployment.ID)
+
 	if rec.Code < 400 {
 		t.Fatalf("broken rollback = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -245,7 +254,9 @@ func TestAtomicRollbackSwapsCodeDataAndDatabase(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(a.dir, "main.cwasm"), []byte("newer code"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
 	insertItem(t, storage, token, "two")
+
 	if err := os.WriteFile(dataFile, []byte("new"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -255,9 +266,11 @@ func TestAtomicRollbackSwapsCodeDataAndDatabase(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleRollback(rec, req, "demo", deployment.ID)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("atomic rollback = %d: %s", rec.Code, rec.Body.String())
 	}
+
 	t.Cleanup(func() {
 		if next := s.lookup("demo"); next != nil {
 			s.stop(next)

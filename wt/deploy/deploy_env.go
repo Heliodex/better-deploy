@@ -24,6 +24,7 @@ func applyDeployEnv(m *manifest, vars map[string]string) {
 	if m.Env == nil {
 		m.Env = make(map[string]string, len(vars))
 	}
+
 	maps.Copy(m.Env, vars)
 }
 
@@ -32,6 +33,7 @@ func deployEnvFlag(flags *flag.FlagSet) *envAssignments {
 	vars := envAssignments{}
 
 	flags.Var(&vars, "env", "override one app.json env value (repeatable as KEY=VALUE)")
+
 	return &vars
 }
 
@@ -77,6 +79,7 @@ func pollVerify(timeout time.Duration, check func() (bool, string)) error {
 		if time.Now().After(deadline) {
 			return fmt.Errorf("verify: not serving after %s (last: %s)", timeout, detail)
 		}
+
 		time.Sleep(verifyPollDelay)
 	}
 }

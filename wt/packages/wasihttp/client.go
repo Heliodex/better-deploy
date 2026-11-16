@@ -86,6 +86,7 @@ func Send(req *http.Request) (*http.Response, error) {
 	}
 
 	toHTTPHeader(headers, &resp.Header)
+
 	if value := resp.Header.Get("Content-Length"); value != "" {
 		if length, err := strconv.ParseInt(value, 10, 64); err == nil {
 			resp.ContentLength = length

@@ -204,6 +204,7 @@ func mergeConfigEnv(current map[string]string, patch map[string]*string) map[str
 	env := make(map[string]string, len(current)+len(patch))
 
 	maps.Copy(env, current)
+
 	for key, value := range patch {
 		if value == nil {
 			delete(env, key)
@@ -280,6 +281,7 @@ func (s *supervisor) activateConfigPatch(a *app, cfg, next appConfig) bool {
 	a.mu.Unlock()
 	s.setAppHostsLocked(a, oldConfig, next)
 	s.mu.Unlock()
+
 	if s.storage != nil && cfg.DiskMB != next.DiskMB {
 		s.storage.setQuota(a.name, int64(next.DiskMB)<<20)
 	}
@@ -294,12 +296,15 @@ func (s *supervisor) activateConfigPatch(a *app, cfg, next appConfig) bool {
 		running := a.cmd != nil && !a.exited
 
 		a.mu.Unlock()
+
 		if running {
 			s.stopSchedule(a)
 			s.startSchedule(a)
 		}
 	}
+
 	s.broadcast()
+
 	return configRestartRequired(cfg, next)
 }
 
@@ -309,6 +314,7 @@ func (s *supervisor) handleAppConfigGet(w http.ResponseWriter, r *http.Request, 
 	if !ok {
 		return
 	}
+
 	a.mu.Lock()
 
 	cfg := a.cfg
@@ -318,6 +324,7 @@ func (s *supervisor) handleAppConfigGet(w http.ResponseWriter, r *http.Request, 
 	etag := configETag(cfg)
 
 	w.Header().Set("ETag", etag)
+
 	if ifNoneMatch := r.Header.Get("If-None-Match"); ifNoneMatch != "" && etagMatches(ifNoneMatch, etag) {
 		w.WriteHeader(http.StatusNotModified)
 		return
@@ -378,6 +385,7 @@ func (s *supervisor) handleAppConfigPatch(w http.ResponseWriter, r *http.Request
 	if !readJSONBody(w, r, maxConfigRequestBytes, &patch) {
 		return
 	}
+
 	a.mu.Lock()
 
 	cfg := a.cfg
@@ -416,6 +424,7 @@ func (s *supervisor) handleAppConfig(w http.ResponseWriter, r *http.Request, nam
 	if r.Method != http.MethodGet && r.Method != http.MethodPatch {
 		w.Header().Set("Allow", "GET, PATCH")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 		return
 	}
 
@@ -423,5 +432,6 @@ func (s *supervisor) handleAppConfig(w http.ResponseWriter, r *http.Request, nam
 		s.handleAppConfigGet(w, r, name)
 		return
 	}
+
 	s.handleAppConfigPatch(w, r, name)
 }

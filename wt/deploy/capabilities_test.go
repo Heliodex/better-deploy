@@ -42,13 +42,16 @@ func TestRuntimeRelease(t *testing.T) {
 
 func capabilityTestServer(t *testing.T, caps supervisorCapabilities, status int) *httptest.Server {
 	t.Helper()
+
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/capabilities" {
 			http.NotFound(w, r)
 			return
 		}
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
+
 		if status == http.StatusOK {
 			data, err := json.Marshal(caps)
 			if err != nil {
@@ -128,6 +131,7 @@ func TestPreflightDeployIgnoresWasmtimeBuildMetadata(t *testing.T) {
 		wasmtime: bin,
 		target: testTarget,
 	}
+
 	pre, err := preflightDeploy(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -155,6 +159,7 @@ func TestPreflightDeployKeepsExplicitTarget(t *testing.T) {
 		target: "x86_64-custom",
 		targetConfigured: true,
 	}
+
 	pre, err := preflightDeploy(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -200,6 +205,7 @@ func TestPreflightDeployUsesServerTarget(t *testing.T) {
 		wasmtime: bin,
 		target: "x86_64-musl",
 	}
+
 	pre, err := preflightDeploy(cfg)
 	if err != nil {
 		t.Fatal(err)

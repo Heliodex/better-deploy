@@ -67,6 +67,7 @@ func renderRouteClient(entries []routeClientEntry) string {
 	b.WriteString("// Code generated from the supervisor route table. DO NOT EDIT.\n\n")
 	b.WriteString("const enc = encodeURIComponent\n\n")
 	b.WriteString("export const routes = {\n")
+
 	for _, entry := range entries {
 		segments := routeSegments(entry.pattern)
 
@@ -96,6 +97,7 @@ func renderRouteClient(entries []routeClientEntry) string {
 
 				continue
 			}
+
 			templateSb94.WriteString(segment)
 		}
 
@@ -105,9 +107,12 @@ func renderRouteClient(entries []routeClientEntry) string {
 			fmt.Fprintf(&b, "\t%s: \"/%s\",\n", entry.name, template)
 			continue
 		}
+
 		fmt.Fprintf(&b, "\t%s: (%s): string => `/%s`,\n", entry.name, strings.Join(params, ", "), template)
 	}
+
 	b.WriteString("}\n")
+
 	return b.String()
 }
 
@@ -125,6 +130,7 @@ func routeClientEntries() (entries []routeClientEntry) {
 			}
 
 			seen[pattern] = struct{}{}
+
 			name, ok := routeClientNames[pattern]
 			if !ok {
 				panic("missing route client name for " + pattern)
@@ -136,9 +142,11 @@ func routeClientEntries() (entries []routeClientEntry) {
 			})
 		}
 	}
+
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].name < entries[j].name
 	})
+
 	return
 }
 

@@ -17,6 +17,7 @@ func StaticFiles(files fs.FS) http.Handler {
 		if strings.HasPrefix(r.URL.Path, "/_app/") {
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		}
+
 		server.ServeHTTP(w, r)
 	})
 }

@@ -212,7 +212,6 @@ func archiveData(src, dst string) error {
 	}
 
 	// Close the file even after a failure so its descriptor is released before the partial archive is removed.
-
 	if closeErr := file.Close(); err == nil {
 		err = closeErr
 	}
@@ -336,6 +335,7 @@ func (m *backupManager) createLocked(ctx context.Context, app, kind string) (bac
 	candidate.dataTemp = candidate.dataPath + backupTempSuffix
 	_ = os.Remove(candidate.temp)
 	_ = os.Remove(candidate.dataTemp)
+
 	hasDatabase, candidateHash, err := m.writeSnapshotCandidate(ctx, app, candidate)
 	if err != nil {
 		return backupInfo{}, err
@@ -415,6 +415,7 @@ func (m *backupManager) restore(ctx context.Context, app, name string) error {
 	if err != nil {
 		return err
 	}
+
 	m.lock(app)
 
 	defer m.unlock(app)
@@ -461,17 +462,19 @@ func (m *backupManager) restore(ctx context.Context, app, name string) error {
 	if err := m.saveTreeLocked(app, tree); err != nil {
 		return err
 	}
+
 	log.Printf("backup %s: restored %s", app, name)
+
 	return nil
 }
 
 // stageSnapshot extracts /data and, when withDB is set, copies the snapshot database to a temporary file. Both are staged under dataDir so the caller can swap them into place.
 func (m *backupManager) stageSnapshot(app, name string, withDB bool) (dataDir string, hasData bool, dbFile string, err error) {
 	name, err = validBackupName(name)
-
 	if err != nil {
 		return "", false, "", err
 	}
+
 	m.lock(app)
 
 	defer m.unlock(app)
@@ -509,7 +512,6 @@ func (m *backupManager) stageSnapshot(app, name string, withDB bool) (dataDir st
 
 	if hasData {
 		dataDir, err = os.MkdirTemp(m.dataDir, "."+app+".restore-")
-
 		if err != nil {
 			return "", true, "", err
 		}

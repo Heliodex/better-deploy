@@ -11,6 +11,7 @@ import (
 func TestPublishRequiresStorageEnv(t *testing.T) {
 	t.Setenv(storageURLEnv, "")
 	t.Setenv(storageTokenEnv, "")
+
 	if _, err := Publish(t.Context(), http.DefaultClient, "chat", nil); err == nil || !strings.Contains(err.Error(), storageURLEnv) {
 		t.Errorf("Publish error = %v", err)
 	}

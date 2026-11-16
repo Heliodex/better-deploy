@@ -14,13 +14,16 @@ import (
 
 func readStorageJSON(w http.ResponseWriter, r *http.Request, out any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, maxStorageBody)
+
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
 		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			writeError(w, http.StatusRequestEntityTooLarge, "request body is too large")
 			return false
 		}
+
 		writeStorageError(w, fmt.Errorf("%w: read body: %w", errStorageInvalid, err))
+
 		return false
 	}
 
@@ -40,7 +43,6 @@ func readStorageJSON(w http.ResponseWriter, r *http.Request, out any) bool {
 // readStorageRows scans and encodes a query result, stopping at maxRows or the result size limit.
 func readStorageRows(rows *sql.Rows, maxRows int) (columns []string, encoded [][]any, truncated bool, err error) {
 	columns, err = rows.Columns()
-
 	if err != nil {
 		return nil, nil, false, err
 	}
@@ -145,6 +147,7 @@ func (s *storageServer) exec(w http.ResponseWriter, r *http.Request, app string)
 
 	err = s.withWriteConn(ctx, app, func(conn *sql.Conn, changes *rowChangeCollector) error {
 		collector = changes
+
 		unregister, err := requireStorageAuthoriser(conn, false)
 		if err != nil {
 			return err
@@ -164,7 +167,6 @@ func (s *storageServer) exec(w http.ResponseWriter, r *http.Request, app string)
 
 		return nil
 	})
-
 	if err != nil {
 		writeStorageError(w, err)
 		return
@@ -179,6 +181,7 @@ func (s *storageServer) exec(w http.ResponseWriter, r *http.Request, app string)
 		rows = collector.rows
 		truncated = collector.omitted > 0
 	}
+
 	s.logChanges(app, []storageChange{
 		{
 			Time: time.Now().UTC(),
@@ -198,6 +201,7 @@ func (s *storageServer) handle(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="wt-storage"`)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+
 		return
 	}
 
@@ -219,6 +223,7 @@ func (s *storageServer) handle(w http.ResponseWriter, r *http.Request) {
 			}()
 		}
 	}
+
 	s.storageRoutes().serve(w, r, app)
 }
 
@@ -247,6 +252,7 @@ func (s *storageServer) logBatchChanges(app string, r *http.Request, req storage
 			RowsTruncated: truncated,
 		}
 	}
+
 	s.logChanges(app, changes)
 }
 
@@ -278,6 +284,7 @@ func (s *storageServer) batch(w http.ResponseWriter, r *http.Request, app string
 		writeStorageError(w, err)
 		return
 	}
+
 	s.logBatchChanges(app, r, req, results, starts, ends, collector)
 	writeJSON(w, http.StatusOK, storageStatementsResponse{
 		Results: results,
@@ -315,6 +322,7 @@ func (s *storageServer) query(w http.ResponseWriter, r *http.Request, app string
 		Columns: []string{},
 		Rows: [][]any{},
 	}
+
 	err = s.withReadConn(ctx, app, func(conn *sql.Conn) error {
 		unregister, err := requireStorageAuthoriser(conn, true)
 		if err != nil {
@@ -336,11 +344,11 @@ func (s *storageServer) query(w http.ResponseWriter, r *http.Request, app string
 
 		return err
 	})
-
 	if err != nil {
 		writeStorageError(w, err)
 		return
 	}
+
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -377,8 +385,10 @@ func (s *storageServer) writeReturning(w http.ResponseWriter, r *http.Request, a
 		Columns: []string{},
 		Rows: [][]any{},
 	}
+
 	err = s.withWriteConn(ctx, app, func(conn *sql.Conn, changes *rowChangeCollector) error {
 		collector = changes
+
 		unregister, err := requireStorageAuthoriser(conn, false)
 		if err != nil {
 			return err
@@ -406,7 +416,6 @@ func (s *storageServer) writeReturning(w http.ResponseWriter, r *http.Request, a
 
 		return conn.QueryRowContext(ctx, "select changes()").Scan(&result.RowsAffected)
 	})
-
 	if err != nil {
 		writeStorageError(w, err)
 		return
@@ -421,6 +430,7 @@ func (s *storageServer) writeReturning(w http.ResponseWriter, r *http.Request, a
 		rows = collector.rows
 		truncated = collector.omitted > 0
 	}
+
 	s.logChanges(app, []storageChange{
 		{
 			Time: time.Now().UTC(),

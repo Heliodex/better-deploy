@@ -54,6 +54,7 @@ func eventResult(resp *http.Response) (Event, error) {
 // Publish sends one event to the current app's bus through the storage loopback service.
 func Publish(ctx context.Context, client *http.Client, topic string, data any) (Event, error) {
 	base := strings.TrimSuffix(os.Getenv(storageURLEnv), "/")
+
 	token := os.Getenv(storageTokenEnv)
 	if base == "" || token == "" {
 		return Event{}, fmt.Errorf("%s and %s are not set", storageURLEnv, storageTokenEnv)
@@ -71,6 +72,7 @@ func Publish(ctx context.Context, client *http.Client, topic string, data any) (
 	if err != nil {
 		return Event{}, err
 	}
+
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 
@@ -96,6 +98,7 @@ func PublishTo(ctx context.Context, client *http.Client, target, topic string, d
 	if err != nil {
 		return Event{}, err
 	}
+
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := client.Do(req)

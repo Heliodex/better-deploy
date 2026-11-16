@@ -35,6 +35,7 @@ func (m *deploymentManager) recordFailure(app, digest, message string) (deployme
 		Status: deploymentStatusFail,
 		Error: message,
 	}
+
 	meta, err := json.Marshal(recorded)
 	if err != nil {
 		return deploymentInfo{}, err
@@ -100,6 +101,7 @@ func (m *deploymentManager) recordAt(app, id string, previous deploymentInfo, so
 	defer os.RemoveAll(temp)
 
 	artifact, _ := readArtifact(source)
+
 	record, static, total, err := m.stageDeployment(app, id, source, temp)
 	if err != nil {
 		return deploymentInfo{}, err
@@ -148,6 +150,7 @@ func (s *supervisor) historyBytes(a *app) int64 {
 		bytes := a.history.bytes
 
 		a.history.mu.Unlock()
+
 		return bytes
 	}
 	a.history.mu.Unlock()
@@ -156,12 +159,14 @@ func (s *supervisor) historyBytes(a *app) int64 {
 	if err != nil {
 		log.Printf("app %s: deployment history usage: %v", a.name, err)
 	}
+
 	a.history.mu.Lock()
 
 	a.history.bytes = bytes
 	a.history.at = now
 
 	a.history.mu.Unlock()
+
 	return bytes
 }
 
@@ -185,6 +190,7 @@ func (s *supervisor) recordDeployment(name, dir string) {
 	if _, err := s.deployments.record(name, dir); err != nil {
 		log.Printf("deploy history %s: %v", name, err)
 	}
+
 	s.resetHistoryUsage(name)
 }
 
@@ -199,5 +205,6 @@ func (s *supervisor) recordDeploymentFailure(name, digest string, cause error) {
 	if _, err := s.deployments.recordFailure(name, digest, message); err != nil {
 		log.Printf("deploy history %s: %v", name, err)
 	}
+
 	s.resetHistoryUsage(name)
 }

@@ -386,9 +386,11 @@ func (m *backupManager) filesLocked(app string) ([]backupInfo, error) {
 			})
 		}
 	}
+
 	sort.Slice(infos, func(i, j int) bool {
 		return infos[i].CreatedAt.After(infos[j].CreatedAt)
 	})
+
 	return infos, nil
 }
 
@@ -511,6 +513,7 @@ func (m *backupManager) overview(app string) (backupsResponse, error) {
 // runDue snapshots every app whose policy is enabled and whose newest snapshot is older than its interval. An app without a database still gets a data-only snapshot of /data. A small worker pool bounds concurrent archives without letting one app's large /data delay every other app.
 func (m *backupManager) runDue(ctx context.Context, now time.Time) {
 	names := m.dueApps()
+
 	workers := min(backupWorkers, len(names))
 	if workers == 0 {
 		return
@@ -540,9 +543,11 @@ func (m *backupManager) runDue(ctx context.Context, now time.Time) {
 		case <-ctx.Done():
 			close(jobs)
 			wg.Wait()
+
 			return
 		}
 	}
+
 	close(jobs)
 	wg.Wait()
 }
@@ -550,6 +555,7 @@ func (m *backupManager) runDue(ctx context.Context, now time.Time) {
 // loop runs the periodic snapshots until the context is cancelled.
 func (m *backupManager) loop(ctx context.Context) {
 	m.runDue(ctx, time.Now())
+
 	for {
 		timer := time.NewTimer(backupCheckDelay(rand.Int64N))
 
@@ -622,6 +628,7 @@ func (m *backupManager) saveSettings(app string, settings backupSettings) error 
 	if err := settings.validate(); err != nil {
 		return err
 	}
+
 	m.lock(app)
 
 	defer m.unlock(app)

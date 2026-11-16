@@ -20,6 +20,7 @@ func TestDependenciesGateRouting(t *testing.T) {
 	}
 	s.apps["web"] = web
 	s.hosts["web.localhost"] = web
+
 	ready, waiting := s.dependenciesReady(web)
 	if ready || len(waiting) != 1 || waiting[0] != "api" {
 		t.Fatalf("dependenciesReady = %v %v", ready, waiting)
@@ -28,6 +29,7 @@ func TestDependenciesGateRouting(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	s.handleProxy(rec, httptest.NewRequest(http.MethodGet, "http://web.localhost/", nil))
+
 	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "api") {
 		t.Errorf("gated response = %d %q", rec.Code, rec.Body.String())
 	}
@@ -47,11 +49,13 @@ func TestDependenciesGateRouting(t *testing.T) {
 	if ready, waiting := s.dependenciesReady(web); !ready {
 		t.Errorf("ready with dependency = %v %v", ready, waiting)
 	}
+
 	api.mu.Lock()
 
 	api.cfg.Maintenance = true
 
 	api.mu.Unlock()
+
 	if ready, _ := s.dependenciesReady(web); ready {
 		t.Error("a dependency in maintenance still counted as ready")
 	}
@@ -81,11 +85,13 @@ func TestDependencyCycles(t *testing.T) {
 	if err := s.dependencyCycleError("a", []string{"missing"}); err != nil {
 		t.Errorf("forward reference rejected: %v", err)
 	}
+
 	b.mu.Lock()
 
 	b.cfg.DependsOn = nil
 
 	b.mu.Unlock()
+
 	if err := s.dependencyCycleError("a", []string{"b"}); err != nil {
 		t.Errorf("acyclic graph rejected: %v", err)
 	}
@@ -125,6 +131,7 @@ func TestMaintenanceEndpointAndPage(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleAppMaintenance(rec, req, "demo")
+
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"enabled":true`) {
 		t.Fatalf("maintenance POST = %d %s", rec.Code, rec.Body.String())
 	}
@@ -141,6 +148,7 @@ func TestMaintenanceEndpointAndPage(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	s.handleProxy(rec, httptest.NewRequest(http.MethodGet, "http://demo.localhost/some/page", nil))
+
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("maintenance page = %d", rec.Code)
 	}
@@ -162,14 +170,17 @@ func TestMaintenanceEndpointAndPage(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleAppMaintenance(rec, req, "demo")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("maintenance off = %d %s", rec.Code, rec.Body.String())
 	}
+
 	a.mu.Lock()
 
 	maintenance := a.cfg.Maintenance
 
 	a.mu.Unlock()
+
 	if maintenance {
 		t.Error("maintenance stayed enabled")
 	}
@@ -180,6 +191,7 @@ func TestReadyzDistinctFromLiveness(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	s.handleReadyz(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("readyz before ready = %d, want 503", rec.Code)
 	}
@@ -187,22 +199,27 @@ func TestReadyzDistinctFromLiveness(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	s.handleHealthz(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+
 	if rec.Code != http.StatusOK {
 		t.Errorf("healthz = %d, want 200", rec.Code)
 	}
+
 	s.ready.Store(true)
 
 	rec = httptest.NewRecorder()
 
 	s.handleReadyz(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+
 	if rec.Code != http.StatusOK || rec.Body.String() != "ok\n" {
 		t.Errorf("readyz = %d %q", rec.Code, rec.Body.String())
 	}
+
 	s.stopping.Store(true)
 
 	rec = httptest.NewRecorder()
 
 	s.handleReadyz(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("readyz while stopping = %d, want 503", rec.Code)
 	}

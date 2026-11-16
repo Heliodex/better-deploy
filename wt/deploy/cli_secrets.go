@@ -150,11 +150,15 @@ func runSecretsDelete(cfg clientOptions, name string, args []string) error {
 	if err := json.Unmarshal(body, &result); err != nil {
 		return err
 	}
+
 	fmt.Printf("deleted %s", result.Key)
+
 	if result.RestartRequired {
 		fmt.Print(" (restart required)")
 	}
+
 	fmt.Println()
+
 	return nil
 }
 
@@ -217,11 +221,15 @@ func runSecretsSet(cfg clientOptions, name string, args []string) error {
 	if err := json.Unmarshal(body, &result); err != nil {
 		return err
 	}
+
 	fmt.Printf("set %s", result.Key)
+
 	if result.RestartRequired {
 		fmt.Print(" (restart required)")
 	}
+
 	fmt.Println()
+
 	return nil
 }
 

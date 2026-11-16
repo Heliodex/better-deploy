@@ -86,6 +86,7 @@ func (a *passportApp) completeLogin(w http.ResponseWriter, r *http.Request, flow
 	if err != nil {
 		log.Printf("oauth token exchange: %v", err)
 		app.WriteErrorCode(w, http.StatusBadGateway, "exchange", "the identity provider rejected the code exchange")
+
 		return oauth.Identity{}, oauth.Tokens{}, false
 	}
 
@@ -93,6 +94,7 @@ func (a *passportApp) completeLogin(w http.ResponseWriter, r *http.Request, flow
 	if err != nil {
 		log.Printf("verify id token: %v", err)
 		app.WriteErrorCode(w, http.StatusBadGateway, "token", "the identity token could not be verified")
+
 		return oauth.Identity{}, oauth.Tokens{}, false
 	}
 
@@ -221,6 +223,7 @@ func (a *passportApp) handleListCheckins(w http.ResponseWriter, r *http.Request)
 		app.WriteError(w, http.StatusInternalServerError, "could not load check-ins")
 		return
 	}
+
 	app.WriteJSON(w, http.StatusOK, contract.CheckinsResponse{
 		Checkins: checkins,
 	})
@@ -228,6 +231,7 @@ func (a *passportApp) handleListCheckins(w http.ResponseWriter, r *http.Request)
 
 func (a *passportApp) handleLogout(w http.ResponseWriter, r *http.Request) {
 	noStore(w)
+
 	if !session.SameOrigin(r) {
 		app.WriteErrorCode(w, http.StatusForbidden, "forbidden", "cross-site request rejected")
 		return
@@ -253,10 +257,13 @@ func (a *passportApp) handleLogout(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+
 	a.sessions.Clear(w, r)
+
 	if sess != nil {
 		response.EndSessionURL = a.endSessionURL(r, sess)
 	}
+
 	app.WriteJSON(w, http.StatusOK, response)
 }
 
@@ -338,6 +345,7 @@ func (a *passportApp) handleDeleteCheckin(w http.ResponseWriter, r *http.Request
 		app.WriteError(w, http.StatusNotFound, "check-in not found")
 		return
 	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -379,6 +387,7 @@ func (a *passportApp) handleSession(w http.ResponseWriter, r *http.Request) {
 	if errors.Is(err, errNoSession) {
 		sess = nil
 	}
+
 	app.WriteJSON(w, http.StatusOK, a.sessionResponse(sess))
 }
 
@@ -392,6 +401,7 @@ func (a *passportApp) storeSession(w http.ResponseWriter, r *http.Request, ident
 
 	now := time.Now().UTC()
 	expiresAt := now.Add(sessionTTL)
+
 	_, err = a.store.Batch(r.Context(), storage.Statement{
 		SQL: `delete from sessions where expires_at <= ?`,
 		Args: []any{now.Format(app.TimestampFormat)},
@@ -414,14 +424,16 @@ func (a *passportApp) storeSession(w http.ResponseWriter, r *http.Request, ident
 			expiresAt.Format(app.TimestampFormat),
 		},
 	})
-
 	if err != nil {
 		log.Printf("store session: %v", err)
 		app.WriteErrorCode(w, http.StatusInternalServerError, "internal", "could not store the session")
+
 		return false
 	}
+
 	a.sessions.Set(w, r, token)
 	session.Clear(w, r, stateCookie)
+
 	return true
 }
 
@@ -451,6 +463,7 @@ func (a *passportApp) takeFlow(ctx context.Context, state string) (callbackFlow,
 // handleCallback validates state, exchanges the code, verifies the ID token and opens a session. The static /auth/callback page calls it, because the supervisor serves HTML navigations from static files before the component sees them.
 func (a *passportApp) handleCallback(w http.ResponseWriter, r *http.Request) {
 	noStore(w)
+
 	if !session.SameOrigin(r) {
 		app.WriteErrorCode(w, http.StatusForbidden, "forbidden", "cross-site request rejected")
 		return
@@ -475,6 +488,7 @@ func (a *passportApp) handleCallback(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("take login flow: %v", err)
 		app.WriteErrorCode(w, http.StatusInternalServerError, "internal", "could not complete the login")
+
 		return
 	}
 
@@ -486,6 +500,7 @@ func (a *passportApp) handleCallback(w http.ResponseWriter, r *http.Request) {
 	if !a.storeSession(w, r, identity, tokens) {
 		return
 	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -525,10 +540,12 @@ func (a *passportApp) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	redirectURI := app.PublicURL(r) + "/auth/callback/"
+
 	authoriseURL, err := a.oauth.AuthoriseURL(r.Context(), redirectURI, state, nonce, challenge)
 	if err != nil {
 		log.Printf("oauth discovery: %v", err)
 		authFailed(w, r, "provider")
+
 		return
 	}
 
@@ -539,12 +556,13 @@ func (a *passportApp) handleLogin(w http.ResponseWriter, r *http.Request) {
 		SQL: `insert into login_flows (state, verifier, nonce, redirect_uri, created_at) values (?, ?, ?, ?, ?)`,
 		Args: []any{state, verifier, nonce, redirectURI, time.Now().UTC().Format(app.TimestampFormat)},
 	})
-
 	if err != nil {
 		log.Printf("store login flow: %v", err)
 		authFailed(w, r, "internal")
+
 		return
 	}
+
 	session.Set(w, r, stateCookie, state, flowTTL)
 	//nolint:gosec // authoriseURL comes from the configured provider's discovery document, not user input.
 	http.Redirect(w, r, authoriseURL, http.StatusFound)
@@ -605,6 +623,7 @@ func (a *passportApp) handleCreateCheckin(w http.ResponseWriter, r *http.Request
 		app.WriteError(w, http.StatusInternalServerError, "could not save the check-in")
 		return
 	}
+
 	app.WriteJSON(w, http.StatusCreated, entry)
 }
 
@@ -631,5 +650,6 @@ func newPassportApp(store *storage.Client, client *http.Client) (*passportApp, e
 	a.mux.HandleFunc("GET /auth/login", a.handleLogin)
 	a.mux.HandleFunc("POST /auth/login", a.handleLogin)
 	a.mux.HandleFunc("POST /api/auth/callback", a.handleCallback)
+
 	return a, nil
 }

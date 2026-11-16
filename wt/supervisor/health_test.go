@@ -120,6 +120,7 @@ func TestProxyResponseHeaderTimeout(t *testing.T) {
 	started := time.Now()
 
 	proxy.ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusBadGateway {
 		t.Errorf("status = %d, want 502 after the header timeout", rec.Code)
 	}
@@ -182,9 +183,11 @@ func TestReadinessBlocksTrafficUntilRecovery(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	s.handleProxy(rec, httptest.NewRequest(http.MethodGet, "http://demo.localhost/", nil))
+
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("ready app status = %d, want 204", rec.Code)
 	}
+
 	a.mu.Lock()
 
 	a.ready = false
@@ -195,6 +198,7 @@ func TestReadinessBlocksTrafficUntilRecovery(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	s.handleProxy(rec, httptest.NewRequest(http.MethodGet, "http://demo.localhost/", nil))
+
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("unready app status = %d, want 503", rec.Code)
 	}
@@ -202,11 +206,13 @@ func TestReadinessBlocksTrafficUntilRecovery(t *testing.T) {
 	if rec.Header().Get("Retry-After") == "" {
 		t.Error("unready response has no Retry-After")
 	}
+
 	s.checkHealth(a)
 
 	rec = httptest.NewRecorder()
 
 	s.handleProxy(rec, httptest.NewRequest(http.MethodGet, "http://demo.localhost/", nil))
+
 	if rec.Code != http.StatusNoContent {
 		t.Errorf("recovered app status = %d, want 204", rec.Code)
 	}
@@ -268,11 +274,13 @@ func TestRestartOnUnhealthyKillsProcess(t *testing.T) {
 	s.hosts["demo.localhost"] = a
 
 	s.checkHealth(a)
+
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("unhealthy app was not restarted")
 	}
+
 	a.mu.Lock()
 
 	defer a.mu.Unlock()
@@ -308,9 +316,11 @@ func TestCheckAllHealthHonorsInterval(t *testing.T) {
 	failures := a.healthFailures
 
 	a.mu.Unlock()
+
 	if failures != 0 {
 		t.Errorf("probe ran before the health interval: failures = %d", failures)
 	}
+
 	a.mu.Lock()
 
 	a.nextHealth = time.Time{}
@@ -351,10 +361,13 @@ func TestCheckHealthMarksAppUnhealthy(t *testing.T) {
 	if s.info(a).Status != "running" {
 		t.Fatalf("initial status = %q, want running", s.info(a).Status)
 	}
+
 	s.checkHealth(a)
+
 	if got := s.info(a).Status; got != "running" {
 		t.Errorf("status after one failure = %q, want running until the threshold", got)
 	}
+
 	s.checkHealth(a)
 
 	info := s.info(a)
@@ -374,6 +387,7 @@ func TestRecordHealthHonorsFailureLimit(t *testing.T) {
 	for range 2 {
 		a.recordHealth(stringError("boom"), time.Now())
 	}
+
 	a.mu.Lock()
 	if !a.ready {
 		t.Error("app became unready before the configured failure count")
@@ -396,19 +410,23 @@ func TestRecordHealthTransitions(t *testing.T) {
 	if changed := a.recordHealth(failure, time.Now()); !changed {
 		t.Error("first failure should publish the new error")
 	}
+
 	a.mu.Lock()
 	if !a.healthOK || !a.ready || a.healthFailures != 1 || a.lastError != "connection refused" {
 		t.Errorf("after one failure: healthy = %v, ready = %v, failures = %d, error = %q", a.healthOK, a.ready, a.healthFailures, a.lastError)
 	}
 	a.mu.Unlock()
+
 	if changed := a.recordHealth(failure, time.Now()); !changed {
 		t.Error("second failure should publish the unhealthy state")
 	}
+
 	a.mu.Lock()
 	if a.healthOK || a.ready || a.healthFailures != 2 {
 		t.Errorf("after two failures: healthy = %v, ready = %v, failures = %d", a.healthOK, a.ready, a.healthFailures)
 	}
 	a.mu.Unlock()
+
 	if changed := a.recordHealth(failure, time.Now()); changed {
 		t.Error("a repeated failure should not publish again")
 	}
@@ -418,6 +436,7 @@ func TestRecordHealthTransitions(t *testing.T) {
 	if changed := a.recordHealth(nil, now); !changed {
 		t.Error("recovery should publish")
 	}
+
 	a.mu.Lock()
 
 	defer a.mu.Unlock()

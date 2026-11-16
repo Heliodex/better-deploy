@@ -146,6 +146,7 @@ func jobsAction(cfg clientOptions, name, action string, args []string) error {
 	}
 
 	id := flags.Arg(0)
+
 	status, _, body, err := apiDo(cfg, http.MethodPost, "/apps/"+name+"/jobs/"+url.PathEscape(id)+"/"+action, nil, "")
 	if err != nil {
 		return err
@@ -165,7 +166,9 @@ func jobsAction(cfg clientOptions, name, action string, args []string) error {
 	if err := json.Unmarshal(body, &job); err != nil {
 		return err
 	}
+
 	fmt.Printf("%s %s %s\n", action, job.ID, job.Status)
+
 	return nil
 }
 
@@ -192,6 +195,7 @@ func jobsEnqueue(cfg clientOptions, name string, args []string) error {
 
 		return nil
 	})
+
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -254,7 +258,9 @@ func jobsEnqueue(cfg clientOptions, name string, args []string) error {
 	if status == http.StatusOK {
 		verb = "existing"
 	}
+
 	fmt.Printf("%s %s %s %s\n", verb, job.ID, job.Status, job.Path)
+
 	return nil
 }
 
@@ -268,6 +274,7 @@ func printJob(job jobRecord) {
 	fmt.Printf("Created: %s\n", jobTime(job.CreatedAt))
 	fmt.Printf("Started: %s\n", jobTime(job.StartedAt))
 	fmt.Printf("Finished: %s\n", jobTime(job.FinishedAt))
+
 	if job.StatusCode != 0 {
 		fmt.Printf("Status code: %d\n", job.StatusCode)
 	}
@@ -282,7 +289,9 @@ func printJob(job jobRecord) {
 		for key := range job.Headers {
 			keys = append(keys, key)
 		}
+
 		sort.Strings(keys)
+
 		for _, key := range keys {
 			fmt.Printf("Header: %s: %s\n", key, job.Headers[key])
 		}
@@ -315,6 +324,7 @@ func jobsShow(cfg clientOptions, name string, args []string) error {
 	}
 
 	id := flags.Arg(0)
+
 	statusCode, _, body, err := apiDo(cfg, http.MethodGet, "/apps/"+name+"/jobs/"+url.PathEscape(id), nil, "")
 	if err != nil {
 		return err
@@ -334,7 +344,9 @@ func jobsShow(cfg clientOptions, name string, args []string) error {
 	if err := json.Unmarshal(body, &job); err != nil {
 		return err
 	}
+
 	printJob(job)
+
 	return nil
 }
 
@@ -355,7 +367,9 @@ func printJobs(cfg clientOptions, body []byte) error {
 		fmt.Println("no jobs")
 		return nil
 	}
+
 	fmt.Printf("%-26s %-10s %-7s %-8s %-20s %s\n", "ID", "STATUS", "METHOD", "ATTEMPTS", "RUN AT", "PATH")
+
 	for _, job := range result.Jobs {
 		fmt.Printf("%-26s %-10s %-7s %-8s %-20s %s\n", job.ID, job.Status, job.Method, fmt.Sprintf("%d/%d", job.Attempts, job.MaxAttempts), jobTime(job.RunAt), job.Path)
 	}

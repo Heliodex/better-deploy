@@ -30,6 +30,7 @@ func TestBlobAppListsFiles(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	application.handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/files", nil))
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("list files = %d: %s", rec.Code, rec.Body.String())
 	}

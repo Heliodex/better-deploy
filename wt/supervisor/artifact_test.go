@@ -67,6 +67,7 @@ func TestRuntimeRelease(t *testing.T) {
 
 func artifactSupervisorWithCache(t *testing.T, compiler, cache string) *supervisor {
 	t.Helper()
+
 	return &supervisor{
 		cfg: config{
 			stateDir: t.TempDir(),
@@ -108,6 +109,7 @@ func TestPruneArtifactCacheRemovesOldestAndKeepsNewEntry(t *testing.T) {
 	keep := filepath.Join(dir, "newest.cwasm")
 
 	s.pruneArtifactCache(keep)
+
 	if _, err := os.Stat(keep); err != nil {
 		t.Errorf("new cache entry was pruned: %v", err)
 	}
@@ -345,6 +347,7 @@ func TestCorrectArtifactEpoch(t *testing.T) {
 	}
 
 	s.correctArtifactEpoch(a, true)
+
 	if !a.wasmEpoch {
 		t.Error("app did not record the corrected epoch setting")
 	}
@@ -383,6 +386,7 @@ esac
 
 	artifact := fmt.Sprintf(`{"wasmtime":"wasmtime-cli 51.0.0","target":"x86_64-test","epoch_interruption":true,"wasm_sha256":"%s","wasm_bytes":%d,"cpu":"baseline"}`, digestText(wasm), len(wasm))
 	bundle := writeBundleDir(t, wasm, "current", artifact)
+
 	epoch, err := artifactSupervisor(t, compiler).ensureArtifact(bundle, true)
 	if err != nil {
 		t.Fatal(err)
@@ -484,6 +488,7 @@ func TestEnsureArtifactIgnoresLegacyArtifactWithoutDigest(t *testing.T) {
 	cache := t.TempDir()
 	dir := writeBundleDir(t, "wasm", "legacy", `{"wasmtime":"wasmtime-cli 51.0.0","target":"x86_64-test","epoch_interruption":true}`)
 	s := artifactSupervisorWithCache(t, compiler, cache)
+
 	epoch, err := s.ensureArtifact(dir, true)
 	if err != nil {
 		t.Fatal(err)
@@ -523,6 +528,7 @@ func TestEnsureArtifactKeepsMatchingArtifact(t *testing.T) {
 	compiler := writeCompilerWithCounter(t, "wasmtime-cli 51.0.0", "rebuilt", counter, false)
 	artifact := fmt.Sprintf(`{"wasmtime":"wasmtime-cli 51.0.0","target":"x86_64-test","epoch_interruption":true,"wasm_sha256":"%s","wasm_bytes":%d,"cpu":"baseline"}`, digestText(wasm), len(wasm))
 	dir := writeBundleDir(t, wasm, "current", artifact)
+
 	epoch, err := artifactSupervisor(t, compiler).ensureArtifact(dir, true)
 	if err != nil {
 		t.Fatal(err)
@@ -624,6 +630,7 @@ func TestEnsureArtifactFailsWithoutCompilerOrCwasm(t *testing.T) {
 func TestEnsureArtifactKeepsCwasmWithoutCompiler(t *testing.T) {
 	compiler := writeCompiler(t, "wasmtime-cli 51.0.0", "", true)
 	dir := writeBundleDir(t, "wasm", "old", `{"wasmtime":"wasmtime-cli 50.0.0","target":"x86_64-test"}`)
+
 	epoch, err := artifactSupervisor(t, compiler).ensureArtifact(dir, true)
 	if err != nil {
 		t.Fatal(err)
@@ -663,6 +670,7 @@ func TestEnsureArtifactRebuildsForEpoch(t *testing.T) {
 	// Matching runtime, target and wasm, but without the instrumentation a per-request timeout needs.
 	artifact := fmt.Sprintf(`{"wasmtime":"wasmtime-cli 51.0.0","target":"x86_64-test","wasm_sha256":"%s"}`, digestText("wasm"))
 	dir := writeBundleDir(t, "wasm", "old", artifact)
+
 	epoch, err := artifactSupervisor(t, compiler).ensureArtifact(dir, true)
 	if err != nil {
 		t.Fatal(err)
@@ -694,6 +702,7 @@ func TestEnsureArtifactRebuildsForEpoch(t *testing.T) {
 func TestEnsureArtifactRebuildsStaleArtifact(t *testing.T) {
 	compiler := writeCompiler(t, "wasmtime-cli 51.0.0", "rebuilt", false)
 	dir := writeBundleDir(t, "wasm", "old", `{"wasmtime":"wasmtime-cli 50.0.0","target":"x86_64-test"}`)
+
 	epoch, err := artifactSupervisor(t, compiler).ensureArtifact(dir, false)
 	if err != nil {
 		t.Fatal(err)

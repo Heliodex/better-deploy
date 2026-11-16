@@ -69,6 +69,7 @@ func TestProxyCompressesJSON(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	proxy.ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("proxy = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -119,6 +120,7 @@ func TestProxyLeavesSSEAlone(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	proxy.ServeHTTP(rec, req)
+
 	if rec.Header().Get("Content-Encoding") != "" {
 		t.Errorf("SSE was compressed: %v", rec.Header())
 	}
@@ -167,6 +169,7 @@ func TestProxyCompressesText(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	proxy.ServeHTTP(rec, req)
+
 	if rec.Header().Get("Content-Encoding") != "gzip" {
 		t.Errorf("text was not compressed: %v", rec.Header())
 	}
@@ -180,7 +183,9 @@ func TestProxyStreamsCompressedNDJSON(t *testing.T) {
 
 		_, _ = io.WriteString(w, `{"line":1}`+"\n")
 		_ = http.NewResponseController(w).Flush()
+
 		<-release
+
 		_, _ = io.WriteString(w, `{"line":2}`+"\n")
 	}))
 
@@ -200,6 +205,7 @@ func TestProxyStreamsCompressedNDJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	req.Header.Set("Accept-Encoding", "gzip")
 
 	resp, err := (&http.Transport{

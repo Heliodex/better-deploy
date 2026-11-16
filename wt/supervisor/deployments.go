@@ -100,6 +100,7 @@ func (m *deploymentManager) logPath(app, id string) string {
 // appendLog keeps a deployment's log bounded and never lets logging fail the install.
 func (m *deploymentManager) appendLog(app, id string, data []byte) {
 	path := m.logPath(app, id)
+
 	info, err := os.Stat(path)
 	if err == nil && info.Size()+int64(len(data)) > deploymentLogBytes {
 		return
@@ -151,6 +152,7 @@ func (m *deploymentManager) createRun(app, digest string) (deploymentInfo, error
 		Digest: digest,
 		Status: deploymentStatusQueued,
 	}
+
 	data, err := json.Marshal(info)
 	if err != nil {
 		_ = os.RemoveAll(dir)
@@ -266,6 +268,7 @@ func (m *deploymentManager) storeReplay(app, key string, entry deployReplayEntry
 			key string
 			at time.Time
 		}
+
 		aged := make([]agedEntry, 0, len(file.Entries))
 
 		for name, existing := range file.Entries {
@@ -274,9 +277,11 @@ func (m *deploymentManager) storeReplay(app, key string, entry deployReplayEntry
 				at: existing.At,
 			})
 		}
+
 		sort.Slice(aged, func(i, j int) bool {
 			return aged[i].at.Before(aged[j].at)
 		})
+
 		for _, item := range aged[:len(aged)-deploymentReplayKeep] {
 			delete(file.Entries, item.key)
 		}
@@ -299,6 +304,7 @@ func (m *deploymentManager) usage(app string) (int64, error) {
 	var total int64
 
 	seen := map[fileKey]struct{}{}
+
 	err := filepath.WalkDir(m.appDir(app), func(_ string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -408,7 +414,9 @@ func (m *deploymentManager) ids(app string) ([]string, error) {
 
 		ids = append(ids, entry.Name())
 	}
+
 	sort.Strings(ids)
+
 	return ids, nil
 }
 
@@ -560,6 +568,7 @@ func (m *deploymentManager) list(app string) ([]deploymentInfo, error) {
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].ID > out[j].ID
 	})
+
 	return out, nil
 }
 
@@ -586,6 +595,7 @@ func (m *deploymentManager) updateRun(app, id string, update func(*deploymentInf
 	if err != nil {
 		return deploymentInfo{}, err
 	}
+
 	update(&info)
 
 	data, err := json.Marshal(info)

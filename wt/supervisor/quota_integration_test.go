@@ -14,6 +14,7 @@ import (
 
 func TestClearAppDataQuotaUsesAppOrAllocatedUID(t *testing.T) {
 	runner := &fakeQuotaRunner{}
+
 	uids, err := newUIDAllocator(filepath.Join(t.TempDir(), ".uids.json"), 20000)
 	if err != nil {
 		t.Fatal(err)
@@ -35,6 +36,7 @@ func TestClearAppDataQuotaUsesAppOrAllocatedUID(t *testing.T) {
 	s.clearAppDataQuota("demo", &app{
 		name: "demo",
 	})
+
 	if want := []quotaCall{
 		{
 			bin: "setquota",
@@ -59,6 +61,7 @@ func TestDataQuotaClearFailureDoesNotPanic(t *testing.T) {
 		name: "demo",
 		uid: 20008,
 	})
+
 	if len(runner.calls) != 1 {
 		t.Errorf("clear ran %d commands, want one best-effort attempt", len(runner.calls))
 	}
@@ -66,6 +69,7 @@ func TestDataQuotaClearFailureDoesNotPanic(t *testing.T) {
 
 func TestDataQuotaConfigPatchAppliesBeforePersist(t *testing.T) {
 	dir := t.TempDir()
+
 	cfg, err := normaliseAppConfig(appConfig{
 		Name: "demo",
 		Host: "demo.localhost",
@@ -98,6 +102,7 @@ func TestDataQuotaConfigPatchAppliesBeforePersist(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	s.handleAppConfig(rec, req, "demo")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -131,6 +136,7 @@ func TestDataQuotaConfigPatchAppliesBeforePersist(t *testing.T) {
 
 func TestDataQuotaConfigPatchFailureKeepsConfig(t *testing.T) {
 	dir := t.TempDir()
+
 	cfg, err := normaliseAppConfig(appConfig{
 		Name: "demo",
 		Host: "demo.localhost",
@@ -171,6 +177,7 @@ func TestDataQuotaConfigPatchFailureKeepsConfig(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	s.handleAppConfig(rec, req, "demo")
+
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500: %s", rec.Code, rec.Body.String())
 	}
@@ -197,6 +204,7 @@ func TestDataQuotaConfigPatchFailureKeepsConfig(t *testing.T) {
 
 func TestDataQuotaConfigPatchWithoutUIDIsDeferred(t *testing.T) {
 	dir := t.TempDir()
+
 	cfg, err := normaliseAppConfig(appConfig{
 		Name: "demo",
 		Host: "demo.localhost",
@@ -228,6 +236,7 @@ func TestDataQuotaConfigPatchWithoutUIDIsDeferred(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	s.handleAppConfig(rec, req, "demo")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
 	}

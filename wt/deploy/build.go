@@ -43,6 +43,7 @@ func checkStaticSvelteKit(dir string, m manifest) error {
 
 		name := entry.Name()
 		rel, _ := filepath.Rel(dir, path)
+
 		serverFile := strings.HasSuffix(name, ".server.ts") || strings.HasSuffix(name, ".server.js") || strings.HasSuffix(name, ".server.mjs") || strings.HasPrefix(name, "+server.")
 		if serverDir := strings.Contains(filepath.ToSlash(rel), "/lib/server/"); serverFile || serverDir {
 			found = append(found, filepath.ToSlash(rel))
@@ -163,6 +164,7 @@ func buildComponent(cfg *deployConfig, m manifest, cache *buildCache, status *bu
 	status.ComponentHash, status.ComponentFiles = in.hash, in.files
 
 	writeBuildCache(cfg.dir, *cache)
+
 	return nil
 }
 
@@ -260,6 +262,7 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 
 	wasmInfo, wasmErr := os.Stat(wasmPath)
 	wasmExists := wasmErr == nil && wasmInfo.Mode().IsRegular()
+
 	hasComponentBuild := componentCmd != ""
 	if !hasComponentBuild && !wasmExists {
 		return status, errors.New("app.json has no build_component and main.wasm is missing")
@@ -272,6 +275,7 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 	staticInfo, staticErr := os.Stat(filepath.Join(cfg.dir, "static"))
 	staticExists := staticErr == nil && staticInfo.IsDir()
 	cache, _ := readBuildCache(cfg.dir)
+
 	component, err := measurePhase(cfg.dir, m, componentCmd, componentInputHash)
 	if err != nil {
 		return status, err

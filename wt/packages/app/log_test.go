@@ -17,6 +17,7 @@ func captureLogs(t *testing.T) *bytes.Buffer {
 	t.Cleanup(func() {
 		output = previous
 	})
+
 	return buffer
 }
 
@@ -42,6 +43,7 @@ func TestLogfSplitsLines(t *testing.T) {
 	buffer := captureLogs(t)
 
 	Warnf("first\nsecond\n")
+
 	if got := buffer.String(); got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}

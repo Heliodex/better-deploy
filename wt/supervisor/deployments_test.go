@@ -79,6 +79,7 @@ func TestDeploymentHistoryLegacyStaticWithoutMetadata(t *testing.T) {
 func TestDeploymentHistoryRecordsFailure(t *testing.T) {
 	manager := newDeploymentManager(t.TempDir())
 	digest := digestText("wasm")
+
 	info, err := manager.recordFailure("demo", digest, "new version did not start: boom")
 	if err != nil {
 		t.Fatal(err)
@@ -106,6 +107,7 @@ func TestRollbackInstallsPreviousBundle(t *testing.T) {
 	s := newLifecycleSupervisor(t)
 	a := spawnTestApp(t, s, "demo")
 	s.deployments = newDeploymentManager(filepath.Join(s.cfg.stateDir, ".deployments"))
+
 	info, err := s.deployments.record("demo", a.dir)
 	if err != nil {
 		t.Fatal(err)
@@ -116,6 +118,7 @@ func TestRollbackInstallsPreviousBundle(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleRollback(rec, req, "demo", info.ID)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("rollback status = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -124,6 +127,7 @@ func TestRollbackInstallsPreviousBundle(t *testing.T) {
 	if next == nil || next == a {
 		t.Fatalf("rollback did not replace the app: %v", next)
 	}
+
 	t.Cleanup(func() {
 		s.stop(next)
 	})
@@ -225,6 +229,7 @@ func TestDeploymentHistoryKeepsStaticFiles(t *testing.T) {
 func TestDeploymentHistoryLegacyCwasmDigest(t *testing.T) {
 	manager := newDeploymentManager(t.TempDir())
 	source := writeDeploymentSource(t, "demo.localhost")
+
 	recorded, err := manager.record("demo", source)
 	if err != nil {
 		t.Fatal(err)
@@ -238,6 +243,7 @@ func TestDeploymentHistoryLegacyCwasmDigest(t *testing.T) {
 func TestDeploymentHistoryMarksRunningDigest(t *testing.T) {
 	s := testSupervisor()
 	s.deployments = newDeploymentManager(t.TempDir())
+
 	first, err := s.deployments.record("demo", writeDeploymentSource(t, "first.localhost"))
 	if err != nil {
 		t.Fatal(err)
@@ -261,6 +267,7 @@ func TestDeploymentHistoryMarksRunningDigest(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleDeployments(rec, req, "demo")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("deployments = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -452,6 +459,7 @@ func TestDeploymentHistorySharesArtifacts(t *testing.T) {
 func TestDeploymentInfoEndpoint(t *testing.T) {
 	s := testSupervisor()
 	s.deployments = newDeploymentManager(t.TempDir())
+
 	recorded, err := s.deployments.record("demo", writeDeploymentSource(t, "demo.localhost"))
 	if err != nil {
 		t.Fatal(err)
@@ -466,6 +474,7 @@ func TestDeploymentInfoEndpoint(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleApp(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("deployment info = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -507,6 +516,7 @@ func TestDeploymentHistoryChangedStaticGetsNewBlob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	writeStaticFile(t, source, rel, "two")
 
 	second, err := manager.record("demo", source)

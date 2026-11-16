@@ -32,6 +32,7 @@ func (s *identityStore) saveSessionsLocked() error {
 	for hash := range s.sessions {
 		hashes = append(hashes, hash)
 	}
+
 	slices.Sort(hashes)
 
 	sessions := make([]identitySession, 0, len(hashes))
@@ -167,6 +168,7 @@ func (s *identityStore) saveUsersLocked() error {
 	for id := range s.users {
 		ids = append(ids, id)
 	}
+
 	slices.Sort(ids)
 
 	users := make([]identityUser, 0, len(ids))

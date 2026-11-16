@@ -28,6 +28,7 @@ func TestCookieLifecycle(t *testing.T) {
 	read := httptest.NewRequest(http.MethodGet, "https://passport.example/", nil)
 
 	read.AddCookie(cookie)
+
 	if got, ok := manager.Token(read); !ok || got != "token" {
 		t.Errorf("token = %q %v", got, ok)
 	}
@@ -35,6 +36,7 @@ func TestCookieLifecycle(t *testing.T) {
 	cleared := httptest.NewRecorder()
 
 	manager.Clear(cleared, request)
+
 	if expired := cleared.Result().Cookies()[0]; expired.MaxAge != -1 || expired.Value != "" {
 		t.Errorf("expired cookie = %+v", expired)
 	}
@@ -70,10 +72,13 @@ func TestSecureAndSameOrigin(t *testing.T) {
 	request = httptest.NewRequest(http.MethodPost, "http://passport.example/", nil)
 
 	request.Header.Set("Origin", "https://passport.example")
+
 	if !SameOrigin(request) {
 		t.Error("same-origin request rejected")
 	}
+
 	request.Header.Set("Origin", "https://evil.example")
+
 	if SameOrigin(request) {
 		t.Error("cross-origin request accepted")
 	}
@@ -81,6 +86,7 @@ func TestSecureAndSameOrigin(t *testing.T) {
 	request = httptest.NewRequest(http.MethodPost, "http://passport.localhost/", nil)
 
 	request.Header.Set("Origin", "http://127.0.0.1:5173")
+
 	if !SameOrigin(request) {
 		t.Error("loopback dev origin rejected")
 	}

@@ -45,6 +45,7 @@ func (s *supervisor) handleBackupsRoute(w http.ResponseWriter, r *http.Request, 
 	if params["rest"] != "" {
 		rest = "/" + params["rest"]
 	}
+
 	s.handleBackupRoute(w, r, params["name"], rest)
 }
 
@@ -55,6 +56,7 @@ func (s *supervisor) handleDatabaseRoute(w http.ResponseWriter, r *http.Request,
 	if params["rest"] != "" {
 		action += "/" + params["rest"]
 	}
+
 	s.handleAppDatabase(w, r, params["name"], action)
 }
 
@@ -69,6 +71,7 @@ func (s *supervisor) handleDeploymentsRoute(w http.ResponseWriter, r *http.Reque
 		s.handleDeploymentCreate(w, r, params["name"])
 		return
 	}
+
 	s.handleDeployments(w, r, params["name"])
 }
 
@@ -79,6 +82,7 @@ func (s *supervisor) handleJobsRoute(w http.ResponseWriter, r *http.Request, par
 	if params["rest"] != "" {
 		action += "/" + params["rest"]
 	}
+
 	s.handleAppJobs(w, r, params["name"], action)
 }
 
@@ -88,6 +92,7 @@ func (s *supervisor) handleLogExportRoute(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
+
 	s.handleLogExport(w, r, a)
 }
 
@@ -112,6 +117,7 @@ func (s *supervisor) handleResourcesRoute(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
+
 	s.handleResources(w, r, a)
 }
 
@@ -121,6 +127,7 @@ func (s *supervisor) handleRestartRoute(w http.ResponseWriter, r *http.Request, 
 	if !ok {
 		return
 	}
+
 	s.handleRestart(w, r, a)
 }
 
@@ -185,6 +192,7 @@ func (s *supervisor) buildAppRoutes() *routeTable {
 	rt.addApp(http.MethodPost, "/apps/{name}/rollback/{id}", func(params map[string]string) string {
 		return "rollback/" + params["id"]
 	}, s.handleRollbackRoute)
+
 	return rt
 }
 

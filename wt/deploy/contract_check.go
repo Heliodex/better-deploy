@@ -103,7 +103,9 @@ func compareContractTrees(generatedDir, currentDir string) error {
 			names = append(names, name)
 		}
 	}
+
 	sort.Strings(names)
+
 	for _, name := range names {
 		currentPath, currentOK := current[name]
 		generatedPath, generatedOK := generated[name]

@@ -137,7 +137,9 @@ func dedupePaths(paths []string) []string {
 		seen[abs] = struct{}{}
 		out = append(out, abs)
 	}
+
 	sort.Strings(out)
+
 	return out
 }
 
@@ -200,6 +202,7 @@ func goModuleFiles(dir string) ([]string, error) {
 func inputHash(dir, command, seed string, files []string) (string, error) {
 	hash := sha256.New()
 	_, _ = io.WriteString(hash, "command\x00"+command+"\x00seed\x00"+seed+"\x00")
+
 	base, err := filepath.Abs(dir)
 	if err != nil {
 		return "", err
@@ -305,6 +308,7 @@ func localReplaceDirs(dir string) ([]string, error) {
 		}
 
 		line = strings.TrimPrefix(line, "replace ")
+
 		_, right, ok := strings.Cut(line, "=>")
 		if !ok {
 			continue
@@ -445,7 +449,6 @@ func collectComponentInputFiles(dir string, m manifest) ([]string, error) {
 
 	for _, value := range m.ComponentInputs {
 		files, err = addExplicitInput(files, dir, value, walkModuleInput)
-
 		if err != nil {
 			return nil, err
 		}
@@ -465,7 +468,6 @@ func collectComponentInputFiles(dir string, m manifest) ([]string, error) {
 
 	for _, value := range replaces {
 		files, err = addExplicitInput(files, dir, value, walkModuleSources)
-
 		if err != nil {
 			return nil, err
 		}
@@ -482,6 +484,7 @@ func componentInputHash(dir string, m manifest, command string) (string, int, er
 	}
 
 	seed := "component\x00" + strings.Join(m.ComponentInputs, "\x00")
+
 	hash, err := inputHash(dir, command, seed, files)
 	if err != nil {
 		return "", 0, err
@@ -541,6 +544,7 @@ func staticInputHash(dir string, m manifest, command string) (string, int, error
 	}
 
 	seed := "static\x00" + webDirName(m) + "\x00" + strings.Join(m.StaticInputs, "\x00")
+
 	hash, err := inputHash(dir, command, seed, files)
 	if err != nil {
 		return "", 0, err

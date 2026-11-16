@@ -64,6 +64,7 @@ func checkDeploySecrets(cfg *deployConfig, m manifest) error {
 		jsonOut: cfg.jsonOut,
 		timeout: deployPollTimeout,
 	}
+
 	status, _, body, err := apiDo(client, http.MethodGet, "/apps/"+m.Name+"/secrets", nil, "")
 	if err != nil {
 		return err
@@ -115,7 +116,9 @@ func prepareManifest(m *manifest, cfg *deployConfig) error {
 
 		return nil
 	}
+
 	applyAppDomain(m, cfg.appDomain)
+
 	return nil
 }
 
@@ -156,6 +159,7 @@ func printDeployResult(cfg *deployConfig, name string, body []byte) error {
 			jsonOut: cfg.jsonOut,
 			timeout: deployPollTimeout,
 		}
+
 		status, _, data, err := apiDo(client, http.MethodGet, "/apps/"+name, nil, "")
 		if err != nil {
 			return err
@@ -189,7 +193,9 @@ func printDeployResult(cfg *deployConfig, name string, body []byte) error {
 	if info.Name == "" {
 		info.Name = name
 	}
+
 	fmt.Printf("deployed %s\n", info.Name)
+
 	if info.Host != "" {
 		fmt.Printf("  url: %s\n", appURLForHost(cfg.host, info.Host))
 	}
@@ -199,14 +205,17 @@ func printDeployResult(cfg *deployConfig, name string, body []byte) error {
 		if len(digest) > shortHashLength {
 			digest = digest[:shortHashLength]
 		}
+
 		fmt.Printf("  digest: %s\n", digest)
 	}
 
 	if info.Status != "" {
 		fmt.Printf("  status: %s", info.Status)
+
 		if info.Ready {
 			fmt.Print(" (ready)")
 		}
+
 		fmt.Println()
 	}
 
@@ -286,6 +295,7 @@ func upload(cfg *deployConfig, m manifest, bundle []byte) error {
 	var body bytes.Buffer
 
 	form := multipart.NewWriter(&body)
+
 	part, err := form.CreateFormFile("artifact", "app.tar.gz")
 	if err != nil {
 		return err
@@ -300,6 +310,7 @@ func upload(cfg *deployConfig, m manifest, bundle []byte) error {
 	}
 
 	url := baseURL(cfg.host) + "/apps/" + m.Name + "/deployments"
+
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, &body)
 	if err != nil {
 		return err
@@ -308,6 +319,7 @@ func upload(cfg *deployConfig, m manifest, bundle []byte) error {
 	if cfg.token != "" {
 		req.Header.Set("Authorization", "Bearer "+cfg.token)
 	}
+
 	req.Header.Set("Content-Type", form.FormDataContentType())
 
 	size := int64(body.Len())
@@ -320,6 +332,7 @@ func upload(cfg *deployConfig, m manifest, bundle []byte) error {
 	client := &http.Client{
 		Timeout: 2 * time.Minute,
 	}
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("post bundle: %w", err)
@@ -367,6 +380,7 @@ func deploy(args []string) error {
 	}
 
 	cfg.start = time.Now()
+
 	m, err := readManifest(cfg.dir)
 	if err != nil {
 		return err
@@ -385,6 +399,7 @@ func deploy(args []string) error {
 		if err != nil {
 			return err
 		}
+
 		applyDeployEnv(&m, vars)
 	}
 
@@ -409,6 +424,7 @@ func deploy(args []string) error {
 	if err != nil {
 		return err
 	}
+
 	printBuildStatus(status)
 
 	var keepComponent bool

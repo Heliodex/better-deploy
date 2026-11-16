@@ -26,6 +26,7 @@ func TestCallerRejectsStaleAndMissingSignatures(t *testing.T) {
 	request.Header.Set(AppTimestampHeader, stale)
 	request.Header.Set(AppBodyHashHeader, bodyHash)
 	request.Header.Set(AppSignatureV2Header, appCallSignatureV2("key", "caller", request.Method, request.URL.RequestURI(), stale, bodyHash))
+
 	if _, ok := Caller(request); ok {
 		t.Error("stale signature accepted")
 	}
@@ -47,6 +48,7 @@ func TestCallerRejectsUnknownSignature(t *testing.T) {
 	request.Header.Set(AppCallerHeader, "caller")
 	request.Header.Set(AppTimestampHeader, timestamp)
 	request.Header.Set("X-WT-App-Signature", "legacy-signature")
+
 	if _, ok := Caller(request); ok {
 		t.Error("legacy signature accepted")
 	}
@@ -136,6 +138,7 @@ func TestServeStorageHealth(t *testing.T) {
 		rec := httptest.NewRecorder()
 
 		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, HealthPath, nil))
+
 		if rec.Code != http.StatusNoContent {
 			t.Fatalf("status = %d, want 204", rec.Code)
 		}
@@ -156,6 +159,7 @@ func TestServeStorageHealthFailedMigration(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, HealthPath, nil))
+
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500", rec.Code)
 	}
@@ -168,6 +172,7 @@ func TestServeStorageHealthUnavailable(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	ServeStorage(errors.New("down"), nil, next).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, HealthPath, nil))
+
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("status = %d, want 503", rec.Code)
 	}
@@ -186,6 +191,7 @@ func TestServeStorageMigrateEndpoint(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, MigratePath, nil))
+
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("migrate status = %d, want 204", rec.Code)
 	}
@@ -193,6 +199,7 @@ func TestServeStorageMigrateEndpoint(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, HealthPath, nil))
+
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("health status = %d, want 204", rec.Code)
 	}
@@ -217,6 +224,7 @@ func TestServeStorageMigrateEndpointFailureThenRetry(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, MigratePath, nil))
+
 	if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), "schema is broken") {
 		t.Fatalf("first migrate = %d %q", rec.Code, rec.Body.String())
 	}
@@ -224,6 +232,7 @@ func TestServeStorageMigrateEndpointFailureThenRetry(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, MigratePath, nil))
+
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("retry status = %d, want 204", rec.Code)
 	}
@@ -243,6 +252,7 @@ func TestServeStorageMigrateEndpointRequiresPost(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, MigratePath, nil))
+
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("status = %d, want 405", rec.Code)
 	}
@@ -262,6 +272,7 @@ func TestServeStorageMigrateEndpointUnavailable(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, MigratePath, nil))
+
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("status = %d, want 503", rec.Code)
 	}
@@ -287,6 +298,7 @@ func TestServeStorageMigratesOnce(t *testing.T) {
 		rec := httptest.NewRecorder()
 
 		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
 		if rec.Code != http.StatusNoContent {
 			t.Fatalf("status = %d, want 204", rec.Code)
 		}
@@ -345,6 +357,7 @@ func TestServeStorageNormalPath(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want 204", rec.Code)
 	}
@@ -370,6 +383,7 @@ func TestServeStorageRetriesFailedMigration(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("first request status = %d, want 500", rec.Code)
 	}
@@ -377,6 +391,7 @@ func TestServeStorageRetriesFailedMigration(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
 	if rec.Code != http.StatusNoContent {
 		t.Errorf("retry status = %d, want 204", rec.Code)
 	}
@@ -393,6 +408,7 @@ func TestServeStorageUnavailable(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	ServeStorage(errors.New("down"), nil, next).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("status = %d, want 503", rec.Code)
 	}
@@ -402,6 +418,7 @@ func TestWriteError(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	WriteError(rec, http.StatusBadRequest, "nope")
+
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", rec.Code)
 	}
@@ -432,6 +449,7 @@ func TestWriteJSON(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	WriteJSON(rec, http.StatusCreated, map[string]int{"n": 1})
+
 	if rec.Code != http.StatusCreated {
 		t.Errorf("status = %d, want 201", rec.Code)
 	}

@@ -25,6 +25,7 @@ func TestStorageJobsAPI(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	storage.storageJobs(rec, req, "demo")
+
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("enqueue = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -43,6 +44,7 @@ func TestStorageJobsAPI(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	storage.storageJobs(rec, req, "demo")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("list = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -61,6 +63,7 @@ func TestStorageJobsAPI(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	storage.storageJob(rec, req, "demo", job.ID, "")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("show = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -69,6 +72,7 @@ func TestStorageJobsAPI(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	storage.storageJob(rec, req, "demo", job.ID, "cancel")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("cancel = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -84,6 +88,7 @@ func TestStorageJobsUnavailable(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	storage.storageJobs(rec, req, "demo")
+
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("status = %d, want 503", rec.Code)
 	}

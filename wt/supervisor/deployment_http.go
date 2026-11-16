@@ -27,6 +27,7 @@ func (s *supervisor) handleDeploymentInfo(w http.ResponseWriter, _ *http.Request
 
 		info.Current = running != "" && info.Digest == running
 	}
+
 	writeJSON(w, http.StatusOK, info)
 }
 
@@ -75,8 +76,10 @@ func (s *supervisor) handleDeployments(w http.ResponseWriter, _ *http.Request, n
 		}
 
 		list[i].Current = true
+
 		break
 	}
+
 	writeJSON(w, http.StatusOK, list)
 }
 
@@ -135,17 +138,22 @@ func (s *supervisor) handleRollback(w http.ResponseWriter, r *http.Request, name
 		if next == nil {
 			return
 		}
+
 		writeJSON(w, http.StatusOK, s.info(next))
+
 		return
 	}
 
 	digest := sourceDigest(dir)
+
 	next, mode, err := s.installBundle(w, name, cfg, dir, digest, "rolled back")
 	if err != nil {
 		s.metrics.observeDeploy(name, "rollback-failed")
 		s.recordDeploymentFailure(name, digest, err)
+
 		return
 	}
+
 	s.metrics.observeDeploy(name, "rollback")
 	s.recordDeployment(name, next.dir)
 	w.Header().Set("X-Wt-Wasm-Digest", next.digest)

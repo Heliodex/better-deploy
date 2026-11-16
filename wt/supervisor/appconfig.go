@@ -75,12 +75,14 @@ func applyAppTimeouts(cfg *appConfig) error {
 	}
 
 	cfg.healthInterval = interval
+
 	failures, err := parseHealthFailures(cfg.HealthFailures)
 	if err != nil {
 		return err
 	}
 
 	cfg.HealthFailures = failures
+
 	idle, err := parseIdleTimeout(cfg.IdleTimeout)
 	if err != nil {
 		return err
@@ -270,6 +272,7 @@ func validateAppSchedule(cfg *appConfig) error {
 // applyAppDefaults fills in tenant defaults, network and identity rules, timeouts and scheduled calls.
 func applyAppDefaults(cfg *appConfig, mode string) error {
 	applyTenantDefaults(cfg, mode)
+
 	if err := normaliseAppNetwork(cfg, mode); err != nil {
 		return err
 	}
@@ -305,6 +308,7 @@ func validateAppSettings(cfg *appConfig) error {
 	}
 
 	cfg.ServerPaths = serverPaths
+
 	serverPages, err := normaliseServerPages(cfg.ServerPages)
 	if err != nil {
 		return err
@@ -357,7 +361,6 @@ func normaliseAppConfig(cfg appConfig, name, domain, mode string) (appConfig, er
 	}
 
 	cfg, err = normaliseAppRelations(cfg, name)
-
 	if err != nil {
 		return cfg, err
 	}

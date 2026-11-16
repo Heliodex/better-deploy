@@ -56,6 +56,7 @@ func adminStatic() http.Handler {
 			// Entry HTML must revalidate so panels pick up new bundles after a supervisor update.
 			w.Header().Set("Cache-Control", "no-cache")
 		}
+
 		files.ServeHTTP(w, r)
 	})
 }
@@ -117,12 +118,14 @@ func (s *supervisor) handleRestart(w http.ResponseWriter, _ *http.Request, a *ap
 		http.Error(w, "app not found", http.StatusNotFound)
 		return
 	}
+
 	a.mu.Lock()
 
 	name := a.name
 
 	a.mu.Unlock()
 	s.drainAndStop(a, "restart")
+
 	if err := s.startStopped(a); err != nil {
 		log.Printf("restart %s: %v", name, err)
 
@@ -131,9 +134,12 @@ func (s *supervisor) handleRestart(w http.ResponseWriter, _ *http.Request, a *ap
 		if errors.Is(err, errNoComponent) {
 			status = http.StatusInternalServerError
 		}
+
 		writeError(w, status, "app did not restart: "+err.Error())
+
 		return
 	}
+
 	writeJSON(w, http.StatusOK, s.info(a))
 }
 
@@ -170,6 +176,7 @@ func (s *supervisor) broadcast() {
 	if err != nil {
 		return
 	}
+
 	s.events.publish(data)
 }
 
@@ -188,6 +195,7 @@ func (s *supervisor) handleEvents(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
@@ -204,6 +212,7 @@ func (s *supervisor) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
 		return
 	}
+
 	flusher.Flush()
 
 	messages := s.events.subscribe()
@@ -224,11 +233,13 @@ func (s *supervisor) handleEvents(w http.ResponseWriter, r *http.Request) {
 			if _, err := fmt.Fprintf(w, "data: %s\n\n", message); err != nil {
 				return
 			}
+
 			flusher.Flush()
 		case <-ticker.C:
 			if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
 				return
 			}
+
 			flusher.Flush()
 		case <-r.Context().Done():
 			return
@@ -294,6 +305,7 @@ func (s *supervisor) handleBackupImport(w http.ResponseWriter, r *http.Request, 
 		_ = temp.Close()
 
 		writeError(w, http.StatusBadRequest, "read snapshot: "+err.Error())
+
 		return
 	}
 
@@ -306,8 +318,10 @@ func (s *supervisor) handleBackupImport(w http.ResponseWriter, r *http.Request, 
 	if err != nil {
 		s.metrics.observeBackup(name, "import", "failed")
 		writeError(w, http.StatusBadRequest, "import snapshot: "+err.Error())
+
 		return
 	}
+
 	s.metrics.observeBackup(name, "import", "success")
 	s.writeBackups(w, name, info.Name)
 }
@@ -331,6 +345,7 @@ func (s *supervisor) handleBackupSettings(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	s.writeBackups(w, name, "")
 }
 
@@ -379,8 +394,10 @@ func (s *supervisor) handleBackups(w http.ResponseWriter, r *http.Request, name 
 		if err != nil && !errors.Is(err, errBackupUnchanged) {
 			s.metrics.observeBackup(name, "create", "failed")
 			writeBackupError(w, err)
+
 			return
 		}
+
 		s.metrics.observeBackup(name, "create", "success")
 		s.writeBackups(w, name, info.Name)
 	default:
@@ -422,6 +439,7 @@ func (s *supervisor) restoreBackupLocked(ctx context.Context, w http.ResponseWri
 		running = a.cmd != nil && !a.exited
 
 		a.mu.Unlock()
+
 		if running {
 			s.stop(a)
 		}
@@ -441,6 +459,7 @@ func (s *supervisor) restoreBackupLocked(ctx context.Context, w http.ResponseWri
 		if err := s.startStopped(a); err != nil {
 			log.Printf("restore %s: restart: %v", name, err)
 			writeError(w, http.StatusBadGateway, "data restored but app did not restart: "+err.Error())
+
 			return false
 		}
 	}
@@ -468,6 +487,7 @@ func (s *supervisor) handleBackupRestore(w http.ResponseWriter, r *http.Request,
 		s.metrics.observeBackup(name, "restore", "failed")
 		return
 	}
+
 	s.metrics.observeBackup(name, "restore", "success")
 	s.writeBackups(w, name, "")
 }

@@ -109,6 +109,7 @@ func TestHandlerRoutesByTrustedForwardedHost(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	s.handler().ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("untrusted admin route = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -123,6 +124,7 @@ func TestHandlerRoutesByTrustedForwardedHost(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	s.handler().ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("trusted forwarded host = %d, want the app route's 503", rec.Code)
 	}
@@ -132,6 +134,7 @@ func TestProxyRewritesForwardedHeadersCleanly(t *testing.T) {
 	type seen struct {
 		host, forwardedHost, forwardedProto, forwardedFor, realIP, forwarded, spinClient string
 	}
+
 	got := make(chan seen, 1)
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got <- seen{
@@ -143,6 +146,7 @@ func TestProxyRewritesForwardedHeadersCleanly(t *testing.T) {
 			forwarded: r.Header.Get("Forwarded"),
 			spinClient: r.Header.Get(spinClientAddrHeader),
 		}
+
 		w.WriteHeader(http.StatusNoContent)
 	}))
 
@@ -179,6 +183,7 @@ func TestProxyRewritesForwardedHeadersCleanly(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	proxy.ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("proxy = %d: %s", rec.Code, rec.Body.String())
 	}

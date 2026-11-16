@@ -72,12 +72,14 @@ func isHelpFlag(arg string) bool {
 // selectProfile loads the config file named by args and resolves the profile that the flags select.
 func selectProfile(args []string) (profileSelection, error) {
 	path := configArg(args)
+
 	file, err := loadFileConfig(path)
 	if err != nil {
 		return profileSelection{}, err
 	}
 
 	name := activeProfileName(profileArg(args), file)
+
 	profile, err := resolveProfile(file, name)
 	if err != nil {
 		return profileSelection{}, err
@@ -186,6 +188,7 @@ func resolveConfig(args []string) (*deployConfig, error) {
 			appDomainSet = true
 		}
 	})
+
 	if *target != targetDefault {
 		targetConfigured = true
 	}
@@ -196,7 +199,6 @@ func resolveConfig(args []string) (*deployConfig, error) {
 
 	if *config != configPath {
 		profile, err = applyConfigFile(*config, profileSet, appDomainSet, profileFlag, host, token, appDomain)
-
 		if err != nil {
 			return nil, err
 		}
@@ -244,6 +246,7 @@ func runBundle(args []string) error {
 	if err != nil {
 		return err
 	}
+
 	printBuildStatus(status)
 
 	out := cfg.out
@@ -254,7 +257,9 @@ func runBundle(args []string) error {
 	if err := os.WriteFile(out, data, privateFileMode); err != nil {
 		return fmt.Errorf("write bundle: %w", err)
 	}
+
 	fmt.Println("wrote", out)
+
 	return nil
 }
 

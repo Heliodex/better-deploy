@@ -18,6 +18,7 @@ func TestBlobDownloadURL(t *testing.T) {
 	t.Setenv(blobPrefixEnv, "")
 
 	digest := strings.Repeat("a", 64)
+
 	link, err := BlobDownloadURL(digest, time.Now().Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
@@ -58,6 +59,7 @@ func TestBlobSignatureVector(t *testing.T) {
 
 func TestBlobURLRequiresSecret(t *testing.T) {
 	t.Setenv(blobSecretEnv, "")
+
 	if _, err := BlobDownloadURL(strings.Repeat("a", 64), time.Now().Add(time.Hour)); err == nil {
 		t.Error("BlobDownloadURL accepted an empty secret")
 	}

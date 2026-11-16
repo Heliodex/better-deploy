@@ -48,6 +48,7 @@ func testBlobSupervisor(t *testing.T) (*supervisor, *app) {
 
 	s := testSupervisor()
 	s.cfg.stateDir = t.TempDir()
+
 	store, err := newBlobStore(s.cfg.stateDir)
 	if err != nil {
 		t.Fatal(err)
@@ -74,6 +75,7 @@ func TestBlobAdminDelete(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPut, signedBlobURL(t, s, a, "upload", "", 1024, "text/plain", expires), strings.NewReader("delete me"))
 
 	s.handleBlobs(rec, req, a)
+
 	if rec.Code != http.StatusCreated {
 		t.Fatal(rec.Body.String())
 	}
@@ -87,6 +89,7 @@ func TestBlobAdminDelete(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	s.handleAppBlob(rec, httptest.NewRequest(http.MethodDelete, "/apps/demo/blobs/"+uploaded.Digest, nil), "demo", uploaded.Digest)
+
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("delete = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -104,6 +107,7 @@ func TestBlobAdminLifecycle(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPut, signedBlobURL(t, s, a, "upload", "", 1024, "text/plain", expires), bytes.NewReader(body))
 
 	s.handleBlobs(rec, req, a)
+
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("upload = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -118,6 +122,7 @@ func TestBlobAdminLifecycle(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	s.handleAppBlobs(rec, httptest.NewRequest(http.MethodGet, "/apps/demo/blobs", nil), "demo")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("list = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -163,6 +168,7 @@ func TestBlobAdminLifecycle(t *testing.T) {
 	bodyGC := strings.NewReader(`{"olderThan":"24h","dryRun":true}`)
 
 	s.handleAppBlobGC(rec, httptest.NewRequest(http.MethodPost, "/apps/demo/blobs/gc", bodyGC), "demo")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("dry run = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -185,6 +191,7 @@ func TestBlobAdminLifecycle(t *testing.T) {
 	bodyGC = strings.NewReader(`{"olderThan":"24h"}`)
 
 	s.handleAppBlobGC(rec, httptest.NewRequest(http.MethodPost, "/apps/demo/blobs/gc", bodyGC), "demo")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("gc = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -211,6 +218,7 @@ func TestBlobRejectsBadSignatureAndOversize(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPut, blobPrefix+"?max=10&ct=text/plain&exp="+strconv.FormatInt(expires.Unix(), 10)+"&sig="+strings.Repeat("0", 64), strings.NewReader("hello"))
 
 	s.handleBlobs(rec, req, a)
+
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("bad signature = %d, want 403", rec.Code)
 	}
@@ -220,6 +228,7 @@ func TestBlobRejectsBadSignatureAndOversize(t *testing.T) {
 	req = httptest.NewRequest(http.MethodPut, uploadURL, strings.NewReader("hello"))
 
 	s.handleBlobs(rec, req, a)
+
 	if rec.Code != http.StatusRequestEntityTooLarge {
 		t.Errorf("oversize upload = %d, want 413: %s", rec.Code, rec.Body.String())
 	}
@@ -234,6 +243,7 @@ func TestBlobUploadDownloadAndDelete(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPut, uploadURL, bytes.NewReader(body))
 
 	s.handleBlobs(rec, req, a)
+
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("upload = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -245,6 +255,7 @@ func TestBlobUploadDownloadAndDelete(t *testing.T) {
 	}
 
 	sum := sha256.Sum256(body)
+
 	digest := hex.EncodeToString(sum[:])
 	if uploaded.Digest != digest || uploaded.Size != int64(len(body)) || uploaded.ContentType != "text/plain" {
 		t.Errorf("uploaded = %+v", uploaded)
@@ -255,6 +266,7 @@ func TestBlobUploadDownloadAndDelete(t *testing.T) {
 	req = httptest.NewRequest(http.MethodGet, downloadURL, nil)
 
 	s.handleBlobs(rec, req, a)
+
 	if rec.Code != http.StatusOK || rec.Body.String() != string(body) {
 		t.Fatalf("download = %d %q", rec.Code, rec.Body.String())
 	}
@@ -280,6 +292,7 @@ func TestBlobUploadDownloadAndDelete(t *testing.T) {
 
 	req.Header.Set("Range", "bytes=2-5")
 	s.handleBlobs(rec, req, a)
+
 	if rec.Code != http.StatusPartialContent || rec.Body.String() != string(body[2:6]) {
 		t.Errorf("range download = %d %q", rec.Code, rec.Body.String())
 	}
@@ -293,6 +306,7 @@ func TestBlobUploadDownloadAndDelete(t *testing.T) {
 	req = httptest.NewRequest(http.MethodDelete, deleteURL, nil)
 
 	s.handleBlobs(rec, req, a)
+
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("delete = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -301,6 +315,7 @@ func TestBlobUploadDownloadAndDelete(t *testing.T) {
 	req = httptest.NewRequest(http.MethodGet, downloadURL, nil)
 
 	s.handleBlobs(rec, req, a)
+
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("download after delete = %d, want 404", rec.Code)
 	}
@@ -324,6 +339,7 @@ func TestBlobUploadRejectsOverQuota(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPut, uploadURL, bytes.NewReader(make([]byte, 300<<10)))
 
 	s.handleBlobs(rec, req, a)
+
 	if rec.Code != http.StatusInsufficientStorage {
 		t.Errorf("over-quota upload = %d, want 507: %s", rec.Code, rec.Body.String())
 	}

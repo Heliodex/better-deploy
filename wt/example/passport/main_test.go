@@ -32,6 +32,7 @@ func do(handler http.Handler, method, path, body string, cookies ...*http.Cookie
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, request)
+
 	return recorder
 }
 
@@ -58,6 +59,7 @@ func testIssuer(t *testing.T) string {
 			http.NotFound(w, r)
 			return
 		}
+
 		w.Header().Set("Content-Type", "application/json")
 
 		document, err := json.Marshal(map[string]string{
@@ -75,6 +77,7 @@ func testIssuer(t *testing.T) string {
 	}))
 
 	t.Cleanup(server.Close)
+
 	return server.URL
 }
 
@@ -88,6 +91,7 @@ func testApp(t *testing.T) *passportApp {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(server.Close)
 
 	application, err := newPassportApp(server.NewClient(server.Client()), server.Client())
@@ -184,6 +188,7 @@ func TestCheckinValidationAndOrigin(t *testing.T) {
 		Name: sessionCookie,
 		Value: "alice-token",
 	}
+
 	recorder := do(handler, http.MethodPost, "/api/checkins", `{"message":"   "}`, cookie)
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("blank = %d: %s", recorder.Code, recorder.Body.String())
@@ -215,6 +220,7 @@ func TestCheckinValidationAndOrigin(t *testing.T) {
 	recorder = httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, request)
+
 	if recorder.Code != http.StatusForbidden {
 		t.Fatalf("cross-origin = %d: %s", recorder.Code, recorder.Body.String())
 	}
@@ -223,6 +229,7 @@ func TestCheckinValidationAndOrigin(t *testing.T) {
 func TestCheckinsRequireSession(t *testing.T) {
 	application := testApp(t)
 	handler := application.handler()
+
 	recorder := do(handler, http.MethodPost, "/api/checkins", `{"message":"hello"}`)
 	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("create without session = %d: %s", recorder.Code, recorder.Body.String())
@@ -248,6 +255,7 @@ func TestCheckinsRequireSession(t *testing.T) {
 func TestLoginRedirectsWithPublicOrigin(t *testing.T) {
 	application := testApp(t)
 	handler := application.handler()
+
 	recorder := do(handler, http.MethodGet, "/auth/login", "")
 	if recorder.Code != http.StatusFound {
 		t.Fatalf("login = %d: %s", recorder.Code, recorder.Body.String())

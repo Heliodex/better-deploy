@@ -84,6 +84,7 @@ func readTestFile(t *testing.T, path string) string {
 
 func writeTestFile(t *testing.T, path, body string) {
 	t.Helper()
+
 	if err := os.MkdirAll(filepath.Dir(path), privateDirMode); err != nil {
 		t.Fatal(err)
 	}
@@ -108,6 +109,7 @@ func TestComponentInputHashFindsParentModule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	writeTestFile(t, filepath.Join(module, "other", "main.go"), "package main // sibling")
 
 	afterSibling, _, err := componentInputHash(app, manifest{}, "build")
@@ -118,6 +120,7 @@ func TestComponentInputHashFindsParentModule(t *testing.T) {
 	if afterSibling != first {
 		t.Error("sibling app change altered the component hash")
 	}
+
 	writeTestFile(t, filepath.Join(root, "packages", "app", "app.go"), "package app // changed")
 
 	afterSDK, _, err := componentInputHash(app, manifest{}, "build")
@@ -128,6 +131,7 @@ func TestComponentInputHashFindsParentModule(t *testing.T) {
 	if afterSDK == first {
 		t.Error("parent module replace target change did not alter the component hash")
 	}
+
 	writeTestFile(t, filepath.Join(module, "go.mod"), "module example\n\ngo 1.27.1\n\nreplace github.com/heliodex/better-deploy/wt/packages/v2 => ../packages\n// changed\n")
 
 	afterModule, _, err := componentInputHash(app, manifest{}, "build")
@@ -149,10 +153,12 @@ func TestComponentInputHashIncludesExplicitInputs(t *testing.T) {
 	m := manifest{
 		ComponentInputs: []string{"web/src/lib/contract.ts"},
 	}
+
 	first, _, err := componentInputHash(dir, m, "build")
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	writeTestFile(t, filepath.Join(dir, "web", "src", "lib", "contract.ts"), "export const value = 2")
 
 	after, _, err := componentInputHash(dir, m, "build")
@@ -183,6 +189,7 @@ func TestComponentInputHashTracksSDKAndNotFrontend(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	writeTestFile(t, filepath.Join(app, "web", "src", "+page.svelte"), "<h1>two</h1>")
 
 	afterFrontend, _, err := componentInputHash(app, manifest{}, "build")
@@ -193,6 +200,7 @@ func TestComponentInputHashTracksSDKAndNotFrontend(t *testing.T) {
 	if afterFrontend != first {
 		t.Error("frontend change altered the component hash")
 	}
+
 	writeTestFile(t, filepath.Join(root, "packages", "app", "app.go"), "package app // changed")
 
 	afterSDK, _, err := componentInputHash(app, manifest{}, "build")
@@ -203,6 +211,7 @@ func TestComponentInputHashTracksSDKAndNotFrontend(t *testing.T) {
 	if afterSDK == first {
 		t.Error("SDK change did not alter the component hash")
 	}
+
 	writeTestFile(t, filepath.Join(app, "main.go"), "package main // changed")
 
 	afterApp, _, err := componentInputHash(app, manifest{}, "build")
@@ -226,6 +235,7 @@ func TestPrepareBuildsRecompilesWithoutArtifact(t *testing.T) {
 		wasmtime: fakeCompiler(t, "compiled"),
 		target: testTarget,
 	}
+
 	status, err := prepareBuilds(cfg, manifest{
 		Name: testAppName,
 	})
@@ -263,6 +273,7 @@ func TestPrepareBuildsReusesMatchingArtifact(t *testing.T) {
 		wasmtime: fakeCompiler(t, "compiled"),
 		target: testTarget,
 	}
+
 	status, err := prepareBuilds(cfg, manifest{
 		Name: testAppName,
 	})
@@ -297,6 +308,7 @@ func TestPrepareBuildsSplitsPhases(t *testing.T) {
 		target: testTarget,
 	}
 	logPath := filepath.Join(dir, "build.log")
+
 	first, err := prepareBuilds(cfg, m)
 	if err != nil {
 		t.Fatal(err)
@@ -322,6 +334,7 @@ func TestPrepareBuildsSplitsPhases(t *testing.T) {
 	if got := readTestFile(t, logPath); got != "component\nstatic\n" {
 		t.Errorf("second build log = %q", got)
 	}
+
 	writeTestFile(t, filepath.Join(dir, "web", "src", "+page.svelte"), "<h1>two</h1>")
 
 	afterFrontend, err := prepareBuilds(cfg, m)
@@ -336,6 +349,7 @@ func TestPrepareBuildsSplitsPhases(t *testing.T) {
 	if got := readTestFile(t, logPath); got != "component\nstatic\nstatic\n" {
 		t.Errorf("frontend build log = %q", got)
 	}
+
 	writeTestFile(t, filepath.Join(dir, "main.go"), "package main // changed")
 
 	afterGo, err := prepareBuilds(cfg, m)
@@ -356,14 +370,19 @@ func TestReadManifestValidatesBuildInputs(t *testing.T) {
 	dir := t.TempDir()
 
 	writeTestFile(t, filepath.Join(dir, "app.json"), `{"name":"demo","component_inputs":["/absolute"]}`)
+
 	if _, err := readManifest(dir); err == nil {
 		t.Error("absolute component_inputs should fail")
 	}
+
 	writeTestFile(t, filepath.Join(dir, "app.json"), `{"name":"demo","static_inputs":["."]}`)
+
 	if _, err := readManifest(dir); err == nil {
 		t.Error("the app root as static_inputs should fail")
 	}
+
 	writeTestFile(t, filepath.Join(dir, "app.json"), `{"name":"demo","component_inputs":["../packages","web/src/lib/contract.ts"]}`)
+
 	if _, err := readManifest(dir); err != nil {
 		t.Errorf("relative component_inputs should pass: %v", err)
 	}
@@ -379,10 +398,12 @@ func TestStaticInputHashTracksFrontendAndNotGo(t *testing.T) {
 	m := manifest{
 		BuildStatic: "build-static",
 	}
+
 	first, _, err := staticInputHash(dir, m, m.BuildStatic)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	writeTestFile(t, filepath.Join(dir, "main.go"), "package main // changed")
 
 	afterGo, _, err := staticInputHash(dir, m, m.BuildStatic)
@@ -393,6 +414,7 @@ func TestStaticInputHashTracksFrontendAndNotGo(t *testing.T) {
 	if afterGo != first {
 		t.Error("Go change altered the static hash")
 	}
+
 	writeTestFile(t, filepath.Join(dir, "web", "src", "+page.svelte"), "<h1>two</h1>")
 
 	afterFrontend, _, err := staticInputHash(dir, m, m.BuildStatic)

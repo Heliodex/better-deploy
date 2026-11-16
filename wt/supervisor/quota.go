@@ -44,6 +44,7 @@ func (q *dataQuota) mountPoint() (string, error) {
 	if strings.TrimSpace(q.filesystem) != "" {
 		return q.filesystem, nil
 	}
+
 	q.mu.Lock()
 
 	defer q.mu.Unlock()
@@ -119,6 +120,7 @@ func (q *dataQuota) clear(uid int) error {
 // execQuotaCommand runs a quota or findmnt command and includes its output in any error.
 func execQuotaCommand(bin string, args ...string) (string, error) {
 	cmd := exec.CommandContext(context.Background(), bin, args...)
+
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("%s %s: %w: %s", bin, strings.Join(args, " "), err, strings.TrimSpace(string(out)))

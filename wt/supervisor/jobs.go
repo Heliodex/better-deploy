@@ -105,6 +105,7 @@ func (m *jobManager) store(app string) *jobStore {
 	if m == nil {
 		return nil
 	}
+
 	m.mu.Lock()
 
 	defer m.mu.Unlock()
@@ -143,6 +144,7 @@ func (m *jobManager) close() {
 	if m == nil {
 		return
 	}
+
 	m.mu.Lock()
 
 	stores := make([]*jobStore, 0, len(m.stores))
@@ -154,6 +156,7 @@ func (m *jobManager) close() {
 	m.stores = map[string]*jobStore{}
 
 	m.mu.Unlock()
+
 	for _, store := range stores {
 		store.close()
 	}
@@ -164,12 +167,14 @@ func (m *jobManager) stop(app string) {
 	if m == nil {
 		return
 	}
+
 	m.mu.Lock()
 
 	store := m.stores[app]
 
 	delete(m.stores, app)
 	m.mu.Unlock()
+
 	if store != nil {
 		store.close()
 	}
@@ -225,6 +230,7 @@ func (s *jobStore) setConcurrency(value int) {
 	if s == nil {
 		return
 	}
+
 	s.mu.Lock()
 
 	s.concurrency = normaliseJobConcurrency(value)
@@ -238,11 +244,13 @@ func (m *jobManager) setConcurrency(app string, concurrency int) {
 	if m == nil {
 		return
 	}
+
 	m.mu.Lock()
 
 	store := m.stores[app]
 
 	m.mu.Unlock()
+
 	if store != nil {
 		store.setConcurrency(concurrency)
 	}
@@ -376,6 +384,7 @@ func (m *jobManager) start(app string, concurrency int) error {
 	if m == nil {
 		return nil
 	}
+
 	m.mu.Lock()
 
 	defer m.mu.Unlock()

@@ -75,6 +75,7 @@ func (s *supervisor) stopIdleApps(now time.Time) {
 		if !a.markIdleStopped() {
 			continue
 		}
+
 		log.Printf("app %s: stopping after idle", a.name)
 		s.drainAndStop(a, "idle")
 	}
@@ -90,6 +91,7 @@ func (s *supervisor) monitorIdle() {
 		if s.stopping.Load() {
 			return
 		}
+
 		s.stopIdleApps(time.Now())
 	}
 }
@@ -102,6 +104,7 @@ func (s *supervisor) wakeIdleApp(a *app) error {
 	running := a.cmd != nil && !a.exited
 
 	a.mu.Unlock()
+
 	if !idle || running {
 		return nil
 	}
@@ -109,7 +112,9 @@ func (s *supervisor) wakeIdleApp(a *app) error {
 	if s.lookup(a.name) != a {
 		return errors.New("app is no longer registered")
 	}
+
 	log.Printf("app %s: waking after idle", a.name)
+
 	return s.startStopped(a)
 }
 

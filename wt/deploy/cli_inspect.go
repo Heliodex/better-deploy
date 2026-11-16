@@ -51,7 +51,9 @@ func envKeys(value any) []string {
 	for key := range env {
 		keys = append(keys, key)
 	}
+
 	sort.Strings(keys)
+
 	return keys
 }
 
@@ -158,6 +160,7 @@ func joinValues(values []any) string {
 // printInspect prints the effective app view.
 func printInspect(report inspectReport) {
 	fmt.Printf("supervisor: %s\n", report.Supervisor.displayVersion())
+
 	if report.Supervisor.Wasmtime != "" {
 		fmt.Printf("wasmtime: %s\n", report.Supervisor.Wasmtime)
 	}
@@ -165,21 +168,25 @@ func printInspect(report inspectReport) {
 	if report.Supervisor.WasmtimeTarget != "" {
 		fmt.Printf("target: %s\n", report.Supervisor.WasmtimeTarget)
 	}
+
 	fmt.Printf("compiler: %v\n", report.Supervisor.Compiler)
 	fmt.Printf("app: %s\n", report.App.Name)
 	fmt.Printf("host: %s\n", report.App.Host)
 	fmt.Printf("url: %s\n", report.URL)
 	fmt.Printf("status: %s (ready %v)\n", report.App.Status, report.App.Ready)
+
 	if report.App.CurrentDigest != "" {
 		digest := report.App.CurrentDigest
 		if len(digest) > shortHashLength {
 			digest = digest[:shortHashLength]
 		}
+
 		fmt.Printf("digest: %s\n", digest)
 	}
 
 	if report.Deployment != nil {
 		fmt.Printf("deployment: %s (%s, %s)\n", jobTime(report.Deployment.DeployedAt), report.Deployment.Mode, report.Deployment.Runtime)
+
 		if report.Deployment.Target != "" {
 			fmt.Printf("deployed target: %s\n", report.Deployment.Target)
 		}
@@ -206,6 +213,7 @@ func printInspect(report inspectReport) {
 	}
 
 	fmt.Println("config:")
+
 	for _, key := range configKeys {
 		if value, ok := report.Config[key]; ok {
 			fmt.Printf("  %s: %s\n", key, valueText(value))
@@ -219,12 +227,15 @@ func printInspect(report inspectReport) {
 	if keys, ok := report.Config["secret_keys"].([]any); ok {
 		fmt.Printf("  secret_keys: %s\n", joinValues(keys))
 	}
+
 	fmt.Printf("route: routed %v (HTTP %d)\n", report.Route.Routed, report.Route.HTTPStatus)
+
 	if report.Manifest != nil {
 		if len(report.Manifest.Differences) == 0 {
 			fmt.Printf("manifest: %s (matches compared fields)\n", report.Manifest.Path)
 		} else {
 			fmt.Printf("manifest: %s (%d difference(s))\n", report.Manifest.Path, len(report.Manifest.Differences))
+
 			for _, difference := range report.Manifest.Differences {
 				fmt.Printf("  %s\n", difference)
 			}
@@ -250,6 +261,7 @@ func sameIdleTimeout(local, runtime any, scheduled bool) bool {
 // compareManifest reports the local app.json fields that differ from the effective runtime config.
 func compareManifest(dir, name string, config map[string]any) *manifestComparison {
 	path := filepath.Join(dir, "app.json")
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil
@@ -321,6 +333,7 @@ func compareManifest(dir, name string, config map[string]any) *manifestCompariso
 			for _, key := range keys {
 				values = append(values, valueText(key))
 			}
+
 			sort.Strings(values)
 
 			configKeys = strings.Join(values, ",")
@@ -417,6 +430,8 @@ func runInspect(args []string) error {
 		printRawOrJSONJSON(report)
 		return nil
 	}
+
 	printInspect(report)
+
 	return nil
 }

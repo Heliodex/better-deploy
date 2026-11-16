@@ -45,6 +45,7 @@ func TestTrustedPrepareLaunchCreatesNoCgroup(t *testing.T) {
 		name: "demo",
 		dir: t.TempDir(),
 	}
+
 	iso, err := s.prepareIsolation(a, appConfig{
 		DiskMB: 256,
 	})
@@ -85,6 +86,7 @@ func TestPersistAppConfigIsPrivateInUntrustedMode(t *testing.T) {
 	if err := persistAppConfig(dir, cfg, tenantUntrusted); err != nil {
 		t.Fatal(err)
 	}
+
 	requireMode(t, filepath.Join(dir, "app.json"), 0o600)
 }
 
@@ -117,11 +119,13 @@ func TestUntrustedInstallStaticKeepsAppJSONPrivate(t *testing.T) {
 	if err := s.installStatic(a, cfg, source); err != nil {
 		t.Fatal(err)
 	}
+
 	requireMode(t, filepath.Join(appDir, "app.json"), 0o600)
 }
 
 func writeModeFile(t *testing.T, path string, mode os.FileMode) {
 	t.Helper()
+
 	if err := os.WriteFile(path, []byte("data"), mode); err != nil {
 		t.Fatal(err)
 	}
@@ -137,6 +141,7 @@ func TestEnsureAppReadable(t *testing.T) {
 	if err := os.Mkdir(root, 0o700); err != nil {
 		t.Fatal(err)
 	}
+
 	writeModeFile(t, filepath.Join(root, "main.cwasm"), 0o600)
 	writeModeFile(t, filepath.Join(root, "app.json"), 0o644)
 	writeModeFile(t, filepath.Join(root, "tool"), 0o700)
@@ -146,10 +151,13 @@ func TestEnsureAppReadable(t *testing.T) {
 	if err := os.Mkdir(static, 0o700); err != nil {
 		t.Fatal(err)
 	}
+
 	writeModeFile(t, filepath.Join(static, "app.js"), 0o600)
+
 	if err := ensureAppReadable(root); err != nil {
 		t.Fatal(err)
 	}
+
 	requireMode(t, root, 0o755)
 	requireMode(t, static, 0o755)
 	requireMode(t, filepath.Join(root, "main.cwasm"), 0o644)
@@ -163,6 +171,7 @@ func TestEnsureAppReadableLeavesDeployedDirectory0755(t *testing.T) {
 	staged := t.TempDir()
 
 	writeModeFile(t, filepath.Join(staged, "main.cwasm"), 0o600)
+
 	if err := ensureAppReadable(staged); err != nil {
 		t.Fatal(err)
 	}
@@ -172,6 +181,7 @@ func TestEnsureAppReadableLeavesDeployedDirectory0755(t *testing.T) {
 	if err := replaceDir(staged, final); err != nil {
 		t.Fatal(err)
 	}
+
 	requireMode(t, final, 0o755)
 	requireMode(t, filepath.Join(final, "main.cwasm"), 0o644)
 }
@@ -193,10 +203,12 @@ func TestImportCachedArtifactMakesCacheReadable(t *testing.T) {
 		CPU: artifactCPUFeatures,
 		Epoch: true,
 	}
+
 	dst, err := s.importCachedArtifact(src, key)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	requireMode(t, dst, 0o644)
 }
 
@@ -210,5 +222,6 @@ func TestInstallArtifactMakesDestinationReadable(t *testing.T) {
 	if err := installArtifact(src, dst); err != nil {
 		t.Fatal(err)
 	}
+
 	requireMode(t, dst, 0o644)
 }

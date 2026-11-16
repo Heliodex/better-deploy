@@ -94,13 +94,16 @@ func TestRecordScheduleRunCountsFailures(t *testing.T) {
 		Name: "tick",
 		Error: "500",
 	}, true)
+
 	if got := a.scheduleRuns["tick"].Failures; got != 2 {
 		t.Errorf("failures = %d, want 2", got)
 	}
+
 	a.recordScheduleRun(scheduleRun{
 		Name: "tick",
 		Status: http.StatusOK,
 	}, false)
+
 	if got := a.scheduleRuns["tick"].Failures; got != 0 {
 		t.Errorf("failures after success = %d, want 0", got)
 	}
@@ -163,11 +166,13 @@ func TestScheduleCallsEndpoint(t *testing.T) {
 	if got := calls.Load(); got < 2 {
 		t.Fatalf("endpoint called %d times, want at least 2", got)
 	}
+
 	a.mu.Lock()
 
 	runs := a.scheduleRunsLocked()
 
 	a.mu.Unlock()
+
 	if len(runs) != 1 || runs[0].Name != "tick" || runs[0].LastRun.IsZero() || runs[0].NextRun.IsZero() || runs[0].Every != "1s" {
 		t.Errorf("schedule status = %+v", runs)
 	}
@@ -178,6 +183,7 @@ func TestScheduleCallsEndpoint(t *testing.T) {
 	stoppedAt := calls.Load()
 
 	time.Sleep(1200 * time.Millisecond)
+
 	if got := calls.Load(); got != stoppedAt {
 		t.Errorf("schedule kept firing after stop: %d -> %d", stoppedAt, got)
 	}

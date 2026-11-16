@@ -46,10 +46,12 @@ func spawnTestApp(t *testing.T, s *supervisor, name string) *app {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	s.register(a)
 	t.Cleanup(func() {
 		s.stop(a)
 	})
+
 	return a
 }
 
@@ -61,14 +63,17 @@ func TestAppStopAndStart(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleStop(rec, req, "demo")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("stop status = %d: %s", rec.Code, rec.Body.String())
 	}
+
 	a.mu.Lock()
 
 	retired, running := a.retired, a.cmd != nil && !a.exited
 
 	a.mu.Unlock()
+
 	if !retired || running {
 		t.Errorf("after stop retired = %v, running = %v", retired, running)
 	}
@@ -78,14 +83,17 @@ func TestAppStopAndStart(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleStart(rec, req, "demo")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("start status = %d: %s", rec.Code, rec.Body.String())
 	}
+
 	a.mu.Lock()
 
 	retired, running = a.retired, a.cmd != nil && !a.exited
 
 	a.mu.Unlock()
+
 	if retired || !running {
 		t.Errorf("after start retired = %v, running = %v", retired, running)
 	}
@@ -110,6 +118,7 @@ func TestDeleteAppKeepsStateByDefault(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleDelete(rec, req, "demo")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("delete status = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -159,6 +168,7 @@ func TestDeleteAppPurgesState(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleDelete(rec, req, "demo")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("delete status = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -195,6 +205,7 @@ func TestHandleRestartDrainsInflightRequests(t *testing.T) {
 
 		req.Header.Set("Authorization", "Bearer secret")
 		s.handleRestart(rec, req, a)
+
 		done <- rec.Code
 	}()
 
@@ -203,7 +214,9 @@ func TestHandleRestartDrainsInflightRequests(t *testing.T) {
 		t.Fatal("restart returned before the in-flight request finished")
 	case <-time.After(100 * time.Millisecond):
 	}
+
 	a.requests.Done()
+
 	select {
 	case code := <-done:
 		if code != http.StatusOK {
@@ -232,6 +245,7 @@ func TestHandleStopDrainsInflightRequests(t *testing.T) {
 
 		req.Header.Set("Authorization", "Bearer secret")
 		s.handleStop(rec, req, "demo")
+
 		done <- rec.Code
 	}()
 
@@ -240,7 +254,9 @@ func TestHandleStopDrainsInflightRequests(t *testing.T) {
 		t.Fatal("stop returned before the in-flight request finished")
 	case <-time.After(100 * time.Millisecond):
 	}
+
 	a.requests.Done()
+
 	select {
 	case code := <-done:
 		if code != http.StatusOK {

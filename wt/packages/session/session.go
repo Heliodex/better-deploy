@@ -77,7 +77,6 @@ func NewToken() (string, error) {
 // Issue creates a random session token and its stored hash.
 func Issue() (token, hash string, err error) {
 	token, err = NewToken()
-
 	if err != nil {
 		return "", "", err
 	}
@@ -101,6 +100,7 @@ func ClearPath(w http.ResponseWriter, r *http.Request, name, path string) {
 	if path == "" {
 		path = "/"
 	}
+
 	http.SetCookie(w, &http.Cookie{
 		Name: name,
 		Value: "",
@@ -123,6 +123,7 @@ func (m Manager) Clear(w http.ResponseWriter, r *http.Request) {
 	if path == "" {
 		path = "/"
 	}
+
 	ClearPath(w, r, m.Name, path)
 }
 
@@ -133,6 +134,7 @@ func SetPath(w http.ResponseWriter, r *http.Request, name, value string, ttl tim
 	if path == "" {
 		path = "/"
 	}
+
 	http.SetCookie(w, &http.Cookie{
 		Name: name,
 		Value: value,
@@ -150,6 +152,7 @@ func (m Manager) Set(w http.ResponseWriter, r *http.Request, token string) {
 	if path == "" {
 		path = "/"
 	}
+
 	SetPath(w, r, m.Name, token, m.TTL, path)
 }
 

@@ -33,6 +33,7 @@ func TestSchemaRejectsInvalidTable(t *testing.T) {
 
 func (s *recordingSender) Send(_ context.Context, delivery Delivery) (int, error) {
 	s.calls = append(s.calls, delivery)
+
 	index := len(s.calls) - 1
 	if index < len(s.errs) && s.errs[index] != nil {
 		return 0, s.errs[index]
@@ -77,6 +78,7 @@ func TestHTTPSenderSetsSignedHeaders(t *testing.T) {
 		Message: message,
 	}
 	delivery.Timestamp, delivery.Signature = signer.Sign(delivery.DeliveryID, delivery.Payload)
+
 	status, err := (HTTPSender{}).Send(context.Background(), delivery)
 	if err != nil {
 		t.Fatal(err)
@@ -114,6 +116,7 @@ func testOutbox(t *testing.T) (*Outbox, *storage.Client, *time.Time) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(server.Close)
 
 	now := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
@@ -129,6 +132,7 @@ func testOutbox(t *testing.T) (*Outbox, *storage.Client, *time.Time) {
 			return now
 		},
 	}
+
 	schema, err := box.Schema()
 	if err != nil {
 		t.Fatal(err)
@@ -146,6 +150,7 @@ func TestDeliverDueMarksPermanentFailure(t *testing.T) {
 	box.Sender = &recordingSender{
 		statuses: []int{http.StatusBadRequest},
 	}
+
 	record, err := box.Enqueue(context.Background(), client, testMessage(""))
 	if err != nil {
 		t.Fatal(err)
@@ -173,6 +178,7 @@ func TestDeliverDueMarksPermanentFailure(t *testing.T) {
 func TestDeliverDueReapsExpiredLease(t *testing.T) {
 	box, client, now := testOutbox(t)
 	box.Sender = &recordingSender{}
+
 	record, err := box.Enqueue(context.Background(), client, testMessage(""))
 	if err != nil {
 		t.Fatal(err)
@@ -215,6 +221,7 @@ func TestDeliverDueRetriesAndFails(t *testing.T) {
 		statuses: []int{http.StatusBadGateway, http.StatusOK},
 	}
 	box.Sender = sender
+
 	record, err := box.Enqueue(context.Background(), client, testMessage(""))
 	if err != nil {
 		t.Fatal(err)
@@ -239,8 +246,8 @@ func TestDeliverDueRetriesAndFails(t *testing.T) {
 	}
 
 	*now = now.Add(DefaultRetry[0])
-	summary, err = box.DeliverDue(context.Background(), client, 10)
 
+	summary, err = box.DeliverDue(context.Background(), client, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,6 +270,7 @@ func TestDeliverDueSendsSignedPayload(t *testing.T) {
 	box, client, _ := testOutbox(t)
 	sender := &recordingSender{}
 	box.Sender = sender
+
 	record, err := box.Enqueue(context.Background(), client, testMessage(""))
 	if err != nil {
 		t.Fatal(err)
@@ -298,6 +306,7 @@ func TestDeliverDueSendsSignedPayload(t *testing.T) {
 
 func TestEnqueueAndDedupe(t *testing.T) {
 	box, client, _ := testOutbox(t)
+
 	first, err := box.Enqueue(context.Background(), client, testMessage("decision:1"))
 	if err != nil {
 		t.Fatal(err)
@@ -332,6 +341,7 @@ func TestEnqueueAndDedupe(t *testing.T) {
 
 func TestPrepareTransaction(t *testing.T) {
 	box, _, _ := testOutbox(t)
+
 	message, statement, err := box.PrepareTransaction(testMessage("transaction:1"))
 	if err != nil {
 		t.Fatal(err)

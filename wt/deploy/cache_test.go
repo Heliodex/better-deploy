@@ -91,6 +91,7 @@ func TestComponentInputHashCoversToolchainSources(t *testing.T) {
 	if count != 1 {
 		t.Errorf("file count = %d, want the one Go file", count)
 	}
+
 	write("asm.s", "TEXT ·x(SB),$0")
 
 	afterAsm, asmCount, err := componentInputHash(dir, manifest{}, "build")
@@ -105,6 +106,7 @@ func TestComponentInputHashCoversToolchainSources(t *testing.T) {
 	if asmCount != 2 {
 		t.Errorf("file count = %d, want the Go and assembly files", asmCount)
 	}
+
 	write("bridge.c", "int x;")
 
 	afterC, _, err := componentInputHash(dir, manifest{}, "build")
@@ -141,6 +143,7 @@ func TestComponentInputHashIgnoresStaticAndOutputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	write("static/index.html", "second")
 
 	afterStatic, _, err := componentInputHash(dir, manifest{}, "build")
@@ -151,6 +154,7 @@ func TestComponentInputHashIgnoresStaticAndOutputs(t *testing.T) {
 	if afterStatic != first {
 		t.Error("static change altered the component hash")
 	}
+
 	write("main.go", "package main // changed")
 
 	afterGo, _, err := componentInputHash(dir, manifest{}, "build")

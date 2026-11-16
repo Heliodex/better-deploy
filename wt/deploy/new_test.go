@@ -15,6 +15,7 @@ import (
 // TestNewMatchesTemplate fails if a template file is missing from the embed list in new.go, or if node_modules or bun.lock leak into the embedded set.
 func TestNewMatchesTemplate(t *testing.T) {
 	embedded := map[string]bool{}
+
 	err := fs.WalkDir(templateFS, "testdata/template", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -176,6 +177,7 @@ func TestTemplateHandlerUsesServeHTTP(t *testing.T) {
 	}
 
 	src := strings.ReplaceAll(string(data), newContractToken, "example.test/contract")
+
 	file, err := parser.ParseFile(token.NewFileSet(), "wasm.go", src, parser.AllErrors)
 	if err != nil {
 		t.Fatal(err)
@@ -213,6 +215,7 @@ func TestTemplateHandlerUsesServeHTTP(t *testing.T) {
 
 		return true
 	})
+
 	if !found {
 		t.Error("template has no wasihttp.Handle call")
 	}
@@ -220,6 +223,7 @@ func TestTemplateHandlerUsesServeHTTP(t *testing.T) {
 
 func writeExampleLayout(t *testing.T, root string) {
 	t.Helper()
+
 	if err := os.MkdirAll(filepath.Join(root, "example"), privateDirMode); err != nil {
 		t.Fatal(err)
 	}

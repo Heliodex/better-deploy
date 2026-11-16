@@ -29,6 +29,7 @@ func TestPublicURL(t *testing.T) {
 	request = publicRequest("http://passport.localhost/auth/login")
 
 	request.Header.Set("Origin", "https://passport.localhost")
+
 	if got := PublicURL(request); got != "https://passport.localhost" {
 		t.Errorf("same-origin Origin = %q", got)
 	}
@@ -36,6 +37,7 @@ func TestPublicURL(t *testing.T) {
 	request = publicRequest("http://passport.localhost/auth/login")
 
 	request.Header.Set("Origin", "https://evil.example")
+
 	if got := PublicURL(request); got != "http://passport.localhost" {
 		t.Errorf("spoofed Origin = %q", got)
 	}
@@ -43,6 +45,7 @@ func TestPublicURL(t *testing.T) {
 	request = publicRequest("http://passport.localhost/auth/login")
 
 	request.Header.Set("Origin", "http://127.0.0.1:5173")
+
 	if got := PublicURL(request); got != "http://127.0.0.1:5173" {
 		t.Errorf("loopback Origin = %q", got)
 	}
@@ -50,6 +53,7 @@ func TestPublicURL(t *testing.T) {
 	request = publicRequest("http://passport.localhost/auth/login")
 
 	request.Header.Set("Referer", "https://passport.localhost/how")
+
 	if got := PublicURL(request); got != "https://passport.localhost" {
 		t.Errorf("Referer = %q", got)
 	}
@@ -61,6 +65,7 @@ func TestPublicURLEnvOverride(t *testing.T) {
 	request := publicRequest("http://passport.localhost/")
 
 	request.Header.Set("Origin", "http://127.0.0.1:5173")
+
 	if got := PublicURL(request); got != "https://passport.example" {
 		t.Errorf("env override = %q", got)
 	}

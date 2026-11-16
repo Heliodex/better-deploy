@@ -43,6 +43,7 @@ func handleTick(w http.ResponseWriter, r *http.Request) {
 	slot := now.Unix() / 10
 
 	app.Logf(beatLevels[int(slot%int64(len(beatLevels)))], "ticker beat")
+
 	if job, created, err := app.EnqueueJob(r.Context(), wasihttp.NewClient(), app.JobRequest{
 		Path: "/jobs/beat",
 		Method: http.MethodPost,
@@ -54,6 +55,7 @@ func handleTick(w http.ResponseWriter, r *http.Request) {
 	} else if created {
 		app.Infof("ticker queued %s", job.ID)
 	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 

@@ -26,6 +26,7 @@ func ensureWebDeps(webDir string) error {
 	if err == nil && info.IsDir() {
 		return nil
 	}
+
 	fmt.Fprintln(os.Stderr, "dev: installing web dependencies in", webDir)
 
 	cmd := exec.CommandContext(context.Background(), "bun", "install")
@@ -90,6 +91,7 @@ func resolveViteDev(appDir string, m manifest, host string) (*viteDev, bool, err
 	}
 
 	webDir := filepath.Join(appDir, web)
+
 	info, err := os.Stat(filepath.Join(webDir, "package.json"))
 	if err != nil || !info.Mode().IsRegular() {
 		return nil, false, nil
@@ -157,6 +159,7 @@ func startVite(dev *viteDev) (*exec.Cmd, error) {
 
 	cmd := exec.CommandContext(context.Background(), "sh", "-c", command)
 	cmd.Dir = dev.webDir
+
 	cmd.Env = append(os.Environ(), "WT_DEV=1")
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
@@ -193,9 +196,11 @@ func writeViteDevConfig(dev *viteDev, supervisorPort int) error {
 	target := "http://127.0.0.1:" + strconv.Itoa(supervisorPort)
 
 	content.WriteString("const proxy = {\n")
+
 	for _, prefix := range dev.proxy {
 		fmt.Fprintf(&content, "  %s: {\n    target: %s,\n    changeOrigin: false,\n    headers: { Host: %s },\n  },\n", strconv.Quote(prefix), strconv.Quote(target), strconv.Quote(dev.host))
 	}
+
 	content.WriteString("}\n\n")
 	content.WriteString("export default async (env: any) => {\n")
 	content.WriteString("  const config = (typeof base === \"function\" ? await base(env) : base) ?? {}\n")

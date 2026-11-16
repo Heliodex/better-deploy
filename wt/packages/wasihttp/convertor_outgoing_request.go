@@ -29,6 +29,7 @@ func outgoingRequestOptions(ctx context.Context) wit.Option[*wasi.RequestOptions
 	options.SetConnectTimeout(duration)
 	options.SetFirstByteTimeout(duration)
 	options.SetBetweenBytesTimeout(duration)
+
 	return wit.Some(options)
 }
 
@@ -96,6 +97,7 @@ func newOutgoingHTTPRequest(req *http.Request) (*wasi.Request, error) {
 
 					return
 				}
+
 				tx.WriteAll(buffer[:count])
 			}
 		}()
@@ -114,9 +116,11 @@ func newOutgoingHTTPRequest(req *http.Request) (*wasi.Request, error) {
 	if authority == "" {
 		authority = req.URL.Host
 	}
+
 	request.SetMethod(toWasiMethod(req.Method))
 	request.SetAuthority(wit.Some(authority))
 	request.SetPathWithQuery(wit.Some(req.URL.RequestURI()))
+
 	switch req.URL.Scheme {
 	case "http":
 		request.SetScheme(wit.Some(wasi.MakeSchemeHttp()))

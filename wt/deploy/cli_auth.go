@@ -78,7 +78,6 @@ func loginHost(input *authInput, flagHost string, profile fileProfile) (string, 
 		var err error
 
 		host, err = input.line("Supervisor URL", profile.Host)
-
 		if err != nil {
 			return "", err
 		}
@@ -165,6 +164,7 @@ func runAuthLogout(args []string, out io.Writer) error {
 	}
 
 	profileName := activeProfileName(values.profile, cfg)
+
 	removed, err := removeAuthToken(configPath, profileName)
 	if err != nil {
 		return err
@@ -227,7 +227,9 @@ func runAuthUse(args []string, out io.Writer) error {
 	if err := setDefaultProfile(configPath, name); err != nil {
 		return err
 	}
+
 	fmt.Fprintf(out, "using profile %s from %s\n", name, configPath)
+
 	return nil
 }
 
@@ -281,6 +283,7 @@ func runAuthLogin(args []string, in io.Reader, out, errOut io.Writer) error {
 	}
 
 	input := newAuthInput(in, errOut)
+
 	host, err := loginHost(input, values.host, profile)
 	if err != nil {
 		return err
@@ -340,7 +343,9 @@ func writeAuthReport(out io.Writer, report authStatusReport, jsonOut bool) error
 		if token == "" || token == "none" {
 			token = "not configured"
 		}
+
 		fmt.Fprintf(out, "token: %s\n", token)
+
 		if report.AppDomain != "" {
 			fmt.Fprintf(out, "app domain: %s\n", report.AppDomain)
 		}
@@ -364,7 +369,9 @@ func writeAuthReport(out io.Writer, report authStatusReport, jsonOut bool) error
 	if err != nil {
 		return err
 	}
+
 	fmt.Fprintln(out, string(data))
+
 	return nil
 }
 
@@ -392,6 +399,7 @@ func runAuthStatus(args []string, out io.Writer) error {
 	}
 
 	profileName := activeProfileName(values.profile, cfg)
+
 	profile, err := resolveProfile(cfg, profileName)
 	if err != nil {
 		return err

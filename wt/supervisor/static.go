@@ -48,6 +48,7 @@ func (a *app) staticDir() string {
 	dir := a.dir
 
 	a.mu.Unlock()
+
 	return filepath.Join(dir, "static")
 }
 
@@ -120,8 +121,10 @@ func serveStaticFile(w http.ResponseWriter, r *http.Request, path, original, req
 		if contentType == "" {
 			contentType = "application/octet-stream"
 		}
+
 		w.Header().Set("Content-Type", contentType)
 	}
+
 	http.ServeFile(w, r, path)
 }
 
@@ -141,11 +144,13 @@ func (a *app) serverPageNavigation(r *http.Request) bool {
 	if !htmlNavigation(r) {
 		return false
 	}
+
 	a.mu.Lock()
 
 	prefixes := append([]string(nil), a.cfg.ServerPages...)
 
 	a.mu.Unlock()
+
 	return serverPathMatch(r.URL.Path, prefixes)
 }
 
@@ -167,12 +172,14 @@ func staticRegularFile(dir, path string) (string, bool) {
 // staticFile maps a request path to a regular file inside dir, rejecting traversal, resolving a directory's index.html for a trailing-slash request, and trying <path>.html for extensionless prerendered pages.
 func staticFile(dir, requestPath string) (string, bool) {
 	clean := filepath.Clean("/" + requestPath)
+
 	rel := strings.TrimPrefix(clean, "/")
 	if rel == "" || rel == "." || strings.HasPrefix(rel, "..") {
 		return "", false
 	}
 
 	path := filepath.Join(dir, filepath.FromSlash(rel))
+
 	inside, err := filepath.Rel(dir, path)
 	if err != nil || inside == ".." || strings.HasPrefix(inside, ".."+string(filepath.Separator)) {
 		return "", false
@@ -306,6 +313,7 @@ func (a *app) serveStaticPageResponse(res *http.Response) (bool, error) {
 	header := res.Header.Get(staticPageHeader)
 
 	res.Header.Del(staticPageHeader)
+
 	if res.Request == nil {
 		return false, nil
 	}
@@ -341,6 +349,7 @@ func (a *app) serveStaticPageResponse(res *http.Response) (bool, error) {
 
 		// A named page that does not exist is a 404 rather than a component error, so a catch-all handler can name the request path directly.
 		notFoundStaticPage(res)
+
 		return true, nil
 	}
 
@@ -382,6 +391,7 @@ func (a *app) serveStaticPageResponse(res *http.Response) (bool, error) {
 	res.Header.Del("Content-Disposition")
 	res.Header.Del("ETag")
 	res.Header.Del("Last-Modified")
+
 	if res.Header.Get("Cache-Control") == "" {
 		res.Header.Set("Cache-Control", "no-cache")
 	}

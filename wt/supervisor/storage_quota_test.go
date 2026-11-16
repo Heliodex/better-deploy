@@ -30,10 +30,12 @@ func TestStoragePerAppQuotaReopensWhenRaised(t *testing.T) {
 
 		return storageSQL(t, s, token, "/v1/exec", body)
 	}
+
 	resp := exec(`create table blobs (id integer primary key, body text not null)`, nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("create table: %d %s", resp.StatusCode, readBody(t, resp))
 	}
+
 	resp.Body.Close()
 
 	chunk := strings.Repeat("x", 64<<10)
@@ -46,6 +48,7 @@ func TestStoragePerAppQuotaReopensWhenRaised(t *testing.T) {
 			failed = resp
 			break
 		}
+
 		resp.Body.Close()
 	}
 
@@ -72,6 +75,7 @@ func TestStoragePerAppQuotaReopensWhenRaised(t *testing.T) {
 	if body.SQLiteCode == 0 {
 		t.Error("over-quota response has no sqlite_code")
 	}
+
 	s.setQuota("quota", 0)
 
 	resp = exec(`insert into blobs (body) values (?)`, []any{"after raising the quota"})
@@ -79,5 +83,6 @@ func TestStoragePerAppQuotaReopensWhenRaised(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("write after raising quota: %d %s", resp.StatusCode, readBody(t, resp))
 	}
+
 	resp.Body.Close()
 }

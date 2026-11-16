@@ -57,7 +57,9 @@ func deployDevApps(cfg *devConfig, dirs []string, deployAddr, target string, vit
 		if err != nil {
 			return nil, nil, err
 		}
+
 		printBuildStatus(status)
+
 		if err := upload(dcfg, m, data); err != nil {
 			return nil, nil, err
 		}
@@ -107,6 +109,7 @@ func overlayDevEnv(m *manifest) {
 // resolveDevConfig loads dev flags, applies WT_DEV_PORT and derives the admin port from the app port.
 func resolveDevConfig(args []string) (*devConfig, error) {
 	configPath := configArg(args)
+
 	fileCfg, err := loadFileConfig(configPath)
 	if err != nil {
 		return nil, err
@@ -207,7 +210,9 @@ func resolveDevVite(cfg *devConfig, dirs []string) (*viteDev, error) {
 	if vite == nil {
 		return nil, nil //nolint:nilnil // A nil result means the app has no Vite dev server.
 	}
+
 	fmt.Fprintf(os.Stderr, "dev: vite frontend in %s on 127.0.0.1:%d\n", vite.webDir, vite.port)
+
 	if err := ensureWebDeps(vite.webDir); err != nil {
 		return nil, err
 	}
@@ -237,6 +242,7 @@ func runViteDev(cfg *devConfig, vite *viteDev, viteDCfg *deployConfig, stop <-ch
 	}()
 
 	fmt.Printf("dev: vite at http://127.0.0.1:%d/ (HMR)\n", vite.port)
+
 	if cfg.watch {
 		go watchComponent(viteDCfg, vite.watch, done)
 
@@ -281,7 +287,9 @@ func workspaceAppDirs(dir string) ([]string, error) {
 			dirs = append(dirs, path)
 		}
 	}
+
 	slices.Sort(dirs)
+
 	if len(dirs) == 0 {
 		return nil, fmt.Errorf("workspace %s has no child app directories with app.json", dir)
 	}
@@ -337,6 +345,7 @@ func runDev(args []string) error {
 	}
 
 	workDir := devWorkDir(cfg, dirs)
+
 	appsDir, stateDir, err := prepareDevState(workDir)
 	if err != nil {
 		return err
@@ -353,6 +362,7 @@ func runDev(args []string) error {
 	}
 
 	addr, adminAddr := devAddresses(cfg)
+
 	cmd, err := startDevSupervisor(supervisor, cfg, appsDir, stateDir, addr, adminAddr, target)
 	if err != nil {
 		return err
@@ -367,6 +377,7 @@ func runDev(args []string) error {
 	if err != nil {
 		return err
 	}
+
 	fmt.Printf("dev: admin at http://%s/admin/ (token: dev)\n", adminAddr)
 
 	done := make(chan struct{})
@@ -376,6 +387,7 @@ func runDev(args []string) error {
 	stop := make(chan os.Signal, 1)
 
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+
 	if vite != nil && viteDCfg != nil {
 		return runViteDev(cfg, vite, viteDCfg, stop, done)
 	}
@@ -384,10 +396,12 @@ func runDev(args []string) error {
 		for _, dcfg := range configs {
 			go watchDev(dcfg, done)
 		}
+
 		fmt.Fprintln(os.Stderr, "dev: watching for changes")
 	}
 
 	<-stop
 	fmt.Fprintln(os.Stderr, "\ndev: stopping")
+
 	return nil
 }

@@ -28,7 +28,6 @@ func (c *contentStore) adoptFile(source string) (digest string, size int64, crea
 	}
 
 	digest, err = fileDigest(source)
-
 	if err != nil {
 		return "", 0, false, err
 	}
@@ -117,6 +116,7 @@ func (c *contentStore) putFile(source string) (string, int64, bool, error) {
 	}
 
 	name := temp.Name()
+
 	src, err := os.Open(source)
 	if err != nil {
 		_ = temp.Close()

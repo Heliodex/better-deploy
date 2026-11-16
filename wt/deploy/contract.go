@@ -63,7 +63,9 @@ func formatGeneratedClient(webDir, outPath string, quiet bool) error {
 		if strings.Contains(output.String(), "No files were processed") {
 			return nil
 		}
+
 		fmt.Fprint(os.Stderr, output.String())
+
 		return fmt.Errorf("contract client format: %w", err)
 	}
 
@@ -96,6 +98,7 @@ func runBunScript(webDir, pattern, script string, env ...string) error {
 
 	cmd := exec.CommandContext(context.Background(), "bun", filepath.Base(scriptPath))
 	cmd.Dir = webDir
+
 	cmd.Env = append(os.Environ(), env...)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
@@ -176,6 +179,7 @@ func runGoJSONSchema(contractDir string) error {
 	if len(schemas) == 0 {
 		return errors.New("contract schemas: no JSON Schema files were generated")
 	}
+
 	sort.Strings(schemas)
 
 	args := []string{
@@ -224,6 +228,7 @@ func stageCheckOutput(webDir, outDir, name string, generate func(staged string) 
 
 	staged.Close()
 	os.Remove(stagedPath)
+
 	if err := generate(stagedPath); err != nil {
 		os.Remove(stagedPath)
 		return err

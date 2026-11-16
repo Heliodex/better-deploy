@@ -24,6 +24,7 @@ func (s *supervisor) migrateApp(a *app, port int, done <-chan struct{}) error {
 	if timeout <= 0 {
 		timeout = 5 * time.Minute
 	}
+
 	a.mu.Lock()
 
 	startup := a.cfg.startupLimit()

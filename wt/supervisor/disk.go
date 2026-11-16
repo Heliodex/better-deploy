@@ -99,6 +99,7 @@ func (s *supervisor) appDataUsage(name string) (bytes, entries int64, err error)
 	}
 
 	storageDir := filepath.Join(s.cfg.stateDir, ".storage", name)
+
 	storageEntries, err := os.ReadDir(storageDir)
 	if err != nil && !os.IsNotExist(err) {
 		return bytes, entries, err
@@ -144,6 +145,7 @@ func (s *supervisor) diskBytes(a *app) int64 {
 		bytes := a.disk.bytes
 
 		a.disk.mu.Unlock()
+
 		return bytes
 	}
 	a.disk.mu.Unlock()
@@ -152,12 +154,14 @@ func (s *supervisor) diskBytes(a *app) int64 {
 	if err != nil {
 		log.Printf("app %s: disk usage: %v", a.name, err)
 	}
+
 	a.disk.mu.Lock()
 
 	a.disk.bytes = bytes
 	a.disk.at = now
 
 	a.disk.mu.Unlock()
+
 	return bytes
 }
 
@@ -167,11 +171,13 @@ func (s *supervisor) enforceDiskQuota(a *app) bool {
 	if a == nil || !s.cfg.untrusted() {
 		return false
 	}
+
 	a.mu.Lock()
 
 	limit := int64(a.cfg.DiskMB) << 20
 
 	a.mu.Unlock()
+
 	if limit <= 0 && maxAppEntries <= 0 {
 		return false
 	}
@@ -192,6 +198,7 @@ func (s *supervisor) enforceDiskQuota(a *app) bool {
 	default:
 		return false
 	}
+
 	a.mu.Lock()
 
 	a.lastError = message
@@ -201,6 +208,7 @@ func (s *supervisor) enforceDiskQuota(a *app) bool {
 	s.cancelRestart(a)
 	s.drainAndStop(a, "disk quota")
 	s.broadcast()
+
 	return true
 }
 
@@ -312,6 +320,7 @@ func (s *supervisor) monitorDiskBudget() {
 			log.Printf("disk budget: %v", err)
 			continue
 		}
+
 		budget.observe(totals.totalBytes)
 	}
 }
@@ -347,6 +356,8 @@ func (s *supervisor) rejectOverBudget(w http.ResponseWriter) bool {
 	if !overByteBudget(s.cfg.diskBudgetBytes, totals.totalBytes) {
 		return false
 	}
+
 	writeError(w, http.StatusInsufficientStorage, fmt.Sprintf("global disk budget exceeded: %d of %d bytes used; free space or raise WT_DISK_BUDGET_MB", totals.totalBytes, s.cfg.diskBudgetBytes))
+
 	return true
 }

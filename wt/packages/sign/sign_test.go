@@ -32,6 +32,7 @@ func fixedSigner() Signer {
 func TestSignAndVerify(t *testing.T) {
 	signer := fixedSigner()
 	body := []byte(`{"ok":true}`)
+
 	timestamp, signature := signer.Sign("delivery-1", body)
 	if timestamp != "1700000000" {
 		t.Errorf("timestamp = %q", timestamp)
@@ -57,6 +58,7 @@ func TestSignAndVerify(t *testing.T) {
 func TestSignFields(t *testing.T) {
 	signer := fixedSigner()
 	parts := [][]byte{[]byte("1700000000"), []byte("."), []byte(`{"a":1}`)}
+
 	signature := signer.SignFields(parts...)
 	if !signer.VerifyFields(signature, parts...) {
 		t.Error("VerifyFields() rejected its own signature")
@@ -89,6 +91,7 @@ func TestSignFieldsSeparatesAmbiguousSplits(t *testing.T) {
 func TestSignParts(t *testing.T) {
 	signer := fixedSigner()
 	parts := [][]byte{[]byte("a"), []byte("b"), []byte("c")}
+
 	signature := signer.SignParts(parts...)
 	if !signer.VerifyParts(signature, parts...) {
 		t.Error("VerifyParts() rejected its own signature")

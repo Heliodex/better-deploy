@@ -11,6 +11,7 @@ import (
 func TestAppURLUsesPerAppAndBaseEnv(t *testing.T) {
 	t.Setenv("WT_APP_URL_NOTES", "http://127.0.0.1:9001/apps/notes/")
 	t.Setenv("WT_APP_FETCH_URL", "http://127.0.0.1:9000")
+
 	if got := AppURL("notes"); got != "http://127.0.0.1:9001/apps/notes" {
 		t.Errorf("known app URL = %q", got)
 	}
@@ -35,6 +36,7 @@ func TestCallerRejectsStaleAndMissingHeaders(t *testing.T) {
 	req.Header.Set(AppTimestampHeader, timestamp)
 	req.Header.Set(AppBodyHashHeader, appBodySHA256(nil))
 	req.Header.Set(AppSignatureV2Header, appCallSignatureV2("target-token", "frontend", http.MethodGet, "/", timestamp, appBodySHA256(nil)))
+
 	if _, ok := Caller(req); ok {
 		t.Error("stale signature verified")
 	}

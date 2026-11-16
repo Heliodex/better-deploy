@@ -65,6 +65,7 @@ func (s *supervisor) deploymentLog(app, id, text string) {
 	if !strings.HasSuffix(text, "\n") {
 		text += "\n"
 	}
+
 	s.deployments.appendLog(app, id, []byte(text))
 }
 
@@ -98,6 +99,7 @@ func (s *supervisor) finishDeploymentRun(app, id, status string, cause error) de
 	}
 
 	now := time.Now().UTC()
+
 	info, err := s.deployments.updateRun(app, id, func(info *deploymentInfo) {
 		info.Status = status
 		info.FinishedAt = now
@@ -142,6 +144,7 @@ func (s *supervisor) handleDeploymentCancel(w http.ResponseWriter, _ *http.Reque
 	} else {
 		s.deploymentLogf(name, id, "deployment %s cancellation requested", id)
 	}
+
 	w.Header().Set("Location", "/apps/"+name+"/deployments/"+id)
 	writeJSON(w, http.StatusAccepted, info)
 }
@@ -201,6 +204,7 @@ func (s *supervisor) handleDeploymentLogs(w http.ResponseWriter, _ *http.Request
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
+
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
@@ -221,21 +225,25 @@ func (s *supervisor) handleDeploymentRoute(w http.ResponseWriter, r *http.Reques
 		if !requireMethod(w, r, http.MethodGet) {
 			return
 		}
+
 		s.handleDeploymentInfo(w, r, name, id)
 	case "cancel":
 		if !requireMethod(w, r, http.MethodPost) {
 			return
 		}
+
 		s.handleDeploymentCancel(w, r, name, id)
 	case "logs":
 		if !requireMethod(w, r, http.MethodGet) {
 			return
 		}
+
 		s.handleDeploymentLogs(w, r, name, id)
 	case "logs/stream":
 		if !requireMethod(w, r, http.MethodGet) {
 			return
 		}
+
 		s.handleDeploymentLogStream(w, r, name, id)
 	default:
 		http.Error(w, "unknown endpoint", http.StatusNotFound)
@@ -259,6 +267,7 @@ func (s *supervisor) runDeployment(ctx context.Context, name, id string, staged 
 	defer staged.cleanup()
 
 	now := time.Now().UTC()
+
 	info, err := s.deployments.updateRun(name, id, func(info *deploymentInfo) {
 		if info.Status == deploymentStatusQueued {
 			info.Status = deploymentStatusRunning
@@ -269,10 +278,13 @@ func (s *supervisor) runDeployment(ctx context.Context, name, id string, staged 
 		s.deploymentLogf(name, id, "deployment %s could not start: %v", id, err)
 		return
 	}
+
 	s.deploymentLogf(name, id, "deployment %s started (digest %s)", id, staged.digest)
+
 	if ctx.Err() != nil {
 		s.finishDeploymentRun(name, id, deploymentStatusCanceled, nil)
 		s.deploymentLogf(name, id, "deployment %s canceled before install", id)
+
 		return
 	}
 
@@ -281,6 +293,7 @@ func (s *supervisor) runDeployment(ctx context.Context, name, id string, staged 
 	if ctx.Err() != nil {
 		s.finishDeploymentRun(name, id, deploymentStatusCanceled, nil)
 		s.deploymentLogf(name, id, "deployment %s canceled before install", id)
+
 		return
 	}
 
@@ -289,6 +302,7 @@ func (s *supervisor) runDeployment(ctx context.Context, name, id string, staged 
 			s.deploymentLog(name, id, text)
 		},
 	}
+
 	next, mode, err := s.installBundle(writer, name, staged.cfg, staged.dir, staged.digest, "deployed")
 	if err != nil {
 		status := deploymentStatusFail
@@ -296,20 +310,25 @@ func (s *supervisor) runDeployment(ctx context.Context, name, id string, staged 
 		if ctx.Err() != nil {
 			status = deploymentStatusCanceled
 		}
+
 		s.metrics.observeDeploy(name, status)
 		s.finishDeploymentRun(name, id, status, err)
 		s.deploymentLogf(name, id, "deployment %s %s: %v", id, status, err)
+
 		return
 	}
 
 	info.Mode = mode
+
 	recorded, err := s.deployments.recordAt(name, id, info, next.dir)
 	if err != nil {
 		s.metrics.observeDeploy(name, "failed")
 		s.finishDeploymentRun(name, id, deploymentStatusFail, err)
 		s.deploymentLogf(name, id, "deployment %s could not be recorded: %v", id, err)
+
 		return
 	}
+
 	s.metrics.observeDeploy(name, "success")
 	s.resetHistoryUsage(name)
 	s.deploymentLogf(name, id, "deployment %s succeeded in %s mode", id, recorded.Mode)
@@ -368,6 +387,7 @@ func (s *supervisor) handleDeploymentCreate(w http.ResponseWriter, r *http.Reque
 		if err != nil {
 			staged.cleanup()
 			writeError(w, http.StatusBadRequest, "dry_run must be a boolean")
+
 			return
 		}
 
@@ -380,14 +400,18 @@ func (s *supervisor) handleDeploymentCreate(w http.ResponseWriter, r *http.Reque
 				Config: configResponse(staged.cfg),
 				Digest: staged.digest,
 			})
+
 			return
 		}
 	}
+
 	w.Header().Set("ETag", staged.etag)
+
 	if match := r.Header.Get("If-None-Match"); match != "" && etagMatches(match, staged.etag) {
 		staged.cleanup()
 		w.Header().Set("X-Wt-Wasm-Digest", staged.digest)
 		w.WriteHeader(http.StatusNotModified)
+
 		return
 	}
 
@@ -395,6 +419,7 @@ func (s *supervisor) handleDeploymentCreate(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		staged.cleanup()
 		writeError(w, http.StatusInternalServerError, err.Error())
+
 		return
 	}
 

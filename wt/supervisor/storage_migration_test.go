@@ -71,6 +71,7 @@ func TestStorageMigrationChecksums(t *testing.T) {
 			"sql": `create table checks (id integer primary key, value text)`,
 		},
 	}
+
 	status, result, _ := migrate(1, first)
 	if status != http.StatusOK || !result.Applied || result.Version != 1 {
 		t.Fatalf("first migration = %d %+v", status, result)
@@ -141,6 +142,7 @@ func TestStorageMigrationChecksums(t *testing.T) {
 		if resp.StatusCode != http.StatusForbidden {
 			t.Errorf("app statement %q = %d %s, want 403", statement, resp.StatusCode, readBody(t, resp))
 		}
+
 		resp.Body.Close()
 	}
 }
@@ -162,11 +164,15 @@ func TestStorageMigrationTimeoutConfig(t *testing.T) {
 			t.Errorf("parseStorageMigrationTimeout(%q) accepted an invalid value", value)
 		}
 	}
+
 	t.Setenv("WT_STORAGE_MIGRATION_TIMEOUT", "20m")
+
 	if got := envStorageMigrationTimeout(); got != 20*time.Minute {
 		t.Errorf("config timeout = %s, want 20m", got)
 	}
+
 	t.Setenv("WT_STORAGE_MIGRATION_TIMEOUT", "invalid")
+
 	if got := envStorageMigrationTimeout(); got != defaultStorageMigrationTimeout {
 		t.Errorf("invalid config timeout = %s, want default", got)
 	}
@@ -213,6 +219,7 @@ func TestStorageRejectsLegacyMigrationVersionWithoutChecksum(t *testing.T) {
 
 		return result
 	}
+
 	schema := schemaOf()
 	if schema.Version != 2 || len(schema.Migrations) != 0 {
 		t.Fatalf("legacy schema = %+v", schema)
@@ -229,7 +236,9 @@ func TestStorageRejectsLegacyMigrationVersionWithoutChecksum(t *testing.T) {
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("legacy migration = %d %s, want 409", resp.StatusCode, readBody(t, resp))
 	}
+
 	resp.Body.Close()
+
 	if schema = schemaOf(); len(schema.Migrations) != 0 {
 		t.Errorf("rejected legacy migration invented checksums: %+v", schema.Migrations)
 	}
@@ -246,6 +255,7 @@ func TestStorageRejectsLegacyMigrationVersionWithoutChecksum(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("new migration = %d %s", resp.StatusCode, readBody(t, resp))
 	}
+
 	resp.Body.Close()
 
 	schema = schemaOf()
@@ -284,10 +294,12 @@ func TestStorageSchemaDetailsAndStats(t *testing.T) {
 			"sql": `create view children_notes as select id, note from children`,
 		},
 	}
+
 	resp := storageSQL(t, s, token, "/v1/migrate", map[string]any{"statements": statements, "version": 1})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("migrate: %d %s", resp.StatusCode, readBody(t, resp))
 	}
+
 	resp.Body.Close()
 
 	resp = storageSQL(t, s, token, "/v1/exec", map[string]any{"sql": `insert into parents (id, name) values (1, 'one')`})
@@ -295,7 +307,9 @@ func TestStorageSchemaDetailsAndStats(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("insert parent: %d %s", resp.StatusCode, readBody(t, resp))
 	}
+
 	resp.Body.Close()
+
 	for i := range 7 {
 		resp = storageSQL(t, s, token, "/v1/exec", map[string]any{
 			"params": []any{i + 1, nil},
@@ -305,6 +319,7 @@ func TestStorageSchemaDetailsAndStats(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("insert child %d: %d %s", i+1, resp.StatusCode, readBody(t, resp))
 		}
+
 		resp.Body.Close()
 	}
 

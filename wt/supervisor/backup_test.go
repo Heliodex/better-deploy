@@ -19,6 +19,7 @@ import (
 
 func TestBackupCheckDelayUsesBoundedJitter(t *testing.T) {
 	highest := backupCheckInterval + backupCheckJitter
+
 	lowest := backupCheckInterval - backupCheckJitter
 	if got := backupCheckDelay(func(int64) int64 {
 		return 0
@@ -35,10 +36,12 @@ func TestBackupCheckDelayUsesBoundedJitter(t *testing.T) {
 
 func TestRollbackWithBackupRestoresData(t *testing.T) {
 	s := newLifecycleSupervisor(t)
+
 	storage, err := newStorageServer(t.TempDir(), "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(storage.close)
 
 	s.storage = storage
@@ -78,9 +81,11 @@ func TestRollbackWithBackupRestoresData(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleRollback(rec, req, "demo", deployment.ID)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("rollback with backup = %d: %s", rec.Code, rec.Body.String())
 	}
+
 	t.Cleanup(func() {
 		if next := s.lookup("demo"); next != nil {
 			s.stop(next)
@@ -104,6 +109,7 @@ func insertItem(t *testing.T, storage *storageServer, token, value string) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("insert %q: %d %s", value, resp.StatusCode, readBody(t, resp))
 	}
+
 	resp.Body.Close()
 }
 
@@ -114,6 +120,7 @@ func createItems(t *testing.T, storage *storageServer, token string) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("create: %d %s", resp.StatusCode, readBody(t, resp))
 	}
+
 	resp.Body.Close()
 	insertItem(t, storage, token, "one")
 }
@@ -147,7 +154,9 @@ func testBackupManager(t *testing.T) (*storageServer, *backupManager) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(storage.close)
+
 	return storage, newBackupManager(t.TempDir(), storage, t.TempDir())
 }
 
@@ -182,6 +191,7 @@ func TestBackupCreateAndRestore(t *testing.T) {
 	resp := storageSQL(t, storage, token, "/v1/exec", map[string]any{"sql": `insert into items (value) values ('two')`})
 
 	resp.Body.Close()
+
 	if got := storageCount(t, storage, token); got != 2 {
 		t.Fatalf("count before restore = %d, want 2", got)
 	}
@@ -257,7 +267,6 @@ func TestBackupDataOnlySnapshot(t *testing.T) {
 	}
 
 	body, err = os.ReadFile(filepath.Join(dataDir, "notes.txt"))
-
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +300,9 @@ func TestBackupDue(t *testing.T) {
 	if infos[0].Kind != backupKindAutomatic {
 		t.Errorf("automatic snapshot kind = %q, want %q", infos[0].Kind, backupKindAutomatic)
 	}
+
 	insertItem(t, storage, token, "two")
+
 	if err := backups.backupIfDue(context.Background(), "notes", now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
@@ -370,6 +381,7 @@ func TestBackupExportImport(t *testing.T) {
 	defer os.Remove(archive)
 
 	other := newBackupManager(t.TempDir(), storage, t.TempDir())
+
 	imported, err := other.importSnapshot("notes", archive)
 	if err != nil {
 		t.Fatal(err)
@@ -387,7 +399,9 @@ func TestBackupExportImport(t *testing.T) {
 	if len(infos) != 1 || infos[0].Name != imported.Name || infos[0].Kind != backupKindImport {
 		t.Errorf("imported list = %+v", infos)
 	}
+
 	insertItem(t, storage, token, "two")
+
 	if got := storageCount(t, storage, token); got != 2 {
 		t.Fatalf("count before restore = %d, want 2", got)
 	}
@@ -405,6 +419,7 @@ func TestBackupImportRejectsEmptyArchive(t *testing.T) {
 	_, backups := testBackupManager(t)
 	dir := t.TempDir()
 	archive := filepath.Join(dir, "empty.tar.gz")
+
 	file, err := os.Create(archive)
 	if err != nil {
 		t.Fatal(err)
@@ -556,6 +571,7 @@ func TestBackupLocksArePerApp(t *testing.T) {
 		t.Fatalf("the same app ran two backup operations at once: %v", err)
 	case <-time.After(50 * time.Millisecond):
 	}
+
 	backups.unlock("first")
 
 	unlocked = true
@@ -581,6 +597,7 @@ func TestBackupPrune(t *testing.T) {
 	token := storage.tokenFor("notes")
 
 	createItems(t, storage, token)
+
 	if err := backups.saveSettings("notes", backupSettings{
 		Enabled: true,
 		Every: "1h",
@@ -591,6 +608,7 @@ func TestBackupPrune(t *testing.T) {
 
 	for _, value := range []string{"two", "three", "four"} {
 		insertItem(t, storage, token, value)
+
 		if _, err := backups.create(context.Background(), "notes"); err != nil {
 			t.Fatal(err)
 		}
@@ -613,6 +631,7 @@ func TestBackupRejectsUnchanged(t *testing.T) {
 	createItems(t, storage, token)
 
 	ctx := context.Background()
+
 	first, err := backups.create(ctx, "notes")
 	if err != nil {
 		t.Fatal(err)
@@ -630,6 +649,7 @@ func TestBackupRejectsUnchanged(t *testing.T) {
 	if len(view.Backups) != 1 || view.Current != first.Name {
 		t.Errorf("unchanged overview = %+v", view)
 	}
+
 	insertItem(t, storage, token, "two")
 
 	second, err := backups.create(ctx, "notes")
@@ -672,6 +692,7 @@ func TestBackupSchedulerIncludesDataOnlyApps(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dataDir, "state.txt"), []byte("value"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
 	backups.runDue(context.Background(), time.Now())
 
 	infos, err := backups.list("plain")
@@ -690,6 +711,7 @@ func TestBackupSchedulerIncludesDataOnlyApps(t *testing.T) {
 
 func TestBackupSettings(t *testing.T) {
 	_, backups := testBackupManager(t)
+
 	settings, err := backups.settings("notes")
 	if err != nil {
 		t.Fatal(err)
@@ -710,7 +732,6 @@ func TestBackupSettings(t *testing.T) {
 	}
 
 	settings, err = backups.settings("notes")
-
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -754,10 +775,12 @@ func TestBackupTreeBranches(t *testing.T) {
 	createItems(t, storage, token)
 
 	ctx := context.Background()
+
 	first, err := backups.create(ctx, "notes")
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	insertItem(t, storage, token, "two")
 
 	second, err := backups.create(ctx, "notes")
@@ -783,7 +806,6 @@ func TestBackupTreeBranches(t *testing.T) {
 	}
 
 	view, err = backups.overview("notes")
-
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -795,6 +817,7 @@ func TestBackupTreeBranches(t *testing.T) {
 	if _, err := backups.create(ctx, "notes"); !errors.Is(err, errBackupUnchanged) {
 		t.Fatalf("unchanged create after restore = %v, want unchanged", err)
 	}
+
 	insertItem(t, storage, token, "three")
 
 	third, err := backups.create(ctx, "notes")
@@ -807,7 +830,6 @@ func TestBackupTreeBranches(t *testing.T) {
 	}
 
 	view, err = backups.overview("notes")
-
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -830,11 +852,14 @@ func TestBackupTreePruneKeepsCurrentBranch(t *testing.T) {
 	createItems(t, storage, token)
 
 	ctx := context.Background()
+
 	first, err := backups.create(ctx, "notes")
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	insertItem(t, storage, token, "two")
+
 	if _, err := backups.create(ctx, "notes"); err != nil {
 		t.Fatal(err)
 	}
@@ -842,6 +867,7 @@ func TestBackupTreePruneKeepsCurrentBranch(t *testing.T) {
 	if err := backups.restore(ctx, "notes", first.Name); err != nil {
 		t.Fatal(err)
 	}
+
 	insertItem(t, storage, token, "three")
 
 	branch, err := backups.create(ctx, "notes")
@@ -882,10 +908,12 @@ func TestBackupTreeRebuildsLegacyChain(t *testing.T) {
 	createItems(t, storage, token)
 
 	ctx := context.Background()
+
 	first, err := backups.create(ctx, "notes")
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	insertItem(t, storage, token, "two")
 
 	second, err := backups.create(ctx, "notes")
@@ -945,6 +973,7 @@ func TestHandleBackupExportImport(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	s.handleApp(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("download = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -957,6 +986,7 @@ func TestHandleBackupExportImport(t *testing.T) {
 	var body bytes.Buffer
 
 	form := multipart.NewWriter(&body)
+
 	part, err := form.CreateFormFile("snapshot", "snapshot.tar.gz")
 	if err != nil {
 		t.Fatal(err)
@@ -978,6 +1008,7 @@ func TestHandleBackupExportImport(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	s.handleApp(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("import = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -1023,6 +1054,7 @@ func TestHandleBackupRoutes(t *testing.T) {
 
 		return rec, result
 	}
+
 	rec, result := do(http.MethodGet, "/apps/notes/backups", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("list = %d %s", rec.Code, rec.Body.String())
@@ -1057,6 +1089,7 @@ func TestHandleBackupRoutes(t *testing.T) {
 	}
 
 	first := result.Backups[0]
+
 	backup := first.Name
 	if result.Created != backup {
 		t.Errorf("created = %q, want %q", result.Created, backup)

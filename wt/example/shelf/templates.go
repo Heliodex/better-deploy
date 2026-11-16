@@ -25,6 +25,7 @@ func render(w http.ResponseWriter, status int, tmpl *template.Template, data any
 		http.Error(w, "render page: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
 
@@ -64,6 +65,7 @@ func parseTemplate(name string, files ...string) *template.Template {
 		if err != nil {
 			panic(err)
 		}
+
 		content.Write(data)
 	}
 

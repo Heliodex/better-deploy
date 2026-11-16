@@ -59,6 +59,7 @@ func (l *loginLimiter) pruneLocked(now time.Time) {
 		if attempt.blockedUntil.After(now) || now.Sub(attempt.firstFailure) <= loginWindow {
 			continue
 		}
+
 		delete(l.attempts, key)
 	}
 }
@@ -116,6 +117,7 @@ func (s *supervisor) handleLogin(w http.ResponseWriter, r *http.Request) {
 			Name: "anonymous",
 		}, r, "login.failed", "", http.StatusTooManyRequests, "too many attempts")
 		writeError(w, http.StatusTooManyRequests, "too many login attempts; try again later")
+
 		return
 	}
 
@@ -129,6 +131,7 @@ func (s *supervisor) handleLogin(w http.ResponseWriter, r *http.Request) {
 			Name: "anonymous",
 		}, r, "login.failed", "", http.StatusBadRequest, err.Error())
 		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+
 		return
 	}
 
@@ -146,11 +149,13 @@ func (s *supervisor) handleLogin(w http.ResponseWriter, r *http.Request) {
 				Name: "anonymous",
 			}, r, "login.failed", "", http.StatusUnauthorized, "invalid token")
 			writeError(w, http.StatusUnauthorized, "invalid token")
+
 			return
 		}
 	} else {
 		token = ""
 	}
+
 	limiter.reset(key)
 	w.Header().Set("Cache-Control", "no-store")
 	s.setAuthCookie(w, r, token, authCookieMaxAge)

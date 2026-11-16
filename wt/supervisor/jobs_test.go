@@ -28,6 +28,7 @@ func TestPruneTerminalJobs(t *testing.T) {
 		ID: "pending",
 		Status: jobStatusPending,
 	})
+
 	pruned := pruneTerminalJobs(jobs)
 	if len(pruned) != jobTerminalRetention+1 {
 		t.Fatalf("pruned length = %d, want %d", len(pruned), jobTerminalRetention+1)
@@ -62,6 +63,7 @@ func jobTestSupervisor(t *testing.T, port int) (*supervisor, *jobManager) {
 	s.jobs = manager
 
 	t.Cleanup(manager.close)
+
 	if err := manager.start("demo", 1); err != nil {
 		t.Fatal(err)
 	}
@@ -83,6 +85,7 @@ func TestJobQueueCancelAndAPI(t *testing.T) {
 
 	s, manager := jobTestSupervisor(t, address.Port)
 	store := manager.store("demo")
+
 	job, _, err := store.enqueue(jobEnqueueRequest{
 		Path: "/work",
 		RunAt: time.Now().Add(time.Hour),
@@ -96,6 +99,7 @@ func TestJobQueueCancelAndAPI(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleApp(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("cancel = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -109,16 +113,19 @@ func TestJobQueueCancelAndAPI(t *testing.T) {
 
 func waitJob(t *testing.T, store *jobStore, id, status string) appJob {
 	t.Helper()
+
 	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
 		if job, ok := store.get(id); ok && job.Status == status {
 			return job
 		}
+
 		time.Sleep(20 * time.Millisecond)
 	}
 
 	job, _ := store.get(id)
 
 	t.Fatalf("job %s did not reach %s: %+v", id, status, job)
+
 	return appJob{}
 }
 
@@ -132,6 +139,7 @@ func TestJobQueueRetriesAndDeadLetters(t *testing.T) {
 			http.Error(w, "no", http.StatusServiceUnavailable)
 			return
 		}
+
 		w.WriteHeader(http.StatusNoContent)
 	}))
 
@@ -144,6 +152,7 @@ func TestJobQueueRetriesAndDeadLetters(t *testing.T) {
 
 	_, manager := jobTestSupervisor(t, address.Port)
 	store := manager.store("demo")
+
 	job, _, err := store.enqueue(jobEnqueueRequest{
 		Path: "/work",
 		MaxAttempts: 2,
@@ -159,6 +168,7 @@ func TestJobQueueRetriesAndDeadLetters(t *testing.T) {
 	if _, err := store.retry(job.ID); err != nil {
 		t.Fatal(err)
 	}
+
 	fail.Store(false)
 	waitJob(t, store, job.ID, jobStatusSucceeded)
 }
@@ -167,8 +177,10 @@ func TestJobQueueRunsAndPersists(t *testing.T) {
 	received := make(chan string, 10)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body := make([]byte, 64)
+
 		count, _ := r.Body.Read(body)
 		received <- r.Method + " " + r.Header.Get("X-Test") + " " + string(body[:count])
+
 		w.WriteHeader(http.StatusNoContent)
 	}))
 
@@ -181,6 +193,7 @@ func TestJobQueueRunsAndPersists(t *testing.T) {
 
 	s, manager := jobTestSupervisor(t, address.Port)
 	store := manager.store("demo")
+
 	job, created, err := store.enqueue(jobEnqueueRequest{
 		Path: "/work",
 		Body: `{"value":"one"}`,
@@ -252,8 +265,10 @@ func TestJobQueueRunsAndPersists(t *testing.T) {
 	s.jobs = reloaded
 
 	t.Cleanup(reloaded.close)
+
 	if err := reloaded.start("demo", 1); err != nil {
 		t.Fatal(err)
 	}
+
 	waitJob(t, reloaded.store("demo"), keyed.ID, jobStatusSucceeded)
 }

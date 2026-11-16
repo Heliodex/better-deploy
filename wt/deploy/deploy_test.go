@@ -45,6 +45,7 @@ func TestCheckDeploySecretsFindsMissing(t *testing.T) {
 		Name: "demo",
 		Env: map[string]string{"FIRST": "secret://HAVE", "SECOND": "secret://MISSING"},
 	}
+
 	err := checkDeploySecrets(cfg, m)
 	if err == nil || !strings.Contains(err.Error(), "MISSING") {
 		t.Fatalf("missing secret error = %v, want MISSING", err)

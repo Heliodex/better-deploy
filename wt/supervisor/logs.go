@@ -119,6 +119,7 @@ func (l *appLog) setSecrets(values []string) {
 		seen[value] = struct{}{}
 		unique = append(unique, value)
 	}
+
 	sort.Slice(unique, func(i, j int) bool {
 		if len(unique[i]) != len(unique[j]) {
 			return len(unique[i]) > len(unique[j])
@@ -217,6 +218,7 @@ func (l *appLog) open() error {
 	}
 
 	l.file, l.size = file, size
+
 	supervisorFile, supervisorSize, err := openLogFile(l.supervisorPath())
 	if err != nil {
 		_ = file.Close()
@@ -290,6 +292,7 @@ func (l *appLog) writeLine(line string) error {
 	level, message := splitLevelPrefix(line)
 	message = l.redactLocked(message)
 	stamp := time.Now().UTC().Format(logTimeFormat)
+
 	data := []byte(stamp + " " + level + " " + message + "\n")
 	if l.size+int64(len(data)) > maxLogBytes {
 		file, size, err := rotateLogFile(l.file, l.path(), l.backupPath())
@@ -306,12 +309,14 @@ func (l *appLog) writeLine(line string) error {
 	if err != nil {
 		return err
 	}
+
 	l.publish(logEntry{
 		Time: stamp,
 		Level: strings.ToLower(level),
 		Source: "app",
 		Message: message,
 	})
+
 	return nil
 }
 
@@ -362,6 +367,7 @@ func (l *appLog) logSupervisor(message string) {
 
 	message = l.redactLocked(message)
 	stamp := time.Now().UTC().Format(logTimeFormat)
+
 	data := []byte(stamp + " INFO " + message + "\n")
 	if l.supervisorSize+int64(len(data)) > maxLogBytes {
 		file, size, err := rotateLogFile(l.supervisorFile, l.supervisorPath(), l.supervisorBackupPath())
@@ -378,6 +384,7 @@ func (l *appLog) logSupervisor(message string) {
 	if err != nil {
 		return
 	}
+
 	l.publish(logEntry{
 		Time: stamp,
 		Level: "info",
@@ -447,9 +454,11 @@ func (l *appLog) readLocked() ([]logEntry, error) {
 			}
 		}
 	}
+
 	sort.SliceStable(out, func(i, j int) bool {
 		return out[i].Time < out[j].Time
 	})
+
 	return out, nil
 }
 

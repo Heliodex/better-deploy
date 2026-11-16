@@ -53,6 +53,7 @@ func (c *runnerClient) fail(err error) {
 		c.streams = map[string]*runnerStream{}
 
 		c.mu.Unlock()
+
 		for _, stream := range streams {
 			select {
 			case stream.events <- runnerEvent{
@@ -103,6 +104,7 @@ func (c *runnerClient) dispatch(event runnerEvent) {
 		stream := c.streams[event.ID]
 
 		c.mu.Unlock()
+
 		if stream == nil {
 			return
 		}
@@ -117,6 +119,7 @@ func (c *runnerClient) dispatch(event runnerEvent) {
 		stream := c.streams[event.ID]
 
 		c.mu.Unlock()
+
 		if stream != nil {
 			select {
 			case stream.events <- event:
@@ -148,6 +151,7 @@ func (c *runnerClient) dispatch(event runnerEvent) {
 		stream := c.streams[event.ID]
 
 		c.mu.Unlock()
+
 		if stream == nil {
 			return
 		}
@@ -188,6 +192,7 @@ func (c *runnerClient) readLoop() {
 	scanner := bufio.NewScanner(c.conn)
 
 	scanner.Buffer(make([]byte, 64<<10), runnerScanBytes)
+
 	for scanner.Scan() {
 		var event runnerEvent
 
@@ -195,6 +200,7 @@ func (c *runnerClient) readLoop() {
 			c.fail(fmt.Errorf("runner event: %w", err))
 			return
 		}
+
 		c.dispatch(event)
 	}
 
@@ -202,6 +208,7 @@ func (c *runnerClient) readLoop() {
 	if err == nil {
 		err = errors.New("runner connection closed")
 	}
+
 	c.fail(err)
 }
 
@@ -255,6 +262,7 @@ func dialRunner(path string, timeout time.Duration) (*runnerClient, []runnerAppI
 
 			return nil, nil, 0, lastErr
 		}
+
 		time.Sleep(50 * time.Millisecond)
 	}
 }
@@ -298,6 +306,7 @@ func (c *runnerClient) Shutdown() error {
 	})
 
 	c.Close()
+
 	return err
 }
 

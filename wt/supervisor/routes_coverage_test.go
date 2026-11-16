@@ -73,6 +73,7 @@ func TestOpenAPIDocumentsRoutes(t *testing.T) {
 		if strings.HasPrefix(line, "  /") || strings.HasPrefix(line, "  \"/") {
 			raw := strings.Trim(strings.TrimSuffix(trimmed, ":"), "\"")
 			path = normaliseRoutePath(raw)
+
 			continue
 		}
 

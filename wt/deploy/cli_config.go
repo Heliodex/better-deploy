@@ -63,7 +63,9 @@ func patchConfig(cfg clientOptions, name, data, ifMatch string) error {
 	if err != nil {
 		return err
 	}
+
 	req.Header.Set("Content-Type", "application/json")
+
 	if cfg.token != "" {
 		req.Header.Set("Authorization", "Bearer "+cfg.token)
 	}
@@ -86,7 +88,9 @@ func patchConfig(cfg clientOptions, name, data, ifMatch string) error {
 	if err := checkAPI(resp.StatusCode, body); err != nil {
 		return err
 	}
+
 	printRawOrJSON(cfg, body)
+
 	return nil
 }
 
@@ -128,7 +132,9 @@ func runConfigShow(cfg clientOptions, name string) error {
 	if etag := header.Get("ETag"); etag != "" {
 		fmt.Fprintln(os.Stderr, "ETag:", etag)
 	}
+
 	printRawOrJSON(cfg, body)
+
 	return nil
 }
 

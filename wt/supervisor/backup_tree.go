@@ -141,6 +141,7 @@ func backupPathNames(tree backupTree) map[string]struct{} {
 		}
 
 		protected[id] = struct{}{}
+
 		node, ok := tree.Nodes[id]
 		if !ok {
 			break
@@ -173,9 +174,11 @@ func (m *backupManager) pruneLocked(app string, keep int) error {
 			if err := m.removeSnapshot(app, leaf); err != nil {
 				return err
 			}
+
 			delete(tree.Nodes, leaf)
 
 			changed = true
+
 			continue
 		}
 
@@ -189,7 +192,9 @@ func (m *backupManager) pruneLocked(app string, keep int) error {
 		if err := m.removeSnapshot(app, root); err != nil {
 			return err
 		}
+
 		delete(tree.Nodes, root)
+
 		if child != "" {
 			node := tree.Nodes[child]
 			node.Parent = ""
@@ -219,6 +224,7 @@ func backupTreeAcyclic(tree backupTree) bool {
 			}
 
 			seen[id] = struct{}{}
+
 			node, ok := tree.Nodes[id]
 			if !ok {
 				break
@@ -323,6 +329,7 @@ func reconcileTree(tree *backupTree, files []backupInfo) (changed bool) {
 	sort.Slice(chronological, func(i, j int) bool {
 		return chronological[i].CreatedAt.Before(chronological[j].CreatedAt)
 	})
+
 	if chainMissingNodes(tree, chronological) {
 		changed = true
 	}

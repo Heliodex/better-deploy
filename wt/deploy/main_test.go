@@ -296,6 +296,7 @@ func TestReadManifestValidatesIdleTimeout(t *testing.T) {
 	dir := t.TempDir()
 	write := func(body string) {
 		t.Helper()
+
 		if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(body), privateFileMode); err != nil {
 			t.Fatal(err)
 		}
@@ -308,6 +309,7 @@ func TestReadManifestValidatesIdleTimeout(t *testing.T) {
 		`{"name":"demo"}`,
 	} {
 		write(body)
+
 		if _, err := readManifest(dir); err != nil {
 			t.Errorf("valid idle_timeout rejected for %s: %v", body, err)
 		}
@@ -319,6 +321,7 @@ func TestReadManifestValidatesIdleTimeout(t *testing.T) {
 		"too slow": `{"name":"demo","idle_timeout":"25h"}`,
 	} {
 		write(body)
+
 		if _, err := readManifest(dir); err == nil {
 			t.Errorf("%s: expected an error", name)
 		}
@@ -329,12 +332,14 @@ func TestReadManifestValidatesSchedule(t *testing.T) {
 	dir := t.TempDir()
 	write := func(body string) {
 		t.Helper()
+
 		if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(body), privateFileMode); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	write(`{"name":"demo","schedule":[{"path":"/tick","every":"10s"}]}`)
+
 	if _, err := readManifest(dir); err != nil {
 		t.Errorf("valid schedule rejected: %v", err)
 	}
@@ -347,6 +352,7 @@ func TestReadManifestValidatesSchedule(t *testing.T) {
 		"too slow": `{"name":"demo","schedule":[{"path":"/tick","every":"48h"}]}`,
 	} {
 		write(body)
+
 		if _, err := readManifest(dir); err == nil {
 			t.Errorf("%s: expected an error", name)
 		}
@@ -357,12 +363,14 @@ func TestReadManifestValidatesServerPages(t *testing.T) {
 	dir := t.TempDir()
 	write := func(body string) {
 		t.Helper()
+
 		if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(body), privateFileMode); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	write(`{"name":"demo","server_pages":["/","/home","/login"]}`)
+
 	if _, err := readManifest(dir); err != nil {
 		t.Errorf("valid server pages rejected: %v", err)
 	}
@@ -375,6 +383,7 @@ func TestReadManifestValidatesServerPages(t *testing.T) {
 		"unclean": `{"name":"demo","server_pages":["/a/../b"]}`,
 	} {
 		write(body)
+
 		if _, err := readManifest(dir); err == nil {
 			t.Errorf("%s: expected an error", name)
 		}
@@ -385,12 +394,14 @@ func TestReadManifestValidatesServerPaths(t *testing.T) {
 	dir := t.TempDir()
 	write := func(body string) {
 		t.Helper()
+
 		if err := os.WriteFile(filepath.Join(dir, "app.json"), []byte(body), privateFileMode); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	write(`{"name":"demo","server_paths":["/auth","/api/v1"]}`)
+
 	if _, err := readManifest(dir); err != nil {
 		t.Errorf("valid server paths rejected: %v", err)
 	}
@@ -403,6 +414,7 @@ func TestReadManifestValidatesServerPaths(t *testing.T) {
 		"unclean": `{"name":"demo","server_paths":["/a/../b"]}`,
 	} {
 		write(body)
+
 		if _, err := readManifest(dir); err == nil {
 			t.Errorf("%s: expected an error", name)
 		}
@@ -432,7 +444,6 @@ func TestResolveDevConfig(t *testing.T) {
 	}
 
 	cfg, err = resolveDevConfig([]string{})
-
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,10 +451,10 @@ func TestResolveDevConfig(t *testing.T) {
 	if cfg.dir != "." || cfg.port != 8080 {
 		t.Errorf("defaults = %+v, want dir . port 8080", cfg)
 	}
+
 	t.Setenv("WT_DEV_PORT", "9001")
 
 	cfg, err = resolveDevConfig([]string{})
-
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -451,14 +462,16 @@ func TestResolveDevConfig(t *testing.T) {
 	if cfg.port != 9001 {
 		t.Errorf("port = %d, want 9001 from WT_DEV_PORT", cfg.port)
 	}
+
 	t.Setenv("WT_DEV_PORT", "bogus")
+
 	if _, err := resolveDevConfig([]string{}); err == nil {
 		t.Error("expected error for invalid WT_DEV_PORT")
 	}
+
 	t.Setenv("WT_DEV_PORT", "")
 
 	cfg, err = resolveDevConfig([]string{"--watch=false"})
-
 	if err != nil {
 		t.Fatal(err)
 	}

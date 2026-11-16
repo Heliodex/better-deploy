@@ -84,6 +84,7 @@ func ensureDirTraversable(dir string) error {
 	}
 
 	mode := info.Mode().Perm()
+
 	want := mode | 0o111
 	if want == mode {
 		return nil
@@ -110,12 +111,14 @@ func (s *supervisor) applyEgress(a *app) error {
 	if s.egress == nil {
 		return errors.New("no egress firewall manager")
 	}
+
 	a.mu.Lock()
 
 	uid, port := a.uid, a.port
 	egress := append([]egressRule(nil), a.cfg.Egress...)
 
 	a.mu.Unlock()
+
 	return s.egress.add(a.name, uid, port, egress...)
 }
 
@@ -167,6 +170,7 @@ func (p *isolationPlan) close(s *supervisor) {
 
 	s.removeAppEgress(p.app)
 	s.removeAppCgroup(p.app)
+
 	if p.nsRoot != "" {
 		_ = os.RemoveAll(p.nsRoot)
 	}
@@ -215,11 +219,13 @@ func (s *supervisor) prepareIsolation(a *app, cfg appConfig) (*isolationPlan, er
 		if err := ensureAppReadable(a.dir); err != nil {
 			return nil, fmt.Errorf("make app readable by uid %d: %w", uid, err)
 		}
+
 		a.mu.Lock()
 
 		a.uid = uid
 
 		a.mu.Unlock()
+
 		if err := s.quota.apply(uid, int64(cfg.DiskMB)<<20, maxAppEntries); err != nil {
 			return nil, fmt.Errorf("data quota: %w", err)
 		}

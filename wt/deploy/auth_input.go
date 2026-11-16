@@ -46,11 +46,13 @@ func (i *authInput) secret(prompt string) (string, error) {
 	if !i.interactive || i.file == nil {
 		return i.line(prompt, "")
 	}
+
 	fmt.Fprint(i.errOut, prompt)
 
 	data, err := term.ReadPassword(int(i.file.Fd()))
 
 	fmt.Fprintln(i.errOut)
+
 	if err != nil {
 		return "", fmt.Errorf("read token: %w", err)
 	}

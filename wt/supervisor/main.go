@@ -235,6 +235,7 @@ func main() {
 		nsInitMain(os.Args[2:])
 		return
 	}
+
 	log.SetFlags(log.LstdFlags | log.LUTC)
 	dropPrivileges()
 	serve(startSupervisor(parseConfig()))
@@ -245,8 +246,10 @@ func requireMethod(w http.ResponseWriter, r *http.Request, method string) bool {
 	if r.Method == method {
 		return true
 	}
+
 	w.Header().Set("Allow", method)
 	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 	return false
 }
 
@@ -277,6 +280,7 @@ func (s *supervisor) handleAppAudited(w http.ResponseWriter, r *http.Request, id
 	if status == 0 {
 		status = http.StatusOK
 	}
+
 	s.appendAudit(identity, r, auditAction(r.Method, action), name, status, auditError(recorder.body.Bytes()))
 }
 
@@ -292,9 +296,12 @@ func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
 		if len(allowed) > 0 {
 			w.Header().Set("Allow", strings.Join(allowed, ", "))
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 			return
 		}
+
 		http.NotFound(w, r)
+
 		return
 	}
 
@@ -323,6 +330,7 @@ func (s *supervisor) handleApp(w http.ResponseWriter, r *http.Request) {
 		s.handleAppAudited(w, r, identity, name, action, route.handler, params)
 		return
 	}
+
 	route.handler(w, r, params)
 }
 
@@ -417,6 +425,7 @@ func (s *supervisor) handleAppLogs(w http.ResponseWriter, r *http.Request, name,
 		s.handleLogStream(w, r, a)
 		return
 	}
+
 	s.handleLogs(w, r, a)
 }
 
@@ -439,11 +448,13 @@ func (s *supervisor) stopAll() {
 			defer wg.Done()
 
 			s.drainAndStop(a, "shutdown")
+
 			if a.logs != nil {
 				a.logs.close()
 			}
 		}(a)
 	}
+
 	wg.Wait()
 }
 
@@ -481,6 +492,7 @@ func (s *supervisor) handleAppRoot(w http.ResponseWriter, r *http.Request, name 
 		if !ok {
 			return
 		}
+
 		a.sampleResources(time.Now())
 		writeJSON(w, http.StatusOK, s.info(a))
 	case http.MethodDelete:
@@ -514,6 +526,7 @@ func (s *supervisor) handleApps(w http.ResponseWriter, r *http.Request) {
 
 		snapshot = filtered
 	}
+
 	writeJSON(w, http.StatusOK, snapshot)
 }
 

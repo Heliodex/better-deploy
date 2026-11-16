@@ -61,6 +61,7 @@ func TestStorageRestoreToken(t *testing.T) {
 	defer s.close()
 
 	s.restoreToken("demo", "token-from-before-handover")
+
 	if app, ok := s.appForToken("token-from-before-handover"); !ok || app != "demo" {
 		t.Errorf("appForToken = %q, %t", app, ok)
 	}
@@ -89,7 +90,9 @@ func TestStorageTempBudgetRejectsRequests(t *testing.T) {
 	if err := os.WriteFile(blob, []byte("0123456789ABCDEF"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	s.checkTemp()
+
 	if !s.tempOver.Load() {
 		t.Fatal("temp usage did not exceed the budget")
 	}
@@ -102,6 +105,7 @@ func TestStorageTempBudgetRejectsRequests(t *testing.T) {
 	recorder := httptest.NewRecorder()
 
 	s.handle(recorder, request)
+
 	if recorder.Code != http.StatusInsufficientStorage {
 		t.Fatalf("status = %d, want 507: %s", recorder.Code, recorder.Body.String())
 	}
@@ -119,7 +123,9 @@ func TestStorageTempBudgetRejectsRequests(t *testing.T) {
 	if err := os.Remove(blob); err != nil {
 		t.Fatal(err)
 	}
+
 	s.checkTemp()
+
 	if s.tempOver.Load() {
 		t.Fatal("temp flag stayed set after usage fell below the budget")
 	}
@@ -131,6 +137,7 @@ func TestStorageTempBudgetRejectsRequests(t *testing.T) {
 	recorder = httptest.NewRecorder()
 
 	s.handle(recorder, request)
+
 	if recorder.Code != http.StatusOK {
 		t.Errorf("status after clearing = %d, want 200: %s", recorder.Code, recorder.Body.String())
 	}

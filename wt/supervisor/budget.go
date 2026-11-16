@@ -30,6 +30,7 @@ func (w *budgetWatch) update(over bool, name string, used, limit int64) {
 		log.Printf("warning: %s exceeded: %d of %d bytes used", name, used, limit)
 		return
 	}
+
 	log.Printf("%s usage is back under the limit", name)
 }
 
@@ -51,6 +52,7 @@ func (b *byteBudget) observe(used int64) bool {
 	over := b.exceeded(used)
 
 	b.watch.update(over, b.name, used, b.limit)
+
 	return over
 }
 

@@ -65,6 +65,7 @@ func addDevFile(state map[string]devFileState, path string) error {
 // The frontend directory is skipped because Vite owns those changes.
 func componentSourceState(root string, extra []string) (map[string]devFileState, error) {
 	state := map[string]devFileState{}
+
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -100,6 +101,7 @@ func componentSourceState(root string, extra []string) (map[string]devFileState,
 
 	for _, value := range extra {
 		path := filepath.Join(root, value)
+
 		info, err := os.Stat(path)
 		if err != nil {
 			continue
@@ -219,6 +221,7 @@ func watchComponent(cfg *deployConfig, extra []string, done <-chan struct{}) {
 			previous = next
 			continue
 		}
+
 		time.Sleep(devRebuildDelay)
 		fmt.Fprintln(os.Stderr, "dev: component change, rebuilding")
 
@@ -227,13 +230,17 @@ func watchComponent(cfg *deployConfig, extra []string, done <-chan struct{}) {
 			fmt.Fprintln(os.Stderr, "dev: component rebuild failed:", err)
 
 			previous, _ = componentSourceState(cfg.dir, extra)
+
 			continue
 		}
+
 		printBuildStatus(status)
+
 		if err := upload(cfg, m, data); err != nil {
 			fmt.Fprintln(os.Stderr, "dev: component redeploy failed:", err)
 
 			previous, _ = componentSourceState(cfg.dir, extra)
+
 			continue
 		}
 
@@ -284,11 +291,14 @@ func watchDev(cfg *deployConfig, done <-chan struct{}) {
 			fmt.Fprintln(os.Stderr, "dev: rebuild failed:", err)
 			continue
 		}
+
 		printBuildStatus(status)
+
 		if err := upload(cfg, m, data); err != nil {
 			fmt.Fprintln(os.Stderr, "dev: redeploy failed:", err)
 			continue
 		}
+
 		fmt.Printf("dev: redeployed %s at %s/\n", m.Name, cfg.host)
 	}
 }

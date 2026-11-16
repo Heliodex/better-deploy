@@ -22,6 +22,7 @@ const (
 // New creates a client using the supplied transport. A wasi:http transport is used in components; tests can pass a normal http.Client.
 func New(httpClient *http.Client) (*Client, error) {
 	baseURL := strings.TrimSuffix(os.Getenv("WT_STORAGE_URL"), "/")
+
 	token := os.Getenv("WT_STORAGE_TOKEN")
 	if baseURL == "" || token == "" {
 		return nil, errors.New("WT_STORAGE_URL and WT_STORAGE_TOKEN must be set")
@@ -70,6 +71,7 @@ func responseError(resp *http.Response) error {
 	var body errorResponse
 
 	_ = json.Unmarshal(raw, &body)
+
 	message := strings.TrimSpace(body.Error)
 	if message == "" {
 		message = strings.TrimSpace(string(raw))
@@ -93,6 +95,7 @@ func (c *Client) get(ctx context.Context, path string, out any) error {
 	if err != nil {
 		return err
 	}
+
 	req.Header.Set("Authorization", "Bearer "+c.token)
 
 	resp, err := c.http.Do(req)
@@ -152,6 +155,7 @@ func (c *Client) post(ctx context.Context, path string, body, out any) error {
 	if err != nil {
 		return err
 	}
+
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.token)
 
@@ -298,6 +302,7 @@ func (c *Client) QueryPage(ctx context.Context, query string, page Page, args ..
 	pageArgs := make([]any, 0, len(args)+2)
 	pageArgs = append(pageArgs, args...)
 	pageArgs = append(pageArgs, page.Limit, page.Offset)
+
 	rows, err := c.QueryOptions(ctx, "select * from ("+query+") limit ? offset ?", QueryOptions{
 		MaxRows: page.Limit,
 	}, pageArgs...) //nolint:unqueryvet // The caller supplies the projected query.
@@ -411,6 +416,7 @@ func (c *Client) Transaction(ctx context.Context, statements ...TransactionState
 
 	for batch := range slices.Chunk(statements, MaxTransactionStatements) {
 		index++
+
 		results, err := c.transact(ctx, batch)
 		if err != nil {
 			return nil, fmt.Errorf("transaction batch %d of %d: %w", index, batches, err)

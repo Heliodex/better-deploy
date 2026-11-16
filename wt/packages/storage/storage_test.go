@@ -19,6 +19,7 @@ func newTestClient(t *testing.T, handler http.HandlerFunc) *Client {
 	server := httptest.NewServer(handler)
 
 	t.Cleanup(server.Close)
+
 	return &Client{
 		baseURL: server.URL,
 		token: "test",
@@ -40,6 +41,7 @@ func TestClientBatch(t *testing.T) {
 
 		_, _ = io.WriteString(w, `{"results":[{"rows_affected":1},{"rows_affected":2,"last_insert_id":9}]}`)
 	})
+
 	results, err := client.Batch(context.Background(), Statement{
 		SQL: `insert into things (value) values (?)`,
 		Args: []any{"one"},
@@ -74,6 +76,7 @@ func TestClientExecEncodesParams(t *testing.T) {
 
 		_, _ = io.WriteString(w, `{"rows_affected":1,"last_insert_id":7}`)
 	})
+
 	result, err := client.Exec(context.Background(), `insert into things (value) values (?)`, []byte{0, 1, 2})
 	if err != nil {
 		t.Fatal(err)
@@ -102,6 +105,7 @@ func TestClientQueryDefaultSendsNoMaxRows(t *testing.T) {
 
 		_, _ = io.WriteString(w, `{"columns":["id"],"rows":[]}`)
 	})
+
 	rows, err := client.Query(context.Background(), `select id from things`)
 	if err != nil {
 		t.Fatal(err)
@@ -140,6 +144,7 @@ func TestClientQueryNSendsMaxRows(t *testing.T) {
 
 		_, _ = io.WriteString(w, `{"columns":["id"],"rows":[["a"]],"truncated":true}`)
 	})
+
 	rows, err := client.QueryN(context.Background(), 5, `select id from things`)
 	if err != nil {
 		t.Fatal(err)
@@ -164,6 +169,7 @@ func TestClientQueryPageAdvancesByReturnedRowsWhenServerTruncates(t *testing.T) 
 	client := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, `{"columns":["id"],"rows":[["a"]],"truncated":true}`)
 	})
+
 	rows, err := client.QueryPage(context.Background(), `select id from things`, Page{
 		Limit: 10,
 		Offset: 4,
@@ -186,6 +192,7 @@ func TestClientQueryPageStopsOnShortPage(t *testing.T) {
 	client := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, `{"columns":["id"],"rows":[["a"]]}`)
 	})
+
 	rows, err := client.QueryPage(context.Background(), `select id from things`, Page{
 		Limit: 2,
 	})
@@ -242,10 +249,12 @@ func TestClientQueryScan(t *testing.T) {
 		if got := r.Header.Get("Authorization"); got != "Bearer test" {
 			t.Errorf("authorization = %q", got)
 		}
+
 		w.Header().Set("Content-Type", "application/json")
 
 		_, _ = io.WriteString(w, `{"columns":["id","count","ok","at","blob"],"rows":[["abc",42,true,"2026-10-26T20:00:00Z",{"$b64":"AAEC"}]]}`)
 	})
+
 	rows, err := client.Query(context.Background(), `select * from things`)
 	if err != nil {
 		t.Fatal(err)
@@ -290,6 +299,7 @@ func TestClientQueryTruncated(t *testing.T) {
 	client := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = fmt.Fprint(w, `{"columns":["id"],"rows":[["a"]],"truncated":true}`)
 	})
+
 	rows, err := client.Query(context.Background(), `select id from things`)
 	if err != nil {
 		t.Fatal(err)
@@ -339,6 +349,7 @@ func TestClientSchemaAndMigrate(t *testing.T) {
 			t.Errorf("path = %q", r.URL.Path)
 		}
 	})
+
 	schema, err := client.Schema(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -358,7 +369,6 @@ func TestClientSchemaAndMigrate(t *testing.T) {
 		SQL: `insert into things (id) values (?)`,
 		Args: []any{"a"},
 	})
-
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,6 +387,7 @@ func TestClientSchemaStats(t *testing.T) {
 		if got := r.URL.Query().Get("stats"); got != "1" {
 			t.Errorf("stats = %q, want 1", got)
 		}
+
 		w.Header().Set("Content-Type", "application/json")
 
 		_, _ = io.WriteString(w, `{
@@ -393,6 +404,7 @@ func TestClientSchemaStats(t *testing.T) {
 			"migrations":[{"version":1,"checksum":"abc","appliedAt":"2026-10-31T00:00:00Z"}]
 		}`)
 	})
+
 	schema, err := client.SchemaStats(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -438,6 +450,7 @@ func TestClientTransaction(t *testing.T) {
 
 		_, _ = io.WriteString(w, `{"results":[{"rows_affected":1,"last_insert_id":3},{"columns":["value"],"rows":[["two"]]}]}`)
 	})
+
 	results, err := client.Transaction(context.Background(), TransactionStatement{
 		SQL: `insert into items (value) values (?)`,
 		Args: []any{"two"},
@@ -554,6 +567,7 @@ func TestClientTransactionNamesFailingBatch(t *testing.T) {
 
 			return
 		}
+
 		http.Error(w, "boom", http.StatusInternalServerError)
 	})
 	statements := make([]TransactionStatement, MaxTransactionStatements+1)
@@ -581,6 +595,7 @@ func TestClientTypedError(t *testing.T) {
 
 		_, _ = io.WriteString(w, `{"error":"constraint failed: UNIQUE constraint failed: items.id","code":"constraint","sqlite_code":2067,"constraint":"UNIQUE"}`)
 	})
+
 	_, err := client.Exec(context.Background(), `insert into items (id) values (?)`, "a")
 	if err == nil {
 		t.Fatal("expected an error")
@@ -682,6 +697,7 @@ func TestClientWithTxRollsBackOnError(t *testing.T) {
 			t.Errorf("path = %q", r.URL.Path)
 		}
 	})
+
 	sentinel := errors.New("stop")
 	if err := client.WithTx(context.Background(), func(tx *Tx) error {
 		if _, err := tx.Exec(context.Background(), `insert into items (value) values (?)`, "three"); err != nil {
@@ -712,6 +728,7 @@ func TestClientWriteReturning(t *testing.T) {
 
 		_, _ = io.WriteString(w, `{"columns":["id","value"],"rows":[["a","one"]],"rows_affected":1}`)
 	})
+
 	rows, err := client.WriteReturning(context.Background(), `insert into items (id, value) values (?, ?) returning id, value`, "a", "one")
 	if err != nil {
 		t.Fatal(err)
@@ -740,6 +757,7 @@ func TestClientWriteReturning(t *testing.T) {
 
 func paramInt(t *testing.T, value any) int {
 	t.Helper()
+
 	switch value := value.(type) {
 	case float64:
 		return int(value)
@@ -763,6 +781,7 @@ func TestClientQueryPageWrapsAndAdvances(t *testing.T) {
 
 		_, _ = io.WriteString(w, `{"columns":["id"],"rows":[["a"],["b"]]}`)
 	})
+
 	rows, err := client.QueryPage(context.Background(), `select id from things;`, Page{
 		Limit: 2,
 		Offset: 4,

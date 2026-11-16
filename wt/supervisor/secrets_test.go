@@ -32,6 +32,7 @@ func TestAppLogRedactsSecretsInAppAndSupervisorLines(t *testing.T) {
 	if entry.Message != "app says [redacted] and [redacted]" {
 		t.Errorf("streamed app line = %q", entry.Message)
 	}
+
 	logs.logSupervisor("GET /?token=longer-secret 200")
 
 	entry = <-messages
@@ -248,6 +249,7 @@ func TestAppInfoRedactsLastError(t *testing.T) {
 	}
 
 	a.lastError = "failed with super-secret-value"
+
 	info := s.info(a)
 	if strings.Contains(info.LastError, "super-secret-value") {
 		t.Errorf("LastError leaked a secret: %q", info.LastError)

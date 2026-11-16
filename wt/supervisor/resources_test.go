@@ -64,6 +64,7 @@ func TestHandleResourcesEmptyHistory(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	s.handleApp(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
@@ -107,6 +108,7 @@ func TestHandleResourcesReturnsHistory(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	s.handleApp(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
@@ -131,6 +133,7 @@ func TestLoadResourceHistoryMissingAndCorrupt(t *testing.T) {
 	}
 
 	s.loadResourceHistory(a)
+
 	if len(a.resourceHistory()) != 0 {
 		t.Fatalf("missing file loaded %+v, want none", a.resourceHistory())
 	}
@@ -142,7 +145,9 @@ func TestLoadResourceHistoryMissingAndCorrupt(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(s.resourcesDir(), "demo.json"), []byte("not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
 	s.loadResourceHistory(a)
+
 	if len(a.resourceHistory()) != 0 {
 		t.Errorf("corrupt file loaded %+v, want none", a.resourceHistory())
 	}
@@ -204,6 +209,7 @@ func TestLoadResourceHistoryTrimsStale(t *testing.T) {
 func TestParseProcStat(t *testing.T) {
 	// Fields after the closing parenthesis start at the state field, so utime and stime are fields 14 and 15.
 	line := []byte("1234 (wasmtime) S 1 1234 1234 0 -1 4194560 100 0 0 0 12 34 0 0 20 0 1 0 12345 100000 100 18446744073709551615")
+
 	ticks, err := parseProcStat(line)
 	if err != nil {
 		t.Fatal(err)
@@ -216,6 +222,7 @@ func TestParseProcStat(t *testing.T) {
 
 func TestParseProcStatHandlesParensInCommand(t *testing.T) {
 	line := []byte("1234 (wasm)time) S 1 1234 1234 0 -1 4194560 100 0 0 0 7 8 0 0 20 0 1 0 12345 100000 100 18446744073709551615")
+
 	ticks, err := parseProcStat(line)
 	if err != nil {
 		t.Fatal(err)
@@ -260,6 +267,7 @@ func TestParseProcStatm(t *testing.T) {
 
 func TestParseSmapsRollupPss(t *testing.T) {
 	rollup := []byte("55f0d4a00000-7ffc0a1b0000 ---p 00000000 00:00 0 [rollup]\nRss:   12000 kB\nPss:    4321 kB\nPss_Anon: 4000 kB\n")
+
 	memory, err := parseSmapsRollupPss(rollup)
 	if err != nil {
 		t.Fatal(err)
@@ -341,6 +349,7 @@ func TestSampleResourcesClearsStoppedApp(t *testing.T) {
 	app.stats.memoryBytes = 1 << 20
 
 	app.sampleResources(time.Now())
+
 	if cpu, memory, _ := app.resourceStats(); cpu != 0 || memory != 0 {
 		t.Errorf("stopped app stats = %v, %d; want 0, 0", cpu, memory)
 	}

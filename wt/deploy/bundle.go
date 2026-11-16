@@ -88,6 +88,7 @@ func bundle(dir string, m manifest, includeComponent bool) ([]byte, error) {
 
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
+
 	appJSON, err := manifestJSON(dir, m)
 	if err != nil {
 		return nil, err

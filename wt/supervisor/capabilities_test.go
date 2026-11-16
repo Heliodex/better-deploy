@@ -17,6 +17,7 @@ func TestCapabilitiesWithoutCompiler(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	s.handleCapabilities(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("capabilities = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -47,6 +48,7 @@ func TestHandleCapabilities(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	s.handleCapabilities(rec, req)
+
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("unauthenticated capabilities = %d, want 401", rec.Code)
 	}
@@ -58,6 +60,7 @@ func TestHandleCapabilities(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	s.handleCapabilities(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("capabilities = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -87,6 +90,7 @@ func TestHandleCapabilities(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	s.handleCapabilities(rec, req)
+
 	if rec.Code != http.StatusMethodNotAllowed || rec.Header().Get("Allow") != http.MethodGet {
 		t.Errorf("POST capabilities = %d Allow=%q", rec.Code, rec.Header().Get("Allow"))
 	}

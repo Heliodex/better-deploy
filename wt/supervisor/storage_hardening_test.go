@@ -52,6 +52,7 @@ func TestWALAutoCheckpoint(t *testing.T) {
 
 func storageConnPragma(t *testing.T, conn *sql.Conn, query string) (value int64) {
 	t.Helper()
+
 	if err := conn.QueryRowContext(context.Background(), query).Scan(&value); err != nil {
 		t.Fatalf("%s: %v", query, err)
 	}
@@ -72,6 +73,7 @@ func TestStoragePoolsApplyPragmasPerConnection(t *testing.T) {
 	if err := s.setTempDir(tempDir, 0); err != nil {
 		t.Fatal(err)
 	}
+
 	s.setQuota("app", 1<<20)
 
 	db, err := s.dbFor("app")
@@ -80,6 +82,7 @@ func TestStoragePoolsApplyPragmasPerConnection(t *testing.T) {
 	}
 
 	ctx := context.Background()
+
 	first, err := db.Conn(ctx)
 	if err != nil {
 		t.Fatal(err)

@@ -12,6 +12,7 @@ import (
 // compatDoc parses one schema document for classifier tests.
 func compatDoc(t *testing.T, body string) (doc map[string]any) {
 	t.Helper()
+
 	if err := json.Unmarshal([]byte(body), &doc); err != nil {
 		t.Fatal(err)
 	}
@@ -76,6 +77,7 @@ func TestCompatSameRefPasses(t *testing.T) {
 
 func TestCompatSchemaRemovedFailsAddedPasses(t *testing.T) {
 	doc := compatDoc(t, `{"type":"object","properties":{}}`)
+
 	breaks := compatDocs(map[string]map[string]any{"gone.json": doc}, map[string]map[string]any{})
 	if len(breaks) != 1 || breaks[0].Rule != "schema removed" {
 		t.Errorf("removed schema breaks = %v", breaks)
@@ -198,6 +200,7 @@ func TestCompatNullability(t *testing.T) {
 		`{"type":"object","properties":{"n":{"type":"string"}}}`,
 		`{"type":"object","properties":{"n":{"type":["string","null"]}}}`,
 	}
+
 	breaks := diffCompatSchemas(t, "t.json", adding[0], adding[1])
 	if len(breaks) != 1 || breaks[0].Rule != "now nullable" {
 		t.Errorf("adding null breaks = %v", breaks)
@@ -323,6 +326,7 @@ func TestCompatSourceAtRefMissingApp(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "README"), []byte("no app yet\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	gitCommitAll(t, root)
 
 	_, ok, err := compatSourceAtRef(app, "HEAD", "web")
@@ -347,6 +351,7 @@ func TestCompatSourceAtRefReadsSubdirApp(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(lib, "contract.ts"), []byte("export const note = 1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	gitCommitAll(t, root)
 
 	source, ok, err := compatSourceAtRef(app, "HEAD", "web")
@@ -363,6 +368,7 @@ func TestCompatSourceAtRefUnknownRef(t *testing.T) {
 	root := t.TempDir()
 
 	gitCommitAll(t, root)
+
 	if _, _, err := compatSourceAtRef(root, "missing", "web"); err == nil {
 		t.Error("unknown ref should fail")
 	}

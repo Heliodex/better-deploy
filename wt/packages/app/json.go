@@ -29,6 +29,7 @@ func jsonErrorField(message, fallback string) string {
 	}
 
 	rest := message[len(marker):]
+
 	end := strings.IndexFunc(rest, func(r rune) bool {
 		return r != '_' && !unicode.IsLetter(r) && !unicode.IsDigit(r)
 	})
@@ -94,6 +95,7 @@ func ReadJSON(w http.ResponseWriter, r *http.Request, limit int64, field string,
 		message := jsonErrorMessage(err, field)
 
 		WriteErrorField(w, http.StatusBadRequest, "invalid", jsonErrorField(message, field), message)
+
 		return false
 	}
 

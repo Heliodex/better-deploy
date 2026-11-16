@@ -133,19 +133,25 @@ func (s *supervisor) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 		return
 	}
+
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
+
 	if !s.ready.Load() || s.stopping.Load() {
 		w.WriteHeader(http.StatusServiceUnavailable)
+
 		if r.Method != http.MethodHead {
 			_, _ = io.WriteString(w, "not ready\n")
 		}
 
 		return
 	}
+
 	w.WriteHeader(http.StatusOK)
+
 	if r.Method != http.MethodHead {
 		_, _ = io.WriteString(w, "ok\n")
 	}
@@ -219,6 +225,7 @@ func (s *supervisor) checkHealth(a *app) {
 	running := a.cmd != nil && !a.exited && !a.starting && !a.retired
 
 	a.mu.Unlock()
+
 	if !running {
 		return
 	}
@@ -228,6 +235,7 @@ func (s *supervisor) checkHealth(a *app) {
 		if err != nil {
 			log.Printf("app %s: health check failed: %v", a.name, err)
 		}
+
 		s.broadcast()
 	}
 
@@ -246,6 +254,7 @@ func (s *supervisor) checkAllHealth() {
 		if !a.healthDue(now) {
 			continue
 		}
+
 		wg.Add(1)
 
 		go func(a *app) {
@@ -254,6 +263,7 @@ func (s *supervisor) checkAllHealth() {
 			s.checkHealth(a)
 		}(a)
 	}
+
 	wg.Wait()
 }
 
@@ -267,6 +277,7 @@ func (s *supervisor) monitorHealth() {
 		if s.stopping.Load() {
 			return
 		}
+
 		s.checkAllHealth()
 	}
 }

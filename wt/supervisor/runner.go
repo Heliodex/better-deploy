@@ -150,11 +150,13 @@ func (r *runnerServer) registerProcess(request runnerStartRequest, cmd *exec.Cmd
 	if !request.Namespaced {
 		app.info.WorkPID = cmd.Process.Pid
 	}
+
 	r.mu.Lock()
 
 	r.apps[app.info.ID] = app
 
 	r.mu.Unlock()
+
 	return app
 }
 
@@ -165,15 +167,18 @@ func (r *runnerServer) release(id string) {
 	app := r.apps[id]
 
 	r.mu.Unlock()
+
 	if app == nil {
 		return
 	}
+
 	app.mu.Lock()
 
 	writer := app.goWriter
 	app.goWriter = nil
 
 	app.mu.Unlock()
+
 	if writer != nil {
 		_, _ = writer.Write([]byte{1})
 		_ = writer.Close()
@@ -187,6 +192,7 @@ func (r *runnerServer) send(event runnerEvent) {
 	conn := r.conn
 
 	r.mu.Unlock()
+
 	if conn == nil {
 		return
 	}
@@ -204,6 +210,7 @@ func (r *runnerServer) send(event runnerEvent) {
 	_, err = conn.Write(data)
 
 	r.writeMu.Unlock()
+
 	if err != nil {
 		r.mu.Lock()
 		if r.conn == conn {
@@ -233,6 +240,7 @@ func (r *runnerServer) readOutput(app *runnerProcess, output *os.File) {
 				App: app.info.Name,
 				Data: data,
 			})
+
 			if port := app.observePort(data); port != 0 {
 				r.send(runnerEvent{
 					Op: runnerOpPort,
@@ -254,10 +262,12 @@ func (r *runnerServer) readWorkPID(app *runnerProcess, reader *os.File) {
 	defer reader.Close()
 
 	data, _ := io.ReadAll(io.LimitReader(reader, 64))
+
 	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
 	if err != nil || pid <= 0 {
 		return
 	}
+
 	app.mu.Lock()
 
 	app.info.WorkPID = pid
@@ -286,6 +296,7 @@ func (r *runnerServer) shutdown() {
 		apps = append(apps, app)
 	}
 	r.mu.Unlock()
+
 	if r.listener != nil {
 		_ = r.listener.Close()
 	}
@@ -306,9 +317,11 @@ func (r *runnerServer) shutdown() {
 		count := len(r.apps)
 
 		r.mu.Unlock()
+
 		if count == 0 {
 			break
 		}
+
 		time.Sleep(100 * time.Millisecond)
 	}
 
@@ -331,9 +344,11 @@ func (r *runnerServer) signal(id string, signal syscall.Signal) {
 	app := r.apps[id]
 
 	r.mu.Unlock()
+
 	if app == nil || signal == 0 {
 		return
 	}
+
 	app.mu.Lock()
 
 	pid := app.info.PID
@@ -363,9 +378,11 @@ func (r *runnerServer) snapshotApps() []runnerAppInfo {
 
 		app.mu.Unlock()
 	}
+
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].Name < out[j].Name
 	})
+
 	return out
 }
 
@@ -394,6 +411,7 @@ func (r *runnerServer) waitApp(app *runnerProcess) {
 
 		message = err.Error()
 	}
+
 	app.mu.Lock()
 
 	goWriter := app.goWriter
@@ -404,6 +422,7 @@ func (r *runnerServer) waitApp(app *runnerProcess) {
 	app.pidReader = nil
 
 	app.mu.Unlock()
+
 	if goWriter != nil {
 		_ = goWriter.Close()
 	}
@@ -411,6 +430,7 @@ func (r *runnerServer) waitApp(app *runnerProcess) {
 	if pidReader != nil {
 		_ = pidReader.Close()
 	}
+
 	r.mu.Lock()
 	delete(r.apps, id)
 	r.mu.Unlock()
@@ -452,6 +472,7 @@ func (r *runnerServer) start(request runnerStartRequest) {
 		_ = outputWrite.Close()
 
 		sendError(err.Error())
+
 		return
 	}
 
@@ -470,7 +491,9 @@ func (r *runnerServer) start(request runnerStartRequest) {
 		for _, file := range cmd.ExtraFiles {
 			_ = file.Close()
 		}
+
 		sendError("start app: " + err.Error())
+
 		return
 	}
 
@@ -525,8 +548,10 @@ func (r *runnerServer) handleRequest(_ net.Conn, request runnerRequest) {
 				App: request.App,
 				Error: "missing start request",
 			})
+
 			return
 		}
+
 		r.start(*request.Start)
 	case runnerOpStop:
 		r.stop(id)
@@ -548,9 +573,11 @@ func (r *runnerServer) handleConnection(conn net.Conn) {
 	r.conn = conn
 
 	r.mu.Unlock()
+
 	if old != nil {
 		_ = old.Close()
 	}
+
 	r.send(runnerEvent{
 		Op: runnerOpSnapshot,
 		Snapshot: r.snapshotApps(),
@@ -560,6 +587,7 @@ func (r *runnerServer) handleConnection(conn net.Conn) {
 	scanner := bufio.NewScanner(conn)
 
 	scanner.Buffer(make([]byte, 64<<10), runnerScanBytes)
+
 	for scanner.Scan() {
 		var request runnerRequest
 
@@ -568,14 +596,17 @@ func (r *runnerServer) handleConnection(conn net.Conn) {
 				Op: runnerOpError,
 				Error: "invalid request: " + err.Error(),
 			})
+
 			continue
 		}
+
 		r.handleRequest(conn, request)
 	}
 
 	if err := scanner.Err(); err != nil {
 		log.Printf("runner: read request: %v", err)
 	}
+
 	r.mu.Lock()
 	if r.conn == conn {
 		r.conn = nil
@@ -622,6 +653,7 @@ func runnerMain() {
 		fmt.Fprintln(os.Stderr, "wt runner: liveness pipe is missing")
 		os.Exit(2)
 	}
+
 	syscall.CloseOnExec(runnerLivenessFD)
 
 	_ = os.Remove(socket)

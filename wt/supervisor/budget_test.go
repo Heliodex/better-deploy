@@ -12,6 +12,7 @@ import (
 
 func writeSizedFile(t *testing.T, path string, size int) {
 	t.Helper()
+
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -35,6 +36,7 @@ func TestDeployRejectedOverBudget(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	s.handleDeploymentCreate(rec, req, "demo")
+
 	if rec.Code != http.StatusInsufficientStorage {
 		t.Fatalf("over-budget deploy status = %d, want 507: %s", rec.Code, rec.Body.String())
 	}
@@ -129,6 +131,7 @@ func TestUsageEndpointReportsBudget(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	s.adminMux().ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("usage status = %d: %s", rec.Code, rec.Body.String())
 	}

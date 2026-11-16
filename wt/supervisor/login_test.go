@@ -19,6 +19,7 @@ func TestLoginIgnoresForwardedProtoFromUntrustedPeer(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	s.handleLogin(rec, req)
+
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("login = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -43,6 +44,7 @@ func TestLoginLimiterPrunesExpiredAddresses(t *testing.T) {
 	later := start.Add(loginWindow + time.Second)
 
 	limiter.fail("192.0.2.1", later)
+
 	if got := len(limiter.attempts); got != 1 {
 		t.Errorf("tracked after expiry = %d, want 1", got)
 	}
@@ -54,6 +56,7 @@ func TestLoginRejectsWrongToken(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	s.handler().ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("wrong token = %d, want 401", rec.Code)
 	}
@@ -75,6 +78,7 @@ func TestLoginSetsHttpOnlyCookie(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("login = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -97,6 +101,7 @@ func TestLoginSetsHttpOnlyCookie(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Errorf("cookie auth = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -108,6 +113,7 @@ func TestLogoutClearsCookie(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	s.handler().ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("logout = %d", rec.Code)
 	}

@@ -274,6 +274,7 @@ func writeStorageTestError(w http.ResponseWriter, status int, message, code stri
 // readStorageTestJSON decodes a bounded JSON body and writes a 400 on failure.
 func readStorageTestJSON(w http.ResponseWriter, r *http.Request, out any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, 8<<20)
+
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
 		writeStorageTestError(w, http.StatusBadRequest, err.Error(), "invalid")
@@ -320,6 +321,7 @@ func (s *TestServer) handleKV(w http.ResponseWriter, r *http.Request, op string)
 	if request.TTLMS > 0 {
 		expires = now.Add(time.Duration(request.TTLMS) * time.Millisecond)
 	}
+
 	s.mu.Lock()
 
 	defer s.mu.Unlock()
@@ -399,6 +401,7 @@ func writeStorageTestSQLError(w http.ResponseWriter, err error) {
 	} else if strings.Contains(message, "no such table") || strings.Contains(message, "syntax error") {
 		status, code = http.StatusBadRequest, "invalid"
 	}
+
 	writeStorageTestError(w, status, message, code)
 }
 
@@ -442,11 +445,11 @@ func (s *TestServer) handleBatch(w http.ResponseWriter, r *http.Request) {
 
 	for i, statement := range request.Statements {
 		results[i], err = testExec(r.Context(), tx, statement)
-
 		if err != nil {
 			_ = tx.Rollback()
 
 			writeStorageTestSQLError(w, err)
+
 			return
 		}
 	}
@@ -455,6 +458,7 @@ func (s *TestServer) handleBatch(w http.ResponseWriter, r *http.Request) {
 		writeStorageTestSQLError(w, err)
 		return
 	}
+
 	writeStorageTestJSON(w, http.StatusOK, testResults{
 		Results: results,
 	})
@@ -475,15 +479,19 @@ func (s *TestServer) handleMigration(w http.ResponseWriter, r *http.Request) {
 	stored, recorded := s.checksums[request.Version]
 
 	s.mu.Unlock()
+
 	if request.Version <= current {
 		// Like the supervisor, an applied version must be resent unchanged. Versions applied before checksums were recorded here have none to compare.
 		if recorded && stored != checksum {
 			message := fmt.Sprintf("migration checksum mismatch: version %d was already applied with different statements; leave applied versions unchanged and put new statements in version %d", request.Version, current+1)
 
 			writeStorageTestError(w, http.StatusConflict, message, "migration_checksum")
+
 			return
 		}
+
 		writeStorageTestJSON(w, http.StatusOK, map[string]any{"applied": false, "version": request.Version})
+
 		return
 	}
 
@@ -498,6 +506,7 @@ func (s *TestServer) handleMigration(w http.ResponseWriter, r *http.Request) {
 			_ = tx.Rollback()
 
 			writeStorageTestSQLError(w, err)
+
 			return
 		}
 	}
@@ -506,6 +515,7 @@ func (s *TestServer) handleMigration(w http.ResponseWriter, r *http.Request) {
 		writeStorageTestSQLError(w, err)
 		return
 	}
+
 	s.mu.Lock()
 
 	s.migrations = request.Version
@@ -525,6 +535,7 @@ func (s *TestServer) handleSession(w http.ResponseWriter, r *http.Request) {
 	tx := s.sessions[id]
 
 	s.mu.Unlock()
+
 	if !found || tx == nil {
 		http.NotFound(w, r)
 		return
@@ -542,6 +553,7 @@ func (s *TestServer) handleSession(w http.ResponseWriter, r *http.Request) {
 			writeStorageTestSQLError(w, err)
 			return
 		}
+
 		writeStorageTestJSON(w, http.StatusOK, response)
 	case "exec":
 		var request testRequest
@@ -557,24 +569,29 @@ func (s *TestServer) handleSession(w http.ResponseWriter, r *http.Request) {
 			writeStorageTestSQLError(w, err)
 			return
 		}
+
 		writeStorageTestJSON(w, http.StatusOK, response)
 	case "commit":
 		s.mu.Lock()
 		delete(s.sessions, id)
 		s.mu.Unlock()
+
 		if err := tx.Commit(); err != nil {
 			writeStorageTestSQLError(w, err)
 			return
 		}
+
 		writeStorageTestJSON(w, http.StatusOK, map[string]bool{"committed": true})
 	case "rollback":
 		s.mu.Lock()
 		delete(s.sessions, id)
 		s.mu.Unlock()
+
 		if err := tx.Rollback(); err != nil {
 			writeStorageTestSQLError(w, err)
 			return
 		}
+
 		writeStorageTestJSON(w, http.StatusOK, map[string]bool{"rolled_back": true})
 	default:
 		http.NotFound(w, r)
@@ -610,6 +627,7 @@ func (s *TestServer) handleTransaction(w http.ResponseWriter, r *http.Request) {
 			_ = tx.Rollback()
 
 			writeStorageTestSQLError(w, err)
+
 			return
 		}
 	}
@@ -618,6 +636,7 @@ func (s *TestServer) handleTransaction(w http.ResponseWriter, r *http.Request) {
 		writeStorageTestSQLError(w, err)
 		return
 	}
+
 	writeStorageTestJSON(w, http.StatusOK, testResults{
 		Results: results,
 	})
@@ -630,6 +649,7 @@ func (s *TestServer) respondExec(w http.ResponseWriter, ctx context.Context, q t
 		writeStorageTestSQLError(w, err)
 		return
 	}
+
 	writeStorageTestJSON(w, http.StatusOK, response)
 }
 
@@ -644,6 +664,7 @@ func (s *TestServer) respondQuery(w http.ResponseWriter, ctx context.Context, q 
 	if write && response.RowsAffected == 0 {
 		response.RowsAffected = int64(len(response.Rows))
 	}
+
 	writeStorageTestJSON(w, http.StatusOK, response)
 }
 
@@ -660,18 +681,21 @@ func (s *TestServer) handle(w http.ResponseWriter, r *http.Request) {
 		if !readStorageTestJSON(w, r, &request) {
 			return
 		}
+
 		s.respondQuery(w, r.Context(), s.db, request, false)
 	case r.URL.Path == "/v1/write":
 		var request testRequest
 		if !readStorageTestJSON(w, r, &request) {
 			return
 		}
+
 		s.respondQuery(w, r.Context(), s.db, request, true)
 	case r.URL.Path == "/v1/exec":
 		var request testRequest
 		if !readStorageTestJSON(w, r, &request) {
 			return
 		}
+
 		s.respondExec(w, r.Context(), s.db, testStatement{
 			SQL: request.SQL,
 			Params: request.Params,
@@ -696,6 +720,7 @@ func (s *TestServer) handle(w http.ResponseWriter, r *http.Request) {
 // NewTestServer starts an isolated in-memory storage service. Call Close when the test finishes.
 func NewTestServer() (*TestServer, error) {
 	dsn := fmt.Sprintf("file:storage-test-%d?mode=memory&cache=shared", testServerSequence.Add(1))
+
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err

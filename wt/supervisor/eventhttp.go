@@ -52,6 +52,7 @@ func handleEventPublish(bus *eventBus, w http.ResponseWriter, r *http.Request, a
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+
 	writeJSON(w, http.StatusAccepted, eventPublishResponse{
 		ID: event.ID,
 		Topic: event.Topic,

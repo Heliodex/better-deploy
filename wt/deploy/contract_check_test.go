@@ -94,6 +94,7 @@ func TestStageClientOutputSkipsWithoutRegistry(t *testing.T) {
 // writeContractTree writes a contract.gen.go and schema files under dir.
 func writeContractTree(t *testing.T, dir, goBody string, schemas map[string]string) {
 	t.Helper()
+
 	if err := os.MkdirAll(filepath.Join(dir, "schemas"), privateDirMode); err != nil {
 		t.Fatal(err)
 	}
@@ -180,6 +181,7 @@ func TestCompareContractTreesReportsChangedGoFile(t *testing.T) {
 
 	writeContractTree(t, generated, "package contract\n\ntype Note struct{}\n", nil)
 	writeContractTree(t, current, "package contract\n\ntype OldNote struct{}\n", nil)
+
 	if err := compareContractTrees(generated, current); err == nil || !strings.Contains(err.Error(), "contract/contract.gen.go differs") {
 		t.Errorf("compareContractTrees() = %v", err)
 	}
@@ -191,6 +193,7 @@ func TestCompareContractTreesReportsMissingGoFile(t *testing.T) {
 	current := filepath.Join(root, "current")
 
 	writeContractTree(t, generated, "package contract\n", nil)
+
 	if err := os.MkdirAll(current, privateDirMode); err != nil {
 		t.Fatal(err)
 	}

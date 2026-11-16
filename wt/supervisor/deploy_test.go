@@ -45,6 +45,7 @@ func deployQueued(t *testing.T, s *supervisor, name, archive, query string, head
 	var body bytes.Buffer
 
 	form := multipart.NewWriter(&body)
+
 	part, err := form.CreateFormFile("artifact", "app.tar.gz")
 	if err != nil {
 		t.Fatal(err)
@@ -62,6 +63,7 @@ func deployQueued(t *testing.T, s *supervisor, name, archive, query string, head
 
 	req.Header.Set("Content-Type", form.FormDataContentType())
 	req.Header.Set("Authorization", "Bearer secret")
+
 	for key, value := range headers {
 		req.Header.Set(key, value)
 	}
@@ -69,12 +71,14 @@ func deployQueued(t *testing.T, s *supervisor, name, archive, query string, head
 	rec := httptest.NewRecorder()
 
 	s.handleApp(rec, req)
+
 	return rec
 }
 
 // deploymentID returns the id from a queued response's Location or body.
 func deploymentID(t *testing.T, rec *httptest.ResponseRecorder) string {
 	t.Helper()
+
 	if location := rec.Header().Get("Location"); location != "" {
 		return filepath.Base(location)
 	}
@@ -91,6 +95,7 @@ func deploymentID(t *testing.T, rec *httptest.ResponseRecorder) string {
 // waitDeployment polls one deployment until it reaches a terminal state.
 func waitDeployment(t *testing.T, s *supervisor, name, id string) deploymentInfo {
 	t.Helper()
+
 	for deadline := time.Now().Add(5 * time.Second); ; {
 		req := httptest.NewRequest(http.MethodGet, "/apps/"+name+"/deployments/"+id, nil)
 
@@ -99,6 +104,7 @@ func waitDeployment(t *testing.T, s *supervisor, name, id string) deploymentInfo
 		rec := httptest.NewRecorder()
 
 		s.handleApp(rec, req)
+
 		if rec.Code != http.StatusOK {
 			t.Fatalf("deployment info = %d: %s", rec.Code, rec.Body.String())
 		}
@@ -116,6 +122,7 @@ func waitDeployment(t *testing.T, s *supervisor, name, id string) deploymentInfo
 		if time.Now().After(deadline) {
 			t.Fatalf("deployment %s did not finish", id)
 		}
+
 		time.Sleep(10 * time.Millisecond)
 	}
 }
@@ -138,8 +145,10 @@ func deployArchiveHeaders(t *testing.T, s *supervisor, name, archive, query stri
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		result.WriteHeader(http.StatusBadGateway)
 		result.Body.Write(data)
+
 		return result
 	}
 
@@ -147,6 +156,7 @@ func deployArchiveHeaders(t *testing.T, s *supervisor, name, archive, query stri
 	if a == nil {
 		t.Fatal("successful deployment did not register the app")
 	}
+
 	result.Header().Set("ETag", etag)
 	result.Header().Set("X-Wt-Wasm-Digest", info.Digest)
 	result.Header().Set("X-Wt-Deploy-Mode", info.Mode)
@@ -155,8 +165,10 @@ func deployArchiveHeaders(t *testing.T, s *supervisor, name, archive, query stri
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	result.WriteHeader(http.StatusOK)
 	result.Body.Write(data)
+
 	return result
 }
 
@@ -186,6 +198,7 @@ func TestDeployConditionalAndIdempotent(t *testing.T) {
 		"app.json": `{"name":"demo","host":"demo.localhost"}`,
 		"main.wasm": "wasm-conditional",
 	})
+
 	rec := deployArchive(t, s, "demo", archive, "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("first deploy = %d: %s", rec.Code, rec.Body.String())
@@ -265,6 +278,7 @@ func TestDeployDryRunValidatesWithoutInstalling(t *testing.T) {
 	s.cfg.appsDir = t.TempDir()
 	s.cfg.domain = "localhost"
 	s.deployments = newDeploymentManager(t.TempDir())
+
 	rec := deployArchive(t, s, "demo", archive, "?dry_run=1")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("dry run status = %d: %s", rec.Code, rec.Body.String())
@@ -351,6 +365,7 @@ func TestDeploySameDigestKeepsProcessAndUpdatesStatic(t *testing.T) {
 	})
 
 	first := writeTarGz(t, map[string]string{"app.json": appJSON, "main.wasm": "wasm-one", "static/index.html": "first"})
+
 	rec := deployArchive(t, s, "demo", first, "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("first deploy = %d: %s", rec.Code, rec.Body.String())
@@ -366,6 +381,7 @@ func TestDeploySameDigestKeepsProcessAndUpdatesStatic(t *testing.T) {
 	}
 
 	running := s.lookup("demo")
+
 	pid := appPID(running)
 	if pid == 0 {
 		t.Fatal("first deploy did not start a process")
@@ -380,6 +396,7 @@ func TestDeploySameDigestKeepsProcessAndUpdatesStatic(t *testing.T) {
 
 	infoReq.Header.Set("Authorization", "Bearer secret")
 	s.handleApp(infoRec, infoReq)
+
 	if infoRec.Code != http.StatusOK {
 		t.Fatalf("app info = %d: %s", infoRec.Code, infoRec.Body.String())
 	}
@@ -475,11 +492,13 @@ func TestDeploySameDigestKeepsProcessAndUpdatesStatic(t *testing.T) {
 	if old.logs == nil {
 		t.Fatal("old app has no log handle")
 	}
+
 	old.logs.mu.Lock()
 
 	closed := old.logs.closed
 
 	old.logs.mu.Unlock()
+
 	if !closed {
 		t.Error("deploy did not close the replaced app's log files")
 	}
@@ -509,6 +528,7 @@ func TestFailedDeployKeepsOldProcess(t *testing.T) {
 	}
 
 	old := s.lookup("demo")
+
 	oldPID := appPID(old)
 	if oldPID == 0 {
 		t.Fatal("first deploy did not start")

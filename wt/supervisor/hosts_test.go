@@ -13,6 +13,7 @@ import (
 
 func TestAppConfigHostAliases(t *testing.T) {
 	dir := t.TempDir()
+
 	cfg, err := normaliseAppConfig(appConfig{
 		Name: "demo",
 		Host: "demo.example.com",
@@ -35,6 +36,7 @@ func TestAppConfigHostAliases(t *testing.T) {
 	}
 
 	s.register(a)
+
 	if s.hosts["*.apps.example.com"] != a || s.hosts["old.example.com"] != a {
 		t.Fatalf("alias routes missing after register: %v", s.hosts)
 	}
@@ -44,6 +46,7 @@ func TestAppConfigHostAliases(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleAppConfig(rec, req, "demo")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PATCH config = %d %s", rec.Code, rec.Body.String())
 	}
@@ -74,6 +77,7 @@ func TestAppConfigHostAliases(t *testing.T) {
 
 func TestAppConfigRejectsWildcardAliasConflict(t *testing.T) {
 	dir := t.TempDir()
+
 	cfg, err := normaliseAppConfig(appConfig{
 		Name: "demo",
 		Host: "demo.example.com",
@@ -110,6 +114,7 @@ func TestAppConfigRejectsWildcardAliasConflict(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleAppConfig(rec, req, "demo")
+
 	if rec.Code != http.StatusConflict {
 		t.Errorf("status = %d, want 409: %s", rec.Code, rec.Body.String())
 	}
@@ -136,6 +141,7 @@ func TestAppForHostMatchesWildcard(t *testing.T) {
 
 	s.register(wildcard)
 	s.register(exact)
+
 	if got := s.appForHost("two.apps.example.com"); got != wildcard {
 		t.Errorf("wildcard lookup = %v, want wild app", got)
 	}
@@ -166,6 +172,7 @@ func TestHandlerKeepsAdminOnReservedHost(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusOK || rec.Body.String() != "ok\n" {
 		t.Errorf("reserved host healthz = %d %q, want the supervisor health response", rec.Code, rec.Body.String())
 	}
@@ -175,6 +182,7 @@ func TestHandlerKeepsAdminOnReservedHost(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	s.publicHandler().ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("public reserved host = %d, want 404 instead of proxying to the shadow app", rec.Code)
 	}
@@ -192,6 +200,7 @@ func TestHostConflictRejectsReservedAndWildcardOverlap(t *testing.T) {
 	}
 
 	s.register(wildcard)
+
 	if err := s.hostConflictError(appConfig{
 		Host: "one.apps.example.com",
 	}, ""); err == nil {

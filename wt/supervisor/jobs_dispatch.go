@@ -131,16 +131,19 @@ func (s *jobStore) runJob(job appJob) (int, error) {
 	if a == nil {
 		return 0, errors.New("app is not registered")
 	}
+
 	a.mu.Lock()
 
 	port := a.port
 
 	a.mu.Unlock()
+
 	if port == 0 {
 		return 0, errors.New("app has no port")
 	}
 
 	body := strings.NewReader(job.Body)
+
 	request, err := http.NewRequestWithContext(s.ctx, job.Method, fmt.Sprintf("http://127.0.0.1:%d%s", port, job.Path), body)
 	if err != nil {
 		return 0, err
@@ -153,11 +156,13 @@ func (s *jobStore) runJob(job appJob) (int, error) {
 	for key, value := range job.Headers {
 		request.Header.Set(key, value)
 	}
+
 	request.Header.Set(requestIDHeader, "job-"+job.ID)
 
 	client := &http.Client{
 		Timeout: jobTimeout,
 	}
+
 	response, err := client.Do(request)
 	if err != nil {
 		return 0, err
@@ -225,6 +230,7 @@ func (s *jobStore) dispatch() bool {
 		log.Printf("jobs %s: save: %v", s.app, err)
 	}
 	s.mu.Unlock()
+
 	for _, job := range claimed {
 		go s.execute(job)
 	}

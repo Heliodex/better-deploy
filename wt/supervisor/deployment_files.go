@@ -156,6 +156,7 @@ func (m *deploymentManager) storeComponent(app, source, temp string) (componentR
 // storeStatic content-addresses every regular file under source/static and hardlinks it into dst/static at the same relative path. It returns the path-to-digest map and the unique bytes stored.
 func (m *deploymentManager) storeStatic(app, source, dst string) (map[string]string, int64, error) {
 	root := filepath.Join(source, "static")
+
 	info, err := os.Stat(root)
 	if os.IsNotExist(err) {
 		return nil, 0, nil

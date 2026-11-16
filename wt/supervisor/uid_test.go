@@ -64,6 +64,7 @@ func TestUIDAllocatorResolvesCollisions(t *testing.T) {
 
 func TestUIDAllocatorStableAcrossReload(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".uids.json")
+
 	first, err := newUIDAllocator(path, 20000)
 	if err != nil {
 		t.Fatal(err)

@@ -57,6 +57,7 @@ func TestAppRolePermissions(t *testing.T) {
 
 func TestAuditRecordsMutatingActions(t *testing.T) {
 	s := testSupervisor()
+
 	audit, err := newAuditStore(filepath.Join(t.TempDir(), ".audit", "audit.log"))
 	if err != nil {
 		t.Fatal(err)
@@ -75,6 +76,7 @@ func TestAuditRecordsMutatingActions(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer secret")
 	req.Header.Set(requestIDHeader, "request-audit")
 	s.handleApp(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("stop = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -97,6 +99,7 @@ func TestAuditRecordsMutatingActions(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleAudit(rec, req)
+
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"action":"stop"`) {
 		t.Errorf("audit API = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -106,6 +109,7 @@ func testAuthStore(t *testing.T) (*authStore, string) {
 	t.Helper()
 
 	path := filepath.Join(t.TempDir(), ".auth", "tokens.json")
+
 	store, err := newAuthStore(path)
 	if err != nil {
 		t.Fatal(err)
@@ -116,6 +120,7 @@ func testAuthStore(t *testing.T) (*authStore, string) {
 
 func TestAuthStorePersistsHashedTokens(t *testing.T) {
 	store, path := testAuthStore(t)
+
 	token, info, err := store.create("ci-notes", roleDeploy, []string{"notes", "notes"}, time.Time{})
 	if err != nil {
 		t.Fatal(err)
@@ -173,6 +178,7 @@ func TestAuthStorePersistsHashedTokens(t *testing.T) {
 
 func TestAuthStoreRejectsExpiredAndCorruptTokens(t *testing.T) {
 	store, path := testAuthStore(t)
+
 	token, _, err := store.create("expired", roleRead, []string{"notes"}, time.Now().Add(-time.Minute))
 	if err != nil {
 		t.Fatal(err)
@@ -200,6 +206,7 @@ func TestAuthTokenAdminOnlyAndRevocation(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleAuthTokens(rec, req)
+
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create token = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -219,6 +226,7 @@ func TestAuthTokenAdminOnlyAndRevocation(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer "+created.Token)
 	s.handleAuthTokens(rec, req)
+
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("deploy token list = %d, want 403", rec.Code)
 	}
@@ -246,6 +254,7 @@ func TestAuthTokenAdminOnlyAndRevocation(t *testing.T) {
 
 		req.Header.Set("Authorization", "Bearer "+created.Token)
 		s.handleApp(rec, req)
+
 		if rec.Code != want {
 			t.Errorf("GET %s = %d, want %d", target, rec.Code, want)
 		}
@@ -256,6 +265,7 @@ func TestAuthTokenAdminOnlyAndRevocation(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleAuthToken(rec, req, created.ID)
+
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("delete token = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -265,6 +275,7 @@ func TestAuthTokenAdminOnlyAndRevocation(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer "+created.Token)
 	s.handleApp(rec, req)
+
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("revoked token = %d, want 401", rec.Code)
 	}
@@ -274,6 +285,7 @@ func TestHandleAppsFiltersScopedTokens(t *testing.T) {
 	s := testSupervisor()
 	store, _ := testAuthStore(t)
 	s.auth = store
+
 	token, _, err := store.create("monitor", roleRead, []string{"demo"}, time.Time{})
 	if err != nil {
 		t.Fatal(err)
@@ -296,6 +308,7 @@ func TestHandleAppsFiltersScopedTokens(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer "+token)
 	s.handleApps(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("apps = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -315,6 +328,7 @@ func TestLoginRateLimitAndScopedLogin(t *testing.T) {
 	s := testSupervisor()
 	store, _ := testAuthStore(t)
 	s.auth = store
+
 	token, _, err := store.create("ci", roleDeploy, []string{"notes"}, time.Time{})
 	if err != nil {
 		t.Fatal(err)
@@ -326,6 +340,7 @@ func TestLoginRateLimitAndScopedLogin(t *testing.T) {
 		rec := httptest.NewRecorder()
 
 		s.handleLogin(rec, req)
+
 		if rec.Code != http.StatusUnauthorized {
 			t.Fatalf("failed login = %d, want 401", rec.Code)
 		}
@@ -336,6 +351,7 @@ func TestLoginRateLimitAndScopedLogin(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	s.handleLogin(rec, req)
+
 	if rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") == "" {
 		t.Errorf("limited login = %d, Retry-After %q", rec.Code, rec.Header().Get("Retry-After"))
 	}
@@ -345,6 +361,7 @@ func TestLoginRateLimitAndScopedLogin(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	s.handleLogin(rec, req)
+
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("scoped login = %d: %s", rec.Code, rec.Body.String())
 	}

@@ -86,6 +86,7 @@ func exampleModule(dir string) (string, error) {
 		}
 
 		module = strings.TrimSpace(name)
+
 		break
 	}
 
@@ -125,8 +126,10 @@ func printNewSummary(dir, name string, mode scaffoldMode, count int, sdkPath str
 	fmt.Printf("new: created %s (%d files, %s)\n", dir, count, layout)
 	fmt.Printf("next:\n  wt-deploy dev --dir %s\n", dir)
 	fmt.Printf("  wt-deploy deploy --dir %s --host <supervisor> --app-host %s.<domain>\n", dir, name)
+
 	if mode.standalone {
 		fmt.Printf("  module: %s\n", mode.module)
+
 		if sdkPath != "" {
 			fmt.Printf("  sdk: %s (local replace)\n", sdkPath)
 		} else {
@@ -250,6 +253,7 @@ func writeContractlessScaffold(abs string) (int, error) {
 	}
 
 	manifestPath := filepath.Join(abs, "app.json")
+
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
 		return 0, err
@@ -264,6 +268,7 @@ func writeContractlessScaffold(abs string) (int, error) {
 	}
 
 	contractPath := filepath.Join(abs, "web", "src", "lib", "contract.ts")
+
 	contractData, err := os.ReadFile(contractPath)
 	if err != nil {
 		return 0, err
@@ -392,7 +397,9 @@ func scaffoldNew(cfg *newConfig) (scaffoldMode, string, error) {
 
 		count++
 	}
+
 	printNewSummary(cfg.dir, name, mode, count, cfg.sdk)
+
 	return mode, abs, nil
 }
 

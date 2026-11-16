@@ -152,6 +152,7 @@ func (s HTTPSender) Send(ctx context.Context, delivery Delivery) (int, error) {
 	if userAgent == "" {
 		userAgent = defaultUserAgent
 	}
+
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set(headerOrDefault(s.TimestampHeader, timestampHeader), delivery.Timestamp)
 	req.Header.Set(headerOrDefault(s.DeliveryHeader, deliveryIDHeader), delivery.DeliveryID)
@@ -236,6 +237,7 @@ func (o Outbox) deliverClaimed(ctx context.Context, client *storage.Client, tabl
 		Timestamp: timestamp,
 		Signature: signature,
 	}
+
 	status, sendErr := sender.Send(ctx, delivery)
 	if sendErr != nil && ctx.Err() != nil {
 		return ctx.Err()
@@ -295,6 +297,7 @@ func (o Outbox) DeliverDue(ctx context.Context, client *storage.Client, limit in
 	now := o.now()
 	nowText := now.Format(timeFormat)
 	leaseText := now.Add(o.lease()).Format(timeFormat)
+
 	reaped, err := client.Exec(ctx, fmt.Sprintf(`update %s set status = 'pending', lease_until = NULL
 		where status = 'sending' and lease_until is not null and lease_until <= ?`, table), nowText)
 	if err != nil {
@@ -304,6 +307,7 @@ func (o Outbox) DeliverDue(ctx context.Context, client *storage.Client, limit in
 	summary := Summary{
 		Reaped: int(reaped.RowsAffected),
 	}
+
 	records, err := dueRecords(ctx, client, table, nowText, limit)
 	if err != nil {
 		return summary, err

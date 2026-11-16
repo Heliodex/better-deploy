@@ -34,6 +34,7 @@ func TestConfigPatchResourceLimitsInUntrustedMode(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	s.handleAppConfig(rec, req, "demo")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -47,11 +48,13 @@ func TestConfigPatchResourceLimitsInUntrustedMode(t *testing.T) {
 	if response.CPUMillicores != 250 || response.PidsMax != 32 || response.IOWeight != 25 || !response.RestartRequired {
 		t.Errorf("response = %+v", response)
 	}
+
 	a.mu.Lock()
 
 	live := a.cfg
 
 	a.mu.Unlock()
+
 	if live.CPUMillicores != 250 || live.PidsMax != 32 || live.IOWeight != 25 {
 		t.Errorf("live cfg = %+v", live)
 	}
@@ -83,14 +86,19 @@ func TestConfigResponseIncludesResourceLimits(t *testing.T) {
 
 func TestIPv6EgressEnv(t *testing.T) {
 	t.Setenv("WT_IPV6_EGRESS", "off")
+
 	if envBool("WT_IPV6_EGRESS", true) {
 		t.Error("WT_IPV6_EGRESS=off should disable IPv6 egress rules")
 	}
+
 	t.Setenv("WT_IPV6_EGRESS", "not-a-bool")
+
 	if !envBool("WT_IPV6_EGRESS", true) {
 		t.Error("an invalid value should keep the fail-closed default")
 	}
+
 	t.Setenv("WT_IP6TABLES", "/sbin/ip6tables")
+
 	if got := env("WT_IP6TABLES", "ip6tables"); got != "/sbin/ip6tables" {
 		t.Errorf("ip6tables = %q", got)
 	}

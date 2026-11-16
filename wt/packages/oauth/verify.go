@@ -118,12 +118,14 @@ func (c *Client) signingKey(ctx context.Context, provider Provider, kid string) 
 	if err != nil {
 		return nil, err
 	}
+
 	c.keysMu.Lock()
 
 	c.keys = keys
 	c.keysExpiry = timeNow().Add(metadataTTL)
 
 	c.keysMu.Unlock()
+
 	if key := keys[kid]; key != nil {
 		return key, nil
 	}

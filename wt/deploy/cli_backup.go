@@ -89,7 +89,9 @@ func backupImport(cfg clientOptions, name, archive string) error {
 	if err != nil {
 		return err
 	}
+
 	req.Header.Set("Content-Type", multipartWriter.FormDataContentType())
+
 	if cfg.token != "" {
 		req.Header.Set("Authorization", "Bearer "+cfg.token)
 	}
@@ -108,7 +110,9 @@ func backupImport(cfg clientOptions, name, archive string) error {
 	if err := checkAPI(resp.StatusCode, body); err != nil {
 		return err
 	}
+
 	printRawOrJSON(cfg, body)
+
 	return nil
 }
 
@@ -148,7 +152,9 @@ func runBackupCreate(cfg clientOptions, name string) error {
 	if err != nil {
 		return err
 	}
+
 	printRawOrJSON(cfg, body)
+
 	return nil
 }
 
@@ -157,7 +163,9 @@ func runBackupDownload(cfg clientOptions, name, snapshot, out string) error {
 	if err := backupDownload(cfg, name, snapshot, out); err != nil {
 		return err
 	}
+
 	fmt.Println("wrote", out)
+
 	return nil
 }
 
@@ -193,6 +201,7 @@ func runBackupList(cfg clientOptions, name string) error {
 		if backup.Name == result.Current {
 			marker = "*"
 		}
+
 		fmt.Printf("%s %-42s %-10s %d\n", marker, backup.Name, backup.Kind, backup.Size)
 	}
 
@@ -205,7 +214,9 @@ func runBackupRestore(cfg clientOptions, name, snapshot string) error {
 	if err != nil {
 		return err
 	}
+
 	printRawOrJSON(cfg, body)
+
 	return nil
 }
 

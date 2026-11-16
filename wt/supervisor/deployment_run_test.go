@@ -44,6 +44,7 @@ func postDeployment(t *testing.T, s *supervisor, name, archive string) *httptest
 	var body bytes.Buffer
 
 	form := multipart.NewWriter(&body)
+
 	part, err := form.CreateFormFile("artifact", "app.tar.gz")
 	if err != nil {
 		t.Fatal(err)
@@ -65,6 +66,7 @@ func postDeployment(t *testing.T, s *supervisor, name, archive string) *httptest
 	rec := httptest.NewRecorder()
 
 	s.handleApp(rec, req)
+
 	return rec
 }
 
@@ -95,6 +97,7 @@ func TestAsyncDeploymentResource(t *testing.T) {
 	})
 
 	archive := writeTarGz(t, map[string]string{"app.json": `{"name":"demo","host":"demo.localhost"}`, "main.wasm": "wasm"})
+
 	rec := postDeployment(t, s, "demo", archive)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("create deployment = %d: %s", rec.Code, rec.Body.String())
@@ -126,6 +129,7 @@ func TestAsyncDeploymentResource(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatalf("deployment did not finish: %+v", info)
 		}
+
 		time.Sleep(20 * time.Millisecond)
 	}
 
@@ -146,6 +150,7 @@ func TestAsyncDeploymentResource(t *testing.T) {
 
 	logReq.Header.Set("Authorization", "Bearer secret")
 	s.handleApp(logRec, logReq)
+
 	if logRec.Code != http.StatusOK {
 		t.Fatalf("deployment logs = %d: %s", logRec.Code, logRec.Body.String())
 	}
@@ -159,6 +164,7 @@ func TestAsyncDeploymentResource(t *testing.T) {
 
 	streamReq.Header.Set("Authorization", "Bearer secret")
 	s.handleApp(streamRec, streamReq)
+
 	if streamRec.Code != http.StatusOK {
 		t.Fatalf("deployment stream = %d: %s", streamRec.Code, streamRec.Body.String())
 	}
@@ -172,6 +178,7 @@ func TestAsyncDeploymentResource(t *testing.T) {
 
 	cancelReq.Header.Set("Authorization", "Bearer secret")
 	s.handleApp(cancelRec, cancelReq)
+
 	if cancelRec.Code != http.StatusConflict {
 		t.Errorf("cancel terminal deployment = %d, want 409", cancelRec.Code)
 	}

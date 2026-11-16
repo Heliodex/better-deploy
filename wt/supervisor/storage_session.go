@@ -77,6 +77,7 @@ func (s *storageServer) openSession(ctx context.Context, w http.ResponseWriter, 
 		_ = conn.Close()
 
 		writeStorageError(w, fmt.Errorf("%w: %w", errStorageUnavailable, err))
+
 		return nil, false
 	}
 
@@ -98,6 +99,7 @@ func (s *storageServer) openSession(ctx context.Context, w http.ResponseWriter, 
 		_ = conn.Close()
 
 		writeStorageError(w, err)
+
 		return nil, false
 	}
 
@@ -111,6 +113,7 @@ func (s *storageServer) openSession(ctx context.Context, w http.ResponseWriter, 
 		_ = conn.Close()
 
 		writeStorageError(w, err)
+
 		return nil, false
 	}
 
@@ -126,6 +129,7 @@ func (s *storageServer) openSession(ctx context.Context, w http.ResponseWriter, 
 		_ = conn.Close()
 
 		writeError(w, http.StatusInternalServerError, "create session id")
+
 		return nil, false
 	}
 
@@ -246,6 +250,7 @@ func (s *storageServer) closeSession(ctx context.Context, id, app string, commit
 
 	delete(s.sessions, id)
 	s.sessionMu.Unlock()
+
 	if expired {
 		_ = s.finishSession(context.Background(), session, false)
 
@@ -265,11 +270,13 @@ func (s *storageServer) closeSessionsForPaused(app string) {
 		if app != "" && session.app != app {
 			continue
 		}
+
 		delete(s.sessions, id)
 
 		closing = append(closing, session)
 	}
 	s.sessionMu.Unlock()
+
 	for _, session := range closing {
 		_ = s.finishSession(context.Background(), session, false)
 	}
@@ -294,11 +301,13 @@ func (s *storageServer) expireSessions(now time.Time) {
 		if now.Before(session.expiresAt) {
 			continue
 		}
+
 		delete(s.sessions, id)
 
 		expired = append(expired, session)
 	}
 	s.sessionMu.Unlock()
+
 	for _, session := range expired {
 		_ = s.finishSession(context.Background(), session, false)
 	}
@@ -317,6 +326,7 @@ func (s *storageServer) registerSession(w http.ResponseWriter, session *storageS
 		_ = s.finishSession(context.Background(), session, false)
 
 		writeError(w, http.StatusServiceUnavailable, "storage is shutting down")
+
 		return false
 	}
 
@@ -334,12 +344,14 @@ func (s *storageServer) registerSession(w http.ResponseWriter, session *storageS
 		_ = s.finishSession(context.Background(), session, false)
 
 		writeError(w, http.StatusTooManyRequests, "too many storage sessions")
+
 		return false
 	}
 
 	s.sessions[session.id] = session
 
 	s.sessionMu.Unlock()
+
 	return true
 }
 
@@ -357,6 +369,7 @@ func (s *storageServer) createSession(w http.ResponseWriter, r *http.Request, ap
 	if !s.registerSession(w, session) {
 		return
 	}
+
 	writeJSON(w, http.StatusOK, storageSessionResponse{
 		ID: session.id,
 		ExpiresAt: session.expiresAt,
@@ -438,6 +451,7 @@ func (s *storageServer) closeSessionRequest(w http.ResponseWriter, r *http.Reque
 		writeSessionError(w, err)
 		return
 	}
+
 	writeJSON(w, http.StatusOK, storageSessionCloseResponse{
 		Committed: commit,
 		RolledBack: !commit,
@@ -470,6 +484,7 @@ func (s *storageServer) sessionExec(w http.ResponseWriter, r *http.Request, app,
 
 	err = s.withSession(id, app, func(session *storageSession) error {
 		start := len(session.collector.rows)
+
 		res, err := session.tx.ExecContext(ctx, req.SQL, params...)
 		if err != nil {
 			session.collector.rows = session.collector.rows[:start]
@@ -492,11 +507,11 @@ func (s *storageServer) sessionExec(w http.ResponseWriter, r *http.Request, app,
 
 		return nil
 	})
-
 	if err != nil {
 		writeSessionError(w, err)
 		return
 	}
+
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -531,8 +546,10 @@ func (s *storageServer) sessionQuery(w http.ResponseWriter, r *http.Request, app
 		Columns: []string{},
 		Rows: [][]any{},
 	}
+
 	err = s.withSession(id, app, func(session *storageSession) error {
 		start := len(session.collector.rows)
+
 		rows, err := session.tx.QueryContext(ctx, req.SQL, params...)
 		if err != nil {
 			session.collector.rows = session.collector.rows[:start]
@@ -564,10 +581,10 @@ func (s *storageServer) sessionQuery(w http.ResponseWriter, r *http.Request, app
 
 		return nil
 	})
-
 	if err != nil {
 		writeSessionError(w, err)
 		return
 	}
+
 	writeJSON(w, http.StatusOK, result)
 }

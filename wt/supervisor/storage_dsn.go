@@ -51,6 +51,7 @@ func (s *storageServer) setQuota(app string, bytes int64) {
 	if bytes < 0 {
 		bytes = 0
 	}
+
 	s.opMu.Lock()
 	s.mu.Lock()
 	if s.quotas == nil {
@@ -61,6 +62,7 @@ func (s *storageServer) setQuota(app string, bytes int64) {
 	if ok && old == bytes {
 		s.mu.Unlock()
 		s.opMu.Unlock()
+
 		return
 	}
 
@@ -72,6 +74,7 @@ func (s *storageServer) setQuota(app string, bytes int64) {
 	delete(s.readDBs, app)
 	s.mu.Unlock()
 	s.opMu.Unlock()
+
 	if readDB != nil {
 		_ = readDB.Close()
 	}
@@ -113,14 +116,17 @@ func storageDSN(path string, readOnly bool, quotaBytes int64, tempDir string) st
 	query.Set("_busy_timeout", "5000")
 	query.Set("_foreign_keys", "on")
 	query.Set("_synchronous", "NORMAL")
+
 	if !readOnly {
 		query.Set("_journal_mode", "WAL")
 		query.Set("_txlock", "immediate")
 	}
+
 	query.Add("_pragma", "trusted_schema(OFF)")
 	query.Add("_pragma", "temp_store(FILE)")
 	query.Add("_pragma", "cache_size(-2048)")
 	query.Add("_pragma", "mmap_size(0)")
+
 	if tempDir != "" {
 		// temp_store_directory is deprecated but remains the only in-process way to choose SQLite's temp directory.
 		query.Add("_pragma", "temp_store_directory("+sqliteString(tempDir)+")")

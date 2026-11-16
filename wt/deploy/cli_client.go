@@ -102,6 +102,7 @@ func clientFlags(args []string, requireHost bool) (clientOptions, []string, erro
 	}
 
 	profileName := activeProfileName(values.profile, fileCfg)
+
 	profile, err := resolveProfile(fileCfg, profileName)
 	if err != nil {
 		return clientOptions{}, nil, err
@@ -127,6 +128,7 @@ func clientFlags(args []string, requireHost bool) (clientOptions, []string, erro
 // htmlErrorTitle pulls the title out of an HTML error page, so an outage reads as one line instead of a markup dump.
 func htmlErrorTitle(page string) string {
 	lower := strings.ToLower(page)
+
 	start := strings.Index(lower, "<title>")
 	if start < 0 {
 		return ""
@@ -199,6 +201,7 @@ func apiDo(cfg clientOptions, method, path string, body io.Reader, contentType s
 	client := &http.Client{
 		Timeout: cfg.timeout,
 	}
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return 0, nil, nil, err

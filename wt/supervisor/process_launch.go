@@ -65,6 +65,7 @@ func appServeArgs(target string, cfg appConfig, epoch bool) []string {
 
 	if epoch {
 		args = append(args, "-W", "epoch-interruption=y")
+
 		timeout := cfg.requestTimeout
 		if timeout <= 0 {
 			timeout = epochIdleTimeout
@@ -123,6 +124,7 @@ func (s *supervisor) appEnv(a *app, cfg appConfig, namespaced bool) (extraArgs, 
 
 			value = secret
 		}
+
 		set(key, value)
 	}
 
@@ -162,7 +164,9 @@ func (s *supervisor) appEnv(a *app, cfg appConfig, namespaced bool) (extraArgs, 
 				names = append(names, other.name)
 			}
 		}
+
 		slices.Sort(names)
+
 		for _, name := range names {
 			set(appURLEnvName(name), s.fetch.appURL(name))
 		}
@@ -190,6 +194,7 @@ func (s *supervisor) appArgsFor(a *app, source string, namespaced bool) (args, e
 	}
 
 	args = append(args, "--dir", dirSpec)
+
 	extraArgs, env, err := s.appEnv(a, cfg, namespaced)
 	if err != nil {
 		return nil, nil, err
@@ -250,6 +255,7 @@ func (s *supervisor) migrateBeforeReady(a *app, cfg appConfig, done <-chan struc
 	if cfg.Network == "none" {
 		return nil
 	}
+
 	a.mu.Lock()
 
 	port := a.port
@@ -287,7 +293,9 @@ func (s *supervisor) awaitAppReady(a *app, l *launchSession, done <-chan struct{
 	if err := s.waitReady(a, done); err != nil {
 		return withLaunchLog(l.source, recent, err)
 	}
+
 	s.markAppReady(a)
+
 	return nil
 }
 
@@ -322,6 +330,7 @@ func (s *supervisor) launchRunner(a *app, l *launchSession) error {
 	if err != nil {
 		l.iso.close(s)
 		a.recordError(err)
+
 		return err
 	}
 
@@ -354,6 +363,7 @@ func (s *supervisor) launchRunner(a *app, l *launchSession) error {
 		a.recordError(err)
 		s.kill(a)
 		l.iso.close(s)
+
 		return err
 	}
 
@@ -382,6 +392,7 @@ func (s *supervisor) prepareLaunchSession(a *app, source string, cfg appConfig, 
 		deadline: deadline,
 		namespaced: s.cfg.appNamespaces,
 	}
+
 	args, env, err := s.appArgsFor(a, source, session.namespaced)
 	if err != nil {
 		a.recordError(err)
@@ -451,11 +462,13 @@ func (s *supervisor) launchOnce(a *app, source string) error {
 	if err := s.launchRunner(a, session); err != nil {
 		return err
 	}
+
 	a.mu.Lock()
 
 	a.isolation = session.iso
 
 	a.mu.Unlock()
+
 	return nil
 }
 
@@ -466,5 +479,6 @@ func (s *supervisor) launch(a *app, source string) error {
 	}
 	// The failed attempt already scheduled its own restart; the corrected retry replaces it.
 	s.cancelRestart(a)
+
 	return s.launchOnce(a, source)
 }

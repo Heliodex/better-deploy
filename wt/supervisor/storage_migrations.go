@@ -179,7 +179,6 @@ func (s *storageServer) migrate(ctx context.Context, app string, version int, st
 
 		return
 	})
-
 	if err != nil {
 		return storageMigrationResponse{}, err
 	}

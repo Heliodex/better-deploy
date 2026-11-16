@@ -20,6 +20,7 @@ func databaseGET(t *testing.T, s *supervisor, target string) *httptest.ResponseR
 	rec := httptest.NewRecorder()
 
 	s.handleApp(rec, req)
+
 	return rec
 }
 
@@ -30,6 +31,7 @@ func testDatabaseSupervisor(t *testing.T) (*supervisor, *storageServer) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(storage.close)
 
 	s := testSupervisor()
@@ -62,6 +64,7 @@ func TestDatabaseExportImportAndMaintenance(t *testing.T) {
 	exported := rec.Body.Bytes()
 
 	insertItem(t, storage, token, "two")
+
 	if got := storageCount(t, storage, token); got != 2 {
 		t.Fatalf("count before import = %d, want 2", got)
 	}
@@ -69,6 +72,7 @@ func TestDatabaseExportImportAndMaintenance(t *testing.T) {
 	var formBody bytes.Buffer
 
 	form := multipart.NewWriter(&formBody)
+
 	part, err := form.CreateFormFile("database", "notes.db")
 	if err != nil {
 		t.Fatal(err)
@@ -90,6 +94,7 @@ func TestDatabaseExportImportAndMaintenance(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	s.handleApp(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("import = %d %s", rec.Code, rec.Body.String())
 	}
@@ -120,6 +125,7 @@ func TestDatabaseExportImportAndMaintenance(t *testing.T) {
 
 		return rec, result
 	}
+
 	rec, result := doMaintenance("integrity_check")
 	if rec.Code != http.StatusOK || result.Result != "ok" {
 		t.Errorf("integrity_check = %d %+v", rec.Code, result)
@@ -143,6 +149,7 @@ func TestDatabaseExportImportAndMaintenance(t *testing.T) {
 func TestDatabaseOverview(t *testing.T) {
 	s, storage := testDatabaseSupervisor(t)
 	token := storage.tokenFor("notes")
+
 	rec := databaseGET(t, s, "/apps/notes/database")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("empty overview = %d %s", rec.Code, rec.Body.String())
@@ -157,6 +164,7 @@ func TestDatabaseOverview(t *testing.T) {
 	if empty.Database || len(empty.Tables) != 0 {
 		t.Errorf("empty overview = %+v", empty)
 	}
+
 	createItems(t, storage, token)
 
 	rec = databaseGET(t, s, "/apps/notes/database")
@@ -250,6 +258,7 @@ func TestDatabaseRows(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("create mixed: %d %s", resp.StatusCode, readBody(t, resp))
 	}
+
 	resp.Body.Close()
 
 	resp = storageSQL(t, storage, token, "/v1/exec", map[string]any{
@@ -260,6 +269,7 @@ func TestDatabaseRows(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("insert mixed: %d %s", resp.StatusCode, readBody(t, resp))
 	}
+
 	resp.Body.Close()
 
 	rec := databaseGET(t, s, "/apps/notes/database/rows?table=items&limit=2&offset=0")

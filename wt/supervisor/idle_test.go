@@ -39,6 +39,7 @@ func TestIdleAppServesStaticWithoutWaking(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	s.serveApp(rec, req, a)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
@@ -54,6 +55,7 @@ func TestIdleAppServesStaticWithoutWaking(t *testing.T) {
 
 func TestIdleDue(t *testing.T) {
 	now := time.Now()
+
 	newApp := func() *app {
 		return &app{
 			name: "demo",
@@ -144,6 +146,7 @@ func TestLoadAppsStartsAsleepByDefault(t *testing.T) {
 	if a == nil {
 		t.Fatal("app was not loaded")
 	}
+
 	t.Cleanup(func() {
 		s.stop(a)
 	})
@@ -152,6 +155,7 @@ func TestLoadAppsStartsAsleepByDefault(t *testing.T) {
 	running, idle, ready, proxy, timeout := a.cmd != nil, a.idleStopped, a.ready, a.proxy, a.cfg.idleTimeout
 
 	a.mu.Unlock()
+
 	if running || !idle || ready || proxy != nil {
 		t.Errorf("loaded app running=%v idle=%v ready=%v proxy=%v; want asleep", running, idle, ready, proxy != nil)
 	}
@@ -164,14 +168,17 @@ func TestLoadAppsStartsAsleepByDefault(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "http://demo.localhost/", nil)
 
 	s.serveApp(rec, req, a)
+
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want 204 after waking: %s", rec.Code, rec.Body.String())
 	}
+
 	a.mu.Lock()
 
 	idle, running = a.idleStopped, a.cmd != nil
 
 	a.mu.Unlock()
+
 	if idle || !running {
 		t.Errorf("after the first request idle=%v running=%v; want awake", idle, running)
 	}
@@ -201,6 +208,7 @@ func TestLoadAppsStartsWithExplicitOptOut(t *testing.T) {
 	if a == nil {
 		t.Fatal("app was not loaded")
 	}
+
 	t.Cleanup(func() {
 		s.stop(a)
 	})
@@ -209,6 +217,7 @@ func TestLoadAppsStartsWithExplicitOptOut(t *testing.T) {
 	running, idle, timeout := a.cmd != nil, a.idleStopped, a.cfg.idleTimeout
 
 	a.mu.Unlock()
+
 	if !running || idle || timeout != 0 {
 		t.Errorf("opt-out app running=%v idle=%v timeout=%s; want running and not idle", running, idle, timeout)
 	}
@@ -216,6 +225,7 @@ func TestLoadAppsStartsWithExplicitOptOut(t *testing.T) {
 
 func TestMarkIdleStopped(t *testing.T) {
 	now := time.Now()
+
 	a := &app{
 		name: "demo",
 		cfg: appConfig{
@@ -284,6 +294,7 @@ func TestServeAppWakesIdleApp(t *testing.T) {
 
 	a.mu.Unlock()
 	s.stopIdleApps(time.Now())
+
 	if !a.idleState() {
 		t.Fatal("idle app was not stopped")
 	}
@@ -292,6 +303,7 @@ func TestServeAppWakesIdleApp(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "http://demo.localhost/", nil)
 
 	s.serveApp(rec, req, a)
+
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want 204 after waking: %s", rec.Code, rec.Body.String())
 	}
@@ -336,11 +348,13 @@ func TestStopIdleAppsStopsProcess(t *testing.T) {
 	s.apps[a.name] = a
 
 	s.stopIdleApps(now)
+
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("idle app process was not stopped")
 	}
+
 	a.mu.Lock()
 
 	defer a.mu.Unlock()

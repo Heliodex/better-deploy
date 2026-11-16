@@ -101,11 +101,13 @@ func (a *auditStore) tail(limit int) ([]auditEntry, error) {
 	if limit > auditMaxLimit {
 		limit = auditMaxLimit
 	}
+
 	a.mu.Lock()
 
 	data, err := os.ReadFile(a.path)
 
 	a.mu.Unlock()
+
 	if os.IsNotExist(err) {
 		return []auditEntry{}, nil
 	}
@@ -207,6 +209,7 @@ func (w *auditWriter) WriteHeader(status int) {
 	if w.status == 0 {
 		w.status = status
 	}
+
 	w.ResponseWriter.WriteHeader(status)
 }
 
@@ -311,6 +314,7 @@ func (s *supervisor) handleAudit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	writeJSON(w, http.StatusOK, auditResponse{
 		Entries: entries,
 	})

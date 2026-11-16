@@ -63,20 +63,26 @@ func runRuntime(args []string) error {
 		} else {
 			report["releaseMatch"] = runtimeRelease(local) == runtimeRelease(caps.Wasmtime)
 		}
+
 		printRawOrJSONJSON(report)
+
 		if localErr != nil {
 			return localErr
 		}
 
 		return nil
 	}
+
 	fmt.Printf("supervisor: %s", displayRuntime(caps.Wasmtime, caps.WasmtimeTarget))
 	fmt.Println()
+
 	if localErr != nil {
 		fmt.Printf("local: unavailable (%v)\n", localErr)
 		return localErr
 	}
+
 	fmt.Printf("local: %s\n", local)
+
 	switch {
 	case caps.Wasmtime == "":
 		fmt.Println("release: supervisor did not report a wasmtime version")
@@ -91,6 +97,8 @@ func runRuntime(args []string) error {
 	} else {
 		fmt.Printf("target: %s\n", caps.WasmtimeTarget)
 	}
+
 	fmt.Printf("compiler: %v\n", caps.Compiler)
+
 	return nil
 }

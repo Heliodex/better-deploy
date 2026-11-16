@@ -35,6 +35,7 @@ func DeleteBlob(ctx context.Context, client *http.Client, digest string) error {
 	}
 
 	base := strings.TrimSuffix(os.Getenv(storageURLEnv), "/")
+
 	token := os.Getenv(storageTokenEnv)
 	if base == "" || token == "" {
 		return fmt.Errorf("%s and %s are not set", storageURLEnv, storageTokenEnv)
@@ -44,6 +45,7 @@ func DeleteBlob(ctx context.Context, client *http.Client, digest string) error {
 	if err != nil {
 		return err
 	}
+
 	req.Header.Set("Authorization", "Bearer "+token)
 
 	resp, err := client.Do(req)
@@ -164,5 +166,6 @@ func BlobUploadURL(maxBytes int64, contentType string, ttl time.Duration) (strin
 	query.Set("max", strconv.FormatInt(maxBytes, 10))
 	query.Set("ct", contentType)
 	query.Set("sig", blobSignature(secret, "upload", "", expires.Unix(), maxBytes, contentType))
+
 	return blobBase() + "?" + query.Encode(), nil
 }

@@ -23,7 +23,9 @@ func newHelperClient(t *testing.T) *Client {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(server.Close)
+
 	return server.NewClient(server.Client())
 }
 

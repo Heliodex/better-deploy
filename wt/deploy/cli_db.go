@@ -98,7 +98,9 @@ func runDBExec(cfg clientOptions, name string, args []string) error {
 		printRawOrJSON(cfg, body)
 		return nil
 	}
+
 	fmt.Printf("rows_affected=%d last_insert_id=%d\n", result.RowsAffected, result.LastInsertID)
+
 	return nil
 }
 
@@ -168,13 +170,16 @@ func runDBQuery(cfg clientOptions, name string, args []string) error {
 		fmt.Println("(no rows)")
 		return nil
 	}
+
 	fmt.Println(strings.Join(result.Columns, "\t"))
+
 	for _, row := range result.Rows {
 		cells := make([]string, 0, len(row))
 
 		for _, value := range row {
 			cells = append(cells, formatDBValue(value))
 		}
+
 		fmt.Println(strings.Join(cells, "\t"))
 	}
 

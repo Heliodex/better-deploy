@@ -147,6 +147,7 @@ func TestDeploymentReplayPersists(t *testing.T) {
 	}
 
 	restarted := newDeploymentManager(dir)
+
 	got, ok := restarted.replay("demo", "key", time.Now())
 	if !ok {
 		t.Fatal("replay did not find the persisted entry")

@@ -95,6 +95,7 @@ func (m *egressManager) remove(app string) error {
 	if !ok {
 		return nil
 	}
+
 	delete(m.rules, app)
 
 	err4 := deleteRules(m.run4, egressChain, rules.v4)
@@ -322,6 +323,7 @@ func (m *egressManager) add(app string, uid, appPort int, extra ...egressRule) e
 	if m.storageIP == "" || m.storagePort <= 0 {
 		return errors.New("egress rules need the storage address")
 	}
+
 	m.mu.Lock()
 
 	defer m.mu.Unlock()
@@ -351,6 +353,7 @@ func (m *egressManager) add(app string, uid, appPort int, extra ...egressRule) e
 				return fmt.Errorf("remove previous IPv6 egress rules for %s: %w", app, err)
 			}
 		}
+
 		delete(m.rules, app)
 	}
 

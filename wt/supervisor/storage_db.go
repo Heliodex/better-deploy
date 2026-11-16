@@ -162,6 +162,7 @@ func (s *storageServer) readDBFor(app string) (*sql.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open read storage: %w", err)
 	}
+
 	db.SetMaxOpenConns(maxStorageReadConns)
 	db.SetMaxIdleConns(maxStorageReadConns)
 	db.SetConnMaxLifetime(0)

@@ -129,6 +129,7 @@ func handleDelete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "delete link: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
 	http.Redirect(w, r, "/?deleted=1", http.StatusSeeOther)
 }
 
@@ -156,6 +157,7 @@ func handleGo(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "record click: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
 	http.Redirect(w, r, target, http.StatusFound)
 }
 
@@ -206,6 +208,7 @@ func loadDays(ctx context.Context, id string) ([]dayCount, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+
 	slices.Reverse(days)
 
 	var maxCount int64
@@ -394,7 +397,9 @@ func splitTags(raw string) []string {
 	for i := range tags {
 		tags[i] = strings.TrimSpace(tags[i])
 	}
+
 	sort.Strings(tags)
+
 	return tags
 }
 
@@ -454,6 +459,7 @@ func handleDetail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "load days: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
 	render(w, http.StatusOK, detailTmpl, detailData{
 		Title: item.Title,
 		Link: item,
@@ -510,6 +516,7 @@ func loadIndex(ctx context.Context, q, tag string, page int) (indexData, error) 
 
 	offset := (page - 1) * pageSize
 	listArgs := slices.Concat(args, []any{pageSize, offset})
+
 	rows, err := store.Query(ctx, `select `+linkColumns+` from links l `+linkFilter+`
 		order by l.created_at desc, l.id desc
 		limit ? offset ?`, listArgs...)
@@ -575,6 +582,7 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	tag := normaliseTag(r.URL.Query().Get("tag"))
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+
 	data, err := loadIndex(r.Context(), q, tag, page)
 	if err != nil {
 		http.Error(w, "load shelf: "+err.Error(), http.StatusInternalServerError)
@@ -624,7 +632,9 @@ func parseTags(raw string) ([]string, error) {
 	if len(tags) > maxTags {
 		return nil, fmt.Errorf("use at most %d tags", maxTags)
 	}
+
 	sort.Strings(tags)
+
 	return tags, nil
 }
 
@@ -649,6 +659,7 @@ func parseLinkInput(r *http.Request) (linkInput, error) {
 
 	parsed.Scheme = strings.ToLower(parsed.Scheme)
 	parsed.Host = strings.ToLower(parsed.Host)
+
 	title := strings.TrimSpace(r.FormValue("title"))
 	if title == "" {
 		title = parsed.Host
@@ -693,6 +704,7 @@ func handleCreate(w http.ResponseWriter, r *http.Request) {
 		data.Error = err.Error()
 
 		render(w, http.StatusBadRequest, indexTmpl, data)
+
 		return
 	}
 
@@ -714,5 +726,6 @@ func handleCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "add link: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
 	http.Redirect(w, r, "/?added=1", http.StatusSeeOther)
 }

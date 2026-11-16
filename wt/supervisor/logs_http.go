@@ -107,16 +107,18 @@ func (s *supervisor) handleLogExport(w http.ResponseWriter, r *http.Request, a *
 		var err error
 
 		entries, err = a.logs.allFiltered(filter)
-
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	}
+
 	w.Header().Set("Cache-Control", "no-store")
+
 	if format == "jsonl" {
 		w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
 		w.Header().Set("Content-Disposition", `attachment; filename="`+a.name+`.log.jsonl"`)
+
 		for _, entry := range entries {
 			data, err := json.Marshal(entry)
 			if err != nil {
@@ -128,8 +130,10 @@ func (s *supervisor) handleLogExport(w http.ResponseWriter, r *http.Request, a *
 
 		return
 	}
+
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+a.name+`.log"`)
+
 	for _, entry := range entries {
 		_, _ = fmt.Fprintf(w, "%s %s %s %s\n", entry.Time, entry.Level, entry.Source, entry.Message)
 	}
@@ -164,6 +168,7 @@ func (s *supervisor) handleLogStream(w http.ResponseWriter, r *http.Request, a *
 
 		return stream.data(data)
 	}
+
 	filter, ok := logFilterParam(w, r)
 	if !ok {
 		return
@@ -177,7 +182,6 @@ func (s *supervisor) handleLogStream(w http.ResponseWriter, r *http.Request, a *
 		var err error
 
 		backlog, err = a.logs.tailFiltered(tail, filter)
-
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -238,12 +242,12 @@ func (s *supervisor) handleLogs(w http.ResponseWriter, r *http.Request, a *app) 
 		var err error
 
 		logs, err = a.logs.tailFiltered(tail, filter)
-
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	}
+
 	writeJSON(w, http.StatusOK, logsResponse{
 		Logs: logs,
 	})

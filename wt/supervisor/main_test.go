@@ -45,10 +45,13 @@ func TestDrainApp(t *testing.T) {
 	}
 
 	a.requests.Add(1)
+
 	if drainApp(a, 20*time.Millisecond) {
 		t.Error("drain finished while a request was active")
 	}
+
 	a.requests.Done()
+
 	if !drainApp(a, time.Second) {
 		t.Error("drain did not finish after the request ended")
 	}
@@ -113,6 +116,7 @@ func TestHandleProxyLogsRequest(t *testing.T) {
 	}
 
 	s := testSupervisor()
+
 	logs, err := newAppLog(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -208,6 +212,7 @@ func TestHandleProxyTracksInFlightRequests(t *testing.T) {
 	if drainApp(a, 20*time.Millisecond) {
 		t.Error("drain finished while a proxied request was in flight")
 	}
+
 	close(release)
 	<-done
 
@@ -227,6 +232,7 @@ func TestHandleRestartRestartsSchedule(t *testing.T) {
 	s.runner, _, _ = startTestRunner(t)
 	s.cfg.wasmtime = os.Args[0]
 	s.cfg.stateDir = t.TempDir()
+
 	a, err := s.spawn("demo", dir, appConfig{
 		Name: "demo",
 		Host: "demo.localhost",
@@ -245,6 +251,7 @@ func TestHandleRestartRestartsSchedule(t *testing.T) {
 	defer s.stop(a)
 
 	s.register(a)
+
 	if a.scheduleCancel == nil {
 		t.Fatal("spawn should start the schedule")
 	}
@@ -252,6 +259,7 @@ func TestHandleRestartRestartsSchedule(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	s.handleRestart(rec, httptest.NewRequest(http.MethodPost, "/apps/demo/restart", nil), a)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("restart status = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -296,6 +304,7 @@ func TestHandlerLetsAppHostsOwnAdminPaths(t *testing.T) {
 	req.Host = "demo.localhost"
 
 	handler.ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusOK || rec.Body.String() != "app /admin/" {
 		t.Errorf("app host admin path = %d %q, want 200 \"app /admin/\"", rec.Code, rec.Body.String())
 	}
@@ -305,6 +314,7 @@ func TestHandlerLetsAppHostsOwnAdminPaths(t *testing.T) {
 	req.Host = "admin.localhost"
 
 	handler.ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusOK || rec.Body.String() != "ok\n" {
 		t.Errorf("non-app healthz = %d %q, want 200 \"ok\\n\"", rec.Code, rec.Body.String())
 	}
@@ -386,6 +396,7 @@ func TestMain(m *testing.M) {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+
 		fmt.Fprintf(os.Stderr, "Serving HTTP on http://%s/\n", listener.Addr())
 
 		err = http.Serve(listener, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -399,6 +410,7 @@ func TestMain(m *testing.M) {
 
 		return
 	}
+
 	os.Exit(m.Run())
 }
 
@@ -406,6 +418,7 @@ func TestProxyRewrite(t *testing.T) {
 	type request struct {
 		host, forwardedHost, forwardedProto, forwardedFor, target string
 	}
+
 	got := make(chan request, 1)
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got <- request{
@@ -415,6 +428,7 @@ func TestProxyRewrite(t *testing.T) {
 			forwardedFor: r.Header.Get("X-Forwarded-For"),
 			target: r.URL.RequestURI(),
 		}
+
 		_, _ = w.Write([]byte("ok"))
 	}))
 
@@ -447,6 +461,7 @@ func TestProxyRewrite(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	proxy.ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %q", rec.Code, rec.Body.String())
 	}
@@ -539,6 +554,7 @@ func TestShutdownServerWaitsForInflightHandler(t *testing.T) {
 	}()
 
 	<-started
+
 	shutdown := make(chan error, 1)
 
 	go func() {
@@ -550,7 +566,9 @@ func TestShutdownServerWaitsForInflightHandler(t *testing.T) {
 		t.Fatalf("shutdown returned before the handler finished: %v", err)
 	case <-time.After(100 * time.Millisecond):
 	}
+
 	close(release)
+
 	if err := <-response; err != nil {
 		t.Fatal(err)
 	}
@@ -619,6 +637,7 @@ func TestWaitReadyRequiresSuccessStatus(t *testing.T) {
 			http.Error(w, "still migrating", http.StatusInternalServerError)
 			return
 		}
+
 		w.WriteHeader(http.StatusNoContent)
 	}))
 

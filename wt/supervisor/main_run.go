@@ -30,6 +30,7 @@ func configureUntrusted(s *supervisor, cfg config) {
 	if ip := net.ParseIP(fetchIP); ip == nil || ip.To4() == nil {
 		log.Fatalf("app fetch listener %s must use IPv4 in untrusted mode", fetchIP)
 	}
+
 	s.egress.setInternal(fetchIP, fetchPort)
 
 	s.quota = newDataQuota(cfg.dataQuotaMode, cfg.dataQuotaFS, cfg.stateDir, cfg.setquota, cfg.findmnt, nil)
@@ -41,7 +42,9 @@ func listenAndServe(server *http.Server, s *supervisor) error {
 	if cfg.tlsCert == "" != (cfg.tlsKey == "") {
 		log.Fatalf("--tls-cert and --tls-key must be set together")
 	}
+
 	log.Printf("supervisor listening on %s with %d app(s)", cfg.listen, len(s.apps))
+
 	if cfg.tlsCert != "" {
 		return server.ListenAndServeTLS(cfg.tlsCert, cfg.tlsKey)
 	}
@@ -116,6 +119,7 @@ func newStorageForConfig(cfg config) *storageServer {
 // newSupervisorServices opens the persistent stores and internal listeners the supervisor owns.
 func newSupervisorServices(cfg config) *supervisor {
 	storage := newStorageForConfig(cfg)
+
 	blobs, err := newBlobStore(cfg.stateDir)
 	if err != nil {
 		log.Fatalf("blobs: %v", err)
@@ -207,6 +211,7 @@ func startAdminServer(s *supervisor, cfg config) (*http.Server, func()) {
 	}()
 
 	log.Printf("admin listener on %s with %d app(s)", cfg.adminListen, len(s.apps))
+
 	return adminServer, cleanup
 }
 
@@ -239,7 +244,9 @@ func startSupervisor(cfg config) *supervisor {
 	if err := s.loadApps(); err != nil {
 		log.Fatalf("load apps: %v", err)
 	}
+
 	s.ready.Store(true)
+
 	return s
 }
 
@@ -259,9 +266,11 @@ func (s *supervisor) listenForSignals(server, adminServer *http.Server) {
 
 				continue
 			}
+
 			s.stopping.Store(true)
 			s.ready.Store(false)
 			log.Printf("shutting down")
+
 			if adminServer != nil {
 				if err := shutdownServer(adminServer, shutdownTimeout); err != nil {
 					log.Printf("graceful admin shutdown: %v", err)
@@ -296,7 +305,9 @@ func (s *supervisor) stopServices(adminServer *http.Server, adminCleanup func(),
 	if adminServer != nil {
 		_ = shutdownServer(adminServer, shutdownTimeout)
 	}
+
 	s.stopAll()
+
 	if s.runnerLiveness != nil {
 		_ = s.runnerLiveness.Close()
 		s.runnerLiveness = nil
@@ -315,10 +326,12 @@ func (s *supervisor) stopServices(adminServer *http.Server, adminCleanup func(),
 	if s.cgroups != nil {
 		s.cgroups.close()
 	}
+
 	s.persistResources()
 	s.jobs.close()
 	s.fetch.close()
 	s.storage.close()
+
 	if adminCleanup != nil {
 		adminCleanup()
 	}

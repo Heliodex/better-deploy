@@ -215,6 +215,7 @@ func (s *storageServer) appForToken(token string) (string, bool) {
 	if token == "" {
 		return "", false
 	}
+
 	s.mu.Lock()
 
 	defer s.mu.Unlock()
@@ -244,8 +245,10 @@ func (s *storageServer) checkTemp() {
 	dir := s.tempDir
 
 	s.mu.Unlock()
+
 	if dir == "" || !budget.enabled() {
 		s.tempOver.Store(false)
+
 		if budget != nil {
 			budget.observe(0)
 		}
@@ -258,6 +261,7 @@ func (s *storageServer) checkTemp() {
 		log.Printf("storage temp: measure %s: %v", dir, err)
 		return
 	}
+
 	s.tempOver.Store(budget.observe(size))
 }
 
@@ -297,12 +301,14 @@ func (s *storageServer) drop(app string) {
 	delete(s.readDBs, app)
 	delete(s.quotas, app)
 	s.kv.drop(app)
+
 	for token, name := range s.tokens {
 		if name == app {
 			delete(s.tokens, token)
 		}
 	}
 	s.mu.Unlock()
+
 	if readDB != nil {
 		_ = readDB.Close()
 	}
@@ -351,6 +357,7 @@ func (s *storageServer) restoreToken(app, token string) {
 	if token == "" {
 		return
 	}
+
 	s.mu.Lock()
 
 	s.tokens[token] = app
@@ -380,6 +387,7 @@ func (s *storageServer) setTempDir(dir string, budget int64) error {
 	if err := cleanStorageTemp(dir); err != nil {
 		return fmt.Errorf("clean storage temp dir: %w", err)
 	}
+
 	s.mu.Lock()
 
 	s.tempDir = dir
@@ -390,6 +398,7 @@ func (s *storageServer) setTempDir(dir string, budget int64) error {
 
 	s.mu.Unlock()
 	s.tempOver.Store(false)
+
 	return nil
 }
 

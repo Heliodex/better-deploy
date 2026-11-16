@@ -67,6 +67,7 @@ func (s *secretStore) keys(app string) []string {
 	if s == nil || !validName(app) {
 		return []string{}
 	}
+
 	s.mu.Lock()
 
 	defer s.mu.Unlock()
@@ -79,6 +80,7 @@ func (s *secretStore) redactionValues(app string) []string {
 	if s == nil || !validName(app) {
 		return nil
 	}
+
 	s.mu.Lock()
 
 	defer s.mu.Unlock()
@@ -90,6 +92,7 @@ func (s *secretStore) redactionValues(app string) []string {
 			values = append(values, value)
 		}
 	}
+
 	sort.Slice(values, func(i, j int) bool {
 		if len(values[i]) != len(values[j]) {
 			return len(values[i]) > len(values[j])
@@ -97,6 +100,7 @@ func (s *secretStore) redactionValues(app string) []string {
 
 		return values[i] < values[j]
 	})
+
 	return values
 }
 
@@ -109,6 +113,7 @@ func (s *secretStore) remove(app string) error {
 	if !validName(app) {
 		return fmt.Errorf("%w: app name %q is invalid", errSecretInvalid, app)
 	}
+
 	s.mu.Lock()
 
 	defer s.mu.Unlock()
@@ -116,8 +121,10 @@ func (s *secretStore) remove(app string) error {
 	if err := os.Remove(s.file(app)); err != nil && !os.IsNotExist(err) {
 		return err
 	}
+
 	delete(s.current, app)
 	delete(s.history, app)
+
 	return nil
 }
 
@@ -126,6 +133,7 @@ func (s *secretStore) values(app string) map[string]string {
 	if s == nil || !validName(app) {
 		return map[string]string{}
 	}
+
 	s.mu.Lock()
 
 	defer s.mu.Unlock()
@@ -133,6 +141,7 @@ func (s *secretStore) values(app string) map[string]string {
 	out := make(map[string]string, len(s.current[app]))
 
 	maps.Copy(out, s.current[app])
+
 	return out
 }
 
@@ -217,6 +226,7 @@ func (s *secretStore) delete(app, key string) error {
 	if err := validateSecretKey(key); err != nil {
 		return err
 	}
+
 	s.mu.Lock()
 
 	defer s.mu.Unlock()
@@ -252,6 +262,7 @@ func (s *secretStore) get(app, key string) (string, bool) {
 	if s == nil || !validName(app) || validateSecretKey(key) != nil {
 		return "", false
 	}
+
 	s.mu.Lock()
 
 	defer s.mu.Unlock()
@@ -293,6 +304,7 @@ func newSecretStore(dir string) (*secretStore, error) {
 		current: map[string]map[string]string{},
 		history: map[string]map[string]struct{}{},
 	}
+
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("read secret dir: %w", err)
@@ -315,6 +327,7 @@ func newSecretStore(dir string) (*secretStore, error) {
 		}
 
 		path := filepath.Join(dir, name)
+
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return nil, fmt.Errorf("read secrets for %s: %w", app, err)
@@ -370,6 +383,7 @@ func (s *secretStore) set(app, key, value string) error {
 	if err := validateSecretValue(value); err != nil {
 		return err
 	}
+
 	s.mu.Lock()
 
 	defer s.mu.Unlock()
@@ -414,9 +428,11 @@ func (s *supervisor) handleAppSecrets(w http.ResponseWriter, r *http.Request, na
 		if !requireMethod(w, r, http.MethodGet) {
 			return
 		}
+
 		writeJSON(w, http.StatusOK, secretKeysResponse{
 			Keys: s.secrets.keys(name),
 		})
+
 		return
 	}
 
@@ -445,9 +461,12 @@ func (s *supervisor) handleAppSecrets(w http.ResponseWriter, r *http.Request, na
 			if errors.Is(err, errSecretInvalid) {
 				status = http.StatusBadRequest
 			}
+
 			writeError(w, status, err.Error())
+
 			return
 		}
+
 		s.refreshAppSecrets(name)
 		writeJSON(w, http.StatusOK, secretMutationResponse{
 			Key: key,
@@ -465,9 +484,12 @@ func (s *supervisor) handleAppSecrets(w http.ResponseWriter, r *http.Request, na
 			if errors.Is(err, errSecretInvalid) {
 				status = http.StatusBadRequest
 			}
+
 			writeError(w, status, err.Error())
+
 			return
 		}
+
 		s.refreshAppSecrets(name)
 		writeJSON(w, http.StatusOK, secretMutationResponse{
 			Key: key,

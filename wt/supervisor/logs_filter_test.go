@@ -41,6 +41,7 @@ func TestLogFilterAndExport(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleApp(rec, req)
+
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "danger zone") {
 		t.Fatalf("filtered logs = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -54,6 +55,7 @@ func TestLogFilterAndExport(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleApp(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("export = %d: %s", rec.Code, rec.Body.String())
 	}

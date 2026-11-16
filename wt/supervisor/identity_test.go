@@ -14,6 +14,7 @@ import (
 func TestIdentityAuthenticateDoesNotRevealDisabledOrUnknownUsers(t *testing.T) {
 	s := testSupervisor()
 	s.cfg.stateDir = t.TempDir()
+
 	store, err := newIdentityStore(s.cfg.stateDir)
 	if err != nil {
 		t.Fatal(err)
@@ -62,6 +63,7 @@ func TestIdentityConfigValidation(t *testing.T) {
 func TestIdentitySessionsExpire(t *testing.T) {
 	s := testSupervisor()
 	s.cfg.stateDir = t.TempDir()
+
 	store, err := newIdentityStore(s.cfg.stateDir)
 	if err != nil {
 		t.Fatal(err)
@@ -76,11 +78,13 @@ func TestIdentitySessionsExpire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	store.mu.Lock()
 
 	store.sessions[session.TokenHash].ExpiresAt = time.Now().Add(-time.Second)
 
 	store.mu.Unlock()
+
 	if _, _, err := store.session(token); err == nil {
 		t.Error("expired session was accepted")
 	}
@@ -99,6 +103,7 @@ func TestIdentitySignatureVector(t *testing.T) {
 func TestIdentityStorePasswordAndSessions(t *testing.T) {
 	s := testSupervisor()
 	s.cfg.stateDir = t.TempDir()
+
 	store, err := newIdentityStore(s.cfg.stateDir)
 	if err != nil {
 		t.Fatal(err)
@@ -173,6 +178,7 @@ func identityCall(t *testing.T, s *supervisor, method, path, body string, cookie
 	rec := httptest.NewRecorder()
 
 	s.serveIdentityApp(rec, req)
+
 	return rec
 }
 
@@ -181,12 +187,14 @@ func testIdentitySupervisor(t *testing.T) (*supervisor, *app, identityUserInfo) 
 
 	s := testSupervisor()
 	s.cfg.stateDir = t.TempDir()
+
 	store, err := newIdentityStore(s.cfg.stateDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	s.identity = store
+
 	blobs, err := newBlobStore(s.cfg.stateDir)
 	if err != nil {
 		t.Fatal(err)
@@ -202,6 +210,7 @@ func testIdentitySupervisor(t *testing.T) (*supervisor, *app, identityUserInfo) 
 	}
 	s.apps["demo"] = a
 	s.hosts["demo.localhost"] = a
+
 	user, err := store.createUser("ada@example.com", "Ada", "correct horse battery", []string{"admins"})
 	if err != nil {
 		t.Fatal(err)
@@ -221,6 +230,7 @@ func TestIdentityAdminUsers(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	s.handleIdentityUsers(rec, req)
+
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create user = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -242,6 +252,7 @@ func TestIdentityAdminUsers(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	s.handleIdentityUsers(rec, req)
+
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "grace@example.com") {
 		t.Errorf("list users = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -253,6 +264,7 @@ func TestIdentityAdminUsers(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	s.handleIdentityUser(rec, req, user.ID+"/password")
+
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("reset password = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -264,6 +276,7 @@ func TestIdentityAdminUsers(t *testing.T) {
 
 func TestIdentityLoginMeLogout(t *testing.T) {
 	s, _, _ := testIdentitySupervisor(t)
+
 	rec := identityCall(t, s, http.MethodPost, identityAppPrefix+"/login", `{"email":"ada@example.com","password":"correct horse battery"}`, nil, "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("login = %d: %s", rec.Code, rec.Body.String())
@@ -315,6 +328,7 @@ func TestIdentityLoginMeLogout(t *testing.T) {
 
 func TestIdentityPasswordChangeAndProxyHeaders(t *testing.T) {
 	s, _, user := testIdentitySupervisor(t)
+
 	token, session, err := s.identity.newSession(user.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -324,6 +338,7 @@ func TestIdentityPasswordChangeAndProxyHeaders(t *testing.T) {
 		Name: identityCookieName,
 		Value: token,
 	}
+
 	rec := identityCall(t, s, http.MethodPost, identityAppPrefix+"/password", `{"currentPassword":"correct horse battery","newPassword":"another long password"}`, cookie, session.CSRF)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("password = %d: %s", rec.Code, rec.Body.String())
@@ -347,6 +362,7 @@ func TestIdentityPasswordChangeAndProxyHeaders(t *testing.T) {
 	req.AddCookie(newCookies[0])
 	req.Header.Set("X-WT-User-Id", "spoof")
 	s.identityProxyHeaders(req, "demo", true)
+
 	if got := req.Header.Get(identityUserIDHeader); got != user.ID {
 		t.Errorf("injected user id = %q, want %q", got, user.ID)
 	}
@@ -371,6 +387,7 @@ func TestIdentityProxyRouting(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	s.handleProxy(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("proxied login = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -387,6 +404,7 @@ func TestIdentityProxyRouting(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	s.handleProxy(rec, req)
+
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "ada@example.com") {
 		t.Errorf("proxied me = %d: %s", rec.Code, rec.Body.String())
 	}

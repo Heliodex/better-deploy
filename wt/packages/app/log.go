@@ -82,6 +82,7 @@ func (w levelWriter) Write(p []byte) (int, error) {
 		if line == "\n" {
 			continue
 		}
+
 		Logf(w.level, "%s", strings.TrimSuffix(line, "\n"))
 	}
 

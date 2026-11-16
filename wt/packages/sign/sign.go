@@ -151,6 +151,7 @@ func (s Signer) window() time.Duration {
 // Verify checks a timestamped signature and its clock window.
 func (s Signer) Verify(timestamp, deliveryID, signature string, body []byte) error {
 	stamp := strings.TrimSpace(timestamp)
+
 	seconds, err := strconv.ParseInt(stamp, 10, 64)
 	if err != nil || seconds < 0 {
 		return ErrInvalidTimestamp

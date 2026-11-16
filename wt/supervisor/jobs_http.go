@@ -14,6 +14,7 @@ func handleJobsCollection(w http.ResponseWriter, r *http.Request, store *jobStor
 			writeError(w, http.StatusBadRequest, "unknown job status")
 			return
 		}
+
 		writeJSON(w, http.StatusOK, jobsResponse{
 			Jobs: store.list(status, 100),
 		})
@@ -36,6 +37,7 @@ func handleJobsCollection(w http.ResponseWriter, r *http.Request, store *jobStor
 
 			store.wakeIdle()
 		}
+
 		writeJSON(w, status, job)
 	default:
 		w.Header().Set("Allow", "GET, POST")
@@ -49,6 +51,7 @@ func writeJobActionError(w http.ResponseWriter, err error) {
 	if strings.Contains(err.Error(), "not found") {
 		status = http.StatusNotFound
 	}
+
 	writeError(w, status, err.Error())
 }
 
@@ -61,6 +64,7 @@ func handleJobItem(w http.ResponseWriter, r *http.Request, store *jobStore, id, 
 			http.NotFound(w, r)
 			return
 		}
+
 		writeJSON(w, http.StatusOK, job)
 	case verb == "cancel" && r.Method == http.MethodPost:
 		job, err := store.cancel(id)
@@ -68,6 +72,7 @@ func handleJobItem(w http.ResponseWriter, r *http.Request, store *jobStore, id, 
 			writeJobActionError(w, err)
 			return
 		}
+
 		writeJSON(w, http.StatusOK, job)
 	case verb == "retry" && r.Method == http.MethodPost:
 		job, err := store.retry(id)
@@ -75,6 +80,7 @@ func handleJobItem(w http.ResponseWriter, r *http.Request, store *jobStore, id, 
 			writeJobActionError(w, err)
 			return
 		}
+
 		writeJSON(w, http.StatusOK, job)
 	default:
 		http.Error(w, "unknown job endpoint", http.StatusNotFound)
@@ -99,10 +105,12 @@ func (s *supervisor) handleAppJobs(w http.ResponseWriter, r *http.Request, name,
 	}
 
 	rest := strings.TrimPrefix(action, "jobs/")
+
 	id, verb, _ := strings.Cut(rest, "/")
 	if id == "" {
 		http.NotFound(w, r)
 		return
 	}
+
 	handleJobItem(w, r, store, id, verb)
 }

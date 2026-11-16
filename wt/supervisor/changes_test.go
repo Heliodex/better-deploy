@@ -32,6 +32,7 @@ func storageExec(t *testing.T, s *storageServer, token, sql string, params []any
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("exec %q: %d %s", sql, resp.StatusCode, readBody(t, resp))
 	}
+
 	resp.Body.Close()
 }
 
@@ -99,6 +100,7 @@ func TestStorageBatchRowChanges(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("batch: %d %s", resp.StatusCode, readBody(t, resp))
 	}
+
 	resp.Body.Close()
 
 	changes, err := s.recentChanges("notes", 10)
@@ -141,6 +143,7 @@ func TestStorageChangeLog(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("batch: %d %s", resp.StatusCode, readBody(t, resp))
 	}
+
 	resp.Body.Close()
 
 	changes, err := s.recentChanges("notes", 10)
@@ -188,6 +191,7 @@ func TestStorageChangeLog(t *testing.T) {
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("bad exec = %d, want 500", resp.StatusCode)
 	}
+
 	resp.Body.Close()
 
 	after, err := s.recentChanges("notes", 10)

@@ -61,6 +61,7 @@ func TestClientFlagsReadConfigFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"host":"http://config.example","token":"config-token"}`), privateFileMode); err != nil {
 		t.Fatal(err)
 	}
+
 	t.Setenv("WT_CONFIG", path)
 
 	cfg, rest, err := clientFlags([]string{"--json"}, true)
@@ -73,7 +74,6 @@ func TestClientFlagsReadConfigFile(t *testing.T) {
 	}
 
 	cfg, _, err = clientFlags([]string{testHostFlag, "http://flag.example", "--token", "flag-token"}, true)
-
 	if err != nil {
 		t.Fatal(err)
 	}

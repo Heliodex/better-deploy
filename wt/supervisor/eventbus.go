@@ -112,6 +112,7 @@ func (b *eventBus) publish(app, topic string, data jsontext.Value) (busEvent, er
 	event.ID = log.next
 
 	log.ring.add(event)
+
 	for sub := range log.subs {
 		if sub.topic != "" && sub.topic != topic {
 			continue
@@ -124,6 +125,7 @@ func (b *eventBus) publish(app, topic string, data jsontext.Value) (busEvent, er
 		}
 	}
 	log.mu.Unlock()
+
 	return event, nil
 }
 
@@ -132,20 +134,24 @@ func (b *eventBus) remove(app string) {
 	if b == nil {
 		return
 	}
+
 	b.mu.Lock()
 
 	log := b.apps[app]
 
 	delete(b.apps, app)
 	b.mu.Unlock()
+
 	if log == nil {
 		return
 	}
+
 	log.mu.Lock()
 	for sub := range log.subs {
 		close(sub.ch)
 		delete(log.subs, sub)
 	}
+
 	log.ring.reset()
 	log.mu.Unlock()
 }
@@ -155,14 +161,17 @@ func (b *eventBus) unsubscribe(app string, sub *busSubscriber) {
 	if b == nil || sub == nil {
 		return
 	}
+
 	b.mu.Lock()
 
 	log := b.apps[app]
 
 	b.mu.Unlock()
+
 	if log == nil {
 		return
 	}
+
 	log.mu.Lock()
 	delete(log.subs, sub)
 	log.mu.Unlock()

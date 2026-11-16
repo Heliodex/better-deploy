@@ -101,6 +101,7 @@ func (s *storageServer) databaseRows(ctx context.Context, app, table string, lim
 		Limit: limit,
 		Offset: offset,
 	}
+
 	err := s.withConn(ctx, app, func(conn *sql.Conn) error {
 		var name string
 
@@ -256,6 +257,7 @@ func (s *supervisor) handleDatabase(w http.ResponseWriter, r *http.Request, name
 		writeJSON(w, http.StatusOK, databaseOverviewResponse{
 			Tables: []string{},
 		})
+
 		return
 	}
 
@@ -286,6 +288,7 @@ func (s *supervisor) handleDatabase(w http.ResponseWriter, r *http.Request, name
 
 		response.Stats = stats
 	}
+
 	writeJSON(w, http.StatusOK, response)
 }
 
@@ -303,6 +306,7 @@ func (s *supervisor) handleDatabaseExec(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusBadRequest, errNoStorageDatabase.Error())
 		return
 	}
+
 	s.storage.exec(w, r, name)
 }
 
@@ -340,6 +344,7 @@ func (s *supervisor) handleDatabaseExport(w http.ResponseWriter, r *http.Request
 		writeStorageError(w, err)
 		return
 	}
+
 	w.Header().Set("Content-Type", "application/vnd.sqlite3")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name+".db"))
 	http.ServeFile(w, r, path)
@@ -396,6 +401,7 @@ func (s *supervisor) handleDatabaseImport(w http.ResponseWriter, r *http.Request
 		_ = temp.Close()
 
 		writeError(w, http.StatusBadRequest, "read database: "+err.Error())
+
 		return
 	}
 
@@ -417,6 +423,7 @@ func (s *supervisor) handleDatabaseImport(w http.ResponseWriter, r *http.Request
 		writeStorageError(w, err)
 		return
 	}
+
 	log.Printf("database %s: imported %s", name, path)
 	writeJSON(w, http.StatusOK, databaseImportResponse{
 		Imported: true,
@@ -453,6 +460,7 @@ func (s *supervisor) handleDatabaseMaintenance(w http.ResponseWriter, r *http.Re
 		writeStorageError(w, err)
 		return
 	}
+
 	writeJSON(w, http.StatusOK, databaseMaintenanceResponse{
 		Op: op,
 		Result: result,
@@ -473,6 +481,7 @@ func (s *supervisor) handleDatabaseQuery(w http.ResponseWriter, r *http.Request,
 		writeError(w, http.StatusBadRequest, errNoStorageDatabase.Error())
 		return
 	}
+
 	s.storage.query(w, r, name)
 }
 
@@ -511,5 +520,6 @@ func (s *supervisor) handleDatabaseRows(w http.ResponseWriter, r *http.Request, 
 		writeStorageError(w, err)
 		return
 	}
+
 	writeJSON(w, http.StatusOK, result)
 }

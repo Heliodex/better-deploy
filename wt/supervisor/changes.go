@@ -137,6 +137,7 @@ func collectRowChange(data sqlite.SQLitePreUpdateData, budget int) (rowChange, i
 	case sqlite3.SQLITE_DELETE:
 		change.Op = "delete"
 		change.RowID = data.OldRowID
+
 		oldValues, size, err := preUpdateValues(data, false, budget)
 		if err != nil {
 			return rowChange{}, size, err
@@ -148,6 +149,7 @@ func collectRowChange(data sqlite.SQLitePreUpdateData, budget int) (rowChange, i
 	case sqlite3.SQLITE_INSERT:
 		change.Op = "insert"
 		change.RowID = data.NewRowID
+
 		newValues, size, err := preUpdateValues(data, true, budget)
 		if err != nil {
 			return rowChange{}, size, err
@@ -226,9 +228,11 @@ func registerRowHook(conn *sql.Conn, collector *rowChangeCollector) error {
 		if !ok {
 			return nil
 		}
+
 		hooker.RegisterPreUpdateHook(func(data sqlite.SQLitePreUpdateData) {
 			collector.add(data)
 		})
+
 		return nil
 	})
 }
@@ -250,6 +254,7 @@ func (s *storageServer) publishStorageChange(app string, change storageChange) {
 		}
 
 		seen[key] = struct{}{}
+
 		event.Tables = append(event.Tables, row.Table)
 		event.Ops = append(event.Ops, row.Op)
 	}
@@ -273,6 +278,7 @@ func (s *storageServer) recentChanges(app string, limit int) ([]storageChange, e
 
 	for _, name := range []string{changeLogBackup, changeLogName} {
 		path := filepath.Join(dir, name)
+
 		file, err := os.Open(path)
 		if os.IsNotExist(err) {
 			continue
@@ -285,6 +291,7 @@ func (s *storageServer) recentChanges(app string, limit int) ([]storageChange, e
 		scanner := bufio.NewScanner(file)
 
 		scanner.Buffer(make([]byte, 64<<10), maxChangeLogBytes)
+
 		for scanner.Scan() {
 			var change storageChange
 
@@ -306,13 +313,17 @@ func (s *storageServer) recentChanges(app string, limit int) ([]storageChange, e
 			return nil, err
 		}
 	}
+
 	sort.SliceStable(changes, func(i, j int) bool {
 		return changes[i].Time.Before(changes[j].Time)
 	})
+
 	if len(changes) > limit {
 		changes = changes[len(changes)-limit:]
 	}
+
 	slices.Reverse(changes)
+
 	return changes, nil
 }
 
@@ -335,6 +346,7 @@ func (s *supervisor) handleDatabaseChanges(w http.ResponseWriter, r *http.Reques
 		writeStorageError(w, err)
 		return
 	}
+
 	writeJSON(w, http.StatusOK, storageChangesResponse{
 		Changes: changes,
 	})
@@ -374,6 +386,7 @@ func (c *rowChangeCollector) resolveColumns(ctx context.Context, conn *sql.Conn)
 
 	for i := range c.rows {
 		row := &c.rows[i]
+
 		columns, ok := cache[row.Table]
 		if !ok {
 			resolved, err := tableColumns(ctx, conn, row.Table)
@@ -429,6 +442,7 @@ func (s *storageServer) logChanges(app string, changes []storageChange) {
 			s.publishStorageChange(app, change)
 		}
 	}
+
 	s.changeMu.Lock()
 
 	defer s.changeMu.Unlock()
@@ -450,6 +464,7 @@ func (s *storageServer) logChanges(app string, changes []storageChange) {
 		}
 
 		change = trimChange(change)
+
 		line, err := json.Marshal(change)
 		if err != nil {
 			continue
@@ -519,7 +534,9 @@ func (s *storageServer) withWriteConn(ctx context.Context, app string, fn func(*
 		if err := fn(conn, collector); err != nil {
 			return err
 		}
+
 		collector.resolveColumns(ctx, conn)
+
 		return nil
 	})
 }

@@ -13,6 +13,7 @@ import (
 
 func TestAppConfigConditionalRequests(t *testing.T) {
 	dir := t.TempDir()
+
 	cfg, err := normaliseAppConfig(appConfig{
 		Name: "demo",
 		Host: "demo.localhost",
@@ -40,6 +41,7 @@ func TestAppConfigConditionalRequests(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleAppConfig(rec, req, "demo")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET config = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -57,6 +59,7 @@ func TestAppConfigConditionalRequests(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	s.handleAppConfig(rec, req, "demo")
+
 	if rec.Code != http.StatusNotModified {
 		t.Errorf("conditional GET = %d, want 304", rec.Code)
 	}
@@ -69,6 +72,7 @@ func TestAppConfigConditionalRequests(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	s.handleAppConfig(rec, req, "demo")
+
 	if rec.Code != http.StatusPreconditionFailed {
 		t.Errorf("stale PATCH = %d, want 412: %s", rec.Code, rec.Body.String())
 	}
@@ -81,6 +85,7 @@ func TestAppConfigConditionalRequests(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	s.handleAppConfig(rec, req, "demo")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("conditional PATCH = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -120,6 +125,7 @@ func TestAppConfigGetAndPatch(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleAppConfig(rec, req, "demo")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET config status = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -143,6 +149,7 @@ func TestAppConfigGetAndPatch(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleAppConfig(rec, req, "demo")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PATCH config status = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -158,11 +165,13 @@ func TestAppConfigGetAndPatch(t *testing.T) {
 	if got.IdleTimeout != "15m" {
 		t.Errorf("idle_timeout = %q, want 15m", got.IdleTimeout)
 	}
+
 	a.mu.Lock()
 
 	live := a.cfg
 
 	a.mu.Unlock()
+
 	if live.Host != "new.localhost" || live.Health != "/ready" || live.MemoryMB != 256 || live.DiskMB != 512 {
 		t.Errorf("live config = %+v", live)
 	}
@@ -205,6 +214,7 @@ func TestAppConfigIdleTimeoutNeedsNoRestart(t *testing.T) {
 		Health: "/healthz",
 		Env: map[string]string{},
 	}
+
 	cfg, err := normaliseAppConfig(cfg, "demo", "localhost", tenantTrusted)
 	if err != nil {
 		t.Fatal(err)
@@ -227,6 +237,7 @@ func TestAppConfigIdleTimeoutNeedsNoRestart(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleAppConfig(rec, req, "demo")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PATCH config status = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -246,6 +257,7 @@ func TestAppConfigIdleTimeoutNeedsNoRestart(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleAppConfig(rec, req, "demo")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PATCH config status = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -257,11 +269,13 @@ func TestAppConfigIdleTimeoutNeedsNoRestart(t *testing.T) {
 	if got.IdleTimeout != "none" || got.RestartRequired {
 		t.Errorf("PATCH config = %+v; want disabled without a restart", got)
 	}
+
 	a.mu.Lock()
 
 	live, stored := a.cfg.idleTimeout, a.cfg.IdleTimeout
 
 	a.mu.Unlock()
+
 	if live != 0 || stored != "none" {
 		t.Errorf("live idle timeout = %s (%q), want 0 (none)", live, stored)
 	}
@@ -269,6 +283,7 @@ func TestAppConfigIdleTimeoutNeedsNoRestart(t *testing.T) {
 
 func TestAppConfigPatchesCallersAndEgress(t *testing.T) {
 	dir := t.TempDir()
+
 	cfg, err := normaliseAppConfig(appConfig{
 		Name: "demo",
 		Host: "demo.localhost",
@@ -296,6 +311,7 @@ func TestAppConfigPatchesCallersAndEgress(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleAppConfig(rec, req, "demo")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("callers patch = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -315,6 +331,7 @@ func TestAppConfigPatchesCallersAndEgress(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleAppConfig(rec, req, "demo")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("egress patch = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -332,6 +349,7 @@ func TestAppConfigPatchesCallersAndEgress(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleAppConfig(rec, req, "demo")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("IPv6 egress patch = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -354,6 +372,7 @@ func TestAppConfigPatchesCallersAndEgress(t *testing.T) {
 
 		req.Header.Set("Authorization", "Bearer secret")
 		s.handleAppConfig(rec, req, "demo")
+
 		if rec.Code != http.StatusBadRequest {
 			t.Errorf("invalid patch %s = %d, want 400", body, rec.Code)
 		}
@@ -370,6 +389,7 @@ func TestAppConfigPatchesHealthSettings(t *testing.T) {
 		Health: "/healthz",
 		Env: map[string]string{},
 	}
+
 	cfg, err := normaliseAppConfig(cfg, "demo", "localhost", tenantTrusted)
 	if err != nil {
 		t.Fatal(err)
@@ -392,6 +412,7 @@ func TestAppConfigPatchesHealthSettings(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleAppConfig(rec, req, "demo")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PATCH config status = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -405,11 +426,13 @@ func TestAppConfigPatchesHealthSettings(t *testing.T) {
 	if got.StartupTimeout != "30s" || got.HealthInterval != "5s" || got.HealthFailures != 3 || !got.RestartOnUnhealthy {
 		t.Errorf("PATCH health config = %+v", got)
 	}
+
 	a.mu.Lock()
 
 	live := a.cfg
 
 	a.mu.Unlock()
+
 	if live.startupTimeout != 30*time.Second || live.healthInterval != 5*time.Second {
 		t.Errorf("live health durations = %+v", live)
 	}
@@ -425,6 +448,7 @@ func TestAppConfigRejectsIdleTimeoutWithSchedule(t *testing.T) {
 		Health: "/healthz",
 		Env: map[string]string{},
 	}
+
 	cfg, err := normaliseAppConfig(cfg, "demo", "localhost", tenantTrusted)
 	if err != nil {
 		t.Fatal(err)
@@ -447,6 +471,7 @@ func TestAppConfigRejectsIdleTimeoutWithSchedule(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleAppConfig(rec, req, "demo")
+
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400: %s", rec.Code, rec.Body.String())
 	}
@@ -486,6 +511,7 @@ func TestAppConfigRejectsTakenHost(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleAppConfig(rec, req, "demo")
+
 	if rec.Code != http.StatusConflict {
 		t.Errorf("status = %d, want 409: %s", rec.Code, rec.Body.String())
 	}
@@ -512,6 +538,7 @@ func TestNormaliseIdleTimeoutDefaults(t *testing.T) {
 
 		return cfg
 	}
+
 	cfg, err := normaliseAppConfig(newConfig("", false), "demo", "localhost", tenantTrusted)
 	if err != nil {
 		t.Fatal(err)
@@ -522,7 +549,6 @@ func TestNormaliseIdleTimeoutDefaults(t *testing.T) {
 	}
 
 	cfg, err = normaliseAppConfig(newConfig("15m", false), "demo", "localhost", tenantTrusted)
-
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -543,7 +569,6 @@ func TestNormaliseIdleTimeoutDefaults(t *testing.T) {
 	}
 
 	cfg, err = normaliseAppConfig(newConfig("", true), "demo", "localhost", tenantTrusted)
-
 	if err != nil {
 		t.Fatal(err)
 	}

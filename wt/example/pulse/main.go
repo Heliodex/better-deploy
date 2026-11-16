@@ -54,6 +54,7 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	fmt.Fprintln(w, "pulse: a Wasm uptime monitor")
 	fmt.Fprintln(w, "GET    /api/monitors")
@@ -176,6 +177,7 @@ func handleDeleteMonitor(w http.ResponseWriter, r *http.Request) {
 		app.WriteError(w, http.StatusNotFound, "monitor not found")
 		return
 	}
+
 	publishCycle(r.Context(), cycleResult{
 		At: time.Now().UTC().Format(app.TimestampFormat),
 	})
@@ -266,12 +268,14 @@ func probe(ctx context.Context, target string) check {
 	entry := check{
 		CheckedAt: time.Now().UTC().Format(app.TimestampFormat),
 	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		entry.Error = "invalid request"
 
 		return entry
 	}
+
 	req.Header.Set("Accept", "*/*")
 	req.Header.Set("User-Agent", "wt-pulse/1.0")
 
@@ -381,6 +385,7 @@ func handleCreateMonitor(w http.ResponseWriter, r *http.Request) {
 	} else {
 		result.Down = 1
 	}
+
 	publishCycle(r.Context(), result)
 	app.WriteJSON(w, http.StatusCreated, entry)
 }
@@ -433,6 +438,7 @@ func handleListMonitors(w http.ResponseWriter, r *http.Request) {
 		app.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	app.WriteJSON(w, http.StatusOK, map[string]any{"monitors": monitors})
 }
 
@@ -488,6 +494,7 @@ func handleStats(w http.ResponseWriter, r *http.Request) {
 		app.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	app.WriteJSON(w, http.StatusOK, out)
 }
 
@@ -518,7 +525,9 @@ func runCycle(ctx context.Context) (cycleResult, error) {
 
 		result.Down++
 	}
+
 	publishCycle(ctx, result)
+
 	return result, nil
 }
 
@@ -546,5 +555,6 @@ func handleCheck(w http.ResponseWriter, r *http.Request) {
 		app.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	app.WriteJSON(w, http.StatusOK, result)
 }

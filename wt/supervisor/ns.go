@@ -99,7 +99,9 @@ func namespaceFiles(dynamic bool) []string {
 			files = append(files, path)
 		}
 	}
+
 	sort.Strings(files)
+
 	return files
 }
 
@@ -130,7 +132,9 @@ func namespaceLibDirs(interp string) []string {
 			dirs = append(dirs, dir)
 		}
 	}
+
 	sort.Strings(dirs)
+
 	return dirs
 }
 

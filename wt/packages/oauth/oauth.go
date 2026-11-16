@@ -104,13 +104,16 @@ func (c *Client) Config() Config {
 // requestAuth is request with optional HTTP Basic client authentication.
 func (c *Client) requestAuth(ctx context.Context, method, target string, body io.Reader, contentType, username, password string) (*http.Response, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.cfg.Timeout)
+
 	req, err := http.NewRequestWithContext(ctx, method, target, body)
 	if err != nil {
 		cancel()
 		return nil, err
 	}
+
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "wt-oauth/1")
+
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
@@ -268,6 +271,7 @@ func (c cancelOnClose) Close() error {
 	err := c.ReadCloser.Close()
 
 	c.cancel()
+
 	return err
 }
 
@@ -311,6 +315,7 @@ func (c *Client) Discover(ctx context.Context) (Provider, error) {
 		provider := c.provider
 
 		c.mu.Unlock()
+
 		return provider, nil
 	}
 	c.mu.Unlock()
@@ -337,12 +342,14 @@ func (c *Client) Discover(ctx context.Context) (Provider, error) {
 	if provider.AuthorisationEndpoint == "" || provider.TokenEndpoint == "" {
 		return Provider{}, errors.New("discovery document is missing an authorisation or token endpoint")
 	}
+
 	c.mu.Lock()
 
 	c.provider = provider
 	c.providerExpiry = time.Now().Add(metadataTTL)
 
 	c.mu.Unlock()
+
 	return provider, nil
 }
 
@@ -517,6 +524,7 @@ func (c *Client) Userinfo(ctx context.Context, accessToken string) (Identity, er
 	if err != nil {
 		return Identity{}, err
 	}
+
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("User-Agent", "wt-oauth/1")

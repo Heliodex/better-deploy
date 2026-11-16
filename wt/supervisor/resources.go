@@ -64,6 +64,7 @@ func (a *app) resourceHistory() []resourceSample {
 	out := make([]resourceSample, len(a.stats.history))
 
 	copy(out, a.stats.history)
+
 	return out
 }
 
@@ -103,6 +104,7 @@ func (a *app) recordHistory() {
 	if a.stats.sampledAt.IsZero() || time.Since(a.stats.sampledAt) > 2*resourceSampleInterval {
 		return
 	}
+
 	a.stats.appendHistory(a.stats.sampledAt, a.stats.cpuPercent, a.stats.memoryBytes)
 }
 
@@ -322,9 +324,11 @@ func (s *supervisor) loadResourceHistory(a *app) {
 
 		kept = append(kept, sample)
 	}
+
 	sort.Slice(kept, func(i, j int) bool {
 		return kept[i].At.Before(kept[j].At)
 	})
+
 	if len(kept) > resourceHistoryPoints {
 		kept = kept[len(kept)-resourceHistoryPoints:]
 	}
@@ -332,6 +336,7 @@ func (s *supervisor) loadResourceHistory(a *app) {
 	if len(kept) == 0 {
 		return
 	}
+
 	a.stats.mu.Lock()
 
 	a.stats.history = kept
@@ -366,6 +371,7 @@ func (s *supervisor) persistResources() {
 		}
 
 		tmpName := tmp.Name()
+
 		_, writeErr := tmp.Write(append(data, '\n'))
 		if closeErr := tmp.Close(); writeErr != nil || closeErr != nil {
 			_ = os.Remove(tmpName)
@@ -403,8 +409,10 @@ func (s *supervisor) monitorResources(every time.Duration) {
 		if s.stopping.Load() {
 			return
 		}
+
 		s.sampleAll()
 		s.recordAll()
+
 		if time.Since(lastPersist) >= resourcePersistInterval {
 			s.persistResources()
 

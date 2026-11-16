@@ -36,7 +36,9 @@ func normaliseAllowCallers(names []string) ([]string, error) {
 		seen[name] = struct{}{}
 		out = append(out, name)
 	}
+
 	slices.Sort(out)
+
 	return out, nil
 }
 
@@ -97,7 +99,9 @@ func normaliseDependsOn(names []string, self string) ([]string, error) {
 		seen[name] = struct{}{}
 		out = append(out, name)
 	}
+
 	slices.Sort(out)
+
 	return out, nil
 }
 
@@ -132,6 +136,7 @@ func normaliseEgress(rules []egressRule) ([]egressRule, error) {
 		seen[next] = struct{}{}
 		out = append(out, next)
 	}
+
 	slices.SortFunc(out, func(a, b egressRule) int {
 		if a.CIDR != b.CIDR {
 			return strings.Compare(a.CIDR, b.CIDR)
@@ -139,6 +144,7 @@ func normaliseEgress(rules []egressRule) ([]egressRule, error) {
 
 		return a.Port - b.Port
 	})
+
 	return out, nil
 }
 
@@ -150,12 +156,14 @@ func normaliseAppRelations(cfg appConfig, name string) (appConfig, error) {
 	}
 
 	cfg.AllowCallers = callers
+
 	dependsOn, err := normaliseDependsOn(cfg.DependsOn, name)
 	if err != nil {
 		return cfg, err
 	}
 
 	cfg.DependsOn = dependsOn
+
 	egress, err := normaliseEgress(cfg.Egress)
 	if err != nil {
 		return cfg, err
@@ -201,7 +209,9 @@ func normalisePathPrefixes(field string, paths []string) ([]string, error) {
 		seen[clean] = struct{}{}
 		out = append(out, clean)
 	}
+
 	slices.Sort(out)
+
 	return out, nil
 }
 

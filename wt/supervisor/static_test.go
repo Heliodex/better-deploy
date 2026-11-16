@@ -59,6 +59,7 @@ func proxyStaticPage(t *testing.T, a *app, backend http.Handler, requestPath str
 	req := httptest.NewRequest(http.MethodGet, "http://demo.localhost"+requestPath, nil)
 
 	req.Header.Set("Accept", "text/html")
+
 	if pageRequest {
 		req = req.WithContext(context.WithValue(req.Context(), staticPageRequestKey{}, true))
 	}
@@ -66,6 +67,7 @@ func proxyStaticPage(t *testing.T, a *app, backend http.Handler, requestPath str
 	rec := httptest.NewRecorder()
 
 	a.proxy.ServeHTTP(rec, req)
+
 	return rec.Result()
 }
 
@@ -250,6 +252,7 @@ func TestServeAppRoutesServerPageToComponent(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	s.serveApp(rec, req, a)
+
 	if rec.Code != http.StatusOK || rec.Body.String() != "<html>login</html>" {
 		t.Errorf("response = %d %q, want the static login page", rec.Code, rec.Body.String())
 	}
@@ -348,6 +351,7 @@ func TestServeStaticFiles(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "http://demo.localhost/", nil)
 
 	req.Header.Set("Accept", "text/html")
+
 	if a.serveStatic(httptest.NewRecorder(), req) {
 		t.Error("POST was served from static files")
 	}
@@ -389,6 +393,7 @@ func TestServeStaticRespectsServerPages(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "http://demo.localhost"+path, nil)
 
 		req.Header.Set("Accept", "text/html")
+
 		if got := a.serveStatic(httptest.NewRecorder(), req); got != want {
 			t.Errorf("%s served = %v, want %v", path, got, want)
 		}
@@ -433,6 +438,7 @@ func TestServeStaticRespectsServerPaths(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "http://demo.localhost/missing", nil)
 
 	req.Header.Set("Accept", "text/html")
+
 	if a.serveStatic(httptest.NewRecorder(), req) {
 		t.Error("root server path still fell back to index.html")
 	}
@@ -490,6 +496,7 @@ func TestStoppedAppDoesNotServeStatic(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	s.handleProxy(rec, req)
+
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("stopped app status = %d, want 503", rec.Code)
 	}
@@ -497,6 +504,7 @@ func TestStoppedAppDoesNotServeStatic(t *testing.T) {
 	if strings.Contains(rec.Body.String(), "spa") {
 		t.Error("stopped app served its static index")
 	}
+
 	a.mu.Lock()
 
 	a.cmd = &exec.Cmd{}
@@ -507,6 +515,7 @@ func TestStoppedAppDoesNotServeStatic(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	s.handleProxy(rec, req)
+
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "spa") {
 		t.Errorf("running app static response = %d %q", rec.Code, rec.Body.String())
 	}

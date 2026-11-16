@@ -69,6 +69,7 @@ func printRuntimePlan(pre deployPreflight, hasCwasm bool) {
 		fmt.Fprintln(os.Stderr, "casm: supervisor will recompile main.wasm")
 		return
 	}
+
 	fmt.Fprintln(os.Stderr, "casm: mismatch and supervisor has no compiler; deploy may fail")
 }
 

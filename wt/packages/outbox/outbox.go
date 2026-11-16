@@ -363,13 +363,11 @@ func scanRecord(row interface {
 	var err error
 
 	record.NextAttemptAt, err = parseTime(nextAttempt)
-
 	if err != nil {
 		return Record{}, err
 	}
 
 	record.CreatedAt, err = parseTime(createdAt)
-
 	if err != nil {
 		return Record{}, err
 	}

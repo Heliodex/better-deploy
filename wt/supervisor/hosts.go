@@ -245,6 +245,8 @@ func normaliseAppHosts(hosts []string, primary, domain string) ([]string, error)
 		seen[host] = true
 		normalised = append(normalised, host)
 	}
+
 	slices.Sort(normalised)
+
 	return normalised, nil
 }

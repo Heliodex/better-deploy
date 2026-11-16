@@ -126,6 +126,7 @@ func ServeStorage(storeErr error, migrate func(context.Context) error, next http
 			if r.Method != http.MethodPost {
 				w.Header().Set("Allow", "POST")
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 				return
 			}
 
@@ -133,7 +134,9 @@ func ServeStorage(storeErr error, migrate func(context.Context) error, next http
 				http.Error(w, "storage schema: "+err.Error(), http.StatusInternalServerError)
 				return
 			}
+
 			w.WriteHeader(http.StatusNoContent)
+
 			return
 		}
 
@@ -147,6 +150,7 @@ func ServeStorage(storeErr error, migrate func(context.Context) error, next http
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+
 		next.ServeHTTP(w, r)
 	})
 }
@@ -165,6 +169,7 @@ func WriteErrorCode(w http.ResponseWriter, status int, code, message string) {
 	if code == "" {
 		code = ErrorCode(status)
 	}
+
 	WriteJSON(w, status, ErrorResponse{
 		Error: message,
 		Code: code,
@@ -181,6 +186,7 @@ func WriteErrorField(w http.ResponseWriter, status int, code, field, message str
 	if code == "" {
 		code = ErrorCode(status)
 	}
+
 	WriteJSON(w, status, ErrorResponse{
 		Error: message,
 		Code: code,

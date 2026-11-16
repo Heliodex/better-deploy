@@ -69,6 +69,7 @@ func appCallSignatureV2(key, caller, method, path, timestamp, bodyHash string) s
 func Caller(r *http.Request) (string, bool) {
 	caller := r.Header.Get(AppCallerHeader)
 	timestamp := r.Header.Get(AppTimestampHeader)
+
 	v2 := r.Header.Get(AppSignatureV2Header)
 	if caller == "" || timestamp == "" || v2 == "" {
 		return "", false
@@ -115,6 +116,7 @@ func appURLEnvName(name string) string {
 	var key strings.Builder
 
 	key.WriteString(appURLEnvPrefix)
+
 	for _, char := range strings.ToUpper(name) {
 		switch {
 		case char >= 'A' && char <= 'Z', char >= '0' && char <= '9':
@@ -156,6 +158,8 @@ func NewAppRequest(ctx context.Context, method, target, path string, body io.Rea
 	if err != nil {
 		return nil, err
 	}
+
 	req.Header.Set("Authorization", "Bearer "+AppToken())
+
 	return req, nil
 }

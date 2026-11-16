@@ -25,5 +25,6 @@ func init() {
 		handler = application.handler()
 		migrate = application.migrate
 	}
+
 	wasihttp.Handle(app.ServeStorage(storeErr, migrate, handler).ServeHTTP)
 }

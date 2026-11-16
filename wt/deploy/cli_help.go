@@ -572,6 +572,7 @@ func findHelpSub(cmd *helpCommand, name string) *helpCommand {
 // helpTarget turns command arguments into a help lookup path. If a help flag is present, the tokens before it are searched for a subcommand so wt jobs enqueue --help shows enqueue's help.
 func helpTarget(command string, args []string) []string {
 	target := []string{command}
+
 	topic := findHelpCommand(command)
 	if topic == nil || len(topic.subs) == 0 {
 		return target
@@ -606,6 +607,7 @@ func printCommandIndex(w io.Writer) {
 	for _, command := range helpCommands {
 		fmt.Fprintf(w, "  %-*s  %s\n", width, command.name, command.summary)
 	}
+
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "run `wt help <command>` for that command's flags and examples; -h and --help work too")
 }
@@ -636,12 +638,14 @@ func printHelpFlags(w io.Writer, flags []helpFlag) {
 func printCommandHelp(w io.Writer, command *helpCommand, title string, client bool) {
 	fmt.Fprintf(w, "wt %s - %s\n\n", title, command.summary)
 	fmt.Fprintln(w, "usage:")
+
 	for _, line := range command.usage {
 		fmt.Fprintf(w, "  %s\n", line)
 	}
 
 	if len(command.details) > 0 {
 		fmt.Fprintln(w)
+
 		for _, line := range command.details {
 			fmt.Fprintln(w, line)
 		}
@@ -672,12 +676,14 @@ func printCommandHelp(w io.Writer, command *helpCommand, title string, client bo
 		for _, sub := range command.subs {
 			fmt.Fprintf(w, "  %-*s  %s\n", width, sub.name, sub.summary)
 		}
+
 		fmt.Fprintf(w, "\nrun `wt help %s <subcommand>` for details\n", command.name)
 	}
 
 	if len(command.examples) > 0 {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "examples:")
+
 		for _, example := range command.examples {
 			fmt.Fprintf(w, "  %s\n", example)
 		}
@@ -708,6 +714,8 @@ func writeHelp(w io.Writer, args []string) error {
 		topic = sub
 		title += " " + sub.name
 	}
+
 	printCommandHelp(w, topic, title, inheritClient)
+
 	return nil
 }

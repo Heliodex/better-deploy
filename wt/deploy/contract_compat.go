@@ -90,6 +90,7 @@ func compatProps(node map[string]any) map[string]any {
 // compatRepoPath returns the app directory relative to the repository root, with a trailing slash.
 func compatRepoPath(dir string) (string, error) {
 	cmd := exec.CommandContext(context.Background(), "git", "-C", dir, "rev-parse", "--show-prefix")
+
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("read repo prefix: %w", err)
@@ -133,6 +134,7 @@ func compatSourceAtRef(dir, ref, web string) (string, bool, error) {
 	}
 
 	show := exec.CommandContext(context.Background(), "git", "-C", dir, "show", ref+":"+path)
+
 	data, err := show.Output()
 	if err != nil {
 		return "", false, fmt.Errorf("read %s at %s: %w", path, ref, err)
@@ -305,6 +307,7 @@ func diffCompatKeywords(schema, path string, oldMap, newMap map[string]any) (bre
 		}
 
 		newValue, newOK := newMap[keyword]
+
 		oldValue, oldOK := oldMap[keyword]
 		if oldOK == newOK && reflect.DeepEqual(oldValue, newValue) {
 			continue
@@ -324,6 +327,7 @@ func diffCompatKeywords(schema, path string, oldMap, newMap map[string]any) (bre
 // diffCompatType compares type keywords. Dropping null is safe; every other change breaks a laggard.
 func diffCompatType(schema, path string, oldValue, newValue any) []compatBreak {
 	oldSet := compatTypeNames(oldValue)
+
 	newSet := compatTypeNames(newValue)
 	if reflect.DeepEqual(oldSet, newSet) {
 		return nil
@@ -334,6 +338,7 @@ func diffCompatType(schema, path string, oldValue, newValue any) []compatBreak {
 
 		delete(oldSet, "null")
 		delete(newSet, "null")
+
 		if reflect.DeepEqual(oldSet, newSet) {
 			if oldNull && !newNull {
 				return nil
@@ -363,6 +368,7 @@ func diffCompatType(schema, path string, oldValue, newValue any) []compatBreak {
 // diffCompatSchema compares two schema nodes and reports every breaking change.
 func diffCompatSchema(schema, path string, oldNode, newNode any) []compatBreak {
 	newMap, newOK := newNode.(map[string]any)
+
 	oldMap, oldOK := oldNode.(map[string]any)
 	if !oldOK || !newOK {
 		if reflect.DeepEqual(oldNode, newNode) {
@@ -401,8 +407,10 @@ func diffCompatProperties(schema, path string, oldMap, newMap map[string]any) (b
 			removed = append(removed, name)
 		}
 	}
+
 	slices.Sort(added)
 	slices.Sort(removed)
+
 	if len(added) == 1 && len(removed) == 1 && reflect.DeepEqual(oldProps[removed[0]], newProps[added[0]]) {
 		breaks = append(breaks, compatBreak{
 			Schema: schema,
@@ -444,6 +452,7 @@ func diffCompatProperties(schema, path string, oldMap, newMap map[string]any) (b
 // diffCompatItems compares array item schemas.
 func diffCompatItems(schema, path string, oldMap, newMap map[string]any) []compatBreak {
 	newItems, newOK := newMap["items"]
+
 	oldItems, oldOK := oldMap["items"]
 	if !oldOK && !newOK {
 		return nil
@@ -469,6 +478,7 @@ func walkCompatPointer(node any, fragment string) (any, error) {
 
 	for part := range strings.SplitSeq(strings.TrimPrefix(fragment, "/"), "/") {
 		part = strings.ReplaceAll(strings.ReplaceAll(part, "~1", "/"), "~0", "~")
+
 		mapped, ok := current.(map[string]any)
 		if !ok {
 			return nil, fmt.Errorf("reference fragment %s does not resolve", fragment)
@@ -487,6 +497,7 @@ func walkCompatPointer(node any, fragment string) (any, error) {
 // resolveCompatRef resolves a sibling-file reference like message.json or message.json#/properties/id.
 func resolveCompatRef(docs map[string]map[string]any, ref string) (any, error) {
 	file, fragment, _ := strings.Cut(ref, "#")
+
 	doc, ok := docs[file]
 	if !ok {
 		return nil, fmt.Errorf("unresolvable reference %s", ref)
@@ -571,6 +582,7 @@ func compatDocs(baseline, current map[string]map[string]any) (breaks []compatBre
 				Rule: "schema removed",
 				Detail: "old clients still expect it",
 			})
+
 			continue
 		}
 
@@ -581,6 +593,7 @@ func compatDocs(baseline, current map[string]map[string]any) (breaks []compatBre
 				Rule: "reference unresolvable",
 				Detail: err.Error(),
 			})
+
 			continue
 		}
 
@@ -591,12 +604,15 @@ func compatDocs(baseline, current map[string]map[string]any) (breaks []compatBre
 				Rule: "reference unresolvable",
 				Detail: err.Error(),
 			})
+
 			continue
 		}
 
 		breaks = append(breaks, diffCompatSchema(name, "", oldInlined, newInlined)...)
 	}
+
 	slices.SortFunc(breaks, compareCompatBreaks)
+
 	return
 }
 

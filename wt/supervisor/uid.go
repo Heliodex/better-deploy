@@ -120,6 +120,7 @@ func newUIDAllocator(path string, base int) (*uidAllocator, error) {
 	for name := range a.apps {
 		names = append(names, name)
 	}
+
 	sort.Strings(names)
 
 	var changed bool
@@ -131,6 +132,7 @@ func newUIDAllocator(path string, base int) (*uidAllocator, error) {
 			delete(a.apps, name)
 
 			changed = true
+
 			continue
 		}
 
@@ -182,6 +184,7 @@ func (a *uidAllocator) Allocate(name string) (int, error) {
 	if err := a.saveLocked(); err != nil {
 		delete(a.apps, name)
 		delete(a.used, uid)
+
 		return 0, err
 	}
 

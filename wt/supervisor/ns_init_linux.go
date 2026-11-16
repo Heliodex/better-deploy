@@ -230,6 +230,7 @@ func runApp(plan *nsPlan, args []string) int {
 
 	close(done)
 	signal.Stop(signals)
+
 	if err == nil {
 		return 0
 	}
@@ -405,5 +406,6 @@ func nsInitMain(args []string) {
 	if err := waitForStart(); err != nil {
 		nsFatal(err)
 	}
+
 	os.Exit(runApp(&plan, args))
 }

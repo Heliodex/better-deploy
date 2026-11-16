@@ -39,6 +39,7 @@ func TestSeedOnce(t *testing.T) {
 				statements = append(statements, req.SQL)
 
 				w.Header().Set("Content-Type", "application/json")
+
 				switch {
 				case strings.Contains(req.SQL, "from meta"):
 					_, _ = fmt.Fprintf(w, `{"columns":["count"],"rows":[[%d]]}`, tc.seeded)
@@ -66,7 +67,6 @@ func TestSeedOnce(t *testing.T) {
 
 				return nil
 			})
-
 			if err != nil {
 				t.Fatal(err)
 			}

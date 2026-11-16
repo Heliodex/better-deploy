@@ -364,6 +364,7 @@ func (s *storageServer) runMigration(w http.ResponseWriter, r *http.Request, app
 		writeStorageError(w, err)
 		return
 	}
+
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -487,6 +488,7 @@ func (s *storageServer) readSchema(w http.ResponseWriter, r *http.Request, app s
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 		return
 	}
 
@@ -499,5 +501,6 @@ func (s *storageServer) readSchema(w http.ResponseWriter, r *http.Request, app s
 		writeStorageError(w, err)
 		return
 	}
+
 	writeJSON(w, http.StatusOK, schema)
 }

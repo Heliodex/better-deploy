@@ -83,6 +83,7 @@ func mergeEnv(base, override []string) []string {
 	for key := range values {
 		keys = append(keys, key)
 	}
+
 	sort.Strings(keys)
 
 	merged := make([]string, 0, len(keys))
@@ -124,6 +125,7 @@ func parseServePort(line string) (int, bool) {
 	}
 
 	portText, _, _ := strings.Cut(rest, "/")
+
 	port, err := strconv.Atoi(strings.TrimSpace(portText))
 	if err != nil || port < 1 || port > 65535 {
 		return 0, false
@@ -168,7 +170,9 @@ func sortedKeys(values map[string]string) []string {
 	for key := range values {
 		keys = append(keys, key)
 	}
+
 	sort.Strings(keys)
+
 	return keys
 }
 

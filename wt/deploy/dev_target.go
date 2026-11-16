@@ -46,6 +46,7 @@ func detectTarget(wasmtime string) (string, error) {
 		out, err := exec.CommandContext(ctx, wasmtime, "serve", "--allow-precompiled", "--addr", "127.0.0.1:0", "--target", target, artifact).CombinedOutput()
 
 		cancel()
+
 		if err == nil {
 			return target, nil
 		}
@@ -70,6 +71,8 @@ func resolveDevTarget(cfg *devConfig) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	fmt.Fprintln(os.Stderr, "dev: using target", target)
+
 	return target, nil
 }

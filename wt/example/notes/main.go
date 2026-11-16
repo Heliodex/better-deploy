@@ -93,6 +93,7 @@ func handle(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "load notes: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
+
 		app.WriteJSON(w, http.StatusOK, notes)
 	case r.URL.Path == "/notes" && r.Method == http.MethodPost:
 		body, err := io.ReadAll(io.LimitReader(r.Body, maxNoteBody))
@@ -118,6 +119,7 @@ func handle(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "save notes: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
+
 		app.WriteJSON(w, http.StatusCreated, entry)
 	default:
 		http.NotFound(w, r)

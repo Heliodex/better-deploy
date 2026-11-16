@@ -35,6 +35,7 @@ func TestAppFetchPublish(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer "+storage.tokenFor("caller"))
 	s.handleAppFetch(rec, req)
+
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("app fetch publish = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -48,6 +49,7 @@ func TestAppFetchPublish(t *testing.T) {
 
 func TestEventBusPublishSubscribeAndCursor(t *testing.T) {
 	bus := newEventBus()
+
 	first, err := bus.publish("demo", "chat", []byte(`{"text":"one"}`))
 	if err != nil {
 		t.Fatal(err)
@@ -85,7 +87,9 @@ func TestEventBusPublishSubscribeAndCursor(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("no live event")
 	}
+
 	bus.unsubscribe("demo", sub)
+
 	for i := range eventBusMaxEvents + 5 {
 		if _, err := bus.publish("demo", "flood", []byte(`{"i":`+strconv.Itoa(i)+`}`)); err != nil {
 			t.Fatal(err)
@@ -112,6 +116,7 @@ func TestEventPublishAndSSEReplay(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/publish", strings.NewReader(`{"topic":"chat","data":{"text":"hello"}}`))
 
 	handleEventPublish(s.bus, rec, req, "demo")
+
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("publish = %d: %s", rec.Code, rec.Body.String())
 	}

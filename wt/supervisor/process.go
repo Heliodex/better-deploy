@@ -26,6 +26,7 @@ func (a *app) beginRequest() bool {
 	if a.draining || a.retired {
 		return false
 	}
+
 	a.requests.Add(1)
 
 	a.inflight++
@@ -76,6 +77,7 @@ func (s *supervisor) checkDependencyCycles() error {
 		deps := append([]string(nil), a.cfg.DependsOn...)
 
 		a.mu.Unlock()
+
 		if err := s.dependencyCycleError(name, deps); err != nil {
 			return fmt.Errorf("app %s: %w", name, err)
 		}
@@ -92,9 +94,11 @@ func (s *supervisor) kill(a *app) {
 	done := a.done
 
 	a.mu.Unlock()
+
 	if cmd == nil || cmd.Process == nil {
 		return
 	}
+
 	log.Printf("app %s: stopping pid %d", a.name, cmd.Process.Pid)
 
 	_ = cmd.Process.Signal(syscall.SIGTERM)
@@ -103,6 +107,7 @@ func (s *supervisor) kill(a *app) {
 	case <-done:
 	case <-time.After(stopTimeout):
 		_ = cmd.Process.Kill()
+
 		<-done
 	}
 }
@@ -113,6 +118,7 @@ func (s *supervisor) register(a *app) {
 	if old := s.apps[a.name]; old != nil {
 		s.removeAppHostsLocked(old, old.cfg)
 	}
+
 	s.removeAppHostsLocked(a, a.cfg)
 
 	s.apps[a.name] = a
@@ -121,11 +127,13 @@ func (s *supervisor) register(a *app) {
 		s.hosts[host] = a
 	}
 	s.mu.Unlock()
+
 	if s.jobs != nil {
 		if err := s.jobs.start(a.name, a.cfg.JobConcurrency); err != nil {
 			log.Printf("jobs %s: %v", a.name, err)
 		}
 	}
+
 	s.broadcast()
 }
 
@@ -176,18 +184,22 @@ func (s *supervisor) restart(a *app) {
 	a.mu.Unlock()
 
 	cwasm := filepath.Join(dir, "main.cwasm")
+
 	epoch, err := s.ensureArtifact(dir, requireEpoch)
 	if err != nil {
 		log.Printf("app %s: restart: %v", a.name, err)
 		s.scheduleRetry(a)
+
 		return
 	}
+
 	a.mu.Lock()
 
 	a.wasmEpoch = epoch
 	a.digest = sourceDigest(dir)
 
 	a.mu.Unlock()
+
 	if err := s.launch(a, cwasm); err != nil {
 		log.Printf("app %s: restart: %v", a.name, err)
 		s.kill(a)
@@ -202,6 +214,7 @@ func (s *supervisor) finishExit(a *app, cmd *exec.Cmd, done chan struct{}, exitE
 	if a.cmd != cmd {
 		a.mu.Unlock()
 		close(done)
+
 		return
 	}
 
@@ -228,6 +241,7 @@ func (s *supervisor) finishExit(a *app, cmd *exec.Cmd, done chan struct{}, exitE
 	a.mu.Unlock()
 	close(done)
 	s.broadcast()
+
 	if exitErr != nil {
 		log.Printf(message, a.name, exitErr)
 	}
@@ -235,6 +249,7 @@ func (s *supervisor) finishExit(a *app, cmd *exec.Cmd, done chan struct{}, exitE
 	if retired || s.stopping.Load() {
 		return
 	}
+
 	log.Printf("app %s: restarting in %s", a.name, delay)
 	s.scheduleRestart(a, delay)
 }
@@ -245,6 +260,7 @@ func (s *supervisor) finishRunnerExit(a *app, cmd *exec.Cmd, done chan struct{},
 	if nsRoot != "" {
 		_ = os.RemoveAll(nsRoot)
 	}
+
 	s.finishExit(a, cmd, done, exitErr, "app %s: exited: %v")
 }
 
@@ -277,7 +293,9 @@ func (s *supervisor) consumeRunnerStream(a *app, cmd *exec.Cmd, done chan struct
 			} else if event.Code != 0 {
 				exitErr = fmt.Errorf("exited with code %d", event.Code)
 			}
+
 			s.finishRunnerExit(a, cmd, done, nsRoot, exitErr)
+
 			return
 		}
 	}
@@ -295,6 +313,7 @@ func (s *supervisor) adoptApp(name, dir string, cfg appConfig, info runnerAppInf
 	if err != nil {
 		return nil, fmt.Errorf("app logs: %w", err)
 	}
+
 	logs.setSecrets(s.appRedactionValues(name))
 
 	var epoch bool
@@ -351,6 +370,7 @@ func (s *supervisor) adoptApp(name, dir string, cfg appConfig, info runnerAppInf
 	a.proxy = s.newProxy(a)
 
 	s.startSchedule(a)
+
 	return a, nil
 }
 
@@ -359,6 +379,7 @@ func (s *supervisor) stop(a *app) {
 	if a == nil {
 		return
 	}
+
 	a.mu.Lock()
 
 	a.retired = true
@@ -375,11 +396,13 @@ func (s *supervisor) stop(a *app) {
 	a.mu.Unlock()
 	s.stopSchedule(a)
 	s.kill(a)
+
 	if iso == nil {
 		iso = &isolationPlan{
 			app: a,
 		}
 	}
+
 	iso.close(s)
 }
 
@@ -394,6 +417,7 @@ func (s *supervisor) createApp(name, dir string, cfg appConfig, asleep bool) (*a
 	}
 
 	cwasm := filepath.Join(dir, "main.cwasm")
+
 	epoch, err := s.ensureArtifact(dir, cfg.requestTimeout > 0)
 	if err != nil {
 		return nil, err
@@ -403,6 +427,7 @@ func (s *supervisor) createApp(name, dir string, cfg appConfig, asleep bool) (*a
 	if err != nil {
 		return nil, fmt.Errorf("app logs: %w", err)
 	}
+
 	logs.setSecrets(s.appRedactionValues(name))
 
 	a := &app{
@@ -430,7 +455,9 @@ func (s *supervisor) createApp(name, dir string, cfg appConfig, asleep bool) (*a
 		s.stop(a)
 		return nil, err
 	}
+
 	s.startSchedule(a)
+
 	return a, nil
 }
 
@@ -439,10 +466,13 @@ func (s *supervisor) drainAndStop(a *app, action string) {
 	if a == nil {
 		return
 	}
+
 	a.markDraining()
+
 	if !drainApp(a, drainTimeout) {
 		log.Printf("%s %s: still handling requests after %s", action, a.name, drainTimeout)
 	}
+
 	s.stop(a)
 }
 
@@ -475,6 +505,7 @@ func (s *supervisor) storedAppConfig(info runnerAppInfo, name string, cfg appCon
 // An adopted app is removed from snapshot, so whatever remains in snapshot afterwards has no app directory.
 func (s *supervisor) loadAppEntry(name string, snapshot map[string]runnerAppInfo) {
 	dir := filepath.Join(s.cfg.appsDir, name)
+
 	info, running := snapshot[name]
 	if running && info.Dir != "" {
 		dir = info.Dir
@@ -501,9 +532,12 @@ func (s *supervisor) loadAppEntry(name string, snapshot map[string]runnerAppInfo
 			log.Printf("app %s: %v (skipped)", name, err)
 			return
 		}
+
 		s.register(a)
+
 		return
 	}
+
 	delete(snapshot, name)
 
 	a, err := s.adoptApp(name, dir, cfg, info)
@@ -514,6 +548,7 @@ func (s *supervisor) loadAppEntry(name string, snapshot map[string]runnerAppInfo
 
 		return
 	}
+
 	s.register(a)
 }
 
@@ -539,6 +574,7 @@ func (s *supervisor) loadApps() error {
 		if !entry.IsDir() || !validName(name) {
 			continue
 		}
+
 		s.loadAppEntry(name, snapshot)
 	}
 
@@ -564,6 +600,7 @@ func (s *supervisor) waitForPort(a *app, finder *portFinder, done <-chan struct{
 		a.port = port
 
 		a.mu.Unlock()
+
 		return nil
 	case <-done:
 		return errors.New("wasmtime exited before it reported a serve address")
@@ -595,6 +632,7 @@ func (s *supervisor) waitReadyUntil(a *app, done <-chan struct{}, deadline time.
 
 		timeout := min(healthCheckTimeout, max(time.Until(deadline), time.Millisecond))
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 		if err != nil {
 			cancel()
@@ -604,6 +642,7 @@ func (s *supervisor) waitReadyUntil(a *app, done <-chan struct{}, deadline time.
 		response, err := healthClient.Do(request)
 
 		cancel()
+
 		if err == nil {
 			body, _ := io.ReadAll(io.LimitReader(response.Body, 512))
 			_ = response.Body.Close()
@@ -624,6 +663,7 @@ func (s *supervisor) waitReadyUntil(a *app, done <-chan struct{}, deadline time.
 
 			return fmt.Errorf("no response on %s within %s", target, limit)
 		}
+
 		time.Sleep(wait)
 
 		wait = min(wait*2, time.Second)
@@ -637,5 +677,6 @@ func (s *supervisor) waitReady(a *app, done <-chan struct{}) error {
 	limit := a.cfg.startupLimit()
 
 	a.mu.Unlock()
+
 	return s.waitReadyUntil(a, done, time.Now().Add(limit))
 }

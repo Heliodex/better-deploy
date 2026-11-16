@@ -35,6 +35,7 @@ func (s *supervisor) handleAppBlob(w http.ResponseWriter, r *http.Request, name,
 		writeBlobError(w, err)
 		return
 	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -55,6 +56,7 @@ func (s *supervisor) handleAppBlobGC(w http.ResponseWriter, r *http.Request, nam
 	}
 
 	olderThan := strings.TrimSpace(request.OlderThan)
+
 	duration, err := time.ParseDuration(olderThan)
 	if err != nil || duration <= 0 {
 		writeError(w, http.StatusBadRequest, "olderThan must be a positive duration such as 720h")
@@ -103,6 +105,7 @@ func (s *supervisor) handleAppBlobGC(w http.ResponseWriter, r *http.Request, nam
 			return
 		}
 	}
+
 	writeJSON(w, http.StatusOK, blobGCResponse{
 		Deleted: deleted,
 		DryRun: request.DryRun,
@@ -126,5 +129,6 @@ func (s *supervisor) handleAppBlobs(w http.ResponseWriter, r *http.Request, name
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	writeJSON(w, http.StatusOK, map[string]any{"blobs": blobs})
 }

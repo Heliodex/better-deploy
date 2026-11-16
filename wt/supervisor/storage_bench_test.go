@@ -33,6 +33,7 @@ func benchmarkStoragePost(b *testing.B, client *http.Client, url, token, body st
 	if err != nil {
 		b.Fatal(err)
 	}
+
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 
@@ -52,6 +53,7 @@ func benchmarkStoragePost(b *testing.B, client *http.Client, url, token, body st
 
 func seedStorageDB(tb testing.TB, db *sql.DB) {
 	tb.Helper()
+
 	if _, err := db.Exec(`create table notes (
 		id text primary key,
 		body text not null,
@@ -89,12 +91,15 @@ func BenchmarkSQLiteQueryConfiguredConn(b *testing.B) {
 	defer db.Close()
 
 	db.SetMaxOpenConns(1)
+
 	if _, err := db.Exec(`pragma journal_mode = WAL`); err != nil {
 		b.Fatal(err)
 	}
+
 	seedStorageDB(b, db)
 
 	ctx := context.Background()
+
 	conn, err := db.Conn(ctx)
 	if err != nil {
 		b.Fatal(err)
@@ -124,10 +129,13 @@ func BenchmarkSQLiteQueryDirect(b *testing.B) {
 	defer db.Close()
 
 	db.SetMaxOpenConns(1)
+
 	if _, err := db.Exec(`pragma journal_mode = WAL`); err != nil {
 		b.Fatal(err)
 	}
+
 	seedStorageDB(b, db)
+
 	for b.Loop() {
 		var id, body, createdAt string
 
@@ -144,13 +152,16 @@ func benchmarkStorageServer(b *testing.B) (*storageServer, string) {
 	if err != nil {
 		b.Fatal(err)
 	}
+
 	b.Cleanup(s.close)
 
 	db, err := s.dbFor("bench")
 	if err != nil {
 		b.Fatal(err)
 	}
+
 	seedStorageDB(b, db)
+
 	return s, s.tokenFor("bench")
 }
 
@@ -161,6 +172,7 @@ func BenchmarkStorageExecHTTP(b *testing.B) {
 	client := benchmarkHTTPClient()
 
 	b.ReportAllocs()
+
 	for b.Loop() {
 		benchmarkStoragePost(b, client, s.url()+"/v1/exec", token, body)
 	}
@@ -173,6 +185,7 @@ func BenchmarkStoragePointQueryHTTP(b *testing.B) {
 	client := benchmarkHTTPClient()
 
 	b.ReportAllocs()
+
 	for b.Loop() {
 		benchmarkStoragePost(b, client, s.url()+"/v1/query", token, body)
 	}
@@ -185,6 +198,7 @@ func BenchmarkStorageQueryHTTP(b *testing.B) {
 	client := benchmarkHTTPClient()
 
 	b.ReportAllocs()
+
 	for b.Loop() {
 		benchmarkStoragePost(b, client, s.url()+"/v1/query", token, body)
 	}

@@ -17,6 +17,7 @@ type overviewApp struct {
 // appSummary describes the app.json in dir; hasApp reports whether one could be read.
 func appSummary(dir string) (summary string, hasApp bool) {
 	path := filepath.Join(dir, "app.json")
+
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return "app: none in this directory", false
@@ -62,6 +63,7 @@ func printOverview(w io.Writer, dir string) {
 	if err != nil {
 		abs = dir
 	}
+
 	fmt.Fprintf(w, "wt: no command given\ndirectory: %s\n", abs)
 
 	summary, hasApp := appSummary(abs)
@@ -70,6 +72,7 @@ func printOverview(w io.Writer, dir string) {
 
 	host := firstNonEmpty(os.Getenv("WT_DEPLOY_HOST"))
 	configPath := defaultConfigPath()
+
 	cfg, cfgErr := loadFileConfig("")
 	if cfgErr == nil {
 		host = firstNonEmpty(host, cfg.Host)
@@ -88,5 +91,6 @@ func printOverview(w io.Writer, dir string) {
 			fmt.Fprintf(w, "config: %s\n", configPath)
 		}
 	}
+
 	fmt.Fprintln(w, overviewHint(hasApp, host != ""))
 }

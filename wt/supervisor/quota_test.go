@@ -206,6 +206,7 @@ func TestDataQuotaMonitorIsNoOp(t *testing.T) {
 			return "", nil
 		},
 	}
+
 	quota := newDataQuota(dataQuotaMonitor, "", t.TempDir(), "setquota", "findmnt", runner.run)
 	if quota.enabled() {
 		t.Fatal("monitor mode should not be enabled")

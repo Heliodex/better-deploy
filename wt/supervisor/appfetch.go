@@ -103,6 +103,7 @@ func appURLEnvName(name string) string {
 	var key strings.Builder
 
 	key.WriteString(appURLEnvPrefix)
+
 	for _, char := range strings.ToUpper(name) {
 		switch {
 		case char >= 'A' && char <= 'Z', char >= '0' && char <= '9':
@@ -156,6 +157,7 @@ func (s *supervisor) handleAppFetch(w http.ResponseWriter, r *http.Request) {
 	if !ok || s.lookup(caller) == nil {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="wt-app-fetch"`)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+
 		return
 	}
 
@@ -170,11 +172,13 @@ func (s *supervisor) handleAppFetch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "app not found")
 		return
 	}
+
 	a.mu.Lock()
 
 	cfg := a.cfg
 
 	a.mu.Unlock()
+
 	if !allowsAppCaller(cfg.AllowCallers, caller) {
 		writeError(w, http.StatusForbidden, "app does not allow calls from "+caller)
 		return
@@ -186,13 +190,16 @@ func (s *supervisor) handleAppFetch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxAppFetchBody)
+
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			writeError(w, http.StatusRequestEntityTooLarge, "app fetch body is too large")
 			return
 		}
+
 		writeError(w, http.StatusBadRequest, "read app fetch body: "+err.Error())
+
 		return
 	}
 
@@ -208,6 +215,7 @@ func (s *supervisor) handleAppFetch(w http.ResponseWriter, r *http.Request) {
 	r.Header.Del("X-Forwarded-For")
 	r.Header.Del("X-Forwarded-Host")
 	r.Header.Del("X-Forwarded-Proto")
+
 	for key := range r.Header {
 		if strings.HasPrefix(strings.ToLower(key), "x-wt-") {
 			delete(r.Header, key)

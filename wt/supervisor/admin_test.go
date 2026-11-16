@@ -101,7 +101,6 @@ func TestAppLogRotation(t *testing.T) {
 	}
 
 	got, err = logs.tail(1 << 20)
-
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +119,9 @@ func TestAppLogSeparatesSupervisorLines(t *testing.T) {
 	if _, err := io.WriteString(logs, "WARN careful\n"); err != nil {
 		t.Fatal(err)
 	}
+
 	logs.logSupervisor("GET 200 1.5ms /hello")
+
 	if _, err := io.WriteString(logs, "plain line\n"); err != nil {
 		t.Fatal(err)
 	}
@@ -227,6 +228,7 @@ func TestHubBroadcast(t *testing.T) {
 	second := h.subscribe()
 
 	h.publish([]byte("hello"))
+
 	for _, ch := range []chan []byte{first, second} {
 		select {
 		case got := <-ch:
@@ -237,8 +239,10 @@ func TestHubBroadcast(t *testing.T) {
 			t.Error("subscriber did not receive broadcast")
 		}
 	}
+
 	h.unsubscribe(first)
 	h.publish([]byte("again"))
+
 	select {
 	case <-first:
 		t.Error("unsubscribed channel received a broadcast")
@@ -333,6 +337,7 @@ func TestAdminStaticCacheHeaders(t *testing.T) {
 		rec := httptest.NewRecorder()
 
 		adminStatic().ServeHTTP(rec, req)
+
 		if got := rec.Header().Get("Cache-Control"); got != tc.want {
 			t.Errorf("GET %s Cache-Control = %q, want %q", tc.path, got, tc.want)
 		}
@@ -360,6 +365,7 @@ func (r *safeRecorder) Write(p []byte) (int, error) {
 	r.once.Do(func() {
 		close(r.wrote)
 	})
+
 	return n, err
 }
 
@@ -392,6 +398,7 @@ func TestAuthorisedAcceptsCookie(t *testing.T) {
 		Name: "wt_token",
 		Value: "secret",
 	})
+
 	if !s.authorised(req) {
 		t.Error("cookie token should authorise")
 	}
@@ -402,6 +409,7 @@ func TestAuthorisedAcceptsCookie(t *testing.T) {
 		Name: "wt_token",
 		Value: "wrong",
 	})
+
 	if s.authorised(req) {
 		t.Error("wrong cookie token should not authorise")
 	}
@@ -433,6 +441,7 @@ func TestHandleAppMethods(t *testing.T) {
 		rec := httptest.NewRecorder()
 
 		s.handleApp(rec, req)
+
 		if tc.allow == "" {
 			if rec.Code != http.StatusNotFound {
 				t.Errorf("%s %s = %d, want 404", tc.method, tc.target, rec.Code)
@@ -457,6 +466,7 @@ func TestHandleAppsRequiresAuth(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	s.handleApps(rec, req)
+
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", rec.Code)
 	}
@@ -468,6 +478,7 @@ func TestHandleAppsRequiresAuth(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	s.handleApps(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", rec.Code)
 	}
@@ -479,6 +490,7 @@ func TestHandleEventsRequiresAuth(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	s.handleEvents(rec, req)
+
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", rec.Code)
 	}
@@ -516,6 +528,7 @@ func TestHandleEventsStreamsSnapshot(t *testing.T) {
 		<-finished
 		t.Fatal("timed out waiting for snapshot")
 	}
+
 	cancel()
 	<-finished
 
@@ -561,6 +574,7 @@ func TestHandleLogStreamBacklogAndLines(t *testing.T) {
 
 	waitFor := func(want string) {
 		t.Helper()
+
 		for deadline := time.After(5 * time.Second); !strings.Contains(rec.Body(), want); {
 			select {
 			case <-deadline:
@@ -573,6 +587,7 @@ func TestHandleLogStreamBacklogAndLines(t *testing.T) {
 	}
 
 	waitFor(`"type":"backlog"`)
+
 	if body := rec.Body(); !strings.Contains(body, `"message":"existing line"`) {
 		t.Errorf("backlog missing existing line: %s", body)
 	}
@@ -580,6 +595,7 @@ func TestHandleLogStreamBacklogAndLines(t *testing.T) {
 	if _, err := io.WriteString(logs, "fresh line\n"); err != nil {
 		t.Fatal(err)
 	}
+
 	waitFor(`"type":"line"`)
 	waitFor(`"message":"fresh line"`)
 	cancel()
@@ -598,6 +614,7 @@ func TestHandleLogStreamRequiresAuth(t *testing.T) {
 	s.handleLogStream(rec, req, &app{
 		name: "demo",
 	})
+
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", rec.Code)
 	}
@@ -605,6 +622,7 @@ func TestHandleLogStreamRequiresAuth(t *testing.T) {
 
 func TestHandleLogsValidation(t *testing.T) {
 	s := testSupervisor()
+
 	logs, err := newAppLog(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -620,6 +638,7 @@ func TestHandleLogsValidation(t *testing.T) {
 		rec := httptest.NewRecorder()
 
 		s.handleLogs(rec, req, a)
+
 		if rec.Code != http.StatusBadRequest {
 			t.Errorf("tail %s = %d, want 400", query, rec.Code)
 		}
@@ -643,6 +662,7 @@ func TestHandleUnknownApp(t *testing.T) {
 		rec := httptest.NewRecorder()
 
 		s.handleApp(rec, req)
+
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("GET %s = %d, want 404", target, rec.Code)
 		}

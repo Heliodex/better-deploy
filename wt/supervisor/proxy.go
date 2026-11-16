@@ -165,6 +165,7 @@ func (s *supervisor) newProxy(a *app) *httputil.ReverseProxy {
 			if remote := remoteIP(r.In.RemoteAddr); info.Trusted && remote != "" && remote != info.ClientIP {
 				chain += ", " + remote
 			}
+
 			r.Out.Header.Set("X-Forwarded-For", chain)
 			r.Out.Header.Set("X-Real-IP", info.ClientIP)
 			r.Out.Header.Set("X-Forwarded-Host", info.Authority)
@@ -181,6 +182,7 @@ func (s *supervisor) newProxy(a *app) *httputil.ReverseProxy {
 			r.Out.Header.Set(spinClientAddrHeader, info.ClientIP)
 			r.Out.Header.Set(spinPathInfoHeader, r.In.URL.RequestURI())
 			r.Out.Header.Set(spinBasePathHeader, "")
+
 			if requestID := r.In.Header.Get(requestIDHeader); requestID != "" {
 				r.Out.Header.Set(requestIDHeader, requestID)
 			}
@@ -203,9 +205,11 @@ func (s *supervisor) proxyRequest(w http.ResponseWriter, r *http.Request, a *app
 	timeout := a.cfg.requestTimeout
 
 	a.mu.Unlock()
+
 	if proxy == nil {
 		w.Header().Set("Retry-After", "1")
 		http.Error(w, "app is not ready", http.StatusServiceUnavailable)
+
 		return false
 	}
 
@@ -228,7 +232,9 @@ func (s *supervisor) proxyRequest(w http.ResponseWriter, r *http.Request, a *app
 
 		r = r.WithContext(ctx)
 	}
+
 	proxy.ServeHTTP(w, r)
+
 	return true
 }
 
@@ -238,6 +244,7 @@ func (s *supervisor) requireDependencies(w http.ResponseWriter, a *app) bool {
 	if ready {
 		return true
 	}
+
 	w.Header().Set("Retry-After", "1")
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusServiceUnavailable)
@@ -270,6 +277,7 @@ func (s *supervisor) logAccess(a *app, r *http.Request, started time.Time, reque
 	if a.logs == nil || !s.shouldLogAccess(a, status) {
 		return
 	}
+
 	a.logs.logSupervisor(formatAccessLog(r.Method, status, time.Since(started), r.URL.RequestURI(), requestID))
 }
 
@@ -281,7 +289,9 @@ func (s *supervisor) startAccess(w http.ResponseWriter, r *http.Request) string 
 
 		r.Header.Set(requestIDHeader, requestID)
 	}
+
 	w.Header().Set(requestIDHeader, requestID)
+
 	return requestID
 }
 
@@ -325,6 +335,7 @@ func (s *supervisor) serveApp(w http.ResponseWriter, r *http.Request, a *app) {
 		if err := s.wakeIdleApp(a); err != nil {
 			log.Printf("app %s: wake after idle: %v", a.name, err)
 			s.writeUnavailable(w, r, a, started, requestID, "app did not start: "+err.Error())
+
 			return
 		}
 
@@ -362,17 +373,20 @@ func (s *supervisor) serveApp(w http.ResponseWriter, r *http.Request, a *app) {
 // handleProxy resolves the app host and dispatches maintenance, events, identity and blob traffic before proxying.
 func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
 	host := s.effectiveHost(r)
+
 	a := s.appForHost(host)
 	if a == nil {
 		http.Error(w, "no app for this host", http.StatusNotFound)
 		return
 	}
+
 	a.mu.Lock()
 
 	identityMode := a.cfg.Identity == identityModePlatform
 	maintenance := a.cfg.Maintenance
 
 	a.mu.Unlock()
+
 	if maintenance {
 		s.serveMaintenance(w, r, a)
 		return
@@ -386,12 +400,14 @@ func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
 	if identityMode && s.serveIdentityApp(w, r) {
 		return
 	}
+
 	s.identityProxyHeaders(r, a.name, identityMode)
 	// Blob traffic belongs to the supervisor, not the wasm component, so large bodies never take an app slot.
 	if r.URL.Path == blobPrefix || strings.HasPrefix(r.URL.Path, blobPrefix+"/") {
 		s.handleBlobs(w, r, a)
 		return
 	}
+
 	s.serveApp(w, r, a)
 }
 
@@ -402,6 +418,7 @@ func (s *supervisor) handler() http.Handler {
 			s.handleProxy(w, r)
 			return
 		}
+
 		s.serveAdminOrProxy(w, r)
 	})
 }
@@ -414,6 +431,7 @@ func (s *supervisor) publicHandler() http.Handler {
 			s.handleProxy(w, r)
 			return
 		}
+
 		s.publicRoutes().ServeHTTP(w, r)
 	})
 }

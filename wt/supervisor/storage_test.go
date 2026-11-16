@@ -242,6 +242,7 @@ func TestStorageAllowsUnsafeLookingIdentifiers(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("exec %q: %d %s", statement, resp.StatusCode, readBody(t, resp))
 		}
+
 		resp.Body.Close()
 	}
 
@@ -273,6 +274,7 @@ func TestStorageQueryIsReadOnly(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("exec %q: %d %s", statement, resp.StatusCode, readBody(t, resp))
 		}
+
 		resp.Body.Close()
 	}
 
@@ -291,6 +293,7 @@ func TestStorageQueryIsReadOnly(t *testing.T) {
 		if resp.StatusCode != http.StatusForbidden {
 			t.Errorf("query %q: %d, want 403", statement, resp.StatusCode)
 			resp.Body.Close()
+
 			continue
 		}
 
@@ -311,6 +314,7 @@ func TestStorageQueryIsReadOnly(t *testing.T) {
 			t.Errorf("query %q: %d, want 200: %s", statement, resp.StatusCode, readBody(t, resp))
 			continue
 		}
+
 		resp.Body.Close()
 	}
 }
@@ -324,10 +328,12 @@ func TestStorageQueryReadsFTS(t *testing.T) {
 	defer s.close()
 
 	token := s.tokenFor("fts")
+
 	resp := storageSQL(t, s, token, "/v1/exec", map[string]any{"sql": `create virtual table docs using fts5(body)`})
 	if resp.StatusCode != http.StatusOK {
 		t.Skipf("fts5 is unavailable: %d %s", resp.StatusCode, readBody(t, resp))
 	}
+
 	resp.Body.Close()
 
 	resp = storageSQL(t, s, token, "/v1/exec", map[string]any{"sql": `insert into docs (body) values ('hello storage')`})
@@ -335,6 +341,7 @@ func TestStorageQueryReadsFTS(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("insert: %d %s", resp.StatusCode, readBody(t, resp))
 	}
+
 	resp.Body.Close()
 
 	resp = storageSQL(t, s, token, "/v1/query", map[string]any{"sql": `select body from docs where docs match 'hello'`})
@@ -367,6 +374,7 @@ func TestStorageSQL(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("exec %q: %d %s", statement, resp.StatusCode, readBody(t, resp))
 		}
+
 		resp.Body.Close()
 	}
 
@@ -415,6 +423,7 @@ func TestStorageSQLAllowsStringsThatLookUnsafe(t *testing.T) {
 	defer s.close()
 
 	token := s.tokenFor("strings")
+
 	resp := storageSQL(t, s, token, "/v1/query", map[string]any{"sql": `select 'load_extension' as text`})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("query: %d %s", resp.StatusCode, readBody(t, resp))
@@ -429,6 +438,7 @@ func TestStorageSQLAllowsStringsThatLookUnsafe(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("begin string: %d %s", resp.StatusCode, readBody(t, resp))
 	}
+
 	resp.Body.Close()
 }
 
@@ -479,6 +489,7 @@ func TestStorageSQLBatch(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("batch: %d %s", resp.StatusCode, readBody(t, resp))
 	}
+
 	resp.Body.Close()
 
 	resp = storageSQL(t, s, token, "/v1/batch", map[string]any{
@@ -491,6 +502,7 @@ func TestStorageSQLBatch(t *testing.T) {
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("bad batch: %d, want 500", resp.StatusCode)
 	}
+
 	resp.Body.Close()
 
 	resp = storageSQL(t, s, token, "/v1/query", map[string]any{"sql": `select count(*) from items`})
@@ -536,6 +548,7 @@ func TestStorageSQLBlob(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("oversized value: %d, want 400", resp.StatusCode)
 	}
+
 	resp.Body.Close()
 }
 
@@ -567,6 +580,7 @@ func TestStorageSQLRejectsUnsafeStatements(t *testing.T) {
 		if resp.StatusCode != http.StatusForbidden {
 			t.Errorf("%q: %d, want 403", statement, resp.StatusCode)
 		}
+
 		resp.Body.Close()
 	}
 }
@@ -598,6 +612,7 @@ func TestStorageSchemaAndMigrate(t *testing.T) {
 
 		return result
 	}
+
 	result := migrate(1, map[string]any{"sql": `create table notes (id text primary key, body text not null)`})
 	if !result.Applied || result.Version != 1 {
 		t.Errorf("first migration = %+v", result)
@@ -613,7 +628,9 @@ func TestStorageSchemaAndMigrate(t *testing.T) {
 	if err := json.UnmarshalRead(resp.Body, &schema); err != nil {
 		t.Fatal(err)
 	}
+
 	resp.Body.Close()
+
 	if schema.Version != 1 || len(schema.Tables) != 1 || schema.Tables[0].Name != "notes" || len(schema.Tables[0].Columns) != 2 {
 		t.Fatalf("schema = %+v", schema)
 	}
@@ -651,6 +668,7 @@ func TestStorageSchemaAndMigrate(t *testing.T) {
 	if resp.StatusCode == http.StatusOK {
 		t.Error("failed migration reported success")
 	}
+
 	resp.Body.Close()
 
 	resp = storageDo(t, http.MethodGet, s.url()+"/v1/schema", token, "")
@@ -658,7 +676,9 @@ func TestStorageSchemaAndMigrate(t *testing.T) {
 	if err := json.UnmarshalRead(resp.Body, &schema); err != nil {
 		t.Fatal(err)
 	}
+
 	resp.Body.Close()
+
 	if schema.Version != 2 {
 		t.Errorf("version after failed migration = %d, want 2", schema.Version)
 	}
@@ -668,6 +688,7 @@ func TestStorageSchemaAndMigrate(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("version 0 = %d, want 400", resp.StatusCode)
 	}
+
 	resp.Body.Close()
 
 	// Raw SQL still cannot use pragma; migrations are the only way to change user_version.
@@ -676,6 +697,7 @@ func TestStorageSchemaAndMigrate(t *testing.T) {
 	if resp.StatusCode != http.StatusForbidden {
 		t.Errorf("pragma through exec = %d, want 403", resp.StatusCode)
 	}
+
 	resp.Body.Close()
 }
 
@@ -697,6 +719,7 @@ func TestStorageTransaction(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("exec %q: %d %s", statement, resp.StatusCode, readBody(t, resp))
 		}
+
 		resp.Body.Close()
 	}
 
@@ -725,7 +748,9 @@ func TestStorageTransaction(t *testing.T) {
 	if err := json.UnmarshalRead(resp.Body, &result); err != nil {
 		t.Fatal(err)
 	}
+
 	resp.Body.Close()
+
 	if len(result.Results) != 3 {
 		t.Fatalf("results = %+v", result.Results)
 	}
@@ -757,9 +782,11 @@ func TestStorageTransaction(t *testing.T) {
 	if resp.StatusCode == http.StatusOK {
 		t.Error("failed transaction reported success")
 	}
+
 	resp.Body.Close()
 
 	resp = storageSQL(t, s, token, "/v1/query", map[string]any{"sql": `select count(*) from items where id = 'c'`})
+
 	resultRows := storageResultOf(t, resp)
 	if len(resultRows.Rows) != 1 {
 		t.Fatalf("rolled-back row count = %+v", resultRows.Rows)
@@ -774,6 +801,7 @@ func TestStorageTransaction(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("empty transaction = %d, want 400", resp.StatusCode)
 	}
+
 	resp.Body.Close()
 }
 
@@ -795,6 +823,7 @@ func TestStorageTypedConstraintError(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("exec %q: %d %s", statement, resp.StatusCode, readBody(t, resp))
 		}
+
 		resp.Body.Close()
 	}
 
@@ -817,6 +846,7 @@ func TestStorageUnknownSQLIsInternal(t *testing.T) {
 	defer s.close()
 
 	token := s.tokenFor("unknown")
+
 	resp := storageSQL(t, s, token, "/v1/query", map[string]any{"sql": `select * from missing`})
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("missing table = %d, want 500", resp.StatusCode)
@@ -836,10 +866,12 @@ func TestStorageWriteReturning(t *testing.T) {
 	defer s.close()
 
 	token := s.tokenFor("returning")
+
 	resp := storageSQL(t, s, token, "/v1/exec", map[string]any{"sql": `create table items (id text primary key, value text not null)`})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("create: %d %s", resp.StatusCode, readBody(t, resp))
 	}
+
 	resp.Body.Close()
 
 	resp = storageSQL(t, s, token, "/v1/write", map[string]any{
@@ -948,10 +980,12 @@ func TestStorageSessionCommit(t *testing.T) {
 	defer s.close()
 
 	token := s.tokenFor("notes")
+
 	resp := storageSQL(t, s, token, "/v1/exec", map[string]any{"sql": `create table items (id text primary key, value text not null)`})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("create table: %d %s", resp.StatusCode, readBody(t, resp))
 	}
+
 	resp.Body.Close()
 
 	session := storageSessionOf(t, s, token)
@@ -961,6 +995,7 @@ func TestStorageSessionCommit(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("session exec: %d %s", resp.StatusCode, readBody(t, resp))
 	}
+
 	resp.Body.Close()
 
 	resp = storageSQL(t, s, token, base+"/query", map[string]any{"sql": `select value from items where id = 'a'`})
@@ -978,7 +1013,9 @@ func TestStorageSessionCommit(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("session commit: %d %s", resp.StatusCode, readBody(t, resp))
 	}
+
 	resp.Body.Close()
+
 	if count := storageSessionCount(t, s, token, "items"); count != 1 {
 		t.Errorf("count after commit = %v, want 1", count)
 	}
@@ -1012,10 +1049,12 @@ func TestStorageSessionIsScopedToApp(t *testing.T) {
 	token := s.tokenFor("notes")
 	other := s.tokenFor("other")
 	session := storageSessionOf(t, s, token)
+
 	resp := storageSQL(t, s, other, "/v1/sessions/"+session.ID+"/query", map[string]any{"sql": `select 1`})
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("other app used session: %d, want 404", resp.StatusCode)
 	}
+
 	resp.Body.Close()
 }
 
@@ -1028,10 +1067,12 @@ func TestStorageSessionLeaseExpiryRollsBack(t *testing.T) {
 	defer s.close()
 
 	token := s.tokenFor("notes")
+
 	resp := storageSQL(t, s, token, "/v1/exec", map[string]any{"sql": `create table items (id text primary key, value text not null)`})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("create table: %d %s", resp.StatusCode, readBody(t, resp))
 	}
+
 	resp.Body.Close()
 
 	session := storageSessionOf(t, s, token)
@@ -1041,6 +1082,7 @@ func TestStorageSessionLeaseExpiryRollsBack(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("session exec: %d %s", resp.StatusCode, readBody(t, resp))
 	}
+
 	resp.Body.Close()
 	s.sessionMu.Lock()
 
@@ -1048,6 +1090,7 @@ func TestStorageSessionLeaseExpiryRollsBack(t *testing.T) {
 
 	s.sessionMu.Unlock()
 	s.expireSessions(time.Now())
+
 	if count := storageSessionCount(t, s, token, "items"); count != 0 {
 		t.Errorf("count after lease expiry = %v, want 0", count)
 	}
@@ -1057,6 +1100,7 @@ func TestStorageSessionLeaseExpiryRollsBack(t *testing.T) {
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("expired session query = %d, want 404", resp.StatusCode)
 	}
+
 	resp.Body.Close()
 }
 
@@ -1069,10 +1113,12 @@ func TestStorageSessionRollback(t *testing.T) {
 	defer s.close()
 
 	token := s.tokenFor("notes")
+
 	resp := storageSQL(t, s, token, "/v1/exec", map[string]any{"sql": `create table items (id text primary key, value text not null)`})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("create table: %d %s", resp.StatusCode, readBody(t, resp))
 	}
+
 	resp.Body.Close()
 
 	session := storageSessionOf(t, s, token)
@@ -1082,6 +1128,7 @@ func TestStorageSessionRollback(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("session exec: %d %s", resp.StatusCode, readBody(t, resp))
 	}
+
 	resp.Body.Close()
 
 	resp = storageSQL(t, s, token, base+"/rollback", map[string]any{})
@@ -1089,7 +1136,9 @@ func TestStorageSessionRollback(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("session rollback: %d %s", resp.StatusCode, readBody(t, resp))
 	}
+
 	resp.Body.Close()
+
 	if count := storageSessionCount(t, s, token, "items"); count != 0 {
 		t.Errorf("count after rollback = %v, want 0", count)
 	}

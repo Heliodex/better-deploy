@@ -66,6 +66,7 @@ const (
 // jobEndpoint reads the storage loopback URL and token that guard an app's job queue.
 func jobEndpoint() (string, string, error) {
 	base := strings.TrimSuffix(os.Getenv(storageURLEnv), "/")
+
 	token := os.Getenv(storageTokenEnv)
 	if base == "" || token == "" {
 		return "", "", fmt.Errorf("%s and %s are not set", storageURLEnv, storageTokenEnv)
@@ -96,7 +97,9 @@ func jobDo(ctx context.Context, client *http.Client, method, path string, body, 
 	if err != nil {
 		return 0, err
 	}
+
 	req.Header.Set("Authorization", "Bearer "+token)
+
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

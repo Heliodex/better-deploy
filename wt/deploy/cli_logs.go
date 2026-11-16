@@ -42,6 +42,7 @@ func followLogs(cfg clientOptions, path string) error {
 	if err != nil {
 		return err
 	}
+
 	req.Header.Set("Authorization", "Bearer "+cfg.token)
 
 	resp, err := (&http.Client{
@@ -82,6 +83,7 @@ func followLogs(cfg clientOptions, path string) error {
 				fmt.Printf("{\"time\":%q,\"level\":%q,\"source\":%q,\"message\":%q}\n", entry.Time, entry.Level, entry.Source, entry.Message)
 				continue
 			}
+
 			fmt.Printf("%s %-6s %-10s %s\n", entry.Time, entry.Level, entry.Source, entry.Message)
 		}
 	}
@@ -144,14 +146,13 @@ func parseLogOptions(cfg *clientOptions, rest []string) (string, logOptions, err
 			cfg.jsonOut = true
 		case arg == "--tail" && index+1 < len(rest):
 			index++
-			opts.tail, err = strconv.Atoi(rest[index])
 
+			opts.tail, err = strconv.Atoi(rest[index])
 			if err != nil {
 				return "", opts, errors.New("tail must be an integer")
 			}
 		case strings.HasPrefix(arg, "--tail="):
 			opts.tail, err = strconv.Atoi(strings.TrimPrefix(arg, "--tail="))
-
 			if err != nil {
 				return "", opts, errors.New("tail must be an integer")
 			}

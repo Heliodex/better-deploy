@@ -71,6 +71,7 @@ func (a *notesApp) handleCreateNote(w http.ResponseWriter, r *http.Request) {
 		app.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	app.WriteJSON(w, http.StatusCreated, item)
 }
 
@@ -112,6 +113,7 @@ func (a *notesApp) handleListNotes(w http.ResponseWriter, r *http.Request) {
 		app.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	app.WriteJSON(w, http.StatusOK, notesResponse{
 		Notes: out,
 	})
@@ -126,6 +128,7 @@ func newNotesApp(store *storage.Client) *notesApp {
 
 	a.mux.HandleFunc("GET /api/notes", a.handleListNotes)
 	a.mux.HandleFunc("POST /api/notes", a.handleCreateNote)
+
 	return a
 }
 

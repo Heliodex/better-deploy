@@ -27,6 +27,7 @@ func TestStaticFilesCachesHashedAssets(t *testing.T) {
 		rec := httptest.NewRecorder()
 
 		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tc.path, nil))
+
 		if rec.Code != http.StatusOK {
 			t.Errorf("%s status = %d, want 200", tc.path, rec.Code)
 		}
@@ -41,6 +42,7 @@ func TestStaticPageNamesTheSupervisorPage(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	StaticPage(rec, "/login/")
+
 	if rec.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", rec.Code)
 	}

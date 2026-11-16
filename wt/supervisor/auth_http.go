@@ -109,8 +109,10 @@ func (s *supervisor) requireIdentity(w http.ResponseWriter, r *http.Request) (au
 	if identity, ok := s.requestIdentity(r); ok {
 		return identity, true
 	}
+
 	w.Header().Set("WWW-Authenticate", `Bearer realm="wt-supervisor"`)
 	http.Error(w, "unauthorized", http.StatusUnauthorized)
+
 	return authIdentity{}, false
 }
 
@@ -153,12 +155,16 @@ func (s *supervisor) handleAuthToken(w http.ResponseWriter, r *http.Request, id 
 
 			http.Error(w, "token not found", status)
 			s.appendAudit(identity, r, "token.delete", "", status, err.Error())
+
 			return
 		}
+
 		s.appendAudit(identity, r, "token.delete", "", status, err.Error())
 		writeError(w, status, err.Error())
+
 		return
 	}
+
 	s.appendAudit(identity, r, "token.delete", "", http.StatusNoContent, "")
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -196,8 +202,10 @@ func (s *supervisor) handleAuthTokens(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			s.appendAudit(identity, r, "token.create", "", http.StatusBadRequest, err.Error())
 			writeError(w, http.StatusBadRequest, err.Error())
+
 			return
 		}
+
 		s.appendAudit(identity, r, "token.create", "", http.StatusCreated, "")
 		writeJSON(w, http.StatusCreated, authTokenCreateResponse{
 			authTokenInfo: info,

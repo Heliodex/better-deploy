@@ -88,6 +88,7 @@ func runOpen(args []string) error {
 	target := appURLForHost(cfg.host, app.Host)
 
 	fmt.Println(target)
+
 	if printOnly {
 		return nil
 	}
@@ -101,6 +102,7 @@ func runOpen(args []string) error {
 		command = "open"
 	case "windows":
 		command = "rundll32"
+
 		commandArgs = append(commandArgs, "url.dll,FileProtocolHandler")
 	default:
 		command = "xdg-open"

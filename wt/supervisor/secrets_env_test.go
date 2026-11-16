@@ -29,10 +29,12 @@ func TestAppArgsResolvesSecretReferencesWithoutValuesInArgv(t *testing.T) {
 	store := testSecretStore(t)
 	s := testSupervisor()
 	s.secrets = store
+
 	storage, err := newStorageServer(t.TempDir(), "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(storage.close)
 
 	s.storage = storage
@@ -47,6 +49,7 @@ func TestAppArgsResolvesSecretReferencesWithoutValuesInArgv(t *testing.T) {
 			Env: map[string]string{"API_KEY": "secret://API_KEY", "LITERAL": "plain-value"},
 		},
 	}
+
 	args, env, err := s.appArgs(a, "main.cwasm")
 	if err != nil {
 		t.Fatal(err)
@@ -129,6 +132,7 @@ func TestDeploymentHistoryKeepsSecretReferences(t *testing.T) {
 
 func TestLaunchAbortsBeforeProcessOnMissingSecret(t *testing.T) {
 	s := newLifecycleSupervisor(t)
+
 	store, err := newSecretStore(filepath.Join(s.cfg.stateDir, secretDirName))
 	if err != nil {
 		t.Fatal(err)
@@ -167,6 +171,7 @@ func TestLaunchAbortsBeforeProcessOnMissingSecret(t *testing.T) {
 
 func TestPurgeRemovesSecretsButDeleteKeepsThem(t *testing.T) {
 	s := newLifecycleSupervisor(t)
+
 	store, err := newSecretStore(filepath.Join(s.cfg.stateDir, secretDirName))
 	if err != nil {
 		t.Fatal(err)
@@ -199,6 +204,7 @@ func TestPurgeRemovesSecretsButDeleteKeepsThem(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleApp(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("delete = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -218,6 +224,7 @@ func TestPurgeRemovesSecretsButDeleteKeepsThem(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleApp(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("purge delete = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -233,6 +240,7 @@ func TestSecretAPIIsAuthenticatedAndWriteOnly(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	s.handleApp(rec, req)
+
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated GET = %d, want 401", rec.Code)
 	}
@@ -244,6 +252,7 @@ func TestSecretAPIIsAuthenticatedAndWriteOnly(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	s.handleApp(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PUT = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -269,6 +278,7 @@ func TestSecretAPIIsAuthenticatedAndWriteOnly(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	s.handleApp(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET secrets = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -294,6 +304,7 @@ func TestSecretAPIIsAuthenticatedAndWriteOnly(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	s.handleApp(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("rotation PUT = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -317,6 +328,7 @@ func TestSecretAPIIsAuthenticatedAndWriteOnly(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	s.handleAppConfig(rec, req, "demo")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET config = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -336,6 +348,7 @@ func TestSecretAPIIsAuthenticatedAndWriteOnly(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	s.handleApp(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("DELETE = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -364,6 +377,7 @@ func TestSecretAPIValidatesInput(t *testing.T) {
 		rec := httptest.NewRecorder()
 
 		s.handleApp(rec, req)
+
 		if rec.Code != http.StatusBadRequest {
 			t.Errorf("PUT %s %s = %d, want 400", tc.key, tc.body, rec.Code)
 		}

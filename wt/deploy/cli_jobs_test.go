@@ -21,6 +21,7 @@ func TestRunJobsEnqueue(t *testing.T) {
 		if err := json.UnmarshalRead(r.Body, &got); err != nil {
 			t.Errorf("body: %v", err)
 		}
+
 		w.WriteHeader(http.StatusCreated)
 
 		_, _ = w.Write([]byte(`{"id":"job-1","path":"/jobs/run","method":"POST","status":"pending","attempts":0,"maxAttempts":2}`))

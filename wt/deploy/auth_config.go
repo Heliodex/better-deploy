@@ -74,7 +74,9 @@ func marshalConfig(values map[string]any) ([]byte, error) {
 	if err := json.MarshalEncode(encoder, values); err != nil {
 		return nil, err
 	}
+
 	buf.WriteByte('\n')
+
 	return buf.Bytes(), nil
 }
 
@@ -106,6 +108,7 @@ func warnInsecureConfig(path, token string) {
 	if mode == "" || private {
 		return
 	}
+
 	fmt.Fprintf(os.Stderr, "wt-deploy: warning: %s contains a token and has mode %s; run chmod 600 %s\n", path, mode, path)
 }
 
@@ -193,7 +196,9 @@ func removeAuthToken(path, profile string) (bool, error) {
 	if _, ok := target["token"]; !ok {
 		return false, nil
 	}
+
 	delete(target, "token")
+
 	return true, writeConfigMap(path, values)
 }
 
@@ -213,7 +218,6 @@ func saveAuthConfig(path, profile, host, token, appDomain string) error {
 		}
 
 		target, err = objectMap(profiles, profile)
-
 		if err != nil {
 			return err
 		}

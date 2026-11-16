@@ -47,6 +47,7 @@ func handleCreateMessage(w http.ResponseWriter, r *http.Request) {
 		app.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	app.WriteJSON(w, http.StatusCreated, item)
 }
 
@@ -98,6 +99,7 @@ func handleListMessages(w http.ResponseWriter, r *http.Request) {
 		app.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	app.WriteJSON(w, http.StatusOK, contract.MessagesResponse{
 		Messages: out,
 	})
@@ -146,6 +148,7 @@ func handleReact(w http.ResponseWriter, r *http.Request) {
 		app.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	app.WriteJSON(w, http.StatusOK, contract.ReactResponse{
 		Reaction: contract.ReactResponseReaction(reaction),
 		Count: count,
@@ -162,6 +165,7 @@ func handleStats(w http.ResponseWriter, r *http.Request) {
 		app.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	app.WriteJSON(w, http.StatusOK, stats)
 }
 
@@ -224,7 +228,6 @@ func seed(ctx context.Context) error {
 
 func init() {
 	store, errStorage = storage.New(wasihttp.NewClient())
-
 	if errStorage != nil {
 		return
 	}

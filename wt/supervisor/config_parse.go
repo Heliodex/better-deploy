@@ -144,6 +144,7 @@ func resolveConfigPaths(cfg *config) {
 func warnConfig(cfg config) {
 	if cfg.untrusted() {
 		log.Printf("untrusted tenant mode: per-app uid, cgroup and network isolation are required (namespaces=%t seccomp=%t)", cfg.appNamespaces, cfg.appSeccomp)
+
 		if os.Geteuid() != 0 {
 			log.Printf("warning: untrusted tenant mode needs root; apps will refuse to launch")
 		}
@@ -226,6 +227,7 @@ func applyConfigFlags(cfg *config, diskBudgetMB, storageTempBudgetMB int64) {
 	if !cfg.untrusted() && cfg.dataQuotaMode == dataQuotaSetquota {
 		log.Printf("warning: WT_DATA_QUOTA_MODE=setquota is ignored in trusted mode; disk_mb stays a report")
 	}
+
 	warnConfig(*cfg)
 }
 
@@ -241,5 +243,6 @@ func parseConfig() config {
 	flag.Parse()
 	applyConfigFlags(&cfg, diskBudgetMB, storageTempBudgetMB)
 	resolveConfigPaths(&cfg)
+
 	return cfg
 }

@@ -42,6 +42,7 @@ func stripIdentityCookie(r *http.Request) {
 		r.Header.Del("Cookie")
 		return
 	}
+
 	r.Header.Set("Cookie", strings.Join(kept, "; "))
 }
 
@@ -98,15 +99,18 @@ func (s *supervisor) identityProxyHeaders(r *http.Request, appName string, enabl
 	}
 	// The app never receives the supervisor session cookie; it gets signed headers instead.
 	stripIdentityCookie(r)
+
 	if !ok {
 		return
 	}
 
 	groups := strings.Join(user.Groups, ",")
+
 	secret := s.identitySecretFor(appName)
 	if secret == "" {
 		return
 	}
+
 	r.Header.Set(identityUserIDHeader, user.ID)
 	r.Header.Set(identityUserEmail, user.Email)
 	r.Header.Set(identityUserName, user.Name)

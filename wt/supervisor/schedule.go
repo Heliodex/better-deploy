@@ -46,12 +46,14 @@ func callSchedule(ctx context.Context, client *http.Client, method, target, labe
 		Name: label,
 		LastRun: time.Now().UTC(),
 	}
+
 	request, err := http.NewRequestWithContext(ctx, method, target, nil)
 	if err != nil {
 		run.Error = err.Error()
 
 		return run, true, true
 	}
+
 	request.Header.Set(scheduleHeader, label)
 
 	response, err := client.Do(request)
@@ -164,6 +166,7 @@ func (s *supervisor) runSchedule(ctx context.Context, a *app, entry scheduleConf
 		Name: label,
 		NextRun: time.Now().Add(every).UTC(),
 	}, false)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -183,6 +186,7 @@ func (s *supervisor) runSchedule(ctx context.Context, a *app, entry scheduleConf
 		run.NextRun = time.Now().Add(every).UTC()
 
 		a.recordScheduleRun(run, failed)
+
 		if failed {
 			log.Printf("app %s: schedule %s: %s", a.name, label, run.Error)
 		}
@@ -196,6 +200,7 @@ func (s *supervisor) startSchedule(a *app) {
 	entries := append([]scheduleConfig(nil), a.cfg.Schedule...)
 
 	a.mu.Unlock()
+
 	if len(entries) == 0 {
 		return
 	}
@@ -208,6 +213,7 @@ func (s *supervisor) startSchedule(a *app) {
 	a.scheduleRuns = map[string]scheduleRun{}
 
 	a.mu.Unlock()
+
 	for i, label := range scheduleLabels(entries) {
 		go s.runSchedule(ctx, a, entries[i], label)
 	}
@@ -221,6 +227,7 @@ func (s *supervisor) stopSchedule(a *app) {
 	a.scheduleCancel = nil
 
 	a.mu.Unlock()
+
 	if cancel != nil {
 		cancel()
 	}

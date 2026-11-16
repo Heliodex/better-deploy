@@ -91,11 +91,13 @@ func TestTrustedDiskQuotaStaysSoft(t *testing.T) {
 	if s.enforceDiskQuota(a) {
 		t.Error("trusted mode must not stop an app for disk usage")
 	}
+
 	a.mu.Lock()
 
 	retired := a.retired
 
 	a.mu.Unlock()
+
 	if retired {
 		t.Error("trusted app was retired")
 	}
@@ -133,11 +135,13 @@ func TestTrustedEntryQuotaStaysSoft(t *testing.T) {
 	if s.enforceDiskQuota(a) {
 		t.Error("trusted mode must not stop an app for file count")
 	}
+
 	a.mu.Lock()
 
 	retired := a.retired
 
 	a.mu.Unlock()
+
 	if retired {
 		t.Error("trusted app was retired")
 	}
@@ -167,11 +171,13 @@ func TestUntrustedDiskQuotaStopsApp(t *testing.T) {
 	if !s.enforceDiskQuota(a) {
 		t.Fatal("expected the quota check to stop the app")
 	}
+
 	a.mu.Lock()
 
 	retired, lastError, timer := a.retired, a.lastError, a.timer
 
 	a.mu.Unlock()
+
 	if !retired {
 		t.Error("over-quota app was not retired")
 	}
@@ -218,11 +224,13 @@ func TestUntrustedEntryQuotaStopsApp(t *testing.T) {
 	if !s.enforceDiskQuota(a) {
 		t.Fatal("expected the entry quota check to stop the app")
 	}
+
 	a.mu.Lock()
 
 	retired, lastError := a.retired, a.lastError
 
 	a.mu.Unlock()
+
 	if !retired {
 		t.Error("over-entry-quota app was not retired")
 	}

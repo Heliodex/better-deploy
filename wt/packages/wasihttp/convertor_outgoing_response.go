@@ -93,6 +93,7 @@ func (w *responseWriter) stop() {
 // close cancels the request context and drops the body stream.
 func (w *responseWriter) close() {
 	w.stop()
+
 	if w.stream != nil {
 		w.stream.Drop()
 	}

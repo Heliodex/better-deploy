@@ -89,6 +89,7 @@ func (a *blobApp) handlePeer(w http.ResponseWriter, r *http.Request) {
 		app.WriteError(w, http.StatusBadGateway, strings.TrimSpace(string(body)))
 		return
 	}
+
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 
 	_, _ = w.Write(body)
@@ -154,7 +155,6 @@ func (a *blobApp) handleListFiles(w http.ResponseWriter, r *http.Request) {
 		}
 
 		item, err = a.record(item)
-
 		if err != nil {
 			app.WriteError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -167,6 +167,7 @@ func (a *blobApp) handleListFiles(w http.ResponseWriter, r *http.Request) {
 		app.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	app.WriteJSON(w, http.StatusOK, filesResponse{
 		Files: files,
 	})
@@ -220,6 +221,7 @@ func (a *blobApp) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 	if err := app.DeleteBlob(r.Context(), a.client, digest); err != nil {
 		app.Errorf("blob delete %s: %v", digest, err)
 	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -296,11 +298,11 @@ func (a *blobApp) handleCreateFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	item, err = a.record(item)
-
 	if err != nil {
 		app.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	app.WriteJSON(w, http.StatusCreated, item)
 }
 
@@ -325,6 +327,7 @@ func (a *blobApp) handleCreateUpload(w http.ResponseWriter, r *http.Request) {
 		app.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	app.WriteJSON(w, http.StatusOK, uploadResponse{
 		UploadURL: uploadURL,
 		Max: request.Size,
@@ -348,5 +351,6 @@ func newBlobApp(store *storage.Client, client *http.Client) *blobApp {
 	a.mux.HandleFunc("POST /api/uploads", a.handleCreateUpload)
 	a.mux.HandleFunc("POST /api/files", a.handleCreateFile)
 	a.mux.HandleFunc("DELETE /api/files/{id}", a.handleDeleteFile)
+
 	return a
 }

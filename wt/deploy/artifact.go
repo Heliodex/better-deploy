@@ -105,6 +105,7 @@ func artifactUsable(cfg *deployConfig) bool {
 // writeArtifact records the wasm digest, size and compiler details so the supervisor can key its cache and detect a stale cwasm.
 func writeArtifact(cfg *deployConfig, epoch bool) error {
 	wasm := filepath.Join(cfg.dir, "main.wasm")
+
 	info, err := os.Stat(wasm)
 	if err != nil {
 		return fmt.Errorf("read main.wasm: %w", err)
@@ -123,6 +124,7 @@ func writeArtifact(cfg *deployConfig, epoch bool) error {
 		WasmSHA256: digest,
 		WasmBytes: info.Size(),
 	}
+
 	version, err := wasmtimeVersion(cfg.wasmtime)
 	if err != nil {
 		// Without a version the supervisor can still key and rebuild the artifact from main.wasm.

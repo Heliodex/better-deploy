@@ -221,6 +221,7 @@ func TestOverlayDevEnvOverridesManifestKeys(t *testing.T) {
 	t.Setenv("SECRET", "plaintext")
 	t.Setenv("INJECTED", "client")
 	overlayDevEnv(&m)
+
 	if m.Env["SWITCH"] != "client" {
 		t.Errorf("SWITCH = %q, want the client value", m.Env["SWITCH"])
 	}
@@ -508,6 +509,7 @@ func TestViteDevProxy(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatalf("vite did not start: %v", err)
 		}
+
 		time.Sleep(100 * time.Millisecond)
 	}
 
@@ -515,7 +517,9 @@ func TestViteDevProxy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	response.Body.Close()
+
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("proxied API status = %d", response.StatusCode)
 	}
@@ -529,6 +533,7 @@ func TestViteDevProxy(t *testing.T) {
 	eventBody, err := io.ReadAll(response.Body)
 
 	response.Body.Close()
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -546,6 +551,7 @@ func TestViteDevProxy(t *testing.T) {
 	blobBody, err := io.ReadAll(response.Body)
 
 	response.Body.Close()
+
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -87,6 +87,7 @@ func TestEgressAllowsInternalFetchAndConfiguredCIDR(t *testing.T) {
 	manager := newEgressManager("iptables", "ip6tables", "127.0.0.1", 9999, runner.run)
 
 	manager.setInternal("127.0.0.1", 9500)
+
 	if err := manager.add("demo", 20001, 8081, egressRule{
 		CIDR: "203.0.113.0/24",
 		Port: 443,

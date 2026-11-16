@@ -63,6 +63,7 @@ func matchRoute(pattern, segments []string) (map[string]string, bool) {
 			}
 
 			params[name] = segments[i]
+
 			continue
 		}
 
@@ -89,6 +90,7 @@ func (c *routeCache) get(build func() *routeTable) *routeTable {
 	c.once.Do(func() {
 		c.table = build()
 	})
+
 	return c.table
 }
 
@@ -131,6 +133,7 @@ func (rt *routeTable) match(method, path string) (*route, map[string]string, []s
 
 	for i := range rt.routes {
 		route := &rt.routes[i]
+
 		params, ok := matchRoute(route.pattern, segments)
 		if !ok {
 			continue
@@ -170,15 +173,19 @@ func (rt *routeTable) serve(w http.ResponseWriter, r *http.Request, app string) 
 		if len(allowed) > 0 {
 			w.Header().Set("Allow", strings.Join(allowed, ", "))
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 			return
 		}
+
 		http.NotFound(w, r)
+
 		return
 	}
 
 	if app != "" {
 		params["app"] = app
 	}
+
 	route.handler(w, r, params)
 }
 

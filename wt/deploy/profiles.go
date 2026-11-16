@@ -109,7 +109,9 @@ func loadFileConfig(explicit string) (fileConfig, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return fileConfig{}, fmt.Errorf("config %s: %w", path, err)
 	}
+
 	warnInsecureConfig(path, cfg.Token)
+
 	return cfg, nil
 }
 
@@ -125,7 +127,9 @@ func profileNames(cfg fileConfig) []string {
 	for name := range cfg.Profiles {
 		names = append(names, name)
 	}
+
 	slices.Sort(names)
+
 	return names
 }
 

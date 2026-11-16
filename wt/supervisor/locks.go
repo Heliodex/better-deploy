@@ -31,5 +31,6 @@ func (s *supervisor) lockApp(name string) func() {
 	lock := s.deployLocks.get(name)
 
 	lock.Lock()
+
 	return lock.Unlock
 }

@@ -17,6 +17,7 @@ func TestAdminStaticIsPublicWhileAPIRemainsProtected(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Errorf("GET /admin/ without a token = %d, want 200", rec.Code)
 	}
@@ -25,6 +26,7 @@ func TestAdminStaticIsPublicWhileAPIRemainsProtected(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("GET /apps without a token = %d, want 401", rec.Code)
 	}
@@ -32,6 +34,7 @@ func TestAdminStaticIsPublicWhileAPIRemainsProtected(t *testing.T) {
 
 func TestListenAdminUnixSocketIsPrivateAndCleanedUp(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "admin.sock")
+
 	network, address, err := parseAdminListen("unix:" + path)
 	if err != nil {
 		t.Fatal(err)
@@ -62,6 +65,7 @@ func TestListenAdminUnixSocketIsPrivateAndCleanedUp(t *testing.T) {
 
 	cleanup2()
 	cleanup()
+
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Errorf("socket still exists after cleanup: %v", err)
 	}
@@ -125,6 +129,7 @@ func TestPublicAndAdminHandlersSeparateRoutes(t *testing.T) {
 		rec := httptest.NewRecorder()
 
 		tc.handler.ServeHTTP(rec, req)
+
 		if rec.Code != tc.status {
 			t.Errorf("%s: %s %s = %d, want %d", tc.name, tc.method, tc.target, rec.Code, tc.status)
 		}
@@ -143,6 +148,7 @@ func TestPublicHandlerProxiesAppHosts(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	s.publicHandler().ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusOK || rec.Body.String() != "app" {
 		t.Errorf("public app host = %d %q, want 200 \"app\"", rec.Code, rec.Body.String())
 	}
@@ -158,6 +164,7 @@ func TestUntrustedEmptyTokenCannotReachAdmin(t *testing.T) {
 		rec := httptest.NewRecorder()
 
 		s.adminHandler().ServeHTTP(rec, req)
+
 		if rec.Code != http.StatusUnauthorized {
 			t.Errorf("GET %s with no token = %d, want 401", target, rec.Code)
 		}
@@ -167,6 +174,7 @@ func TestUntrustedEmptyTokenCannotReachAdmin(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	s.adminHandler().ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Errorf("GET /admin/ with no token = %d, want the public panel shell", rec.Code)
 	}
@@ -175,6 +183,7 @@ func TestUntrustedEmptyTokenCannotReachAdmin(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	s.adminHandler().ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("login with no token = %d, want 401", rec.Code)
 	}

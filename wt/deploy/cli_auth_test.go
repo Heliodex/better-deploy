@@ -14,6 +14,7 @@ import (
 
 func authTestServer(t *testing.T, token string) *httptest.Server {
 	t.Helper()
+
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/capabilities" {
 			http.NotFound(w, r)
@@ -24,6 +25,7 @@ func authTestServer(t *testing.T, token string) *httptest.Server {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+
 		w.Header().Set("Content-Type", "application/json")
 
 		_, _ = w.Write([]byte(`{}`))
@@ -64,6 +66,7 @@ func TestAuthLoginRejectsTokenFlag(t *testing.T) {
 
 func writeAuthTestConfig(t *testing.T, path, contents string) {
 	t.Helper()
+
 	if err := os.WriteFile(path, []byte(contents), privateFileMode); err != nil {
 		t.Fatal(err)
 	}

@@ -104,6 +104,7 @@ func (s *supervisor) handleIdentityLogin(w http.ResponseWriter, r *http.Request)
 	if allowed, wait := limiter.allow(key, now); !allowed {
 		writeRetryAfter(w, wait)
 		writeError(w, http.StatusTooManyRequests, "too many login attempts; try again later")
+
 		return
 	}
 
@@ -114,6 +115,7 @@ func (s *supervisor) handleIdentityLogin(w http.ResponseWriter, r *http.Request)
 	if err := json.UnmarshalRead(r.Body, &request); err != nil {
 		limiter.fail(key, now)
 		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+
 		return
 	}
 
@@ -121,6 +123,7 @@ func (s *supervisor) handleIdentityLogin(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		limiter.fail(key, now)
 		writeIdentityError(w, err)
+
 		return
 	}
 
@@ -129,6 +132,7 @@ func (s *supervisor) handleIdentityLogin(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	limiter.reset(key)
 	s.setIdentityCookie(w, r, token)
 	w.Header().Set("Cache-Control", "no-store")
@@ -152,6 +156,7 @@ func (s *supervisor) handleIdentityLogout(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
+
 	s.clearIdentityCookie(w, r)
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusNoContent)
@@ -164,6 +169,7 @@ func (s *supervisor) handleIdentityMe(w http.ResponseWriter, r *http.Request) {
 		writeIdentityError(w, errIdentityNoSession)
 		return
 	}
+
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, identityMeResponse{
 		User: user,
@@ -204,6 +210,7 @@ func (s *supervisor) handleIdentityPassword(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	s.setIdentityCookie(w, r, newToken)
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, identityMeResponse{
@@ -218,6 +225,7 @@ func (s *supervisor) handleIdentityUserDelete(w http.ResponseWriter, id string) 
 		writeIdentityError(w, err)
 		return
 	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -228,6 +236,7 @@ func (s *supervisor) handleIdentityUserGet(w http.ResponseWriter, id string) {
 		writeIdentityError(w, errIdentityUserMissing)
 		return
 	}
+
 	writeJSON(w, http.StatusOK, user)
 }
 
@@ -246,6 +255,7 @@ func (s *supervisor) handleIdentityUserPassword(w http.ResponseWriter, r *http.R
 		writeIdentityError(w, err)
 		return
 	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -279,6 +289,7 @@ func (s *supervisor) handleIdentityUserUpdate(w http.ResponseWriter, r *http.Req
 		writeIdentityError(w, err)
 		return
 	}
+
 	writeJSON(w, http.StatusOK, user)
 }
 
@@ -344,6 +355,7 @@ func (s *supervisor) handleIdentityUsers(w http.ResponseWriter, r *http.Request)
 			writeIdentityError(w, err)
 			return
 		}
+
 		writeJSON(w, http.StatusCreated, user)
 	default:
 		w.Header().Set("Allow", "GET, POST")
@@ -360,6 +372,7 @@ func (s *supervisor) identityAppRoutes() *routeTable {
 		rt.add(http.MethodPost, identityAppPrefix+"/logout", plainHandler(s.handleIdentityLogout))
 		rt.add(http.MethodGet, identityAppPrefix+"/me", plainHandler(s.handleIdentityMe))
 		rt.add(http.MethodPost, identityAppPrefix+"/password", plainHandler(s.handleIdentityPassword))
+
 		return rt
 	})
 }
@@ -375,6 +388,8 @@ func (s *supervisor) serveIdentityApp(w http.ResponseWriter, r *http.Request) bo
 		writeError(w, http.StatusServiceUnavailable, "identity is unavailable")
 		return true
 	}
+
 	routes.ServeHTTP(w, r)
+
 	return true
 }

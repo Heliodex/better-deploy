@@ -30,6 +30,7 @@ func writeProfileTestConfig(t *testing.T) string {
 	path := filepath.Join(t.TempDir(), "config.json")
 
 	writeTestFile(t, path, profileTestConfig)
+
 	return path
 }
 
@@ -39,6 +40,7 @@ func TestClientFlagsProfileFromEnvironment(t *testing.T) {
 	t.Setenv("WT_PROFILE", "local")
 
 	path := writeProfileTestConfig(t)
+
 	cfg, _, err := clientFlags([]string{"--config", path}, false)
 	if err != nil {
 		t.Fatal(err)
@@ -53,6 +55,7 @@ func TestClientFlagsRejectsUnknownProfile(t *testing.T) {
 	t.Setenv("WT_PROFILE", "")
 
 	path := writeProfileTestConfig(t)
+
 	_, _, err := clientFlags([]string{"--config", path, "--profile", "staging"}, false)
 	if err == nil {
 		t.Fatal("unknown profile was accepted")
@@ -71,6 +74,7 @@ func TestClientFlagsSelectsProfile(t *testing.T) {
 	t.Setenv("WT_PROFILE", "")
 
 	path := writeProfileTestConfig(t)
+
 	cfg, rest, err := clientFlags([]string{"apps", "--config", path, "--profile", "local"}, false)
 	if err != nil {
 		t.Fatal(err)
@@ -91,6 +95,7 @@ func TestClientFlagsUsesDefaultProfile(t *testing.T) {
 	t.Setenv("WT_PROFILE", "")
 
 	path := writeProfileTestConfig(t)
+
 	cfg, _, err := clientFlags([]string{"--config", path}, false)
 	if err != nil {
 		t.Fatal(err)
@@ -107,6 +112,7 @@ func TestResolveConfigDropsDomainWhenHostChangesLocality(t *testing.T) {
 	t.Setenv("WT_PROFILE", "")
 
 	path := writeProfileTestConfig(t)
+
 	cfg, err := resolveConfig([]string{"--config", path, "--dir", ".", "--profile", "remote", "--host", "http://127.0.0.1:8080"})
 	if err != nil {
 		t.Fatal(err)
@@ -123,6 +129,7 @@ func TestResolveConfigKeepsExplicitAppDomain(t *testing.T) {
 	t.Setenv("WT_PROFILE", "")
 
 	path := writeProfileTestConfig(t)
+
 	cfg, err := resolveConfig([]string{
 		"--config",
 		path,
@@ -150,6 +157,7 @@ func TestResolveConfigUsesDefaultProfile(t *testing.T) {
 	t.Setenv("WT_PROFILE", "")
 
 	path := writeProfileTestConfig(t)
+
 	cfg, err := resolveConfig([]string{"--config", path, "--dir", "."})
 	if err != nil {
 		t.Fatal(err)
@@ -166,6 +174,7 @@ func TestResolveConfigUsesProfile(t *testing.T) {
 	t.Setenv("WT_PROFILE", "")
 
 	path := writeProfileTestConfig(t)
+
 	cfg, err := resolveConfig([]string{"--config", path, "--dir", ".", "--profile", "local"})
 	if err != nil {
 		t.Fatal(err)

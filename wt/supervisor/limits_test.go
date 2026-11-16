@@ -32,7 +32,6 @@ func TestNormaliseHealthSettings(t *testing.T) {
 		HealthFailures: 3,
 		RestartOnUnhealthy: true,
 	}, "demo", "localhost", tenantTrusted)
-
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,10 +218,12 @@ func BenchmarkProxyLatency(b *testing.B) {
 	req := httptest.NewRequest(http.MethodGet, "http://demo.localhost/", nil)
 
 	b.ReportAllocs()
+
 	for b.Loop() {
 		rec := httptest.NewRecorder()
 
 		proxy.ServeHTTP(rec, req)
+
 		if rec.Code != http.StatusOK {
 			b.Fatalf("status = %d", rec.Code)
 		}
@@ -242,6 +243,7 @@ func TestProxyConcurrencyLimit(t *testing.T) {
 			entered <- struct{}{}
 		})
 		<-release
+
 		_, _ = w.Write([]byte("ok"))
 	}), appConfig{
 		MaxConcurrent: 1,
@@ -253,6 +255,7 @@ func TestProxyConcurrencyLimit(t *testing.T) {
 		rec := httptest.NewRecorder()
 
 		s.handleProxy(rec, httptest.NewRequest(http.MethodGet, "http://demo.localhost/", nil))
+
 		firstDone <- rec
 	}()
 
@@ -265,10 +268,13 @@ func TestProxyConcurrencyLimit(t *testing.T) {
 	second := httptest.NewRecorder()
 
 	s.handleProxy(second, httptest.NewRequest(http.MethodGet, "http://demo.localhost/", nil))
+
 	if second.Code != http.StatusTooManyRequests {
 		t.Errorf("second concurrent request = %d, want 429", second.Code)
 	}
+
 	close(release)
+
 	select {
 	case first := <-firstDone:
 		if first.Code != http.StatusOK {
@@ -296,6 +302,7 @@ func TestProxyRequestTimeout(t *testing.T) {
 	started := time.Now()
 
 	s.handleProxy(rec, httptest.NewRequest(http.MethodGet, "http://demo.localhost/", nil))
+
 	if rec.Code != http.StatusBadGateway {
 		t.Errorf("status = %d, want 502 after the request deadline", rec.Code)
 	}

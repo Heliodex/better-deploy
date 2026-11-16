@@ -49,6 +49,7 @@ func (k artifactKey) digest() string {
 	hash := sha256.New()
 
 	fmt.Fprintf(hash, "%s\n%s\n%s\n%s\n%t\n", k.WasmSHA256, k.Wasmtime, k.Target, k.CPU, k.Epoch)
+
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
@@ -167,6 +168,7 @@ func (s *supervisor) artifactCachePath(key artifactKey) string {
 // cachedArtifact returns a compiled artifact and its modification time when the cache already holds this key.
 func (s *supervisor) cachedArtifact(key artifactKey) (string, time.Time, bool) {
 	path := s.artifactCachePath(key)
+
 	info, err := os.Stat(path)
 	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
 		return "", time.Time{}, false
@@ -323,7 +325,9 @@ func (s *supervisor) pruneArtifactCache(keep string) {
 		size int64
 		mod time.Time
 	}
+
 	dir := filepath.Join(s.artifactCacheDir(), "cwasm")
+
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
@@ -359,6 +363,7 @@ func (s *supervisor) pruneArtifactCache(keep string) {
 	}
 
 	limit := s.artifactCacheMaxBytes()
+
 	budget := byteBudget{
 		name: "artifact cache",
 		limit: limit,
@@ -366,9 +371,11 @@ func (s *supervisor) pruneArtifactCache(keep string) {
 	if !budget.exceeded(total) {
 		return
 	}
+
 	sort.Slice(files, func(i, j int) bool {
 		return files[i].mod.Before(files[j].mod)
 	})
+
 	for _, file := range files {
 		if !budget.exceeded(total) {
 			break
@@ -394,12 +401,14 @@ func (s *supervisor) wasmtimeVersion() string {
 
 		s.version = strings.TrimSpace(string(out))
 	})
+
 	return s.version
 }
 
 // wasmFileInfo hashes main.wasm and reports its size.
 func wasmFileInfo(dir string) (string, int64, error) {
 	path := filepath.Join(dir, "main.wasm")
+
 	info, err := os.Stat(path)
 	if err != nil {
 		return "", 0, err
@@ -482,6 +491,7 @@ func (s *supervisor) correctArtifactEpoch(a *app, epoch bool) {
 	if err := writeArtifact(dir, info); err != nil {
 		log.Printf("app artifact %s: record epoch interruption %t: %v", filepath.Base(dir), epoch, err)
 	}
+
 	log.Printf("app artifact %s: using epoch interruption %t reported by wasmtime", filepath.Base(dir), epoch)
 }
 
@@ -492,7 +502,9 @@ func (s *supervisor) finishArtifact(dir, path string, current artifactInfo, comp
 	if err := writeArtifact(dir, current); err != nil {
 		log.Printf("app artifact %s: write %s: %v", filepath.Base(dir), artifactName, err)
 	}
+
 	s.pruneArtifactCache(path)
+
 	return epoch, nil
 }
 
@@ -507,6 +519,7 @@ func (s *supervisor) ensureArtifact(dir string, requireEpoch bool) (bool, error)
 
 	cwasm := filepath.Join(dir, "main.cwasm")
 	wasm := filepath.Join(dir, "main.wasm")
+
 	current, key, ok, err := s.artifactForWasm(dir, cwasm, requireEpoch)
 	if err != nil {
 		return false, err
@@ -555,6 +568,7 @@ func (s *supervisor) ensureArtifact(dir string, requireEpoch bool) (bool, error)
 
 		return false, nil
 	}
+
 	log.Printf("app artifact %s: compiling main.wasm for %s (%s)", filepath.Base(dir), current.Wasmtime, current.Target)
 
 	path, err := s.compileCachedArtifact(dir, wasm, key)

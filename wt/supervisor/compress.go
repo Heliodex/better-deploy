@@ -30,6 +30,7 @@ func addVary(header http.Header, value string) {
 			}
 		}
 	}
+
 	header.Add("Vary", value)
 }
 
@@ -38,6 +39,7 @@ func (b *compressedBody) Close() error {
 		_ = b.PipeReader.Close()
 		_ = b.original.Close()
 	})
+
 	return nil
 }
 

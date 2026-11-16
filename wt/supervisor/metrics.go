@@ -52,6 +52,7 @@ func (m *metrics) beginRequest(app string) {
 	if m == nil {
 		return
 	}
+
 	m.mu.Lock()
 
 	m.inflight[app]++
@@ -97,6 +98,7 @@ func (m *metrics) observeOutcome(target map[outcomeKey]uint64, app, action, resu
 	if m == nil {
 		return
 	}
+
 	m.mu.Lock()
 
 	target[outcomeKey{
@@ -112,6 +114,7 @@ func (m *metrics) observeBackup(app, action, result string) {
 	if m == nil {
 		return
 	}
+
 	m.observeOutcome(m.backups, app, action, result)
 }
 
@@ -119,6 +122,7 @@ func (m *metrics) observeDeploy(app, result string) {
 	if m == nil {
 		return
 	}
+
 	m.observeOutcome(m.deploys, app, "deploy", result)
 }
 
@@ -126,6 +130,7 @@ func (m *metrics) observeJob(app, result string) {
 	if m == nil {
 		return
 	}
+
 	m.observeOutcome(m.jobs, app, "job", result)
 }
 
@@ -139,6 +144,7 @@ func (m *metrics) observeStorage(app, pool string, err error, duration time.Dura
 	if err != nil {
 		result = "error"
 	}
+
 	m.mu.Lock()
 
 	m.storage[storageMetricKey{
@@ -185,11 +191,13 @@ func prometheusLabel(value string) string {
 // writeMetric appends one metric sample with optional labels.
 func writeMetric(builder *strings.Builder, name, labels, value string) {
 	builder.WriteString(name)
+
 	if labels != "" {
 		builder.WriteByte('{')
 		builder.WriteString(labels)
 		builder.WriteByte('}')
 	}
+
 	builder.WriteByte(' ')
 	builder.WriteString(value)
 	builder.WriteByte('\n')
@@ -201,6 +209,7 @@ func (m *metrics) renderApps(builder *strings.Builder, s *supervisor) {
 	builder.WriteString("# HELP wt_app_memory_bytes Proportional set size of one app process, falling back to resident memory.\n# TYPE wt_app_memory_bytes gauge\n")
 	builder.WriteString("# HELP wt_app_ready Whether the app is ready for traffic.\n# TYPE wt_app_ready gauge\n")
 	builder.WriteString("# HELP wt_app_disk_bytes Measured /data and database bytes.\n# TYPE wt_app_disk_bytes gauge\n")
+
 	for _, a := range s.allApps() {
 		cpu, memory, _ := a.resourceStats()
 		_, ready := a.servingState()
@@ -214,6 +223,7 @@ func (m *metrics) renderApps(builder *strings.Builder, s *supervisor) {
 		if ready {
 			readyValue = 1
 		}
+
 		writeMetric(builder, "wt_app_ready", labels, strconv.Itoa(readyValue))
 		writeMetric(builder, "wt_app_disk_bytes", labels, strconv.FormatInt(s.diskBytes(a), 10))
 	}
@@ -228,6 +238,7 @@ func (m *metrics) renderDurations(builder *strings.Builder) {
 	for key := range m.durations {
 		durationKeys = append(durationKeys, key)
 	}
+
 	sort.Slice(durationKeys, func(i, j int) bool {
 		if durationKeys[i].app != durationKeys[j].app {
 			return durationKeys[i].app < durationKeys[j].app
@@ -235,6 +246,7 @@ func (m *metrics) renderDurations(builder *strings.Builder) {
 
 		return durationKeys[i].method < durationKeys[j].method
 	})
+
 	for _, key := range durationKeys {
 		stat := m.durations[key]
 		labels := fmt.Sprintf(`app="%s",method="%s"`, prometheusLabel(key.app), prometheusLabel(key.method))
@@ -253,7 +265,9 @@ func (m *metrics) renderInflight(builder *strings.Builder) {
 	for app := range m.inflight {
 		inflightKeys = append(inflightKeys, app)
 	}
+
 	sort.Strings(inflightKeys)
+
 	for _, app := range inflightKeys {
 		writeMetric(builder, "wt_inflight_requests", fmt.Sprintf(`app="%s"`, prometheusLabel(app)), strconv.FormatInt(m.inflight[app], 10))
 	}
@@ -270,6 +284,7 @@ func (m *metrics) renderRequests(builder *strings.Builder) {
 	for key := range m.requests {
 		requestKeys = append(requestKeys, key)
 	}
+
 	sort.Slice(requestKeys, func(i, j int) bool {
 		if requestKeys[i].app != requestKeys[j].app {
 			return requestKeys[i].app < requestKeys[j].app
@@ -281,6 +296,7 @@ func (m *metrics) renderRequests(builder *strings.Builder) {
 
 		return requestKeys[i].status < requestKeys[j].status
 	})
+
 	for _, key := range requestKeys {
 		writeMetric(builder, "wt_requests_total", fmt.Sprintf(`app="%s",method="%s",status="%s"`, prometheusLabel(key.app), prometheusLabel(key.method), prometheusLabel(key.status)), strconv.FormatUint(m.requests[key], 10))
 	}
@@ -297,6 +313,7 @@ func (m *metrics) renderStorage(builder *strings.Builder) {
 	for key := range m.storage {
 		storageKeys = append(storageKeys, key)
 	}
+
 	sort.Slice(storageKeys, func(i, j int) bool {
 		if storageKeys[i].app != storageKeys[j].app {
 			return storageKeys[i].app < storageKeys[j].app
@@ -308,6 +325,7 @@ func (m *metrics) renderStorage(builder *strings.Builder) {
 
 		return storageKeys[i].result < storageKeys[j].result
 	})
+
 	for _, key := range storageKeys {
 		writeMetric(builder, "wt_storage_operations_total", fmt.Sprintf(`app="%s",pool="%s",result="%s"`, prometheusLabel(key.app), prometheusLabel(key.pool), prometheusLabel(key.result)), strconv.FormatUint(m.storage[key], 10))
 	}
@@ -322,6 +340,7 @@ func (m *metrics) renderStorageDurations(builder *strings.Builder) {
 	for key := range m.storageDur {
 		storageDurationKeys = append(storageDurationKeys, key)
 	}
+
 	sort.Slice(storageDurationKeys, func(i, j int) bool {
 		if storageDurationKeys[i].app != storageDurationKeys[j].app {
 			return storageDurationKeys[i].app < storageDurationKeys[j].app
@@ -329,6 +348,7 @@ func (m *metrics) renderStorageDurations(builder *strings.Builder) {
 
 		return storageDurationKeys[i].pool < storageDurationKeys[j].pool
 	})
+
 	for _, key := range storageDurationKeys {
 		stat := m.storageDur[key]
 		labels := fmt.Sprintf(`app="%s",pool="%s"`, prometheusLabel(key.app), prometheusLabel(key.pool))
@@ -347,6 +367,7 @@ func writeOutcomes(builder *strings.Builder, name, help string, values map[outco
 	for key := range values {
 		keys = append(keys, key)
 	}
+
 	sort.Slice(keys, func(i, j int) bool {
 		if keys[i].app != keys[j].app {
 			return keys[i].app < keys[j].app
@@ -358,6 +379,7 @@ func writeOutcomes(builder *strings.Builder, name, help string, values map[outco
 
 		return keys[i].result < keys[j].result
 	})
+
 	for _, key := range keys {
 		writeMetric(builder, name, fmt.Sprintf(`app="%s",action="%s",result="%s"`, prometheusLabel(key.app), prometheusLabel(key.action), prometheusLabel(key.result)), strconv.FormatUint(values[key], 10))
 	}
@@ -378,6 +400,7 @@ func (m *metrics) render(s *supervisor) string {
 	writeOutcomes(&builder, "wt_jobs_total", "Job outcomes.", m.jobs)
 	m.mu.Unlock()
 	m.renderApps(&builder, s)
+
 	return builder.String()
 }
 
@@ -390,6 +413,7 @@ func (s *supervisor) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "metrics unavailable")
 		return
 	}
+
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 
 	_, _ = w.Write([]byte(s.metrics.render(s)))

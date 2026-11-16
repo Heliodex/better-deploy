@@ -35,6 +35,7 @@ func (s *supervisor) canCompile() bool {
 		cmd.Stderr = io.Discard
 		s.compilerOK = cmd.Run() == nil
 	})
+
 	return s.compilerOK
 }
 
@@ -43,6 +44,7 @@ func supervisorBuildInfo() (string, string) {
 	var commit string
 
 	name := version
+
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
 		return name, commit

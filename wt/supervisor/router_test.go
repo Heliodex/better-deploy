@@ -71,6 +71,7 @@ func TestRouteTableServe(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	rt.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/usage", nil))
+
 	if rec.Code != http.StatusNoContent || !called {
 		t.Fatalf("GET /usage = %d called=%t", rec.Code, called)
 	}
@@ -78,6 +79,7 @@ func TestRouteTableServe(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	rt.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/usage", nil))
+
 	if rec.Code != http.StatusMethodNotAllowed || rec.Header().Get("Allow") != http.MethodGet {
 		t.Errorf("POST /usage = %d Allow=%q", rec.Code, rec.Header().Get("Allow"))
 	}
@@ -85,6 +87,7 @@ func TestRouteTableServe(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	rt.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/missing", nil))
+
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("GET /missing = %d, want 404", rec.Code)
 	}

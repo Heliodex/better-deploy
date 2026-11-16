@@ -89,6 +89,7 @@ func signedTestToken(t *testing.T, key *rsa.PrivateKey, kid string, value claims
 
 	signingInput := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(payload)
 	digest := sha256.Sum256([]byte(signingInput))
+
 	signature, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, digest[:])
 	if err != nil {
 		t.Fatal(err)
@@ -100,6 +101,7 @@ func signedTestToken(t *testing.T, key *rsa.PrivateKey, kid string, value claims
 func writeTestJSON(t *testing.T, w http.ResponseWriter, value any) {
 	t.Helper()
 	w.Header().Set("Content-Type", "application/json")
+
 	if err := json.MarshalWrite(w, value); err != nil {
 		t.Errorf("encode response: %v", err)
 	}
@@ -178,6 +180,7 @@ func newProviderFixture(t *testing.T) *providerFixture {
 				http.Error(w, "bad token", http.StatusUnauthorized)
 				return
 			}
+
 			writeTestJSON(t, w, map[string]any{
 				"email": "alice@example.com",
 				"name": "Alice Example",
@@ -190,12 +193,14 @@ func newProviderFixture(t *testing.T) *providerFixture {
 	}))
 
 	t.Cleanup(fixture.server.Close)
+
 	return fixture
 }
 
 func TestDiscoverAndAuthoriseURL(t *testing.T) {
 	fixture := newProviderFixture(t)
 	client := fixtureClient(t, fixture)
+
 	provider, err := client.Discover(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -223,6 +228,7 @@ func TestDiscoverAndAuthoriseURL(t *testing.T) {
 func TestEndSessionURL(t *testing.T) {
 	fixture := newProviderFixture(t)
 	client := fixtureClient(t, fixture)
+
 	endSession, err := client.EndSessionURL(t.Context(), "id-token", "https://app.example/")
 	if err != nil {
 		t.Fatal(err)
@@ -241,6 +247,7 @@ func TestEndSessionURL(t *testing.T) {
 func TestExchange(t *testing.T) {
 	fixture := newProviderFixture(t)
 	client := fixtureClient(t, fixture)
+
 	tokens, err := client.Exchange(t.Context(), "code", "https://app.example/auth/callback/", "verifier")
 	if err != nil {
 		t.Fatal(err)
@@ -272,6 +279,7 @@ func TestNewValidationAndDiscoveryMismatch(t *testing.T) {
 func TestVerifyIDTokenAndUserinfo(t *testing.T) {
 	fixture := newProviderFixture(t)
 	client := fixtureClient(t, fixture)
+
 	tokens, err := client.Exchange(t.Context(), "code", "https://app.example/auth/callback/", "verifier")
 	if err != nil {
 		t.Fatal(err)
@@ -341,6 +349,7 @@ func TestVerifyIDTokenAndUserinfo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	fixture.setSigningMaterial(rotatedKey, "rotated-key")
 
 	rotated, err := client.Exchange(t.Context(), "code", "https://app.example/auth/callback/", "verifier")

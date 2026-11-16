@@ -121,7 +121,9 @@ func (s *identityStore) deleteSession(token string) error {
 	if _, ok := s.sessions[hash]; !ok {
 		return nil
 	}
+
 	delete(s.sessions, hash)
+
 	return s.saveSessionsLocked()
 }
 
@@ -143,9 +145,11 @@ func (s *identityStore) deleteUser(id string) error {
 	if !ok {
 		return errIdentityUserMissing
 	}
+
 	delete(s.users, id)
 	delete(s.byEmail, user.Email)
 	s.deleteUserSessionsLocked(id)
+
 	if err := s.saveUsersLocked(); err != nil {
 		return err
 	}
@@ -204,6 +208,7 @@ func (s *identityStore) setPassword(id, password string) error {
 	if err != nil {
 		return err
 	}
+
 	s.mu.Lock()
 
 	defer s.mu.Unlock()
@@ -217,6 +222,7 @@ func (s *identityStore) setPassword(id, password string) error {
 	user.UpdatedAt = time.Now().UTC()
 
 	s.deleteUserSessionsLocked(id)
+
 	if err := s.saveUsersLocked(); err != nil {
 		return err
 	}
@@ -250,6 +256,7 @@ func (s *identityStore) listUsers() []identityUserInfo {
 	for id := range s.users {
 		ids = append(ids, id)
 	}
+
 	slices.Sort(ids)
 
 	out := make([]identityUserInfo, 0, len(ids))
@@ -284,10 +291,12 @@ func (s *identityStore) session(token string) (identitySession, identityUserInfo
 		_ = s.saveSessionsLocked()
 
 		s.mu.Unlock()
+
 		return identitySession{}, identityUserInfo{}, errIdentityNoSession
 	}
 
 	session.LastSeenAt = now
+
 	user, ok := s.users[session.UserID]
 	if !ok || user.Disabled {
 		delete(s.sessions, hash)
@@ -295,6 +304,7 @@ func (s *identityStore) session(token string) (identitySession, identityUserInfo
 		_ = s.saveSessionsLocked()
 
 		s.mu.Unlock()
+
 		return identitySession{}, identityUserInfo{}, errIdentityNoSession
 	}
 
@@ -302,6 +312,7 @@ func (s *identityStore) session(token string) (identitySession, identityUserInfo
 	info := user.info()
 
 	s.mu.Unlock()
+
 	return cloned, info, nil
 }
 
@@ -384,6 +395,7 @@ func (s *identityStore) authenticate(email, password string) (identityUserInfo, 
 		info = user.info()
 	}
 	s.mu.Unlock()
+
 	if !verifyIdentityPassword(encoded, password) || !found {
 		return identityUserInfo{}, errIdentityNoUser
 	}
@@ -422,7 +434,9 @@ func normaliseIdentityGroups(groups []string) ([]string, error) {
 		seen[group] = struct{}{}
 		out = append(out, group)
 	}
+
 	slices.Sort(out)
+
 	return out, nil
 }
 
@@ -444,13 +458,11 @@ func (s *identityStore) createUser(email, name, password string, groups []string
 	}
 
 	name, err = normaliseIdentityName(name)
-
 	if err != nil {
 		return identityUserInfo{}, err
 	}
 
 	groups, err = normaliseIdentityGroups(groups)
-
 	if err != nil {
 		return identityUserInfo{}, err
 	}
@@ -459,6 +471,7 @@ func (s *identityStore) createUser(email, name, password string, groups []string
 	if err != nil {
 		return identityUserInfo{}, err
 	}
+
 	s.mu.Lock()
 
 	defer s.mu.Unlock()
@@ -492,6 +505,7 @@ func (s *identityStore) createUser(email, name, password string, groups []string
 	if err := s.saveUsersLocked(); err != nil {
 		delete(s.users, user.ID)
 		delete(s.byEmail, email)
+
 		return identityUserInfo{}, err
 	}
 
@@ -505,10 +519,10 @@ func (s *identityStore) updateUser(id, name string, groups []string, disabled *b
 	}
 
 	groups, err = normaliseIdentityGroups(groups)
-
 	if err != nil {
 		return identityUserInfo{}, err
 	}
+
 	s.mu.Lock()
 
 	defer s.mu.Unlock()

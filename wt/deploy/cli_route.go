@@ -59,6 +59,7 @@ func printRawOrJSONJSON(value any) {
 		fmt.Println(err)
 		return
 	}
+
 	fmt.Println(string(data))
 }
 
@@ -66,6 +67,7 @@ func printRawOrJSONJSON(value any) {
 func printRouteReport(report routeReport) {
 	fmt.Printf("app: %s\n", report.App)
 	fmt.Printf("host: %s (%s)\n", report.Host, report.HealthPath)
+
 	if len(report.Addresses) > 0 {
 		fmt.Printf("dns: %s\n", strings.Join(report.Addresses, ", "))
 	} else if report.DNSError != "" {
@@ -79,7 +81,9 @@ func printRouteReport(report routeReport) {
 	if report.HTTPError != "" {
 		fmt.Printf("http error: %s\n", report.HTTPError)
 	}
+
 	fmt.Printf("routed: %v\n", report.Routed)
+
 	if report.AppStatus != "" {
 		fmt.Printf("app: %s (ready %v)\n", report.AppStatus, report.Ready)
 	}
@@ -97,6 +101,7 @@ func probeRoute(supervisorHost, appHost, healthPath string, timeout time.Duratio
 		URL: target,
 		HealthPath: healthPath,
 	}
+
 	parsed, err := url.Parse(target)
 	if err != nil || parsed.Hostname() == "" {
 		report.HTTPError = "invalid app URL"
@@ -121,6 +126,7 @@ func probeRoute(supervisorHost, appHost, healthPath string, timeout time.Duratio
 
 		return report
 	}
+
 	request.Header.Set("Accept", "text/html")
 
 	client := &http.Client{
@@ -129,6 +135,7 @@ func probeRoute(supervisorHost, appHost, healthPath string, timeout time.Duratio
 			return http.ErrUseLastResponse
 		},
 	}
+
 	resp, err := client.Do(request)
 	if err != nil {
 		report.HTTPError = err.Error()
@@ -260,7 +267,9 @@ func runDoctor(args []string) error {
 	if err != nil {
 		return err
 	}
+
 	fmt.Printf("supervisor: %s\n", caps.displayVersion())
+
 	if caps.Wasmtime != "" {
 		fmt.Printf("wasmtime: %s\n", caps.Wasmtime)
 	}
@@ -268,7 +277,9 @@ func runDoctor(args []string) error {
 	if caps.WasmtimeTarget != "" {
 		fmt.Printf("target: %s\n", caps.WasmtimeTarget)
 	}
+
 	fmt.Printf("compiler: %v\n", caps.Compiler)
+
 	if flags.NArg() == 0 {
 		return nil
 	}

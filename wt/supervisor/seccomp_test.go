@@ -18,6 +18,7 @@ func TestSeccompFilterShape(t *testing.T) {
 	}
 
 	denied := deniedSyscalls()
+
 	filter := seccompFilter(arch, denied)
 	if len(filter) < len(denied)*2 {
 		t.Fatalf("filter has %d instructions for %d denied syscalls", len(filter), len(denied))
@@ -69,6 +70,7 @@ func TestSeccompInstall(t *testing.T) {
 	}
 
 	cmd := exec.Command(os.Args[0], "-test.run=^TestSeccompInstallHelper$")
+
 	cmd.Env = append(os.Environ(), "WT_SECCOMP_HELPER=1")
 
 	if out, err := cmd.CombinedOutput(); err != nil {

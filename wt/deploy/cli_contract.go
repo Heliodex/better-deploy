@@ -32,6 +32,7 @@ func runContract(args []string) error {
 		if err := checkContract(*dir, webDirName(m), m.Name); err != nil {
 			return err
 		}
+
 		fmt.Println("contract: up to date")
 	}
 
@@ -46,6 +47,8 @@ func runContract(args []string) error {
 	if err := generateContract(*dir, webDirName(m), m.Name); err != nil {
 		return err
 	}
+
 	fmt.Println("contract: generated")
+
 	return nil
 }

@@ -58,6 +58,7 @@ func (s *authStore) count() int {
 	if s == nil {
 		return 0
 	}
+
 	s.mu.RLock()
 
 	defer s.mu.RUnlock()
@@ -70,6 +71,7 @@ func (s *authStore) list() []authTokenInfo {
 	if s == nil {
 		return []authTokenInfo{}
 	}
+
 	s.mu.RLock()
 
 	defer s.mu.RUnlock()
@@ -93,6 +95,7 @@ func (s *authStore) list() []authTokenInfo {
 			ExpiresAt: expiresAt,
 		})
 	}
+
 	slices.SortFunc(out, func(a, b authTokenInfo) int {
 		if a.CreatedAt.Equal(b.CreatedAt) {
 			return strings.Compare(a.ID, b.ID)
@@ -104,6 +107,7 @@ func (s *authStore) list() []authTokenInfo {
 
 		return 1
 	})
+
 	return out
 }
 
@@ -193,7 +197,9 @@ func normaliseTokenApps(role string, apps []string) ([]string, error) {
 	if len(out) == 0 {
 		return nil, fmt.Errorf("apps is required for a %s token", role)
 	}
+
 	slices.Sort(out)
+
 	return out, nil
 }
 
@@ -382,6 +388,7 @@ func newAuthStore(path string) (*authStore, error) {
 	store := &authStore{
 		path: path,
 	}
+
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return store, nil

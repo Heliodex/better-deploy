@@ -28,6 +28,7 @@ func TestInheritedListenerKeepsAddress(t *testing.T) {
 	if err := clearCloseOnExec(file); err != nil {
 		t.Fatal(err)
 	}
+
 	t.Setenv(storageFDEnv, strconv.Itoa(int(file.Fd())))
 
 	inherited, ok, err := inheritedListener(storageFDEnv)
@@ -47,12 +48,14 @@ func startTestRunner(t *testing.T) (*runnerClient, *os.File, string) {
 
 	dir := t.TempDir()
 	socket := filepath.Join(dir, "runner.sock")
+
 	read, write, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	cmd := exec.Command(os.Args[0], runnerArg)
+
 	cmd.Env = append(minimalEnv(), runnerSocketEnv+"="+socket, runnerLivenessEnv+"=3")
 	cmd.ExtraFiles = []*os.File{read}
 	cmd.Stderr = os.Stderr
@@ -62,6 +65,7 @@ func startTestRunner(t *testing.T) (*runnerClient, *os.File, string) {
 	}
 
 	_ = read.Close()
+
 	client, _, _, err := dialRunner(socket, 5*time.Second)
 	if err != nil {
 		_ = write.Close()
@@ -69,6 +73,7 @@ func startTestRunner(t *testing.T) (*runnerClient, *os.File, string) {
 
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() {
 		_ = write.Close()
 
@@ -76,6 +81,7 @@ func startTestRunner(t *testing.T) (*runnerClient, *os.File, string) {
 
 		_ = cmd.Wait()
 	})
+
 	return client, write, socket
 }
 
@@ -83,6 +89,7 @@ func TestRunnerLaunchServes(t *testing.T) {
 	s := newLifecycleSupervisor(t)
 	client, _, _ := startTestRunner(t)
 	s.runner = client
+
 	a := spawnTestApp(t, s, "demo")
 	if a.port == 0 || !a.ready {
 		t.Fatalf("port = %d, ready = %t", a.port, a.ready)
@@ -99,6 +106,7 @@ func TestRunnerLaunchServes(t *testing.T) {
 
 func TestRunnerLivenessStopsApps(t *testing.T) {
 	client, write, socket := startTestRunner(t)
+
 	_, _, err := client.Start(runnerStartRequest{
 		ID: "demo",
 		Name: "demo",
@@ -118,13 +126,16 @@ func TestRunnerLivenessStopsApps(t *testing.T) {
 		if _, err := os.Stat(socket); os.IsNotExist(err) {
 			return
 		}
+
 		time.Sleep(50 * time.Millisecond)
 	}
+
 	t.Fatal("runner did not stop after its liveness pipe closed")
 }
 
 func waitRunnerEvent(t *testing.T, stream *runnerStream, op string) runnerEvent {
 	t.Helper()
+
 	for deadline := time.After(5 * time.Second); ; {
 		select {
 		case event := <-stream.events:
@@ -170,6 +181,7 @@ func TestAdoptAppFromRunner(t *testing.T) {
 	}
 
 	port := waitRunnerEvent(t, stream, "port").Port
+
 	adopted, snapshot, _, err := dialRunner(socket, 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
@@ -210,8 +222,10 @@ func TestAdoptAppFromRunner(t *testing.T) {
 	if a.proxy == nil {
 		t.Error("adopted app has no proxy")
 	}
+
 	s.stopping.Store(true)
 	s.drainAndStop(a, "test")
+
 	select {
 	case <-a.done:
 	case <-time.After(5 * time.Second):
@@ -221,6 +235,7 @@ func TestAdoptAppFromRunner(t *testing.T) {
 
 func TestRunnerSnapshotSurvivesAReconnect(t *testing.T) {
 	client, _, socket := startTestRunner(t)
+
 	stream, _, err := client.Start(runnerStartRequest{
 		ID: "demo",
 		Name: "demo",
@@ -255,6 +270,7 @@ func TestRunnerSnapshotSurvivesAReconnect(t *testing.T) {
 
 func TestRunnerStartsStreamsAndStopsAnApp(t *testing.T) {
 	client, _, _ := startTestRunner(t)
+
 	stream, started, err := client.Start(runnerStartRequest{
 		ID: "demo",
 		Name: "demo",
@@ -278,7 +294,9 @@ func TestRunnerStartsStreamsAndStopsAnApp(t *testing.T) {
 	if err := client.Stop("demo"); err != nil {
 		t.Fatal(err)
 	}
+
 	waitRunnerEvent(t, stream, "exited")
+
 	if len(client.Snapshot()) != 0 {
 		t.Error("stopped app is still in the initial runner snapshot")
 	}

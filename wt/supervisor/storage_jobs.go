@@ -14,6 +14,7 @@ func (s *storageServer) storageJob(w http.ResponseWriter, r *http.Request, app, 
 		writeError(w, http.StatusServiceUnavailable, "job queue unavailable")
 		return
 	}
+
 	handleJobItem(w, r, store, id, verb)
 }
 
@@ -29,5 +30,6 @@ func (s *storageServer) storageJobs(w http.ResponseWriter, r *http.Request, app 
 		writeError(w, http.StatusServiceUnavailable, "job queue unavailable")
 		return
 	}
+
 	handleJobsCollection(w, r, store)
 }

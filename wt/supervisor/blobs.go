@@ -128,6 +128,7 @@ func (b *blobStore) store(app, contentType string, src io.Reader, maxBytes int64
 
 	appDir := b.appDir(app)
 	content := newContentStore(appDir, filepath.Join(appDir, ".tmp"))
+
 	digest, written, created, tooLarge, err := content.putReader(src, maxBytes)
 	if err != nil {
 		return blobInfo{}, false, err
@@ -184,6 +185,7 @@ func newBlobStore(stateDir string) (*blobStore, error) {
 	}
 
 	path := filepath.Join(stateDir, blobSecretName)
+
 	secret, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		secret = make([]byte, 32)
@@ -214,11 +216,13 @@ func (s *supervisor) blobOverQuota(a *app) bool {
 	if s.cfg.diskBudgetBytes > 0 && s.overBudget() {
 		return true
 	}
+
 	a.mu.Lock()
 
 	limit := int64(a.cfg.DiskMB) << 20
 
 	a.mu.Unlock()
+
 	if limit <= 0 {
 		return false
 	}
@@ -234,6 +238,7 @@ func (s *supervisor) blobOverQuota(a *app) bool {
 // verifyBlobURL checks the expiry, action and HMAC signature of a signed blob URL.
 func (s *supervisor) verifyBlobURL(r *http.Request, a *app, method, digest string, maxBytes int64, contentType string) error {
 	value := r.URL.Query().Get("exp")
+
 	expires, err := strconv.ParseInt(value, 10, 64)
 	if err != nil {
 		return errBlobInvalid
@@ -336,8 +341,10 @@ func (b *blobStore) list(app string) ([]blobInfo, error) {
 		}
 
 		_ = file.Close()
+
 		out = append(out, info)
 	}
+
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
 			return out[i].Digest < out[j].Digest
@@ -345,6 +352,7 @@ func (b *blobStore) list(app string) ([]blobInfo, error) {
 
 		return out[i].CreatedAt.Before(out[j].CreatedAt)
 	})
+
 	return out, nil
 }
 
@@ -424,6 +432,7 @@ func (s *supervisor) handleBlobDelete(w http.ResponseWriter, r *http.Request, a 
 		writeBlobError(w, err)
 		return
 	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -454,6 +463,7 @@ func (s *supervisor) handleBlobDownload(w http.ResponseWriter, r *http.Request, 
 // handleBlobUpload stores a signed PUT body and returns a signed download URL.
 func (s *supervisor) handleBlobUpload(w http.ResponseWriter, r *http.Request, a *app) {
 	maxValue := r.URL.Query().Get("max")
+
 	maxBytes, err := strconv.ParseInt(maxValue, 10, 64)
 	if err != nil || maxBytes <= 0 || maxBytes > blobMaxUpload {
 		writeError(w, http.StatusBadRequest, "max must be between 1 and "+strconv.Itoa(blobMaxUpload))
@@ -491,11 +501,13 @@ func (s *supervisor) handleBlobUpload(w http.ResponseWriter, r *http.Request, a 
 			_ = s.blobs.remove(a.name, info.Digest)
 
 			writeBlobError(w, errBlobQuota)
+
 			return
 		}
 	}
 
 	expires := time.Now().Add(time.Hour)
+
 	url, err := s.blobs.downloadURL(a.name, info.Digest, expires)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -507,6 +519,7 @@ func (s *supervisor) handleBlobUpload(w http.ResponseWriter, r *http.Request, a 
 	if created {
 		status = http.StatusCreated
 	}
+
 	writeJSON(w, status, blobUploadResponse{
 		blobInfo: info,
 		URL: url,
@@ -524,9 +537,12 @@ func (s *supervisor) handleBlobs(w http.ResponseWriter, r *http.Request, a *app)
 		if r.Method != http.MethodPost && r.Method != http.MethodPut {
 			w.Header().Set("Allow", "POST, PUT")
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 			return
 		}
+
 		s.handleBlobUpload(w, r, a)
+
 		return
 	}
 

@@ -138,6 +138,7 @@ func TestStorageKVRoutes(t *testing.T) {
 	defer s.close()
 
 	token := s.tokenFor("kvapp")
+
 	resp := storageSQL(t, s, token, "/v1/kv/set", map[string]any{"key": "greeting", "ttl_ms": 60_000, "value": "hi"})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("set = %d %s", resp.StatusCode, readBody(t, resp))
@@ -179,7 +180,9 @@ func TestStorageKVRoutes(t *testing.T) {
 	if body := readBody(t, resp); !strings.Contains(body, `"deleted":true`) {
 		t.Errorf("delete = %s", body)
 	}
+
 	s.drop("kvapp")
+
 	if got := s.kv.get("kvapp", "hits"); got.Found {
 		t.Errorf("dropped app keeps keys: %+v", got)
 	}

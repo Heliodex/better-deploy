@@ -36,6 +36,7 @@ func TestMetricsEndpointRendersCountersAndGauges(t *testing.T) {
 
 	req.Header.Set("Authorization", "Bearer secret")
 	s.handleMetrics(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("metrics = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -60,6 +61,7 @@ func TestMetricsEndpointRendersCountersAndGauges(t *testing.T) {
 	req = httptest.NewRequest(http.MethodGet, "/metrics", nil)
 
 	s.handleMetrics(rec, req)
+
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("unauthenticated metrics = %d, want 401", rec.Code)
 	}

@@ -137,6 +137,7 @@ func waitHealthy(url string, timeout time.Duration) error {
 		if time.Now().After(deadline) {
 			return fmt.Errorf("supervisor did not answer %s within %s", url, timeout)
 		}
+
 		time.Sleep(devRetryDelay)
 	}
 }

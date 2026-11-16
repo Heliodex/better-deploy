@@ -72,6 +72,7 @@ func launchRunner(socket string) (*exec.Cmd, *os.File, error) {
 	}
 
 	cmd := exec.CommandContext(context.Background(), "/proc/self/exe", runnerArg)
+
 	cmd.Env = append(minimalEnv(), runnerSocketEnv+"="+socket, runnerLivenessEnv+"=3")
 	cmd.ExtraFiles = []*os.File{read}
 	cmd.Stdout = os.Stderr
@@ -156,10 +157,10 @@ func (s *supervisor) handover() error {
 	}
 
 	env = append(env, handoverEnv+"=1")
+
 	executable := os.Args[0]
 	if executable == "" {
 		executable, err = os.Executable()
-
 		if err != nil {
 			return fmt.Errorf("find supervisor binary: %w", err)
 		}
@@ -175,17 +176,20 @@ func (s *supervisor) handover() error {
 	}
 
 	executable, err = filepath.Abs(executable)
-
 	if err != nil {
 		return fmt.Errorf("resolve supervisor binary: %w", err)
 	}
+
 	s.stopping.Store(true)
 	log.Printf("handover: exec %s with %d app(s)", executable, len(s.allApps()))
+
 	if err := syscall.Exec(executable, os.Args, env); err != nil {
 		s.stopping.Store(false)
 		return fmt.Errorf("exec %s: %w", executable, err)
 	}
+
 	runtime.KeepAlive(files)
+
 	return nil
 }
 
@@ -217,6 +221,7 @@ func waitForSocketGone(socket string) {
 		if _, err := os.Stat(socket); os.IsNotExist(err) {
 			return
 		}
+
 		time.Sleep(100 * time.Millisecond)
 	}
 }
@@ -252,12 +257,16 @@ func (s *supervisor) adoptHandoverRunner(socket string) bool {
 
 		return true
 	}
+
 	log.Printf("runner handover: %v; starting a new runner", err)
+
 	if s.runnerLiveness != nil {
 		_ = s.runnerLiveness.Close()
 		s.runnerLiveness = nil
 	}
+
 	waitForSocketGone(socket)
+
 	return false
 }
 
@@ -275,12 +284,14 @@ func (s *supervisor) startRunner() error {
 	}
 
 	_ = os.Remove(socket)
+
 	cmd, liveness, err := launchRunner(socket)
 	if err != nil {
 		return err
 	}
 
 	s.runnerLiveness = liveness
+
 	client, snapshot, _, err := dialRunner(socket, 5*time.Second)
 	if err != nil {
 		_ = liveness.Close()

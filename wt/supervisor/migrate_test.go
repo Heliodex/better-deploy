@@ -92,6 +92,7 @@ func TestMigrateAppRetriesUnavailable(t *testing.T) {
 			http.Error(w, "storage is starting", http.StatusServiceUnavailable)
 			return
 		}
+
 		w.WriteHeader(http.StatusNoContent)
 	}))
 
@@ -109,9 +110,11 @@ func TestMigrateAppSuccess(t *testing.T) {
 
 	s, a, port := migrateTestTarget(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
+
 		if r.Method != http.MethodPost || r.URL.Path != migratePath {
 			t.Errorf("request = %s %s", r.Method, r.URL.Path)
 		}
+
 		w.WriteHeader(http.StatusNoContent)
 	}))
 

@@ -74,6 +74,7 @@ func canDeployStatic(a *app, digest string, cfg appConfig) bool {
 	if a == nil || digest == "" {
 		return false
 	}
+
 	a.mu.Lock()
 
 	defer a.mu.Unlock()
@@ -150,6 +151,7 @@ func (r *deployRecorder) WriteHeader(status int) {
 	if r.status == 0 {
 		r.status = status
 	}
+
 	r.ResponseWriter.WriteHeader(status)
 }
 
@@ -346,6 +348,7 @@ func (s *supervisor) installStatic(a *app, cfg appConfig, dir string) error {
 	if err := replaceDir(static, filepath.Join(a.dir, "static")); err != nil {
 		return fmt.Errorf("install static: %w", err)
 	}
+
 	a.mu.Lock()
 
 	oldCfg := a.cfg
@@ -357,6 +360,7 @@ func (s *supervisor) installStatic(a *app, cfg appConfig, dir string) error {
 	s.mu.Unlock()
 	s.broadcast()
 	log.Printf("deployed %s static only (wasm %s)", a.name, a.digest)
+
 	return nil
 }
 
@@ -367,10 +371,12 @@ func (s *supervisor) installBundle(w http.ResponseWriter, name string, cfg appCo
 	old := s.apps[name]
 
 	s.mu.RUnlock()
+
 	if canDeployStatic(old, digest, cfg) {
 		if err := s.installStatic(old, cfg, dir); err != nil {
 			log.Printf("%s %s: %v", action, name, err)
 			writeError(w, http.StatusInternalServerError, err.Error())
+
 			return nil, "", err
 		}
 
@@ -384,6 +390,7 @@ func (s *supervisor) installBundle(w http.ResponseWriter, name string, cfg appCo
 		cause := fmt.Errorf("new version did not start: %w", err)
 
 		writeError(w, http.StatusBadGateway, cause.Error())
+
 		return nil, "", cause
 	}
 
@@ -392,19 +399,24 @@ func (s *supervisor) installBundle(w http.ResponseWriter, name string, cfg appCo
 	if err := replaceDir(dir, finalDir); err != nil {
 		s.stop(next)
 		writeError(w, http.StatusInternalServerError, err.Error())
+
 		return nil, "", err
 	}
 
 	next.dir = finalDir
 
 	s.register(next)
+
 	if old != nil {
 		s.drainAndStop(old, action)
+
 		if old.logs != nil {
 			old.logs.close()
 		}
 	}
+
 	log.Printf("%s %s at %s (127.0.0.1:%d)", action, name, cfg.Host, next.port)
+
 	return next, "full", nil
 }
 
@@ -447,6 +459,7 @@ func (s *supervisor) receiveBundle(w http.ResponseWriter, r *http.Request, name 
 		_ = archive.Close()
 
 		writeError(w, http.StatusBadRequest, "read artifact: "+err.Error())
+
 		return "", appConfig{}, cleanup, false
 	}
 
@@ -510,6 +523,7 @@ func (s *supervisor) replayDeployResponse(w http.ResponseWriter, entry deployRep
 			w.Header().Add(key, value)
 		}
 	}
+
 	w.Header().Set("Idempotency-Replayed", "true")
 	w.WriteHeader(entry.Status)
 
@@ -535,13 +549,16 @@ func (s *supervisor) stageDeploy(w http.ResponseWriter, r *http.Request, name st
 		if a == nil {
 			cleanup()
 			writeError(w, http.StatusBadRequest, "bundle has no main.wasm and the app is not running")
+
 			return nil, false
 		}
+
 		a.mu.Lock()
 
 		liveDir := a.dir
 
 		a.mu.Unlock()
+
 		for _, file := range []string{"main.wasm", "main.cwasm", artifactName} {
 			if exists(dir, file) {
 				continue
@@ -550,6 +567,7 @@ func (s *supervisor) stageDeploy(w http.ResponseWriter, r *http.Request, name st
 			if err := copyOptional(liveDir, dir, file); err != nil {
 				cleanup()
 				writeError(w, http.StatusInternalServerError, err.Error())
+
 				return nil, false
 			}
 		}
@@ -560,6 +578,7 @@ func (s *supervisor) stageDeploy(w http.ResponseWriter, r *http.Request, name st
 	if staged.digest == "" {
 		cleanup()
 		writeError(w, http.StatusBadRequest, "bundle has no main.wasm")
+
 		return nil, false
 	}
 

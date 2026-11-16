@@ -58,9 +58,12 @@ var (
 				if recovered == nil {
 					return
 				}
+
 				fmt.Fprintf(os.Stderr, "http handler panic: %v\n%s", recovered, debug.Stack())
+
 				if httpRes.channel != nil {
 					httpRes.channel <- handleErr(wasi.MakeErrorCodeInternalError(wit.Some(fmt.Sprintf("panic: %v", recovered))))
+
 					httpRes.channel = nil
 				}
 			}()
@@ -115,6 +118,7 @@ func toWasiHeaders(headers http.Header) (*wasi.Fields, error) {
 
 		if result := fields.Set(key, fieldVals); result.IsErr() {
 			fields.Drop()
+
 			switch result.Err().Tag() {
 			case wasi.HeaderErrorInvalidSyntax:
 				return nil, fmt.Errorf("failed to set header %s to [%s]: invalid syntax", key, strings.Join(vals, ","))

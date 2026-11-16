@@ -155,6 +155,7 @@ func (m *backupManager) importSnapshot(app, src string) (backupInfo, error) {
 
 	now := time.Now().UTC()
 	name, now := m.backupName(app, now)
+
 	path, dataPath, err := m.placeImportedSnapshot(app, name, database, archive)
 	if err != nil {
 		return backupInfo{}, err
@@ -199,6 +200,7 @@ func (m *backupManager) exportSnapshot(app, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	m.lock(app)
 
 	defer m.unlock(app)
@@ -208,6 +210,7 @@ func (m *backupManager) exportSnapshot(app, name string) (string, error) {
 	databaseInfo, databaseErr := os.Stat(database)
 	archiveInfo, archiveErr := os.Stat(archive)
 	hasDatabase := databaseErr == nil && databaseInfo.Mode().IsRegular()
+
 	hasData := archiveErr == nil && archiveInfo.Mode().IsRegular()
 	if !hasDatabase && !hasData {
 		return "", errBackupNotFound

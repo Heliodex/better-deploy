@@ -57,6 +57,7 @@ func TestApplyAppDomain(t *testing.T) {
 		}
 
 		applyAppDomain(&m, test.domain)
+
 		if m.Host != test.want {
 			t.Errorf("%s: host = %q, want %q", test.name, m.Host, test.want)
 		}

@@ -137,6 +137,7 @@ func (b *kvBucket) putLocked(key string, item kvItem, now time.Time) error {
 	}
 
 	previous, exists := b.items[key]
+
 	fits := func() bool {
 		count, size := len(b.items), b.bytes+item.size(key)
 
@@ -189,6 +190,7 @@ func (s *kvStore) drop(app string) {
 	if s == nil {
 		return
 	}
+
 	s.mu.Lock()
 	delete(s.buckets, app)
 	s.mu.Unlock()
@@ -205,6 +207,7 @@ func (s *kvStore) remove(app, key string) bool {
 	_, ok := b.getLocked(key, now)
 
 	b.removeLocked(key)
+
 	return ok
 }
 
@@ -214,6 +217,7 @@ func (s *kvStore) set(app string, req kvRequest) error {
 	}
 
 	now := s.now()
+
 	expires, err := kvExpiry(now, req.TTLMS)
 	if err != nil {
 		return err
@@ -266,6 +270,7 @@ func (s *kvStore) get(app, key string) kvResponse {
 // incr adds by to an integer key, creating it at zero first. The TTL applies only when the key is created, so a counter is a fixed window that resets when it expires.
 func (s *kvStore) incr(app string, req kvRequest) (kvIncrResponse, error) {
 	now := s.now()
+
 	expires, err := kvExpiry(now, req.TTLMS)
 	if err != nil {
 		return kvIncrResponse{}, err
@@ -286,7 +291,6 @@ func (s *kvStore) incr(app string, req kvRequest) (kvIncrResponse, error) {
 
 	if item, ok := b.getLocked(req.Key, now); ok {
 		current, err = strconv.ParseInt(item.value, 10, 64)
-
 		if err != nil {
 			return kvIncrResponse{}, fmt.Errorf("%w: %q", errKVNotInt, req.Key)
 		}
@@ -385,6 +389,7 @@ func (s *storageServer) kvHandler(op string) func(http.ResponseWriter, *http.Req
 				writeKVError(w, err)
 				return
 			}
+
 			writeJSON(w, http.StatusOK, map[string]bool{"stored": true})
 		case "delete":
 			writeJSON(w, http.StatusOK, map[string]bool{"deleted": s.kv.remove(app, req.Key)})
@@ -394,6 +399,7 @@ func (s *storageServer) kvHandler(op string) func(http.ResponseWriter, *http.Req
 				writeKVError(w, err)
 				return
 			}
+
 			writeJSON(w, http.StatusOK, resp)
 		}
 	}

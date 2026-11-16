@@ -34,6 +34,7 @@ func TestGenerateRegistryOutputsResolvesRelativePaths(t *testing.T) {
 	if err := os.MkdirAll(bin, privateDirMode); err != nil {
 		t.Fatal(err)
 	}
+
 	writeTestFile(t, filepath.Join(web, "biome.json"), "{}")
 	writeTestFile(t, filepath.Join(web, "src", "lib", "contract.ts"), "export const value = 1")
 	writeTestFile(t, filepath.Join(root, "contract", "endpoints.ts"), "export const endpoints = []")
@@ -41,6 +42,7 @@ func TestGenerateRegistryOutputsResolvesRelativePaths(t *testing.T) {
 	writeFakeClientCommand(t, bin, "bunx", bunxRecord, false)
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Chdir(root)
+
 	if err := generateRegistryOutputs(".", "web"); err != nil {
 		t.Fatal(err)
 	}

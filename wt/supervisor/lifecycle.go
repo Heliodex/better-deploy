@@ -25,6 +25,7 @@ func (s *supervisor) handleStop(w http.ResponseWriter, r *http.Request, name str
 	if !ok {
 		return
 	}
+
 	a.mu.Lock()
 
 	a.idleStopped = false
@@ -93,10 +94,12 @@ func (s *supervisor) startStopped(a *app) error {
 	a.mu.Unlock()
 
 	cwasm := filepath.Join(dir, "main.cwasm")
+
 	epoch, err := s.ensureArtifact(dir, requireEpoch)
 	if err != nil {
 		return err
 	}
+
 	s.stopSchedule(a)
 	a.mu.Lock()
 
@@ -109,16 +112,21 @@ func (s *supervisor) startStopped(a *app) error {
 	a.digest = sourceDigest(dir)
 
 	a.mu.Unlock()
+
 	if err := s.launch(a, cwasm); err != nil {
 		return err
 	}
+
 	s.startSchedule(a)
+
 	if s.jobs != nil {
 		if err := s.jobs.start(a.name, a.cfg.JobConcurrency); err != nil {
 			log.Printf("jobs %s: %v", a.name, err)
 		}
 	}
+
 	a.sampleResources(time.Now())
+
 	return nil
 }
 
@@ -130,16 +138,20 @@ func (s *supervisor) handleStart(w http.ResponseWriter, r *http.Request, name st
 	if !ok {
 		return
 	}
+
 	a.mu.Lock()
 
 	running := a.cmd != nil && !a.exited
 
 	a.mu.Unlock()
+
 	if running {
 		writeError(w, http.StatusConflict, "app is already running")
 		return
 	}
+
 	s.cancelRestart(a)
+
 	if err := s.startStopped(a); err != nil {
 		log.Printf("start %s: %v", name, err)
 
@@ -148,9 +160,12 @@ func (s *supervisor) handleStart(w http.ResponseWriter, r *http.Request, name st
 		if errors.Is(err, errNoComponent) {
 			status = http.StatusInternalServerError
 		}
+
 		writeError(w, status, "app did not start: "+err.Error())
+
 		return
 	}
+
 	writeJSON(w, http.StatusOK, s.info(a))
 }
 
@@ -160,11 +175,14 @@ func (s *supervisor) unregister(a *app) {
 	if s.apps[a.name] == a {
 		delete(s.apps, a.name)
 	}
+
 	s.removeAppHostsLocked(a, a.cfg)
 	s.mu.Unlock()
+
 	if s.jobs != nil {
 		s.jobs.stop(a.name)
 	}
+
 	s.broadcast()
 }
 
@@ -188,15 +206,21 @@ func (s *supervisor) handleDelete(w http.ResponseWriter, r *http.Request, name s
 
 		purge = parsed
 	}
+
 	s.unregister(a)
+
 	if s.bus != nil {
 		s.bus.remove(name)
 	}
+
 	s.drainAndStop(a, "delete")
+
 	if a.logs != nil {
 		a.logs.close()
 	}
+
 	s.clearAppDataQuota(name, a)
+
 	if err := os.RemoveAll(filepath.Join(s.cfg.appsDir, name)); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -214,6 +238,7 @@ func (s *supervisor) handleDelete(w http.ResponseWriter, r *http.Request, name s
 			log.Printf("deploy replay %s: %v", name, err)
 		}
 	}
+
 	writeJSON(w, http.StatusOK, deleteAppResponse{
 		Name: name,
 		Purged: purge,

@@ -42,8 +42,10 @@ func (s *jobStore) cancel(id string) (appJob, error) {
 		if err := s.saveLocked(); err != nil {
 			return appJob{}, err
 		}
+
 		s.manager.s.metrics.observeJob(s.app, "canceled")
 		s.signal()
+
 		return s.jobs[index], nil
 	}
 
@@ -84,6 +86,7 @@ func (s *jobStore) list(status string, limit int) []appJob {
 	if limit <= 0 || limit > jobMaxJobs {
 		limit = 100
 	}
+
 	s.mu.Lock()
 
 	defer s.mu.Unlock()
@@ -148,7 +151,9 @@ func (s *jobStore) retry(id string) (appJob, error) {
 		if err := s.saveLocked(); err != nil {
 			return appJob{}, err
 		}
+
 		s.signal()
+
 		return s.jobs[index], nil
 	}
 
@@ -227,10 +232,12 @@ func validateEnqueue(req jobEnqueueRequest, now time.Time) (jobDraft, error) {
 // enqueue validates and persists a new job, deduplicating by idempotency key.
 func (s *jobStore) enqueue(req jobEnqueueRequest) (appJob, bool, error) {
 	now := time.Now().UTC()
+
 	draft, err := validateEnqueue(req, now)
 	if err != nil {
 		return appJob{}, false, err
 	}
+
 	s.mu.Lock()
 
 	defer s.mu.Unlock()
@@ -263,6 +270,8 @@ func (s *jobStore) enqueue(req jobEnqueueRequest) (appJob, bool, error) {
 
 		return appJob{}, false, err
 	}
+
 	s.signal()
+
 	return job, true, nil
 }

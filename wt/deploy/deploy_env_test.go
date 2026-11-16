@@ -11,6 +11,7 @@ func TestApplyDeployEnv(t *testing.T) {
 
 	applyDeployEnv(&m, map[string]string{"NEW": "1"})
 	applyDeployEnv(&m, map[string]string{"NEW": "2", "OTHER": "x"})
+
 	if m.Env["NEW"] != "2" || m.Env["OTHER"] != "x" {
 		t.Errorf("env = %v", m.Env)
 	}
@@ -22,6 +23,7 @@ func TestApplyDeployEnvKeepsManifestValues(t *testing.T) {
 	}
 
 	applyDeployEnv(&m, map[string]string{"NEW": "1"})
+
 	if m.Env["KEEP"] != "yes" || m.Env["NEW"] != "1" {
 		t.Errorf("env = %v", m.Env)
 	}

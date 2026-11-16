@@ -27,6 +27,7 @@ func TestAppArgsForNamespaceLetsAppOverrideDefaults(t *testing.T) {
 			Env: map[string]string{"TMPDIR": "/custom"},
 		},
 	}
+
 	_, env, err := s.appArgsFor(a, "host/main.cwasm", true)
 	if err != nil {
 		t.Fatal(err)
@@ -49,6 +50,7 @@ func TestAppArgsForNamespaceUsesInsidePaths(t *testing.T) {
 			Env: map[string]string{},
 		},
 	}
+
 	args, env, err := s.appArgsFor(a, filepath.Join(a.dir, "main.cwasm"), true)
 	if err != nil {
 		t.Fatal(err)
@@ -99,6 +101,7 @@ func TestNamespaceHelperChild(t *testing.T) {
 	if os.Getenv("WT_NS_HELPER") != "1" {
 		t.Skip("namespace helper child")
 	}
+
 	nsInitMain([]string{"-c", "test -d /app && test -w /data && echo ok > /data/ns-ok && test ! -e /etc/hostname"})
 }
 
@@ -126,12 +129,14 @@ func TestNamespaceLaunch(t *testing.T) {
 	t.Cleanup(func() {
 		_ = os.RemoveAll(root)
 	})
+
 	if err := os.Chmod(root, 0o700); err != nil {
 		t.Fatal(err)
 	}
 
 	appDir := t.TempDir()
 	dataDir := t.TempDir()
+
 	interp, isELF, err := elfInterp("/bin/sh")
 	if err != nil {
 		t.Fatal(err)
@@ -156,14 +161,17 @@ func TestNamespaceLaunch(t *testing.T) {
 		Seccomp: true,
 		Rlimits: rlimitPlan(appConfig{}),
 	}
+
 	raw, err := json.Marshal(plan)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	cmd := exec.Command(os.Args[0], "-test.run=^TestNamespaceHelperChild$")
+
 	cmd.Env = append(os.Environ(), "WT_NS_HELPER=1", nsPlanEnv+"="+string(raw))
 	cmd.SysProcAttr = namespaceSysProcAttr(os.Geteuid(), os.Getegid(), false)
+
 	goReader, goWriter, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)

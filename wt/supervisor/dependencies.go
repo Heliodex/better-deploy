@@ -32,12 +32,14 @@ func (s *supervisor) appDependencyReady(name string, depth int) bool {
 	if a == nil {
 		return false
 	}
+
 	a.mu.Lock()
 
 	maintenance := a.cfg.Maintenance
 	deps := append([]string(nil), a.cfg.DependsOn...)
 
 	a.mu.Unlock()
+
 	if maintenance {
 		return false
 	}
@@ -105,6 +107,7 @@ func (s *supervisor) handleAppMaintenance(w http.ResponseWriter, r *http.Request
 		if !readJSONBody(w, r, maxConfigRequestBytes, &request) {
 			return
 		}
+
 		a.mu.Lock()
 
 		cfg := a.cfg
@@ -117,6 +120,7 @@ func (s *supervisor) handleAppMaintenance(w http.ResponseWriter, r *http.Request
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+
 		a.mu.Lock()
 
 		a.cfg.Maintenance = request.Enabled
@@ -136,6 +140,7 @@ func (s *supervisor) serveMaintenance(w http.ResponseWriter, r *http.Request, a 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusServiceUnavailable)
+
 	if r.Method == http.MethodHead {
 		return
 	}
@@ -162,6 +167,7 @@ func (s *supervisor) walkDependencies(name string, deps []string, visiting map[s
 		if a == nil {
 			continue
 		}
+
 		a.mu.Lock()
 
 		next := append([]string(nil), a.cfg.DependsOn...)
@@ -173,6 +179,7 @@ func (s *supervisor) walkDependencies(name string, deps []string, visiting map[s
 		if err := s.walkDependencies(dep, next, visiting, append(path, dep)); err != nil {
 			return err
 		}
+
 		delete(visiting, dep)
 	}
 

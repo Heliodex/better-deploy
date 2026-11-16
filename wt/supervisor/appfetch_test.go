@@ -28,6 +28,7 @@ func TestAppArgsExposeInternalFetchAndPerAppURLs(t *testing.T) {
 		name: "frontend",
 		cfg: appConfig{},
 	}
+
 	args, env, err := s.appArgs(a, "main.cwasm")
 	if err != nil {
 		t.Fatal(err)
@@ -135,6 +136,7 @@ func TestAppFetchRejectsUnauthorizedAndDisallowedCallers(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	s.handleAppFetch(rec, req)
+
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("missing token = %d, want 401", rec.Code)
 	}
@@ -146,6 +148,7 @@ func TestAppFetchRejectsUnauthorizedAndDisallowedCallers(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	s.handleAppFetch(rec, req)
+
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("disallowed caller = %d, want 403", rec.Code)
 	}
@@ -157,6 +160,7 @@ func TestAppFetchRejectsUnauthorizedAndDisallowedCallers(t *testing.T) {
 	rec = httptest.NewRecorder()
 
 	s.handleAppFetch(rec, req)
+
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("missing target = %d, want 404", rec.Code)
 	}
@@ -185,6 +189,7 @@ func TestAppFetchSignsCallerAndForwards(t *testing.T) {
 
 		timestamp := r.Header.Get(appTimestampHeader)
 		body, _ := io.ReadAll(r.Body)
+
 		bodyHash := appBodySHA256(body)
 		if got := r.Header.Get(appBodyHashHeader); got != bodyHash {
 			t.Errorf("body hash = %q, want %q", got, bodyHash)
@@ -209,6 +214,7 @@ func TestAppFetchSignsCallerAndForwards(t *testing.T) {
 		if string(body) != `{"value":"one"}` {
 			t.Errorf("body = %q", body)
 		}
+
 		w.Header().Set("Content-Type", "application/json")
 
 		_, _ = w.Write([]byte(`{"ok":true}`))
@@ -232,6 +238,7 @@ func TestAppFetchSignsCallerAndForwards(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	s.handleAppFetch(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("fetch = %d: %s", rec.Code, rec.Body.String())
 	}

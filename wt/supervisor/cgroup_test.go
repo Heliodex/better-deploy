@@ -105,6 +105,7 @@ func TestCgroupManagerEnablesParentControllers(t *testing.T) {
 	}
 
 	manager := newCgroupManager(child)
+
 	path, err := manager.create("demo", appConfig{
 		CPUMillicores: 1000,
 		PidsMax: 128,
@@ -130,6 +131,7 @@ func TestCgroupManagerEnablesParentControllers(t *testing.T) {
 func TestCgroupManagerFillsMissingLimitDefaults(t *testing.T) {
 	root := fakeCgroupRoot(t)
 	manager := newCgroupManager(root)
+
 	path, err := manager.create("demo", appConfig{})
 	if err != nil {
 		t.Fatal(err)
@@ -188,6 +190,7 @@ func TestCgroupManagerWritesLimitsAndCleansUp(t *testing.T) {
 		PidsMax: 128,
 		IOWeight: 100,
 	}
+
 	path, err := manager.create("demo", cfg)
 	if err != nil {
 		t.Fatal(err)

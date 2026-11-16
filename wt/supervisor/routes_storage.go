@@ -51,9 +51,11 @@ func (s *storageServer) buildStorageRoutes() *routeTable {
 	rt.add(http.MethodPost, "/v1/sessions/{id}/rollback", withStorageID(func(w http.ResponseWriter, r *http.Request, app, id string) {
 		s.closeSessionRequest(w, r, app, id, false)
 	}))
+
 	for _, op := range []string{"get", "set", "delete", "incr"} {
 		rt.add(http.MethodPost, "/v1/kv/"+op, withStorageApp(s.kvHandler(op)))
 	}
+
 	rt.add(http.MethodPost, "/v1/query", withStorageApp(s.query))
 	rt.add(http.MethodPost, "/v1/exec", withStorageApp(s.exec))
 	rt.add(http.MethodPost, "/v1/write", withStorageApp(s.writeReturning))
@@ -61,6 +63,7 @@ func (s *storageServer) buildStorageRoutes() *routeTable {
 	rt.add(http.MethodPost, "/v1/transaction", withStorageApp(s.transaction))
 	rt.add(http.MethodGet, "/v1/schema", withStorageApp(s.readSchema))
 	rt.add(http.MethodPost, "/v1/migrate", withStorageApp(s.runMigration))
+
 	return rt
 }
 
