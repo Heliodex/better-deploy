@@ -229,31 +229,40 @@ func (m *metrics) renderApps(builder *strings.Builder, s *supervisor) {
 	}
 }
 
-// renderDurations writes request duration summaries; the caller holds m.mu.
-func (m *metrics) renderDurations(builder *strings.Builder) {
-	builder.WriteString("# HELP wt_request_duration_seconds Proxied request duration.\n# TYPE wt_request_duration_seconds summary\n")
+// writeDurationSummary writes one summary family with its series sorted by less; the caller holds m.mu.
+func writeDurationSummary[K comparable](builder *strings.Builder, name, help string, stats map[K]durationStat, less func(a, b K) bool, labels func(key K) string) {
+	fmt.Fprintf(builder, "# HELP %s %s\n# TYPE %s summary\n", name, help, name)
 
-	durationKeys := make([]durationMetricKey, 0, len(m.durations))
+	keys := make([]K, 0, len(stats))
 
-	for key := range m.durations {
-		durationKeys = append(durationKeys, key)
+	for key := range stats {
+		keys = append(keys, key)
 	}
 
-	sort.Slice(durationKeys, func(i, j int) bool {
-		if durationKeys[i].app != durationKeys[j].app {
-			return durationKeys[i].app < durationKeys[j].app
-		}
-
-		return durationKeys[i].method < durationKeys[j].method
+	sort.Slice(keys, func(i, j int) bool {
+		return less(keys[i], keys[j])
 	})
 
-	for _, key := range durationKeys {
-		stat := m.durations[key]
-		labels := fmt.Sprintf(`app="%s",method="%s"`, prometheusLabel(key.app), prometheusLabel(key.method))
+	for _, key := range keys {
+		stat := stats[key]
+		seriesLabels := labels(key)
 
-		writeMetric(builder, "wt_request_duration_seconds_sum", labels, fmt.Sprintf("%.6f", float64(stat.nanos)/float64(time.Second)))
-		writeMetric(builder, "wt_request_duration_seconds_count", labels, strconv.FormatUint(stat.count, 10))
+		writeMetric(builder, name+"_sum", seriesLabels, fmt.Sprintf("%.6f", float64(stat.nanos)/float64(time.Second)))
+		writeMetric(builder, name+"_count", seriesLabels, strconv.FormatUint(stat.count, 10))
 	}
+}
+
+// renderDurations writes request duration summaries; the caller holds m.mu.
+func (m *metrics) renderDurations(builder *strings.Builder) {
+	writeDurationSummary(builder, "wt_request_duration_seconds", "Proxied request duration.", m.durations, func(a, b durationMetricKey) bool {
+		if a.app != b.app {
+			return a.app < b.app
+		}
+
+		return a.method < b.method
+	}, func(key durationMetricKey) string {
+		return fmt.Sprintf(`app="%s",method="%s"`, prometheusLabel(key.app), prometheusLabel(key.method))
+	})
 }
 
 // renderInflight writes the current in-flight gauge; the caller holds m.mu.
@@ -333,29 +342,15 @@ func (m *metrics) renderStorage(builder *strings.Builder) {
 
 // renderStorageDurations writes storage duration summaries; the caller holds m.mu.
 func (m *metrics) renderStorageDurations(builder *strings.Builder) {
-	builder.WriteString("# HELP wt_storage_operation_duration_seconds Storage operation duration.\n# TYPE wt_storage_operation_duration_seconds summary\n")
-
-	storageDurationKeys := make([]storageDurationKey, 0, len(m.storageDur))
-
-	for key := range m.storageDur {
-		storageDurationKeys = append(storageDurationKeys, key)
-	}
-
-	sort.Slice(storageDurationKeys, func(i, j int) bool {
-		if storageDurationKeys[i].app != storageDurationKeys[j].app {
-			return storageDurationKeys[i].app < storageDurationKeys[j].app
+	writeDurationSummary(builder, "wt_storage_operation_duration_seconds", "Storage operation duration.", m.storageDur, func(a, b storageDurationKey) bool {
+		if a.app != b.app {
+			return a.app < b.app
 		}
 
-		return storageDurationKeys[i].pool < storageDurationKeys[j].pool
+		return a.pool < b.pool
+	}, func(key storageDurationKey) string {
+		return fmt.Sprintf(`app="%s",pool="%s"`, prometheusLabel(key.app), prometheusLabel(key.pool))
 	})
-
-	for _, key := range storageDurationKeys {
-		stat := m.storageDur[key]
-		labels := fmt.Sprintf(`app="%s",pool="%s"`, prometheusLabel(key.app), prometheusLabel(key.pool))
-
-		writeMetric(builder, "wt_storage_operation_duration_seconds_sum", labels, fmt.Sprintf("%.6f", float64(stat.nanos)/float64(time.Second)))
-		writeMetric(builder, "wt_storage_operation_duration_seconds_count", labels, strconv.FormatUint(stat.count, 10))
-	}
 }
 
 // writeOutcomes writes one counter family from an outcome map.
