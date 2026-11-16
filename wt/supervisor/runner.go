@@ -300,9 +300,7 @@ func (r *runnerServer) shutdown() {
 		_ = syscall.Kill(pid, syscall.SIGTERM)
 	}
 
-	deadline := time.Now().Add(5 * time.Second)
-
-	for time.Now().Before(deadline) {
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
 		r.mu.Lock()
 
 		count := len(r.apps)

@@ -155,9 +155,7 @@ func TestScheduleCallsEndpoint(t *testing.T) {
 
 	defer s.stop(a)
 
-	deadline := time.Now().Add(3 * time.Second)
-
-	for calls.Load() < 2 && time.Now().Before(deadline) {
+	for deadline := time.Now().Add(3 * time.Second); calls.Load() < 2 && time.Now().Before(deadline); {
 		time.Sleep(20 * time.Millisecond)
 	}
 

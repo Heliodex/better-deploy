@@ -163,9 +163,7 @@ func runSecretsSet(cfg clientOptions, name string, args []string) error {
 	var file, key string
 
 	for index := 0; index < len(args); index++ {
-		arg := args[index]
-
-		switch {
+		switch arg := args[index]; {
 		case arg == "--file" && index+1 < len(args):
 			index++
 			file = args[index]

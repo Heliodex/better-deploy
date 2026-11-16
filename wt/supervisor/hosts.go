@@ -47,9 +47,8 @@ func hostPatternsOverlap(a, b string) bool {
 	}
 
 	aWildcard := strings.HasPrefix(a, "*.")
-	bWildcard := strings.HasPrefix(b, "*.")
 
-	switch {
+	switch bWildcard := strings.HasPrefix(b, "*."); {
 	case aWildcard && bWildcard:
 		return a == b
 	case aWildcard:

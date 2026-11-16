@@ -69,9 +69,8 @@ func TestBundle(t *testing.T) {
 	defer gz.Close()
 
 	entries := map[string]string{}
-	tr := tar.NewReader(gz)
 
-	for {
+	for tr := tar.NewReader(gz); ; {
 		header, err := tr.Next()
 		if errors.Is(err, io.EOF) {
 			break
@@ -130,9 +129,8 @@ func TestBundleOmitsMissingCwasm(t *testing.T) {
 	defer gz.Close()
 
 	names := map[string]bool{}
-	tr := tar.NewReader(gz)
 
-	for {
+	for tr := tar.NewReader(gz); ; {
 		header, err := tr.Next()
 		if errors.Is(err, io.EOF) {
 			break
@@ -583,9 +581,8 @@ func TestRunBundle(t *testing.T) {
 	defer gz.Close()
 
 	names := map[string]bool{}
-	tr := tar.NewReader(gz)
 
-	for {
+	for tr := tar.NewReader(gz); ; {
 		header, err := tr.Next()
 		if errors.Is(err, io.EOF) {
 			break

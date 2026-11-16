@@ -497,9 +497,8 @@ func TestViteDevProxy(t *testing.T) {
 		Timeout: 2 * time.Second,
 	}
 	base := "http://127.0.0.1:" + strconv.Itoa(vite.port)
-	deadline := time.Now().Add(20 * time.Second)
 
-	for {
+	for deadline := time.Now().Add(20 * time.Second); ; {
 		response, err := client.Get(base + "/")
 		if err == nil {
 			response.Body.Close()

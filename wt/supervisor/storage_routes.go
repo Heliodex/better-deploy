@@ -56,9 +56,7 @@ func readStorageRows(rows *sql.Rows, maxRows int) (columns []string, encoded [][
 		dest[i] = &values[i]
 	}
 
-	var total int
-
-	for rows.Next() {
+	for total := 0; rows.Next(); {
 		if len(encoded) >= maxRows {
 			truncated = true
 			break

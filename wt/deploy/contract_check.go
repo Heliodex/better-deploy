@@ -107,9 +107,8 @@ func compareContractTrees(generatedDir, currentDir string) error {
 	for _, name := range names {
 		currentPath, currentOK := current[name]
 		generatedPath, generatedOK := generated[name]
-		label := "contract/schemas/" + name
 
-		switch {
+		switch label := "contract/schemas/" + name; {
 		case !generatedOK:
 			problems = append(problems, label+" is stale")
 		case !currentOK:

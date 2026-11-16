@@ -50,9 +50,7 @@ func ensureAppReadable(root string) error {
 			return err
 		}
 
-		mode := info.Mode()
-
-		switch {
+		switch mode := info.Mode(); {
 		case mode.IsDir():
 			return os.Chmod(path, 0o755)
 		case mode.IsRegular():

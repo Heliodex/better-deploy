@@ -109,10 +109,7 @@ func TestJobQueueCancelAndAPI(t *testing.T) {
 
 func waitJob(t *testing.T, store *jobStore, id, status string) appJob {
 	t.Helper()
-
-	deadline := time.Now().Add(5 * time.Second)
-
-	for time.Now().Before(deadline) {
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
 		if job, ok := store.get(id); ok && job.Status == status {
 			return job
 		}

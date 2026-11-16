@@ -125,10 +125,7 @@ func TestRunnerLivenessStopsApps(t *testing.T) {
 
 func waitRunnerEvent(t *testing.T, stream *runnerStream, op string) runnerEvent {
 	t.Helper()
-
-	deadline := time.After(5 * time.Second)
-
-	for {
+	for deadline := time.After(5 * time.Second); ; {
 		select {
 		case event := <-stream.events:
 			if event.Op == op {

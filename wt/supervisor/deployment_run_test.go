@@ -116,9 +116,7 @@ func TestAsyncDeploymentResource(t *testing.T) {
 
 	var info deploymentInfo
 
-	deadline := time.Now().Add(10 * time.Second)
-
-	for {
+	for deadline := time.Now().Add(10 * time.Second); ; {
 		_, info = getDeployment(t, s, "demo", created.ID)
 
 		if info.Status == deploymentStatusOK || info.Status == deploymentStatusFail || info.Status == deploymentStatusCanceled {

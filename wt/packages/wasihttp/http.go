@@ -36,7 +36,6 @@ const (
 )
 
 var (
-
 	// defaultHandler is a placeholder for returning a useful error to stderr when the handler is not set.
 	defaultHandler = func(http.ResponseWriter, *http.Request) {
 		fmt.Fprintln(os.Stderr, "http handler undefined")

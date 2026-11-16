@@ -560,10 +560,7 @@ func TestHandleLogStreamBacklogAndLines(t *testing.T) {
 
 	waitFor := func(want string) {
 		t.Helper()
-
-		deadline := time.After(5 * time.Second)
-
-		for !strings.Contains(rec.Body(), want) {
+		for deadline := time.After(5 * time.Second); !strings.Contains(rec.Body(), want); {
 			select {
 			case <-deadline:
 				cancel()

@@ -27,9 +27,8 @@ func readArchiveEntries(t *testing.T, path string) map[string]string {
 	}
 
 	entries := map[string]string{}
-	tr := tar.NewReader(gz)
 
-	for {
+	for tr := tar.NewReader(gz); ; {
 		header, err := tr.Next()
 		if errors.Is(err, io.EOF) {
 			return entries

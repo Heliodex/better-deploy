@@ -59,9 +59,7 @@ func storageConstraintName(code int) string {
 
 // storageSQLiteError maps an extended SQLite result code to an HTTP status and a stable error code.
 func storageSQLiteError(code int) (status int, name, constraint string) {
-	base := code & 0xff
-
-	switch base {
+	switch base := code & 0xff; base {
 	case sqlite3.SQLITE_AUTH, sqlite3.SQLITE_PERM:
 		return http.StatusForbidden, "denied", ""
 	case sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED:

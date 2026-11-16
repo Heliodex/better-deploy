@@ -14,9 +14,8 @@ func (m *backupManager) readTreeLocked(app string) (backupTree, bool, error) {
 	tree := backupTree{
 		Nodes: map[string]backupNode{},
 	}
-	data, err := os.ReadFile(m.treePath(app))
 
-	switch {
+	switch data, err := os.ReadFile(m.treePath(app)); {
 	case err == nil:
 		if err := json.Unmarshal(data, &tree); err != nil {
 			tree = backupTree{

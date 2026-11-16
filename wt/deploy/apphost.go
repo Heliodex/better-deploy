@@ -16,9 +16,8 @@ func applyAppDomain(m *manifest, domain string) {
 	}
 
 	host := strings.TrimSpace(m.Host)
-	lower := strings.ToLower(host)
 
-	switch {
+	switch lower := strings.ToLower(host); {
 	case host == "", lower == "localhost":
 		m.Host = m.Name + "." + domain
 	case strings.HasSuffix(lower, ".localhost"):

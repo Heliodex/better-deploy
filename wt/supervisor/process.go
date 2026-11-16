@@ -586,9 +586,7 @@ func (s *supervisor) waitReadyUntil(a *app, done <-chan struct{}, deadline time.
 
 	var lastFailure string
 
-	wait := 50 * time.Millisecond
-
-	for {
+	for wait := 50 * time.Millisecond; ; {
 		select {
 		case <-done:
 			return fmt.Errorf("wasmtime exited before %s answered", target)

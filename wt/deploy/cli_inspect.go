@@ -346,9 +346,7 @@ func runInspect(args []string) error {
 	var name string
 
 	for index := 0; index < len(rest); index++ {
-		arg := rest[index]
-
-		switch {
+		switch arg := rest[index]; {
 		case arg == "--dir" && index+1 < len(rest):
 			index++
 			dir = rest[index]

@@ -42,7 +42,6 @@ type (
 )
 
 const (
-
 	// resourcePersistInterval is how often chart histories are written to disk. A crash loses at most this much history.
 	resourcePersistInterval = 10 * time.Second
 

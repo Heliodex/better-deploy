@@ -68,9 +68,7 @@ func parseDeployEnv(assignments []string) (map[string]string, error) {
 
 // pollVerify repeats check until it reports ready or the timeout lapses.
 func pollVerify(timeout time.Duration, check func() (bool, string)) error {
-	deadline := time.Now().Add(timeout)
-
-	for {
+	for deadline := time.Now().Add(timeout); ; {
 		ready, detail := check()
 		if ready {
 			return nil

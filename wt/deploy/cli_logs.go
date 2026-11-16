@@ -137,9 +137,7 @@ func parseLogOptions(cfg *clientOptions, rest []string) (string, logOptions, err
 	var err error
 
 	for index := 1; index < len(rest); index++ {
-		arg := rest[index]
-
-		switch {
+		switch arg := rest[index]; {
 		case arg == "--follow":
 			opts.follow = true
 		case arg == "--json":

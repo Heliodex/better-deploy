@@ -79,7 +79,6 @@ type (
 )
 
 const (
-
 	// DefaultTable is the SQLite table used when Outbox.Table is empty.
 	DefaultTable = "webhook_outbox"
 	// DefaultLimit is the number of deliveries one DeliverDue call processes.

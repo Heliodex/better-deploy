@@ -122,9 +122,7 @@ func prepareDevState(workDir string) (appsDir, stateDir string, err error) {
 
 // waitHealthy polls url until it answers or the timeout expires.
 func waitHealthy(url string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-
-	for {
+	for deadline := time.Now().Add(timeout); ; {
 		request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
 		if err != nil {
 			return err

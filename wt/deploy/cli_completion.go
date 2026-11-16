@@ -12,7 +12,7 @@ func runCompletion(args []string) error {
 		return errors.New("usage: wt completion <bash|zsh|fish>")
 	}
 
-	commands := []string{
+	switch commands := []string{
 		"apps",
 		"logs",
 		"jobs",
@@ -35,9 +35,7 @@ func runCompletion(args []string) error {
 		"open",
 		"completion",
 		"help",
-	}
-
-	switch args[0] {
+	}; args[0] {
 	case "bash":
 		fmt.Printf("_wt() {\n  local cur\n  cur=\"${COMP_WORDS[COMP_CWORD]}\"\n  COMPREPLY=( $(compgen -W %q -- \"$cur\") )\n}\ncomplete -F _wt wt-deploy\n", strings.Join(commands, " "))
 	case "zsh":

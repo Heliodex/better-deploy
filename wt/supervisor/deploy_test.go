@@ -91,10 +91,7 @@ func deploymentID(t *testing.T, rec *httptest.ResponseRecorder) string {
 // waitDeployment polls one deployment until it reaches a terminal state.
 func waitDeployment(t *testing.T, s *supervisor, name, id string) deploymentInfo {
 	t.Helper()
-
-	deadline := time.Now().Add(5 * time.Second)
-
-	for {
+	for deadline := time.Now().Add(5 * time.Second); ; {
 		req := httptest.NewRequest(http.MethodGet, "/apps/"+name+"/deployments/"+id, nil)
 
 		req.Header.Set("Authorization", "Bearer secret")

@@ -379,9 +379,8 @@ func readAppConfig(dir, name, domain, mode string) (appConfig, error) {
 		Name: name,
 		Env: map[string]string{},
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "app.json"))
 
-	switch {
+	switch data, err := os.ReadFile(filepath.Join(dir, "app.json")); {
 	case err == nil:
 		if err := json.Unmarshal(data, &cfg); err != nil {
 			return cfg, fmt.Errorf("app.json: %w", err)

@@ -66,9 +66,7 @@ func copyCompressed(gz *gzip.Writer, src io.Reader, stream bool) error {
 		return err
 	}
 
-	buf := make([]byte, 32<<10)
-
-	for {
+	for buf := make([]byte, 32<<10); ; {
 		n, readErr := src.Read(buf)
 		if n > 0 {
 			if _, err := gz.Write(buf[:n]); err != nil {

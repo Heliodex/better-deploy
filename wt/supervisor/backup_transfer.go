@@ -101,9 +101,7 @@ func extractSnapshot(src, temp string) (database, archive string, err error) {
 			continue
 		}
 
-		path := filepath.Join(temp, entry.Name())
-
-		switch {
+		switch path := filepath.Join(temp, entry.Name()); {
 		case strings.HasSuffix(entry.Name(), backupFileSuffix):
 			if database != "" {
 				return "", "", errors.New("snapshot contains more than one database")

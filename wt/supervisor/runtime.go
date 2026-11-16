@@ -30,7 +30,6 @@ type (
 )
 
 const (
-
 	// serveAddr lets wasmtime bind any free loopback port; the supervisor learns the chosen port from its startup line.
 	serveAddr = "127.0.0.1:0"
 	serveAddressPrefix = "Serving HTTP on http://127.0.0.1:"

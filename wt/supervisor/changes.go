@@ -386,9 +386,8 @@ func (c *rowChangeCollector) resolveColumns(ctx context.Context, conn *sql.Conn)
 		}
 
 		row.Columns = columns
-		needed := max(len(row.Old), len(row.New))
 
-		for len(row.Columns) < needed {
+		for needed := max(len(row.Old), len(row.New)); len(row.Columns) < needed; {
 			row.Columns = append(row.Columns, fmt.Sprintf("column_%d", len(row.Columns)+1))
 		}
 	}

@@ -125,9 +125,7 @@ func (s *supervisor) handover() error {
 	env := make([]string, 0, len(os.Environ())+4)
 
 	for _, pair := range os.Environ() {
-		key, _, _ := strings.Cut(pair, "=")
-
-		switch key {
+		switch key, _, _ := strings.Cut(pair, "="); key {
 		case fetchFDEnv, handoverEnv, runnerFDEnv, storageFDEnv:
 			continue
 		}
