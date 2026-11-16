@@ -151,9 +151,7 @@ func (s *secretStore) writeLocked(app string, values map[string]string) error {
 }
 
 // appRedactionValues returns stored secret values plus the app's storage token for log redaction.
-func (s *supervisor) appRedactionValues(app string) []string {
-	var values []string
-
+func (s *supervisor) appRedactionValues(app string) (values []string) {
 	if s.secrets != nil {
 		values = s.secrets.redactionValues(app)
 	}
@@ -174,7 +172,7 @@ func (s *supervisor) appRedactionValues(app string) []string {
 		})
 	}
 
-	return values
+	return
 }
 
 // redactAppText redacts stored secrets and the app's storage token from supervisor-side text such as LastError.

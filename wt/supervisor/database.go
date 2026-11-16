@@ -168,6 +168,7 @@ func (s *storageServer) databaseStats(ctx context.Context, app string) ([]databa
 
 			if err := rows.Scan(&name); err != nil {
 				closeErr := rows.Close() //nolint:sqlclosecheck // Rows are closed explicitly so the close error can be returned.
+
 				return errors.Join(err, closeErr)
 			}
 

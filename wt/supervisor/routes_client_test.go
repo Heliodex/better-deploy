@@ -112,11 +112,9 @@ func renderRouteClient(entries []routeClientEntry) string {
 }
 
 // routeClientEntries collects the distinct app and admin patterns the panel uses.
-func routeClientEntries() []routeClientEntry {
+func routeClientEntries() (entries []routeClientEntry) {
 	s := &supervisor{}
 	seen := map[string]struct{}{}
-
-	var entries []routeClientEntry
 
 	for _, table := range []*routeTable{s.buildAppRoutes(), s.adminRoutes()} {
 		for _, route := range table.routes {
@@ -141,7 +139,7 @@ func routeClientEntries() []routeClientEntry {
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].name < entries[j].name
 	})
-	return entries
+	return
 }
 
 func TestGeneratedRouteClient(t *testing.T) {

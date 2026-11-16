@@ -60,10 +60,8 @@ func freeLocalPort() (int, error) {
 }
 
 // mergeProxyPrefixes appends groups without duplicating a prefix, preserving the app prefixes first.
-func mergeProxyPrefixes(groups ...[]string) []string {
+func mergeProxyPrefixes(groups ...[]string) (out []string) {
 	seen := map[string]struct{}{}
-
-	var out []string
 
 	for _, group := range groups {
 		for _, prefix := range group {
@@ -76,7 +74,7 @@ func mergeProxyPrefixes(groups ...[]string) []string {
 		}
 	}
 
-	return out
+	return
 }
 
 // resolveViteDev finds the optional web dev loop. A web/package.json is enough; app.json dev fields override the defaults.

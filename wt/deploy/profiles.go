@@ -54,10 +54,8 @@ func defaultConfigPath() string {
 }
 
 // flagValueArg finds the last value of a global flag before parsing, matching the flag package's repeated-flag behaviour.
-func flagValueArg(args []string, name string) string {
+func flagValueArg(args []string, name string) (value string) {
 	flagName := "--" + name
-
-	var value string
 
 	for index := 0; index < len(args); index++ {
 		arg := args[index]
@@ -79,7 +77,7 @@ func flagValueArg(args []string, name string) string {
 		}
 	}
 
-	return value
+	return
 }
 
 // configArg finds --config before flag parsing so file defaults can seed the flag values.

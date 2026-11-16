@@ -174,12 +174,10 @@ func (s *storageServer) migrate(ctx context.Context, app string, version int, st
 
 	var applied bool
 
-	err = s.withConn(ctx, app, func(conn *sql.Conn) error {
-		var err error
-
+	err = s.withConn(ctx, app, func(conn *sql.Conn) (err error) {
 		applied, err = applyMigration(ctx, conn, version, statements, params, checksum)
 
-		return err
+		return
 	})
 
 	if err != nil {

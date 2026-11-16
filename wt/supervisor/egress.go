@@ -54,9 +54,7 @@ func commandRunner(bin string) egressRun {
 }
 
 // deleteRules deletes rules in order, returning the first failure after trying the rest.
-func deleteRules(run egressRun, chain string, rules [][]string) error {
-	var firstErr error
-
+func deleteRules(run egressRun, chain string, rules [][]string) (firstErr error) {
 	for _, rule := range rules {
 		args := append([]string{"-w", "-D", chain}, rule...)
 
@@ -65,7 +63,7 @@ func deleteRules(run egressRun, chain string, rules [][]string) error {
 		}
 	}
 
-	return firstErr
+	return
 }
 
 // appendRules appends rules and rolls back those it already added on failure.

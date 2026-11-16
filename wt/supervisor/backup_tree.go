@@ -60,7 +60,7 @@ func (m *backupManager) saveTreeLocked(app string, tree backupTree) error {
 }
 
 // backupOldestLeaf returns the oldest node with no children outside the protected branch.
-func backupOldestLeaf(tree backupTree, protected map[string]struct{}) string {
+func backupOldestLeaf(tree backupTree, protected map[string]struct{}) (oldest string) {
 	children := map[string]int{}
 
 	for _, node := range tree.Nodes {
@@ -68,8 +68,6 @@ func backupOldestLeaf(tree backupTree, protected map[string]struct{}) string {
 			children[node.Parent]++
 		}
 	}
-
-	var oldest string
 
 	for name := range tree.Nodes {
 		if _, ok := protected[name]; ok {
@@ -85,13 +83,11 @@ func backupOldestLeaf(tree backupTree, protected map[string]struct{}) string {
 		}
 	}
 
-	return oldest
+	return
 }
 
 // backupOldestRoot returns the lexicographically oldest root, which is also the oldest snapshot.
-func backupOldestRoot(tree backupTree) string {
-	var root string
-
+func backupOldestRoot(tree backupTree) (root string) {
 	for name, node := range tree.Nodes {
 		if node.Parent != "" {
 			continue
@@ -102,14 +98,12 @@ func backupOldestRoot(tree backupTree) string {
 		}
 	}
 
-	return root
+	return
 }
 
 // adoptSingleRoot makes the oldest root the only one, so the graph starts in one place.
-func adoptSingleRoot(tree *backupTree) bool {
+func adoptSingleRoot(tree *backupTree) (changed bool) {
 	root := backupOldestRoot(*tree)
-
-	var changed bool
 
 	for name, node := range tree.Nodes {
 		if node.Parent == "" && name != root {
@@ -119,7 +113,7 @@ func adoptSingleRoot(tree *backupTree) bool {
 		}
 	}
 
-	return changed
+	return
 }
 
 // backupPathChild returns the child of root that lies on the protected branch.
@@ -238,9 +232,7 @@ func backupTreeAcyclic(tree backupTree) bool {
 }
 
 // chainMissingNodes links snapshots the index has not recorded to the current node, so a file written just before a crash still has a place in the tree.
-func chainMissingNodes(tree *backupTree, chronological []backupInfo) bool {
-	var changed bool
-
+func chainMissingNodes(tree *backupTree, chronological []backupInfo) (changed bool) {
 	parent := tree.Current
 
 	if len(tree.Nodes) == 0 {
@@ -262,7 +254,7 @@ func chainMissingNodes(tree *backupTree, chronological []backupInfo) bool {
 		changed = true
 	}
 
-	return changed
+	return
 }
 
 // flattenTree rebuilds a broken index in creation order, keeping each node's kind.
@@ -279,9 +271,7 @@ func flattenTree(tree *backupTree, chronological []backupInfo) {
 }
 
 // repairParentLinks detaches nodes whose parent was pruned or never existed.
-func repairParentLinks(tree *backupTree) bool {
-	var changed bool
-
+func repairParentLinks(tree *backupTree) (changed bool) {
 	for name, node := range tree.Nodes {
 		if node.Parent == "" {
 			continue
@@ -294,7 +284,7 @@ func repairParentLinks(tree *backupTree) bool {
 		}
 	}
 
-	return changed
+	return
 }
 
 // syncCurrentNode moves the current marker to the newest snapshot when it no longer names one.
@@ -313,9 +303,7 @@ func syncCurrentNode(tree *backupTree, chronological []backupInfo) bool {
 }
 
 // reconcileTree makes the index match the files on disk and reports whether it changed.
-func reconcileTree(tree *backupTree, files []backupInfo) bool {
-	var changed bool
-
+func reconcileTree(tree *backupTree, files []backupInfo) (changed bool) {
 	existing := make(map[string]struct{}, len(files))
 
 	for _, file := range files {
@@ -357,7 +345,7 @@ func reconcileTree(tree *backupTree, files []backupInfo) bool {
 		changed = true
 	}
 
-	return changed
+	return
 }
 
 // loadTreeLocked loads snapshot files and their tree index together, rebuilding the index when it is missing, stale or broken.

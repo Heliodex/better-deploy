@@ -218,6 +218,7 @@ func schemaTableIndexes(ctx context.Context, conn *sql.Conn, table string) ([]st
 
 		if err := rows.Scan(&seq, &name, &unique, &origin, &partial); err != nil {
 			closeErr := rows.Close() //nolint:sqlclosecheck // Rows are closed explicitly so the close error can be returned.
+
 			return nil, errors.Join(err, closeErr)
 		}
 
@@ -253,6 +254,7 @@ func schemaTableIndexes(ctx context.Context, conn *sql.Conn, table string) ([]st
 
 			if err := columnRows.Scan(&seqno, &cid, &value); err != nil {
 				closeErr := columnRows.Close() //nolint:sqlclosecheck // Rows are closed explicitly so the close error can be returned.
+
 				return nil, errors.Join(err, closeErr)
 			}
 
@@ -298,6 +300,7 @@ func schemaViews(ctx context.Context, conn *sql.Conn) ([]storageView, error) {
 
 		if err := rows.Scan(&name, &ddl); err != nil {
 			closeErr := rows.Close() //nolint:sqlclosecheck // Rows are closed explicitly so the close error can be returned.
+
 			return nil, errors.Join(err, closeErr)
 		}
 
@@ -415,6 +418,7 @@ func (s *storageServer) schema(ctx context.Context, app string, stats bool) (sto
 
 			if err := rows.Scan(&name); err != nil {
 				closeErr := rows.Close() //nolint:sqlclosecheck // Rows are closed explicitly so the close error can be returned.
+
 				return errors.Join(err, closeErr)
 			}
 

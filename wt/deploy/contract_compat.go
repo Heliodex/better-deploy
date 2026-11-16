@@ -161,13 +161,11 @@ func compatTypeNames(value any) map[string]bool {
 
 // diffCompatRequired compares required sets. Either direction breaks a laggard.
 // Fields the new schema introduces are reported by the property diff, not here.
-func diffCompatRequired(schema, path string, oldMap, newMap map[string]any) []compatBreak {
+func diffCompatRequired(schema, path string, oldMap, newMap map[string]any) (breaks []compatBreak) {
 	oldRequired := compatRequiredSet(oldMap)
 	newRequired := compatRequiredSet(newMap)
 	oldProps := compatProps(oldMap)
 	newProps := compatProps(newMap)
-
-	var breaks []compatBreak
 
 	for name := range newRequired {
 		if _, existed := oldProps[name]; existed && !oldRequired[name] {
@@ -191,7 +189,7 @@ func diffCompatRequired(schema, path string, oldMap, newMap map[string]any) []co
 		}
 	}
 
-	return breaks
+	return
 }
 
 // gitWorkTree reports whether dir sits inside a git work tree.
@@ -290,7 +288,7 @@ func renderCompatJSON(value any) string {
 
 // diffCompatKeywords compares every keyword the differ does not model, including constraints and
 // composition. A change to any of them is reported, which stays safe when the generator grows.
-func diffCompatKeywords(schema, path string, oldMap, newMap map[string]any) []compatBreak {
+func diffCompatKeywords(schema, path string, oldMap, newMap map[string]any) (breaks []compatBreak) {
 	seen := make(map[string]bool, len(oldMap)+len(newMap))
 
 	for keyword := range oldMap {
@@ -300,8 +298,6 @@ func diffCompatKeywords(schema, path string, oldMap, newMap map[string]any) []co
 	for keyword := range newMap {
 		seen[keyword] = true
 	}
-
-	var breaks []compatBreak
 
 	for _, keyword := range slices.Sorted(maps.Keys(seen)) {
 		if compatWalked[keyword] || compatIgnored[keyword] || strings.HasPrefix(keyword, "x-") {
@@ -322,7 +318,7 @@ func diffCompatKeywords(schema, path string, oldMap, newMap map[string]any) []co
 		})
 	}
 
-	return breaks
+	return
 }
 
 // diffCompatType compares type keywords. Dropping null is safe; every other change breaks a laggard.
@@ -387,7 +383,7 @@ func diffCompatSchema(schema, path string, oldNode, newNode any) []compatBreak {
 }
 
 // diffCompatProperties compares properties, including the rename hint and nested schemas.
-func diffCompatProperties(schema, path string, oldMap, newMap map[string]any) []compatBreak {
+func diffCompatProperties(schema, path string, oldMap, newMap map[string]any) (breaks []compatBreak) {
 	oldProps := compatProps(oldMap)
 	newProps := compatProps(newMap)
 	newRequired := compatRequiredSet(newMap)
@@ -407,9 +403,6 @@ func diffCompatProperties(schema, path string, oldMap, newMap map[string]any) []
 	}
 	slices.Sort(added)
 	slices.Sort(removed)
-
-	var breaks []compatBreak
-
 	if len(added) == 1 && len(removed) == 1 && reflect.DeepEqual(oldProps[removed[0]], newProps[added[0]]) {
 		breaks = append(breaks, compatBreak{
 			Schema: schema,
@@ -445,7 +438,7 @@ func diffCompatProperties(schema, path string, oldMap, newMap map[string]any) []
 		}
 	}
 
-	return breaks
+	return
 }
 
 // diffCompatItems compares array item schemas.
@@ -556,7 +549,7 @@ func inlineCompatRefs(docs map[string]map[string]any, node any, stack []string) 
 }
 
 // compatDocs compares baseline and regenerated schema documents file by file.
-func compatDocs(baseline, current map[string]map[string]any) []compatBreak {
+func compatDocs(baseline, current map[string]map[string]any) (breaks []compatBreak) {
 	names := slices.Sorted(maps.Keys(baseline))
 
 	for name := range current {
@@ -564,8 +557,6 @@ func compatDocs(baseline, current map[string]map[string]any) []compatBreak {
 			names = append(names, name)
 		}
 	}
-
-	var breaks []compatBreak
 
 	for _, name := range names {
 		newDoc, newOK := current[name]
@@ -606,7 +597,7 @@ func compatDocs(baseline, current map[string]map[string]any) []compatBreak {
 		breaks = append(breaks, diffCompatSchema(name, "", oldInlined, newInlined)...)
 	}
 	slices.SortFunc(breaks, compareCompatBreaks)
-	return breaks
+	return
 }
 
 // runCompat regenerates the contract and reports breaking schema changes against a git ref.

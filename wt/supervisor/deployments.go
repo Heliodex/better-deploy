@@ -322,6 +322,7 @@ func (m *deploymentManager) usage(app string) (int64, error) {
 				device: uint64(stat.Dev),
 				inode: stat.Ino,
 			} //nolint:unconvert // Stat_t.Dev is not uint64 on every platform.
+
 			if _, ok := seen[key]; ok {
 				return nil
 			}

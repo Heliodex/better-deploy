@@ -10,16 +10,13 @@ import (
 )
 
 // compatDoc parses one schema document for classifier tests.
-func compatDoc(t *testing.T, body string) map[string]any {
+func compatDoc(t *testing.T, body string) (doc map[string]any) {
 	t.Helper()
-
-	var doc map[string]any
-
 	if err := json.Unmarshal([]byte(body), &doc); err != nil {
 		t.Fatal(err)
 	}
 
-	return doc
+	return
 }
 
 func TestCompatChangedRefTargetFails(t *testing.T) {

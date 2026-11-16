@@ -31,7 +31,7 @@ func normaliseRoutePath(path string) string {
 }
 
 // routeEntries lists every route whose method is known, so the OpenAPI coverage check can compare them.
-func (s *supervisor) routeEntries() []routeInfo {
+func (s *supervisor) routeEntries() (entries []routeInfo) {
 	tables := []*routeTable{
 		s.buildAppRoutes(),
 		newStorageServerRoutes(),
@@ -39,8 +39,6 @@ func (s *supervisor) routeEntries() []routeInfo {
 		s.adminRoutes(),
 		s.publicRoutes(),
 	}
-
-	var entries []routeInfo
 
 	for _, table := range tables {
 		for _, route := range table.routes {
@@ -55,7 +53,7 @@ func (s *supervisor) routeEntries() []routeInfo {
 		}
 	}
 
-	return entries
+	return
 }
 
 // TestOpenAPIDocumentsRoutes fails when a method or path exists in the route tables but not in openapi.yaml.

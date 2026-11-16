@@ -50,16 +50,13 @@ func TestWALAutoCheckpoint(t *testing.T) {
 	}
 }
 
-func storageConnPragma(t *testing.T, conn *sql.Conn, query string) int64 {
+func storageConnPragma(t *testing.T, conn *sql.Conn, query string) (value int64) {
 	t.Helper()
-
-	var value int64
-
 	if err := conn.QueryRowContext(context.Background(), query).Scan(&value); err != nil {
 		t.Fatalf("%s: %v", query, err)
 	}
 
-	return value
+	return
 }
 
 func TestStoragePoolsApplyPragmasPerConnection(t *testing.T) {
