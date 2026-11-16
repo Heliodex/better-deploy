@@ -28,6 +28,8 @@ linters:
         - tagliatelle
         - testpackage
         - varnamelen
+        - exhaustive 
+        - nakedret 
     exclusions:
         generated: lax
         presets:
