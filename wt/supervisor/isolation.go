@@ -84,8 +84,8 @@ func ensureDirTraversable(dir string) error {
 	}
 
 	mode := info.Mode().Perm()
-
 	want := mode | 0o111
+
 	if want == mode {
 		return nil
 	}

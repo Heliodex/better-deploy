@@ -77,8 +77,8 @@ func TestCompatSameRefPasses(t *testing.T) {
 
 func TestCompatSchemaRemovedFailsAddedPasses(t *testing.T) {
 	doc := compatDoc(t, `{"type":"object","properties":{}}`)
-
 	breaks := compatDocs(map[string]map[string]any{"gone.json": doc}, map[string]map[string]any{})
+
 	if len(breaks) != 1 || breaks[0].Rule != "schema removed" {
 		t.Errorf("removed schema breaks = %v", breaks)
 	}
@@ -200,8 +200,8 @@ func TestCompatNullability(t *testing.T) {
 		`{"type":"object","properties":{"n":{"type":"string"}}}`,
 		`{"type":"object","properties":{"n":{"type":["string","null"]}}}`,
 	}
-
 	breaks := diffCompatSchemas(t, "t.json", adding[0], adding[1])
+
 	if len(breaks) != 1 || breaks[0].Rule != "now nullable" {
 		t.Errorf("adding null breaks = %v", breaks)
 	}

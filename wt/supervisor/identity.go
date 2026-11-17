@@ -296,8 +296,8 @@ func (s *identityStore) session(token string) (identitySession, identityUserInfo
 	}
 
 	session.LastSeenAt = now
-
 	user, ok := s.users[session.UserID]
+
 	if !ok || user.Disabled {
 		delete(s.sessions, hash)
 

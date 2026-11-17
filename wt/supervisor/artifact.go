@@ -168,8 +168,8 @@ func (s *supervisor) artifactCachePath(key artifactKey) string {
 // cachedArtifact returns a compiled artifact and its modification time when the cache already holds this key.
 func (s *supervisor) cachedArtifact(key artifactKey) (string, time.Time, bool) {
 	path := s.artifactCachePath(key)
-
 	info, err := os.Stat(path)
+
 	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
 		return "", time.Time{}, false
 	}
@@ -363,11 +363,11 @@ func (s *supervisor) pruneArtifactCache(keep string) {
 	}
 
 	limit := s.artifactCacheMaxBytes()
-
 	budget := byteBudget{
 		name: "artifact cache",
 		limit: limit,
 	}
+
 	if !budget.exceeded(total) {
 		return
 	}

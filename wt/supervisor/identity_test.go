@@ -276,8 +276,8 @@ func TestIdentityAdminUsers(t *testing.T) {
 
 func TestIdentityLoginMeLogout(t *testing.T) {
 	s, _, _ := testIdentitySupervisor(t)
-
 	rec := identityCall(t, s, http.MethodPost, identityAppPrefix+"/login", `{"email":"ada@example.com","password":"correct horse battery"}`, nil, "")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("login = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -338,8 +338,8 @@ func TestIdentityPasswordChangeAndProxyHeaders(t *testing.T) {
 		Name: identityCookieName,
 		Value: token,
 	}
-
 	rec := identityCall(t, s, http.MethodPost, identityAppPrefix+"/password", `{"currentPassword":"correct horse battery","newPassword":"another long password"}`, cookie, session.CSRF)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("password = %d: %s", rec.Code, rec.Body.String())
 	}

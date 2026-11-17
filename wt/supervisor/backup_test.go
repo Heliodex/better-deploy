@@ -19,8 +19,8 @@ import (
 
 func TestBackupCheckDelayUsesBoundedJitter(t *testing.T) {
 	highest := backupCheckInterval + backupCheckJitter
-
 	lowest := backupCheckInterval - backupCheckJitter
+
 	if got := backupCheckDelay(func(int64) int64 {
 		return 0
 	}); got != lowest {
@@ -1054,8 +1054,8 @@ func TestHandleBackupRoutes(t *testing.T) {
 
 		return rec, result
 	}
-
 	rec, result := do(http.MethodGet, "/apps/notes/backups", "")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("list = %d %s", rec.Code, rec.Body.String())
 	}
@@ -1089,8 +1089,8 @@ func TestHandleBackupRoutes(t *testing.T) {
 	}
 
 	first := result.Backups[0]
-
 	backup := first.Name
+
 	if result.Created != backup {
 		t.Errorf("created = %q, want %q", result.Created, backup)
 	}

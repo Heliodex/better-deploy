@@ -505,8 +505,8 @@ func (s *supervisor) storedAppConfig(info runnerAppInfo, name string, cfg appCon
 // An adopted app is removed from snapshot, so whatever remains in snapshot afterwards has no app directory.
 func (s *supervisor) loadAppEntry(name string, snapshot map[string]runnerAppInfo) {
 	dir := filepath.Join(s.cfg.appsDir, name)
-
 	info, running := snapshot[name]
+
 	if running && info.Dir != "" {
 		dir = info.Dir
 	}

@@ -137,7 +137,6 @@ func (b *kvBucket) putLocked(key string, item kvItem, now time.Time) error {
 	}
 
 	previous, exists := b.items[key]
-
 	fits := func() bool {
 		count, size := len(b.items), b.bytes+item.size(key)
 
@@ -149,6 +148,7 @@ func (b *kvBucket) putLocked(key string, item kvItem, now time.Time) error {
 
 		return count <= maxKVKeysPerApp && size <= maxKVBytesPerApp
 	}
+
 	if !fits() {
 		b.sweepLocked(now)
 

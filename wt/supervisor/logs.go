@@ -292,8 +292,8 @@ func (l *appLog) writeLine(line string) error {
 	level, message := splitLevelPrefix(line)
 	message = l.redactLocked(message)
 	stamp := time.Now().UTC().Format(logTimeFormat)
-
 	data := []byte(stamp + " " + level + " " + message + "\n")
+
 	if l.size+int64(len(data)) > maxLogBytes {
 		file, size, err := rotateLogFile(l.file, l.path(), l.backupPath())
 		if err != nil {
@@ -367,8 +367,8 @@ func (l *appLog) logSupervisor(message string) {
 
 	message = l.redactLocked(message)
 	stamp := time.Now().UTC().Format(logTimeFormat)
-
 	data := []byte(stamp + " INFO " + message + "\n")
+
 	if l.supervisorSize+int64(len(data)) > maxLogBytes {
 		file, size, err := rotateLogFile(l.supervisorFile, l.supervisorPath(), l.supervisorBackupPath())
 		if err != nil {

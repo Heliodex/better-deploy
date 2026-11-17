@@ -125,8 +125,8 @@ func parseServePort(line string) (int, bool) {
 	}
 
 	portText, _, _ := strings.Cut(rest, "/")
-
 	port, err := strconv.Atoi(strings.TrimSpace(portText))
+
 	if err != nil || port < 1 || port > 65535 {
 		return 0, false
 	}

@@ -71,8 +71,8 @@ func TestStorageMigrationChecksums(t *testing.T) {
 			"sql": `create table checks (id integer primary key, value text)`,
 		},
 	}
-
 	status, result, _ := migrate(1, first)
+
 	if status != http.StatusOK || !result.Applied || result.Version != 1 {
 		t.Fatalf("first migration = %d %+v", status, result)
 	}
@@ -219,8 +219,8 @@ func TestStorageRejectsLegacyMigrationVersionWithoutChecksum(t *testing.T) {
 
 		return result
 	}
-
 	schema := schemaOf()
+
 	if schema.Version != 2 || len(schema.Migrations) != 0 {
 		t.Fatalf("legacy schema = %+v", schema)
 	}
@@ -294,8 +294,8 @@ func TestStorageSchemaDetailsAndStats(t *testing.T) {
 			"sql": `create view children_notes as select id, note from children`,
 		},
 	}
-
 	resp := storageSQL(t, s, token, "/v1/migrate", map[string]any{"statements": statements, "version": 1})
+
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("migrate: %d %s", resp.StatusCode, readBody(t, resp))
 	}

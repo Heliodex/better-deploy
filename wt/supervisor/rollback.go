@@ -130,8 +130,8 @@ func restoreDB(live, backup string) error {
 // recoverRollbacks undoes uncommitted swaps and cleans committed ones before apps load.
 func recoverRollbacks(stateDir string, backups *backupManager) error {
 	dir := filepath.Join(stateDir, rollbackJournalDir)
-
 	entries, err := os.ReadDir(dir)
+
 	if os.IsNotExist(err) {
 		return nil
 	}

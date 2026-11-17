@@ -101,8 +101,8 @@ func probeRoute(supervisorHost, appHost, healthPath string, timeout time.Duratio
 		URL: target,
 		HealthPath: healthPath,
 	}
-
 	parsed, err := url.Parse(target)
+
 	if err != nil || parsed.Hostname() == "" {
 		report.HTTPError = "invalid app URL"
 

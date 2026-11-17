@@ -697,8 +697,8 @@ func TestClientWithTxRollsBackOnError(t *testing.T) {
 			t.Errorf("path = %q", r.URL.Path)
 		}
 	})
-
 	sentinel := errors.New("stop")
+
 	if err := client.WithTx(context.Background(), func(tx *Tx) error {
 		if _, err := tx.Exec(context.Background(), `insert into items (value) values (?)`, "three"); err != nil {
 			return err

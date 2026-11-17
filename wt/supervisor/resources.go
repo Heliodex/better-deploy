@@ -371,8 +371,8 @@ func (s *supervisor) persistResources() {
 		}
 
 		tmpName := tmp.Name()
-
 		_, writeErr := tmp.Write(append(data, '\n'))
+
 		if closeErr := tmp.Close(); writeErr != nil || closeErr != nil {
 			_ = os.Remove(tmpName)
 			continue

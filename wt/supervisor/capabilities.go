@@ -44,8 +44,8 @@ func supervisorBuildInfo() (string, string) {
 	var commit string
 
 	name := version
-
 	info, ok := debug.ReadBuildInfo()
+
 	if !ok {
 		return name, commit
 	}

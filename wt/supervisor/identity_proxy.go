@@ -105,8 +105,8 @@ func (s *supervisor) identityProxyHeaders(r *http.Request, appName string, enabl
 	}
 
 	groups := strings.Join(user.Groups, ",")
-
 	secret := s.identitySecretFor(appName)
+
 	if secret == "" {
 		return
 	}

@@ -307,8 +307,8 @@ func diffCompatKeywords(schema, path string, oldMap, newMap map[string]any) (bre
 		}
 
 		newValue, newOK := newMap[keyword]
-
 		oldValue, oldOK := oldMap[keyword]
+
 		if oldOK == newOK && reflect.DeepEqual(oldValue, newValue) {
 			continue
 		}
@@ -327,8 +327,8 @@ func diffCompatKeywords(schema, path string, oldMap, newMap map[string]any) (bre
 // diffCompatType compares type keywords. Dropping null is safe; every other change breaks a laggard.
 func diffCompatType(schema, path string, oldValue, newValue any) []compatBreak {
 	oldSet := compatTypeNames(oldValue)
-
 	newSet := compatTypeNames(newValue)
+
 	if reflect.DeepEqual(oldSet, newSet) {
 		return nil
 	}
@@ -368,8 +368,8 @@ func diffCompatType(schema, path string, oldValue, newValue any) []compatBreak {
 // diffCompatSchema compares two schema nodes and reports every breaking change.
 func diffCompatSchema(schema, path string, oldNode, newNode any) []compatBreak {
 	newMap, newOK := newNode.(map[string]any)
-
 	oldMap, oldOK := oldNode.(map[string]any)
+
 	if !oldOK || !newOK {
 		if reflect.DeepEqual(oldNode, newNode) {
 			return nil
@@ -452,8 +452,8 @@ func diffCompatProperties(schema, path string, oldMap, newMap map[string]any) (b
 // diffCompatItems compares array item schemas.
 func diffCompatItems(schema, path string, oldMap, newMap map[string]any) []compatBreak {
 	newItems, newOK := newMap["items"]
-
 	oldItems, oldOK := oldMap["items"]
+
 	if !oldOK && !newOK {
 		return nil
 	}
@@ -478,8 +478,8 @@ func walkCompatPointer(node any, fragment string) (any, error) {
 
 	for part := range strings.SplitSeq(strings.TrimPrefix(fragment, "/"), "/") {
 		part = strings.ReplaceAll(strings.ReplaceAll(part, "~1", "/"), "~0", "~")
-
 		mapped, ok := current.(map[string]any)
+
 		if !ok {
 			return nil, fmt.Errorf("reference fragment %s does not resolve", fragment)
 		}
@@ -497,8 +497,8 @@ func walkCompatPointer(node any, fragment string) (any, error) {
 // resolveCompatRef resolves a sibling-file reference like message.json or message.json#/properties/id.
 func resolveCompatRef(docs map[string]map[string]any, ref string) (any, error) {
 	file, fragment, _ := strings.Cut(ref, "#")
-
 	doc, ok := docs[file]
+
 	if !ok {
 		return nil, fmt.Errorf("unresolvable reference %s", ref)
 	}

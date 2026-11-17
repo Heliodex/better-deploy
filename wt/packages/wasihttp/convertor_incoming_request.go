@@ -77,8 +77,8 @@ func newHTTPRequest(ctx context.Context, ir *wasi.Request) (*http.Request, error
 	rx, trailers := wasi.RequestConsumeBody(ir, unitFuture())
 	body := newReader(rx, trailers)
 	scheme, host, requestPath, remote := httpmeta.IncomingTarget(pathWithQuery, headers)
-
 	rawURL := requestPath
+
 	if rawURL == "" {
 		rawURL = "/"
 	}

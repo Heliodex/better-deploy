@@ -69,8 +69,8 @@ func appCallSignatureV2(key, caller, method, path, timestamp, bodyHash string) s
 func Caller(r *http.Request) (string, bool) {
 	caller := r.Header.Get(AppCallerHeader)
 	timestamp := r.Header.Get(AppTimestampHeader)
-
 	v2 := r.Header.Get(AppSignatureV2Header)
+
 	if caller == "" || timestamp == "" || v2 == "" {
 		return "", false
 	}

@@ -99,8 +99,8 @@ func (s *supervisor) appDataUsage(name string) (bytes, entries int64, err error)
 	}
 
 	storageDir := filepath.Join(s.cfg.stateDir, ".storage", name)
-
 	storageEntries, err := os.ReadDir(storageDir)
+
 	if err != nil && !os.IsNotExist(err) {
 		return bytes, entries, err
 	}

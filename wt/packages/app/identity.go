@@ -49,8 +49,8 @@ func UserFromRequest(r *http.Request) (User, bool) {
 	email := r.Header.Get(identityUserEmailHeader)
 	name := r.Header.Get(identityUserNameHeader)
 	groupsHeader := r.Header.Get(identityUserGroupsHeader)
-
 	signature := r.Header.Get(identityUserSignatureHeader)
+
 	if id == "" || len(signature) != sha256.Size*2 {
 		return User{}, false
 	}

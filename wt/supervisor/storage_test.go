@@ -328,8 +328,8 @@ func TestStorageQueryReadsFTS(t *testing.T) {
 	defer s.close()
 
 	token := s.tokenFor("fts")
-
 	resp := storageSQL(t, s, token, "/v1/exec", map[string]any{"sql": `create virtual table docs using fts5(body)`})
+
 	if resp.StatusCode != http.StatusOK {
 		t.Skipf("fts5 is unavailable: %d %s", resp.StatusCode, readBody(t, resp))
 	}
@@ -423,8 +423,8 @@ func TestStorageSQLAllowsStringsThatLookUnsafe(t *testing.T) {
 	defer s.close()
 
 	token := s.tokenFor("strings")
-
 	resp := storageSQL(t, s, token, "/v1/query", map[string]any{"sql": `select 'load_extension' as text`})
+
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("query: %d %s", resp.StatusCode, readBody(t, resp))
 	}
@@ -612,8 +612,8 @@ func TestStorageSchemaAndMigrate(t *testing.T) {
 
 		return result
 	}
-
 	result := migrate(1, map[string]any{"sql": `create table notes (id text primary key, body text not null)`})
+
 	if !result.Applied || result.Version != 1 {
 		t.Errorf("first migration = %+v", result)
 	}
@@ -786,8 +786,8 @@ func TestStorageTransaction(t *testing.T) {
 	resp.Body.Close()
 
 	resp = storageSQL(t, s, token, "/v1/query", map[string]any{"sql": `select count(*) from items where id = 'c'`})
-
 	resultRows := storageResultOf(t, resp)
+
 	if len(resultRows.Rows) != 1 {
 		t.Fatalf("rolled-back row count = %+v", resultRows.Rows)
 	}
@@ -846,8 +846,8 @@ func TestStorageUnknownSQLIsInternal(t *testing.T) {
 	defer s.close()
 
 	token := s.tokenFor("unknown")
-
 	resp := storageSQL(t, s, token, "/v1/query", map[string]any{"sql": `select * from missing`})
+
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("missing table = %d, want 500", resp.StatusCode)
 	}
@@ -866,8 +866,8 @@ func TestStorageWriteReturning(t *testing.T) {
 	defer s.close()
 
 	token := s.tokenFor("returning")
-
 	resp := storageSQL(t, s, token, "/v1/exec", map[string]any{"sql": `create table items (id text primary key, value text not null)`})
+
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("create: %d %s", resp.StatusCode, readBody(t, resp))
 	}
@@ -980,8 +980,8 @@ func TestStorageSessionCommit(t *testing.T) {
 	defer s.close()
 
 	token := s.tokenFor("notes")
-
 	resp := storageSQL(t, s, token, "/v1/exec", map[string]any{"sql": `create table items (id text primary key, value text not null)`})
+
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("create table: %d %s", resp.StatusCode, readBody(t, resp))
 	}
@@ -1049,8 +1049,8 @@ func TestStorageSessionIsScopedToApp(t *testing.T) {
 	token := s.tokenFor("notes")
 	other := s.tokenFor("other")
 	session := storageSessionOf(t, s, token)
-
 	resp := storageSQL(t, s, other, "/v1/sessions/"+session.ID+"/query", map[string]any{"sql": `select 1`})
+
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("other app used session: %d, want 404", resp.StatusCode)
 	}
@@ -1067,8 +1067,8 @@ func TestStorageSessionLeaseExpiryRollsBack(t *testing.T) {
 	defer s.close()
 
 	token := s.tokenFor("notes")
-
 	resp := storageSQL(t, s, token, "/v1/exec", map[string]any{"sql": `create table items (id text primary key, value text not null)`})
+
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("create table: %d %s", resp.StatusCode, readBody(t, resp))
 	}
@@ -1113,8 +1113,8 @@ func TestStorageSessionRollback(t *testing.T) {
 	defer s.close()
 
 	token := s.tokenFor("notes")
-
 	resp := storageSQL(t, s, token, "/v1/exec", map[string]any{"sql": `create table items (id text primary key, value text not null)`})
+
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("create table: %d %s", resp.StatusCode, readBody(t, resp))
 	}

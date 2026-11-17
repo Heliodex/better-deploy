@@ -210,8 +210,8 @@ func (m *backupManager) exportSnapshot(app, name string) (string, error) {
 	databaseInfo, databaseErr := os.Stat(database)
 	archiveInfo, archiveErr := os.Stat(archive)
 	hasDatabase := databaseErr == nil && databaseInfo.Mode().IsRegular()
-
 	hasData := archiveErr == nil && archiveInfo.Mode().IsRegular()
+
 	if !hasDatabase && !hasData {
 		return "", errBackupNotFound
 	}

@@ -138,8 +138,8 @@ func TestStorageKVRoutes(t *testing.T) {
 	defer s.close()
 
 	token := s.tokenFor("kvapp")
-
 	resp := storageSQL(t, s, token, "/v1/kv/set", map[string]any{"key": "greeting", "ttl_ms": 60_000, "value": "hi"})
+
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("set = %d %s", resp.StatusCode, readBody(t, resp))
 	}

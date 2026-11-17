@@ -172,15 +172,15 @@ func staticRegularFile(dir, path string) (string, bool) {
 // staticFile maps a request path to a regular file inside dir, rejecting traversal, resolving a directory's index.html for a trailing-slash request, and trying <path>.html for extensionless prerendered pages.
 func staticFile(dir, requestPath string) (string, bool) {
 	clean := filepath.Clean("/" + requestPath)
-
 	rel := strings.TrimPrefix(clean, "/")
+
 	if rel == "" || rel == "." || strings.HasPrefix(rel, "..") {
 		return "", false
 	}
 
 	path := filepath.Join(dir, filepath.FromSlash(rel))
-
 	inside, err := filepath.Rel(dir, path)
+
 	if err != nil || inside == ".." || strings.HasPrefix(inside, ".."+string(filepath.Separator)) {
 		return "", false
 	}

@@ -22,8 +22,8 @@ const (
 // New creates a client using the supplied transport. A wasi:http transport is used in components; tests can pass a normal http.Client.
 func New(httpClient *http.Client) (*Client, error) {
 	baseURL := strings.TrimSuffix(os.Getenv("WT_STORAGE_URL"), "/")
-
 	token := os.Getenv("WT_STORAGE_TOKEN")
+
 	if baseURL == "" || token == "" {
 		return nil, errors.New("WT_STORAGE_URL and WT_STORAGE_TOKEN must be set")
 	}
@@ -71,8 +71,8 @@ func responseError(resp *http.Response) error {
 	var body errorResponse
 
 	_ = json.Unmarshal(raw, &body)
-
 	message := strings.TrimSpace(body.Error)
+
 	if message == "" {
 		message = strings.TrimSpace(string(raw))
 	}

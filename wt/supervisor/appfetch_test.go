@@ -189,8 +189,8 @@ func TestAppFetchSignsCallerAndForwards(t *testing.T) {
 
 		timestamp := r.Header.Get(appTimestampHeader)
 		body, _ := io.ReadAll(r.Body)
-
 		bodyHash := appBodySHA256(body)
+
 		if got := r.Header.Get(appBodyHashHeader); got != bodyHash {
 			t.Errorf("body hash = %q, want %q", got, bodyHash)
 		}

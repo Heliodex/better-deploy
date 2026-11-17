@@ -481,8 +481,7 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.WriteHeader(status)
 
 	data, _ := json.Marshal(value)
-	//nolint:gosec // The body is escaped or JSON-encoded before writing.
-	_, _ = w.Write(append(data, '\n'))
+	_, _ = w.Write(append(data, '\n')) //nolint:gosec // The body is escaped or JSON-encoded before writing.
 }
 
 // handleAppRoot serves the app resource itself: inspect, deploy, or delete.

@@ -17,8 +17,8 @@ type overviewApp struct {
 // appSummary describes the app.json in dir; hasApp reports whether one could be read.
 func appSummary(dir string) (summary string, hasApp bool) {
 	path := filepath.Join(dir, "app.json")
-
 	data, err := os.ReadFile(path)
+
 	if os.IsNotExist(err) {
 		return "app: none in this directory", false
 	}

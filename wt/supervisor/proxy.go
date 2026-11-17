@@ -374,8 +374,8 @@ func (s *supervisor) serveApp(w http.ResponseWriter, r *http.Request, a *app) {
 // handleProxy resolves the app host and dispatches maintenance, events, identity and blob traffic before proxying.
 func (s *supervisor) handleProxy(w http.ResponseWriter, r *http.Request) {
 	host := s.effectiveHost(r)
-
 	a := s.appForHost(host)
+
 	if a == nil {
 		http.Error(w, "no app for this host", http.StatusNotFound)
 		return

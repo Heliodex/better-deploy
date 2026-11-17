@@ -29,10 +29,10 @@ func jsonErrorField(message, fallback string) string {
 	}
 
 	rest := message[len(marker):]
-
 	end := strings.IndexFunc(rest, func(r rune) bool {
 		return r != '_' && !unicode.IsLetter(r) && !unicode.IsDigit(r)
 	})
+
 	if end < 0 {
 		end = len(rest)
 	}

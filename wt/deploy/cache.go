@@ -308,8 +308,8 @@ func localReplaceDirs(dir string) ([]string, error) {
 		}
 
 		line = strings.TrimPrefix(line, "replace ")
-
 		_, right, ok := strings.Cut(line, "=>")
+
 		if !ok {
 			continue
 		}

@@ -18,8 +18,8 @@ func TestSeccompFilterShape(t *testing.T) {
 	}
 
 	denied := deniedSyscalls()
-
 	filter := seccompFilter(arch, denied)
+
 	if len(filter) < len(denied)*2 {
 		t.Fatalf("filter has %d instructions for %d denied syscalls", len(filter), len(denied))
 	}

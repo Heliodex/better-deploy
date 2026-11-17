@@ -157,8 +157,8 @@ func (s *supervisor) handover() error {
 	}
 
 	env = append(env, handoverEnv+"=1")
-
 	executable := os.Args[0]
+
 	if executable == "" {
 		executable, err = os.Executable()
 		if err != nil {

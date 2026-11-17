@@ -278,8 +278,8 @@ func (s *storageServer) recentChanges(app string, limit int) ([]storageChange, e
 
 	for _, name := range []string{changeLogBackup, changeLogName} {
 		path := filepath.Join(dir, name)
-
 		file, err := os.Open(path)
+
 		if os.IsNotExist(err) {
 			continue
 		}
@@ -386,8 +386,8 @@ func (c *rowChangeCollector) resolveColumns(ctx context.Context, conn *sql.Conn)
 
 	for i := range c.rows {
 		row := &c.rows[i]
-
 		columns, ok := cache[row.Table]
+
 		if !ok {
 			resolved, err := tableColumns(ctx, conn, row.Table)
 			if err != nil {

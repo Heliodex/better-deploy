@@ -513,8 +513,8 @@ func (m *backupManager) overview(app string) (backupsResponse, error) {
 // runDue snapshots every app whose policy is enabled and whose newest snapshot is older than its interval. An app without a database still gets a data-only snapshot of /data. A small worker pool bounds concurrent archives without letting one app's large /data delay every other app.
 func (m *backupManager) runDue(ctx context.Context, now time.Time) {
 	names := m.dueApps()
-
 	workers := min(backupWorkers, len(names))
+
 	if workers == 0 {
 		return
 	}

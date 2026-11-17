@@ -55,7 +55,6 @@ func TestIdleAppServesStaticWithoutWaking(t *testing.T) {
 
 func TestIdleDue(t *testing.T) {
 	now := time.Now()
-
 	newApp := func() *app {
 		return &app{
 			name: "demo",
@@ -70,6 +69,7 @@ func TestIdleDue(t *testing.T) {
 			started: now.Add(-11 * time.Second),
 		}
 	}
+
 	if !newApp().idleDue(now) {
 		t.Error("an app idle past its timeout should be due")
 	}
@@ -225,7 +225,6 @@ func TestLoadAppsStartsWithExplicitOptOut(t *testing.T) {
 
 func TestMarkIdleStopped(t *testing.T) {
 	now := time.Now()
-
 	a := &app{
 		name: "demo",
 		cfg: appConfig{
@@ -238,6 +237,7 @@ func TestMarkIdleStopped(t *testing.T) {
 		},
 		started: now.Add(-11 * time.Second),
 	}
+
 	if !a.markIdleStopped() {
 		t.Fatal("markIdleStopped should accept an idle app")
 	}

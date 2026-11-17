@@ -198,8 +198,8 @@ func TestDeployConditionalAndIdempotent(t *testing.T) {
 		"app.json": `{"name":"demo","host":"demo.localhost"}`,
 		"main.wasm": "wasm-conditional",
 	})
-
 	rec := deployArchive(t, s, "demo", archive, "")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("first deploy = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -278,8 +278,8 @@ func TestDeployDryRunValidatesWithoutInstalling(t *testing.T) {
 	s.cfg.appsDir = t.TempDir()
 	s.cfg.domain = "localhost"
 	s.deployments = newDeploymentManager(t.TempDir())
-
 	rec := deployArchive(t, s, "demo", archive, "?dry_run=1")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("dry run status = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -365,8 +365,8 @@ func TestDeploySameDigestKeepsProcessAndUpdatesStatic(t *testing.T) {
 	})
 
 	first := writeTarGz(t, map[string]string{"app.json": appJSON, "main.wasm": "wasm-one", "static/index.html": "first"})
-
 	rec := deployArchive(t, s, "demo", first, "")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("first deploy = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -381,8 +381,8 @@ func TestDeploySameDigestKeepsProcessAndUpdatesStatic(t *testing.T) {
 	}
 
 	running := s.lookup("demo")
-
 	pid := appPID(running)
+
 	if pid == 0 {
 		t.Fatal("first deploy did not start a process")
 	}
@@ -528,8 +528,8 @@ func TestFailedDeployKeepsOldProcess(t *testing.T) {
 	}
 
 	old := s.lookup("demo")
-
 	oldPID := appPID(old)
+
 	if oldPID == 0 {
 		t.Fatal("first deploy did not start")
 	}

@@ -33,8 +33,8 @@ func TestSchemaRejectsInvalidTable(t *testing.T) {
 
 func (s *recordingSender) Send(_ context.Context, delivery Delivery) (int, error) {
 	s.calls = append(s.calls, delivery)
-
 	index := len(s.calls) - 1
+
 	if index < len(s.errs) && s.errs[index] != nil {
 		return 0, s.errs[index]
 	}

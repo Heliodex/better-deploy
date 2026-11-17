@@ -128,8 +128,8 @@ func clientFlags(args []string, requireHost bool) (clientOptions, []string, erro
 // htmlErrorTitle pulls the title out of an HTML error page, so an outage reads as one line instead of a markup dump.
 func htmlErrorTitle(page string) string {
 	lower := strings.ToLower(page)
-
 	start := strings.Index(lower, "<title>")
+
 	if start < 0 {
 		return ""
 	}

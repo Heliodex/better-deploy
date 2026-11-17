@@ -141,8 +141,8 @@ func backupPathNames(tree backupTree) map[string]struct{} {
 		}
 
 		protected[id] = struct{}{}
-
 		node, ok := tree.Nodes[id]
+
 		if !ok {
 			break
 		}
@@ -224,8 +224,8 @@ func backupTreeAcyclic(tree backupTree) bool {
 			}
 
 			seen[id] = struct{}{}
-
 			node, ok := tree.Nodes[id]
+
 			if !ok {
 				break
 			}

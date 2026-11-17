@@ -91,8 +91,8 @@ func resolveViteDev(appDir string, m manifest, host string) (*viteDev, bool, err
 	}
 
 	webDir := filepath.Join(appDir, web)
-
 	info, err := os.Stat(filepath.Join(webDir, "package.json"))
+
 	if err != nil || !info.Mode().IsRegular() {
 		return nil, false, nil
 	}

@@ -659,8 +659,8 @@ func parseLinkInput(r *http.Request) (linkInput, error) {
 
 	parsed.Scheme = strings.ToLower(parsed.Scheme)
 	parsed.Host = strings.ToLower(parsed.Host)
-
 	title := strings.TrimSpace(r.FormValue("title"))
+
 	if title == "" {
 		title = parsed.Host
 	}

@@ -30,8 +30,8 @@ func TestStoragePerAppQuotaReopensWhenRaised(t *testing.T) {
 
 		return storageSQL(t, s, token, "/v1/exec", body)
 	}
-
 	resp := exec(`create table blobs (id integer primary key, body text not null)`, nil)
+
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("create table: %d %s", resp.StatusCode, readBody(t, resp))
 	}

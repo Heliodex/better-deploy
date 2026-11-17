@@ -186,8 +186,8 @@ func newBlobStore(stateDir string) (*blobStore, error) {
 	}
 
 	path := filepath.Join(stateDir, blobSecretName)
-
 	secret, err := os.ReadFile(path)
+
 	if os.IsNotExist(err) {
 		secret = make([]byte, 32)
 
@@ -464,8 +464,8 @@ func (s *supervisor) handleBlobDownload(w http.ResponseWriter, r *http.Request, 
 // handleBlobUpload stores a signed PUT body and returns a signed download URL.
 func (s *supervisor) handleBlobUpload(w http.ResponseWriter, r *http.Request, a *app) {
 	maxValue := r.URL.Query().Get("max")
-
 	maxBytes, err := strconv.ParseInt(maxValue, 10, 64)
+
 	if err != nil || maxBytes <= 0 || maxBytes > blobMaxUpload {
 		writeError(w, http.StatusBadRequest, "max must be between 1 and "+strconv.Itoa(blobMaxUpload))
 		return

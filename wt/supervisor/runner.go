@@ -262,8 +262,8 @@ func (r *runnerServer) readWorkPID(app *runnerProcess, reader *os.File) {
 	defer reader.Close()
 
 	data, _ := io.ReadAll(io.LimitReader(reader, 64))
-
 	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+
 	if err != nil || pid <= 0 {
 		return
 	}

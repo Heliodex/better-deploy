@@ -97,8 +97,8 @@ func TestAsyncDeploymentResource(t *testing.T) {
 	})
 
 	archive := writeTarGz(t, map[string]string{"app.json": `{"name":"demo","host":"demo.localhost"}`, "main.wasm": "wasm"})
-
 	rec := postDeployment(t, s, "demo", archive)
+
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("create deployment = %d: %s", rec.Code, rec.Body.String())
 	}

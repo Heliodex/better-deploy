@@ -229,42 +229,6 @@ func (m *metrics) renderApps(builder *strings.Builder, s *supervisor) {
 	}
 }
 
-// writeDurationSummary writes one summary family with its series sorted by less; the caller holds m.mu.
-func writeDurationSummary[K comparable](builder *strings.Builder, name, help string, stats map[K]durationStat, less func(a, b K) bool, labels func(key K) string) {
-	fmt.Fprintf(builder, "# HELP %s %s\n# TYPE %s summary\n", name, help, name)
-
-	keys := make([]K, 0, len(stats))
-
-	for key := range stats {
-		keys = append(keys, key)
-	}
-
-	sort.Slice(keys, func(i, j int) bool {
-		return less(keys[i], keys[j])
-	})
-
-	for _, key := range keys {
-		stat := stats[key]
-		seriesLabels := labels(key)
-
-		writeMetric(builder, name+"_sum", seriesLabels, fmt.Sprintf("%.6f", float64(stat.nanos)/float64(time.Second)))
-		writeMetric(builder, name+"_count", seriesLabels, strconv.FormatUint(stat.count, 10))
-	}
-}
-
-// renderDurations writes request duration summaries; the caller holds m.mu.
-func (m *metrics) renderDurations(builder *strings.Builder) {
-	writeDurationSummary(builder, "wt_request_duration_seconds", "Proxied request duration.", m.durations, func(a, b durationMetricKey) bool {
-		if a.app != b.app {
-			return a.app < b.app
-		}
-
-		return a.method < b.method
-	}, func(key durationMetricKey) string {
-		return fmt.Sprintf(`app="%s",method="%s"`, prometheusLabel(key.app), prometheusLabel(key.method))
-	})
-}
-
 // renderInflight writes the current in-flight gauge; the caller holds m.mu.
 func (m *metrics) renderInflight(builder *strings.Builder) {
 	builder.WriteString("# HELP wt_inflight_requests Requests currently being proxied.\n# TYPE wt_inflight_requests gauge\n")
@@ -338,6 +302,42 @@ func (m *metrics) renderStorage(builder *strings.Builder) {
 	for _, key := range storageKeys {
 		writeMetric(builder, "wt_storage_operations_total", fmt.Sprintf(`app="%s",pool="%s",result="%s"`, prometheusLabel(key.app), prometheusLabel(key.pool), prometheusLabel(key.result)), strconv.FormatUint(m.storage[key], 10))
 	}
+}
+
+// writeDurationSummary writes one summary family with its series sorted by less; the caller holds m.mu.
+func writeDurationSummary[K comparable](builder *strings.Builder, name, help string, stats map[K]durationStat, less func(a, b K) bool, labels func(key K) string) {
+	fmt.Fprintf(builder, "# HELP %s %s\n# TYPE %s summary\n", name, help, name)
+
+	keys := make([]K, 0, len(stats))
+
+	for key := range stats {
+		keys = append(keys, key)
+	}
+
+	sort.Slice(keys, func(i, j int) bool {
+		return less(keys[i], keys[j])
+	})
+
+	for _, key := range keys {
+		stat := stats[key]
+		seriesLabels := labels(key)
+
+		writeMetric(builder, name+"_sum", seriesLabels, fmt.Sprintf("%.6f", float64(stat.nanos)/float64(time.Second)))
+		writeMetric(builder, name+"_count", seriesLabels, strconv.FormatUint(stat.count, 10))
+	}
+}
+
+// renderDurations writes request duration summaries; the caller holds m.mu.
+func (m *metrics) renderDurations(builder *strings.Builder) {
+	writeDurationSummary(builder, "wt_request_duration_seconds", "Proxied request duration.", m.durations, func(a, b durationMetricKey) bool {
+		if a.app != b.app {
+			return a.app < b.app
+		}
+
+		return a.method < b.method
+	}, func(key durationMetricKey) string {
+		return fmt.Sprintf(`app="%s",method="%s"`, prometheusLabel(key.app), prometheusLabel(key.method))
+	})
 }
 
 // renderStorageDurations writes storage duration summaries; the caller holds m.mu.

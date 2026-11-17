@@ -249,8 +249,8 @@ func TestAppInfoRedactsLastError(t *testing.T) {
 	}
 
 	a.lastError = "failed with super-secret-value"
-
 	info := s.info(a)
+
 	if strings.Contains(info.LastError, "super-secret-value") {
 		t.Errorf("LastError leaked a secret: %q", info.LastError)
 	}

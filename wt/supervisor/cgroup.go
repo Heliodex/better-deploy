@@ -130,8 +130,8 @@ func enableControllersAt(dir string, required []string) error {
 	}
 
 	subtreePath := filepath.Join(dir, "cgroup.subtree_control")
-
 	existing, err := os.ReadFile(subtreePath)
+
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("read %s: %w", subtreePath, err)
 	}

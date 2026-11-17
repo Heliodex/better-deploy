@@ -125,8 +125,8 @@ func TestDatabaseExportImportAndMaintenance(t *testing.T) {
 
 		return rec, result
 	}
-
 	rec, result := doMaintenance("integrity_check")
+
 	if rec.Code != http.StatusOK || result.Result != "ok" {
 		t.Errorf("integrity_check = %d %+v", rec.Code, result)
 	}
@@ -149,8 +149,8 @@ func TestDatabaseExportImportAndMaintenance(t *testing.T) {
 func TestDatabaseOverview(t *testing.T) {
 	s, storage := testDatabaseSupervisor(t)
 	token := storage.tokenFor("notes")
-
 	rec := databaseGET(t, s, "/apps/notes/database")
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("empty overview = %d %s", rec.Code, rec.Body.String())
 	}

@@ -254,8 +254,8 @@ func TestBlobUploadDownloadAndDelete(t *testing.T) {
 	}
 
 	sum := sha256.Sum256(body)
-
 	digest := hex.EncodeToString(sum[:])
+
 	if uploaded.Digest != digest || uploaded.Size != int64(len(body)) || uploaded.ContentType != "text/plain" {
 		t.Errorf("uploaded = %+v", uploaded)
 	}

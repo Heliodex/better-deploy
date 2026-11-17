@@ -133,8 +133,8 @@ func (rt *routeTable) match(method, path string) (*route, map[string]string, []s
 
 	for i := range rt.routes {
 		route := &rt.routes[i]
-
 		params, ok := matchRoute(route.pattern, segments)
+
 		if !ok {
 			continue
 		}

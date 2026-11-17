@@ -105,8 +105,8 @@ func (s *supervisor) handleAppJobs(w http.ResponseWriter, r *http.Request, name,
 	}
 
 	rest := strings.TrimPrefix(action, "jobs/")
-
 	id, verb, _ := strings.Cut(rest, "/")
+
 	if id == "" {
 		http.NotFound(w, r)
 		return

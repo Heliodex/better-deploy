@@ -572,8 +572,8 @@ func findHelpSub(cmd *helpCommand, name string) *helpCommand {
 // helpTarget turns command arguments into a help lookup path. If a help flag is present, the tokens before it are searched for a subcommand so wt jobs enqueue --help shows enqueue's help.
 func helpTarget(command string, args []string) []string {
 	target := []string{command}
-
 	topic := findHelpCommand(command)
+
 	if topic == nil || len(topic.subs) == 0 {
 		return target
 	}

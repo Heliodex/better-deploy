@@ -168,8 +168,8 @@ func (s *supervisor) handleLogStream(w http.ResponseWriter, r *http.Request, a *
 
 		return stream.data(data)
 	}
-
 	filter, ok := logFilterParam(w, r)
+
 	if !ok {
 		return
 	}

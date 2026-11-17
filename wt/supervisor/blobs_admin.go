@@ -56,8 +56,8 @@ func (s *supervisor) handleAppBlobGC(w http.ResponseWriter, r *http.Request, nam
 	}
 
 	olderThan := strings.TrimSpace(request.OlderThan)
-
 	duration, err := time.ParseDuration(olderThan)
+
 	if err != nil || duration <= 0 {
 		writeError(w, http.StatusBadRequest, "olderThan must be a positive duration such as 720h")
 		return

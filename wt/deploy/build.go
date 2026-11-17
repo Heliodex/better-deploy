@@ -43,8 +43,8 @@ func checkStaticSvelteKit(dir string, m manifest) error {
 
 		name := entry.Name()
 		rel, _ := filepath.Rel(dir, path)
-
 		serverFile := strings.HasSuffix(name, ".server.ts") || strings.HasSuffix(name, ".server.js") || strings.HasSuffix(name, ".server.mjs") || strings.HasPrefix(name, "+server.")
+
 		if serverDir := strings.Contains(filepath.ToSlash(rel), "/lib/server/"); serverFile || serverDir {
 			found = append(found, filepath.ToSlash(rel))
 		}
@@ -262,8 +262,8 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 
 	wasmInfo, wasmErr := os.Stat(wasmPath)
 	wasmExists := wasmErr == nil && wasmInfo.Mode().IsRegular()
-
 	hasComponentBuild := componentCmd != ""
+
 	if !hasComponentBuild && !wasmExists {
 		return status, errors.New("app.json has no build_component and main.wasm is missing")
 	}

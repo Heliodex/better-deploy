@@ -388,8 +388,8 @@ func newAuthStore(path string) (*authStore, error) {
 	store := &authStore{
 		path: path,
 	}
-
 	data, err := os.ReadFile(path)
+
 	if os.IsNotExist(err) {
 		return store, nil
 	}

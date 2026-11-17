@@ -130,8 +130,8 @@ func routeClientEntries() (entries []routeClientEntry) {
 			}
 
 			seen[pattern] = struct{}{}
-
 			name, ok := routeClientNames[pattern]
+
 			if !ok {
 				panic("missing route client name for " + pattern)
 			}

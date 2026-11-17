@@ -65,8 +65,8 @@ func appServeArgs(target string, cfg appConfig, epoch bool) []string {
 
 	if epoch {
 		args = append(args, "-W", "epoch-interruption=y")
-
 		timeout := cfg.requestTimeout
+
 		if timeout <= 0 {
 			timeout = epochIdleTimeout
 		}

@@ -28,8 +28,8 @@ func TestPruneTerminalJobs(t *testing.T) {
 		ID: "pending",
 		Status: jobStatusPending,
 	})
-
 	pruned := pruneTerminalJobs(jobs)
+
 	if len(pruned) != jobTerminalRetention+1 {
 		t.Fatalf("pruned length = %d, want %d", len(pruned), jobTerminalRetention+1)
 	}
@@ -177,8 +177,8 @@ func TestJobQueueRunsAndPersists(t *testing.T) {
 	received := make(chan string, 10)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body := make([]byte, 64)
-
 		count, _ := r.Body.Read(body)
+
 		received <- r.Method + " " + r.Header.Get("X-Test") + " " + string(body[:count])
 
 		w.WriteHeader(http.StatusNoContent)
@@ -193,12 +193,12 @@ func TestJobQueueRunsAndPersists(t *testing.T) {
 
 	s, manager := jobTestSupervisor(t, address.Port)
 	store := manager.store("demo")
-
 	job, created, err := store.enqueue(jobEnqueueRequest{
 		Path: "/work",
 		Body: `{"value":"one"}`,
 		Headers: map[string]string{"X-Test": "yes"},
 	})
+
 	if err != nil || !created {
 		t.Fatalf("enqueue = %+v, %v, %v", job, created, err)
 	}

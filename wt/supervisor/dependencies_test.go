@@ -20,8 +20,8 @@ func TestDependenciesGateRouting(t *testing.T) {
 	}
 	s.apps["web"] = web
 	s.hosts["web.localhost"] = web
-
 	ready, waiting := s.dependenciesReady(web)
+
 	if ready || len(waiting) != 1 || waiting[0] != "api" {
 		t.Fatalf("dependenciesReady = %v %v", ready, waiting)
 	}

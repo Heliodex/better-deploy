@@ -61,8 +61,8 @@ func (s *supervisor) publicRoutes() *routeTable {
 // serveAdminOrProxy serves an admin route and falls back to the app proxy for anything else.
 func (s *supervisor) serveAdminOrProxy(w http.ResponseWriter, r *http.Request) {
 	routes := s.adminRoutes()
-
 	route, _, allowed := routes.match(r.Method, r.URL.Path)
+
 	if route != nil {
 		routes.ServeHTTP(w, r)
 		return

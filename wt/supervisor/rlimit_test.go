@@ -10,8 +10,8 @@ func TestRlimitPlan(t *testing.T) {
 	plan := rlimitPlan(appConfig{
 		DiskMB: 256,
 	})
-
 	want := map[int]uint64{unix.RLIMIT_NOFILE: 1024, unix.RLIMIT_FSIZE: 256 << 20, unix.RLIMIT_CORE: 0}
+
 	if len(plan) != len(want) {
 		t.Fatalf("plan has %d entries, want %d: %+v", len(plan), len(want), plan)
 	}

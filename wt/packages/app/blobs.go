@@ -35,8 +35,8 @@ func DeleteBlob(ctx context.Context, client *http.Client, digest string) error {
 	}
 
 	base := strings.TrimSuffix(os.Getenv(storageURLEnv), "/")
-
 	token := os.Getenv(storageTokenEnv)
+
 	if base == "" || token == "" {
 		return fmt.Errorf("%s and %s are not set", storageURLEnv, storageTokenEnv)
 	}

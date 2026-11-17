@@ -89,8 +89,8 @@ func TestRunnerLaunchServes(t *testing.T) {
 	s := newLifecycleSupervisor(t)
 	client, _, _ := startTestRunner(t)
 	s.runner = client
-
 	a := spawnTestApp(t, s, "demo")
+
 	if a.port == 0 || !a.ready {
 		t.Fatalf("port = %d, ready = %t", a.port, a.ready)
 	}

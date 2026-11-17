@@ -100,8 +100,8 @@ func (m *deploymentManager) logPath(app, id string) string {
 // appendLog keeps a deployment's log bounded and never lets logging fail the install.
 func (m *deploymentManager) appendLog(app, id string, data []byte) {
 	path := m.logPath(app, id)
-
 	info, err := os.Stat(path)
+
 	if err == nil && info.Size()+int64(len(data)) > deploymentLogBytes {
 		return
 	}
@@ -304,7 +304,6 @@ func (m *deploymentManager) usage(app string) (int64, error) {
 	var total int64
 
 	seen := map[fileKey]struct{}{}
-
 	err := filepath.WalkDir(m.appDir(app), func(_ string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -340,6 +339,7 @@ func (m *deploymentManager) usage(app string) (int64, error) {
 
 		return nil
 	})
+
 	if os.IsNotExist(err) {
 		return 0, nil
 	}

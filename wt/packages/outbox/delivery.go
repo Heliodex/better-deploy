@@ -237,8 +237,8 @@ func (o Outbox) deliverClaimed(ctx context.Context, client *storage.Client, tabl
 		Timestamp: timestamp,
 		Signature: signature,
 	}
-
 	status, sendErr := sender.Send(ctx, delivery)
+
 	if sendErr != nil && ctx.Err() != nil {
 		return ctx.Err()
 	}
