@@ -1,5 +1,3 @@
-//go:build wasip1
-
 package main
 
 import (
@@ -11,7 +9,7 @@ import (
 	wasihttp "github.com/heliodex/better-deploy/wt/packages/v2/wasihttp"
 )
 
-// init is the only wasm-specific wiring: storage, the app routes and the wasi:http export.
+// init wires storage and the app routes for either backend; the SDK provides the transport and entry point.
 func init() {
 	store, storeErr := storage.New(wasihttp.NewClient())
 
