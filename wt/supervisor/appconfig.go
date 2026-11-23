@@ -435,6 +435,10 @@ func validateIsolationConfig(cfg config) error {
 		return fmt.Errorf("WT_APP_SECCOMP=off is not allowed in %s mode", tenantUntrusted)
 	}
 
+	if !cfg.nativeNamespaces {
+		return fmt.Errorf("WT_NATIVE_NAMESPACES=off is not allowed in %s mode", tenantUntrusted)
+	}
+
 	return nil
 }
 

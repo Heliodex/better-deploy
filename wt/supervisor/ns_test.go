@@ -346,6 +346,7 @@ func TestValidateIsolationConfig(t *testing.T) {
 		tenantMode: tenantUntrusted,
 		appNamespaces: true,
 		appSeccomp: true,
+		nativeNamespaces: true,
 	}
 
 	if err := validateIsolationConfig(untrusted); err != nil {

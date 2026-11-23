@@ -63,7 +63,7 @@ type (
 		trustedProxies []netip.Prefix
 		cgroupRoot, iptables, ip6tables, dataQuotaMode, setquota, findmnt, dataQuotaFS string
 		appUIDBase int
-		ipv6Egress, appNamespaces, appSeccomp bool
+		ipv6Egress, appNamespaces, appSeccomp, nativeNamespaces bool
 		cacheMaxBytes, diskBudgetBytes int64
 		accessLog bool
 		accessLogEvery int

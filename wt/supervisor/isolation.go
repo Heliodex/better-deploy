@@ -243,7 +243,8 @@ func (s *supervisor) prepareIsolation(a *app, cfg appConfig) (*isolationPlan, er
 		return nil, fmt.Errorf("state dir: %w", err)
 	}
 
-	fullIsolation := s.cfg.untrusted() || cfg.Runtime == runtimeNative
+	nativeIsolated := cfg.Runtime == runtimeNative && s.cfg.nativeNamespaces
+	fullIsolation := s.cfg.untrusted() || nativeIsolated
 
 	var fallback bool
 
@@ -273,7 +274,7 @@ func (s *supervisor) prepareIsolation(a *app, cfg appConfig) (*isolationPlan, er
 		}
 	}
 
-	if !fallback && (s.cfg.appNamespaces || cfg.Runtime == runtimeNative) {
+	if !fallback && (s.cfg.appNamespaces || nativeIsolated) {
 		if ns, err := s.prepareNamespaces(a, plan); err != nil {
 			if cfg.Runtime != runtimeNative || s.cfg.untrusted() {
 				plan.close(s)

@@ -72,6 +72,7 @@ func bindConfigFlags(cfg *config, diskBudgetMB, storageTempBudgetMB *int64) {
 	bindBool("WT_IPV6_EGRESS", "ipv6-egress", "reject IPv6 egress from untrusted app uids", &cfg.ipv6Egress, true)
 	bindBool("WT_APP_NAMESPACES", "app-namespaces", "run apps in user, PID, mount, IPC and UTS namespaces (default on in untrusted mode)", &cfg.appNamespaces, untrusted)
 	bindBool("WT_APP_SECCOMP", "app-seccomp", "install the app seccomp filter (default on in untrusted mode)", &cfg.appSeccomp, untrusted)
+	bindBool("WT_NATIVE_NAMESPACES", "native-namespaces", "run native apps in user, PID, mount, IPC and UTS namespaces", &cfg.nativeNamespaces, true)
 	bindBool("WT_ACCESS_LOG", "access-log", "write proxied request lines to each app's supervisor log", &cfg.accessLog, true)
 	bindInt("WT_ACCESS_LOG_EVERY", "access-log-every", "log one in N successful access lines (errors are always logged)", &cfg.accessLogEvery, 1)
 	bindInt64("WT_DISK_BUDGET_MB", "disk-budget-mb", "global disk budget in MiB across apps and state (0 = unlimited)", diskBudgetMB, 0)
