@@ -88,8 +88,8 @@ func (s *supervisor) startStopped(a *app) error {
 		return nil
 	}
 
-	dir := a.dir
 	cfg := a.cfg
+	dir := a.dir
 
 	a.mu.Unlock()
 

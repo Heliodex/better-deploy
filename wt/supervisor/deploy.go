@@ -536,22 +536,19 @@ func (s *supervisor) stageDeploy(w http.ResponseWriter, r *http.Request, name st
 		return nil, false
 	}
 
+	// A bundle without a component keeps the running one, which makes a frontend-only deploy cheap.
+	files := []string{"main.wasm", "main.cwasm", artifactName}
 	staged := &stagedDeploy{
 		dir: dir,
 		cfg: cfg,
 		cleanup: cleanup,
 	}
 
-	// A bundle without a component keeps the running one, which makes a frontend-only deploy cheap.
-	files := []string{"main.wasm", "main.cwasm", artifactName}
-
 	if cfg.Runtime == runtimeNative {
 		files = []string{"main"}
 	}
 
-	component := files[0]
-
-	if !exists(dir, component) {
+	if component := files[0]; !exists(dir, component) {
 		a := s.lookup(name)
 		if a == nil {
 			cleanup()

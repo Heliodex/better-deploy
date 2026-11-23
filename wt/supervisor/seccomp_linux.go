@@ -21,62 +21,60 @@ const (
 	x32SyscallBit = 0x40000000
 )
 
-// noEgressSyscalls block outbound connections while leaving the app's own loopback listener usable.
-// socket, bind, listen and accept stay allowed so the supervisor can reach the native app; connect and sendto stop it from starting outbound TCP, UDP or Unix-socket calls.
-var noEgressSyscalls = []uintptr{
-	unix.SYS_CONNECT,
-	unix.SYS_SENDTO,
-	unix.SYS_SENDMSG,
-}
+var (
+	// commonDeniedSyscalls are dangerous syscalls present on both amd64 and arm64.
+	// Arch-specific extras live in seccomp_linux_<arch>.go.
+	commonDeniedSyscalls = []uintptr{
+		unix.SYS_PTRACE,
+		unix.SYS_PROCESS_VM_READV,
+		unix.SYS_PROCESS_VM_WRITEV,
+		unix.SYS_KCMP,
+		unix.SYS_BPF,
+		unix.SYS_PERF_EVENT_OPEN,
+		unix.SYS_USERFAULTFD,
+		unix.SYS_KEYCTL,
+		unix.SYS_ADD_KEY,
+		unix.SYS_REQUEST_KEY,
+		unix.SYS_MOUNT,
+		unix.SYS_UMOUNT2,
+		unix.SYS_PIVOT_ROOT,
+		unix.SYS_CHROOT,
+		unix.SYS_SETNS,
+		unix.SYS_UNSHARE,
+		unix.SYS_REBOOT,
+		unix.SYS_KEXEC_LOAD,
+		unix.SYS_KEXEC_FILE_LOAD,
+		unix.SYS_INIT_MODULE,
+		unix.SYS_FINIT_MODULE,
+		unix.SYS_DELETE_MODULE,
+		unix.SYS_SWAPON,
+		unix.SYS_SWAPOFF,
+		unix.SYS_ACCT,
+		unix.SYS_SYSLOG,
+		unix.SYS_QUOTACTL,
+		unix.SYS_SETTIMEOFDAY,
+		unix.SYS_CLOCK_SETTIME,
+		unix.SYS_CLOCK_ADJTIME,
+		unix.SYS_ADJTIMEX,
+		unix.SYS_OPEN_BY_HANDLE_AT,
+		unix.SYS_NAME_TO_HANDLE_AT,
+		unix.SYS_FANOTIFY_INIT,
+		unix.SYS_LOOKUP_DCOOKIE,
+		unix.SYS_NFSSERVCTL,
+		unix.SYS_SECCOMP,
+		unix.SYS_MOUNT_SETATTR,
+		unix.SYS_OPEN_TREE,
+		unix.SYS_MOVE_MOUNT,
+		unix.SYS_FSOPEN,
+		unix.SYS_FSCONFIG,
+		unix.SYS_FSMOUNT,
+		unix.SYS_FSPICK,
+	}
 
-// commonDeniedSyscalls are dangerous syscalls present on both amd64 and arm64.
-// Arch-specific extras live in seccomp_linux_<arch>.go.
-var commonDeniedSyscalls = []uintptr{
-	unix.SYS_PTRACE,
-	unix.SYS_PROCESS_VM_READV,
-	unix.SYS_PROCESS_VM_WRITEV,
-	unix.SYS_KCMP,
-	unix.SYS_BPF,
-	unix.SYS_PERF_EVENT_OPEN,
-	unix.SYS_USERFAULTFD,
-	unix.SYS_KEYCTL,
-	unix.SYS_ADD_KEY,
-	unix.SYS_REQUEST_KEY,
-	unix.SYS_MOUNT,
-	unix.SYS_UMOUNT2,
-	unix.SYS_PIVOT_ROOT,
-	unix.SYS_CHROOT,
-	unix.SYS_SETNS,
-	unix.SYS_UNSHARE,
-	unix.SYS_REBOOT,
-	unix.SYS_KEXEC_LOAD,
-	unix.SYS_KEXEC_FILE_LOAD,
-	unix.SYS_INIT_MODULE,
-	unix.SYS_FINIT_MODULE,
-	unix.SYS_DELETE_MODULE,
-	unix.SYS_SWAPON,
-	unix.SYS_SWAPOFF,
-	unix.SYS_ACCT,
-	unix.SYS_SYSLOG,
-	unix.SYS_QUOTACTL,
-	unix.SYS_SETTIMEOFDAY,
-	unix.SYS_CLOCK_SETTIME,
-	unix.SYS_CLOCK_ADJTIME,
-	unix.SYS_ADJTIMEX,
-	unix.SYS_OPEN_BY_HANDLE_AT,
-	unix.SYS_NAME_TO_HANDLE_AT,
-	unix.SYS_FANOTIFY_INIT,
-	unix.SYS_LOOKUP_DCOOKIE,
-	unix.SYS_NFSSERVCTL,
-	unix.SYS_SECCOMP,
-	unix.SYS_MOUNT_SETATTR,
-	unix.SYS_OPEN_TREE,
-	unix.SYS_MOVE_MOUNT,
-	unix.SYS_FSOPEN,
-	unix.SYS_FSCONFIG,
-	unix.SYS_FSMOUNT,
-	unix.SYS_FSPICK,
-}
+	// noEgressSyscalls block outbound connections while leaving the app's own loopback listener usable.
+	// socket, bind, listen and accept stay allowed so the supervisor can reach the native app; connect and sendto stop it from starting outbound TCP, UDP or Unix-socket calls.
+	noEgressSyscalls = []uintptr{unix.SYS_CONNECT, unix.SYS_SENDTO, unix.SYS_SENDMSG}
+)
 
 func seccompArch() (uint32, error) {
 	switch runtime.GOARCH {

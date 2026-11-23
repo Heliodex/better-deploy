@@ -13,6 +13,19 @@ import (
 	"time"
 )
 
+// configureNativeBounds installs the per-app uid, cgroup and quota boundaries native trusted apps use.
+// Egress rules stay off because trusted tenancy does not restrict the network.
+func configureNativeBounds(s *supervisor, cfg config) {
+	uids, err := newUIDAllocator(filepath.Join(cfg.stateDir, ".uids.json"), cfg.appUIDBase)
+	if err != nil {
+		log.Fatalf("uid allocator: %v", err)
+	}
+
+	s.uids = uids
+	s.cgroups = newCgroupManager(cfg.cgroupRoot)
+	s.quota = newDataQuota(cfg.dataQuotaMode, cfg.dataQuotaFS, cfg.stateDir, cfg.setquota, cfg.findmnt, nil)
+}
+
 // configureUntrusted installs the per-app uid, cgroup, egress and quota boundaries.
 func configureUntrusted(s *supervisor, cfg config) {
 	uids, err := newUIDAllocator(filepath.Join(cfg.stateDir, ".uids.json"), cfg.appUIDBase)
@@ -33,19 +46,6 @@ func configureUntrusted(s *supervisor, cfg config) {
 
 	s.egress.setInternal(fetchIP, fetchPort)
 
-	s.quota = newDataQuota(cfg.dataQuotaMode, cfg.dataQuotaFS, cfg.stateDir, cfg.setquota, cfg.findmnt, nil)
-}
-
-// configureNativeBounds installs the per-app uid, cgroup and quota boundaries native trusted apps use.
-// Egress rules stay off because trusted tenancy does not restrict the network.
-func configureNativeBounds(s *supervisor, cfg config) {
-	uids, err := newUIDAllocator(filepath.Join(cfg.stateDir, ".uids.json"), cfg.appUIDBase)
-	if err != nil {
-		log.Fatalf("uid allocator: %v", err)
-	}
-
-	s.uids = uids
-	s.cgroups = newCgroupManager(cfg.cgroupRoot)
 	s.quota = newDataQuota(cfg.dataQuotaMode, cfg.dataQuotaFS, cfg.stateDir, cfg.setquota, cfg.findmnt, nil)
 }
 

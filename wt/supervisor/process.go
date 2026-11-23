@@ -178,8 +178,8 @@ func (s *supervisor) restart(a *app) {
 		return
 	}
 
-	dir := a.dir
 	cfg := a.cfg
+	dir := a.dir
 
 	a.mu.Unlock()
 
