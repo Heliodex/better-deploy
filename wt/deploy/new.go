@@ -38,7 +38,7 @@ const (
 	// The SDK module is published from wt/packages. Go module tags must be full semantic versions, so 1 and v1 are not recognized.
 
 	sdkModulePath = "github.com/heliodex/better-deploy/wt/packages/v2"
-	sdkModuleVersion = "v2.0.2"
+	sdkModuleVersion = "v2.0.3"
 )
 
 var (
