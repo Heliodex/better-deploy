@@ -15,6 +15,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -114,6 +116,11 @@ func normalize(fn func(http.ResponseWriter, *http.Request)) http.Handler {
 // The app calls it from init(), so it blocks there in a native build.
 // It prints wasmtime's serve line so the supervisor discovers the port with the same code path as a component.
 func Handle(fn func(http.ResponseWriter, *http.Request)) {
+	// A package test imports the app to exercise its handlers. Do not start a second server there.
+	if name := filepath.Base(os.Args[0]); strings.HasSuffix(name, ".test") || strings.HasSuffix(name, ".test.exe") {
+		return
+	}
+
 	addr := os.Getenv("WT_APP_LISTEN")
 	if addr == "" {
 		addr = "127.0.0.1:0"

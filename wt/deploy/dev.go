@@ -175,14 +175,21 @@ func resolveDevConfig(args []string) (*devConfig, error) {
 		return nil, errors.New("--app-host is only used with a single --dir; workspace apps use <name>.localhost")
 	}
 
+	resolvedRuntime := strings.TrimSpace(*runtimeName)
+	if resolvedRuntime == "" && *workspace == "" {
+		if m, err := readManifest(*dir); err == nil {
+			resolvedRuntime = m.Runtime
+		}
+	}
+
 	return &devConfig{
 		dir: *dir,
 		workspace: *workspace,
 		wasmtime: *wasmtime,
 		target: *target,
-		runtime: strings.TrimSpace(*runtimeName),
 		supervisor: *supervisor,
 		appHost: *appHost,
+		runtime: resolvedRuntime,
 		port: resolved,
 		adminPort: resolvedAdmin,
 		skipBuild: *skipBuild,

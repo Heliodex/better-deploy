@@ -6,7 +6,23 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
+
+func TestHandleReturnsInTestBinary(t *testing.T) {
+	done := make(chan struct{})
+
+	go func() {
+		Handle(func(http.ResponseWriter, *http.Request) {})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Handle started a server inside a test binary")
+	}
+}
 
 func TestNewClient(t *testing.T) {
 	if client := NewClient(); client == nil || client.Transport == nil || client.Timeout != defaultClientTimeout {

@@ -101,6 +101,7 @@ path = sys.argv[1]
 with open(path) as f:
     data = json.load(f)
 data["host"] = "hello.localhost"
+data["network"] = "none"
 data.pop("request_timeout", None)
 with open(path, "w") as f:
     json.dump(data, f, indent=2)
