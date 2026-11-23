@@ -437,21 +437,11 @@ func (s *supervisor) launchRunner(a *app, l *launchSession) error {
 
 // prepareLaunchSession resolves the environment, isolation and namespace inputs before any process starts.
 func (s *supervisor) prepareLaunchSession(a *app, source string, cfg appConfig, deadline time.Time) (*launchSession, error) {
-	namespaced := s.cfg.appNamespaces || cfg.Runtime == runtimeNative
 	session := &launchSession{
 		cfg: cfg,
 		source: source,
 		deadline: deadline,
-		namespaced: namespaced,
 	}
-
-	args, env, err := s.appArgsFor(a, source, namespaced)
-	if err != nil {
-		a.recordError(err)
-		return nil, err
-	}
-
-	session.args, session.env = args, env
 
 	if a.logs != nil {
 		a.logs.setSecrets(s.appRedactionValues(a.name))
@@ -464,10 +454,19 @@ func (s *supervisor) prepareLaunchSession(a *app, source string, cfg appConfig, 
 	}
 
 	session.iso = iso
+	session.namespaced = iso.ns != nil
+
+	args, env, err := s.appArgsFor(a, source, session.namespaced)
+	if err != nil {
+		iso.close(s)
+		a.recordError(err)
+
+		return nil, err
+	}
+
+	session.args, session.env = args, env
 
 	if iso.ns == nil {
-		session.namespaced = false
-
 		return session, nil
 	}
 

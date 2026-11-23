@@ -244,28 +244,56 @@ func (s *supervisor) prepareIsolation(a *app, cfg appConfig) (*isolationPlan, er
 	}
 
 	fullIsolation := s.cfg.untrusted() || cfg.Runtime == runtimeNative
+
+	var fallback bool
+
 	if fullIsolation {
 		if os.Geteuid() != 0 {
 			if s.cfg.untrusted() {
 				return nil, fmt.Errorf("untrusted mode requires root to set the app uid; running as uid %d", os.Geteuid())
 			}
-			// A trusted native app still gets user, PID, mount, IPC and UTS namespaces and seccomp through the
+			// A trusted native app still tries user, PID, mount, IPC and UTS namespaces and seccomp through the
 			// non-root namespace path. Without root it shares the supervisor uid, so it is isolated from the host
 			// rather than from other apps.
 		} else if err := s.prepareRootIsolation(a, cfg, dataDir, plan); err != nil {
-			return nil, err
+			if cfg.Runtime != runtimeNative || s.cfg.untrusted() {
+				return nil, err
+			}
+
+			plan.close(s)
+
+			plan.uid, plan.gid = 0, 0
+
+			a.mu.Lock()
+
+			a.uid = 0
+
+			a.mu.Unlock()
+			log.Printf("app %s: native root isolation unavailable (%v); running un-namespaced inside the supervisor boundary", a.name, err)
 		}
 	}
 
-	if s.cfg.appNamespaces || cfg.Runtime == runtimeNative {
-		ns, err := s.prepareNamespaces(a, plan)
-		if err != nil {
-			plan.close(s)
-			return nil, err
-		}
+	if !fallback && (s.cfg.appNamespaces || cfg.Runtime == runtimeNative) {
+		if ns, err := s.prepareNamespaces(a, plan); err != nil {
+			if cfg.Runtime != runtimeNative || s.cfg.untrusted() {
+				plan.close(s)
+				return nil, err
+			}
 
-		plan.ns = ns
-		plan.nsRoot = ns.plan.Root
+			plan.close(s)
+
+			plan.uid, plan.gid = 0, 0
+
+			a.mu.Lock()
+
+			a.uid = 0
+
+			a.mu.Unlock()
+			log.Printf("app %s: native namespaces unavailable (%v); running un-namespaced inside the supervisor boundary", a.name, err)
+		} else {
+			plan.ns = ns
+			plan.nsRoot = ns.plan.Root
+		}
 	}
 
 	return plan, nil
