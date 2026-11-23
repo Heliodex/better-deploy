@@ -72,27 +72,6 @@ json_field() {
 	python3 -c 'import json,sys; print(json.load(sys.stdin)[sys.argv[1]])' "$1"
 }
 
-deploy() {
-	archive=$1
-	name=$2
-	response=$(api -X POST -F "artifact=@$archive" "http://127.0.0.1:$port/apps/$name/deployments")
-	id=$(printf '%s' "$response" | json_field id)
-	while :; do
-		response=$(api "http://127.0.0.1:$port/apps/$name/deployments/$id")
-		status=$(printf '%s' "$response" | json_field status)
-		case "$status" in
-		success)
-			return 0
-			;;
-		failed | canceled)
-			message=$(printf '%s' "$response" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("error", ""))')
-			echo "deploy $name $status: $message" >&2
-			return 1
-			;;
-		esac
-		sleep 0.25
-	done
-}
 
 rewrite_manifest() {
 	python3 - "$1" <<'PY'

@@ -134,7 +134,7 @@ WT_WASMTIME=/path/to/wasmtime ./wt/e2e.sh
 WT_WASMTIME=/path/to/wasmtime ./wt/e2e-native.sh
 ```
 
-Set `WT_E2E_TARGET` when the runtime uses a different target triple; the default is `x86_64-unknown-linux-gnu` to match the released wasmtime binary CI downloads. The script keeps its work directory on failure and prints the supervisor log.
+`wt/e2e-native.sh` deploys a native hello, checks its seccomp filter and the reported native runtime, switches the same app to wasm and back, and rolls back to the native deployment. It skips when unprivileged user and mount namespaces are unavailable. Set `WT_E2E_TARGET` when the runtime uses a different target triple; the default is `x86_64-unknown-linux-gnu` to match the released wasmtime binary CI downloads. The script keeps its work directory on failure and prints the supervisor log.
 
 The supervisor has fuzz targets for tar extraction, backup archives, the SQL guard and parameter decoding:
 
