@@ -463,6 +463,7 @@ var (
 				{"--wasmtime", helpPathValue, "wasmtime binary (default wasmtime)"},
 				{"--target", "TRIPLE", "wasmtime compile target (default x86_64-unknown-linux-musl)"},
 				{"--runtime", "BACKEND", "backend: wasm or native (default app.json or wasm)"},
+				{"--app-host", "HOST", "override the app host in the uploaded app.json"},
 				{"--out", "FILE", "output file (default <name>.tar.gz)"},
 				{"--force-build", "", "rebuild the component and static phases"},
 				{"--skip-build", "", "skip running app.json's build commands"},

@@ -132,6 +132,8 @@ echo "e2e-native: starting supervisor on 127.0.0.1:$port"
 start_supervisor
 wait_healthy
 
+"$work/wt-deploy" runtime --host "http://127.0.0.1:$port" --token "$token" | grep -q "native: supported"
+
 deploy_native() {
 	"$work/wt-deploy" deploy --dir "$work/native-src" --host "http://127.0.0.1:$port" --token "$token" --app-host hello.localhost --runtime native --skip-route-check
 }
@@ -154,6 +156,12 @@ echo "e2e-native: switching hello to wasm"
 deploy_wasm
 curl -fsS -H "Host: hello.localhost" "http://127.0.0.1:$port/" | grep -q "hello from wt"
 api "http://127.0.0.1:$port/apps/hello" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["runtime"] == "wasm", d; assert d["ready"], d'
+
+echo "e2e-native: rolling back to the native deployment"
+native_id=$(api "http://127.0.0.1:$port/apps/hello/deployments" | python3 -c 'import json,sys; print(json.load(sys.stdin)[1]["id"])')
+api -X POST "http://127.0.0.1:$port/apps/hello/rollback/$native_id" >/dev/null
+curl -fsS -H "Host: hello.localhost" "http://127.0.0.1:$port/" | grep -q "hello from wt"
+api "http://127.0.0.1:$port/apps/hello" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["runtime"] == "native", d; assert d["ready"], d'
 
 echo "e2e-native: switching hello back to native"
 deploy_native

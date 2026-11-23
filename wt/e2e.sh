@@ -97,7 +97,7 @@ echo "e2e: building supervisor and deploy tool"
 (cd "$root/wt/deploy" && go build -o "$work/wt-deploy" .)
 
 echo "e2e: bundling hello for $target"
-"$work/wt-deploy" bundle --dir "$root/wt/example/hello" --out "$work/hello.tar.gz" --wasmtime "$wasmtime" --target "$target"
+"$work/wt-deploy" bundle --dir "$root/wt/example/hello" --app-host hello.localhost --out "$work/hello.tar.gz" --wasmtime "$wasmtime" --target "$target"
 
 echo "e2e: starting supervisor on 127.0.0.1:$port"
 start_supervisor
@@ -110,7 +110,7 @@ echo "$body" | grep -q "hello from wt"
 echo "$body" | grep -q "path=/"
 
 echo "e2e: bundling and deploying a second app"
-"$work/wt-deploy" bundle --dir "$root/wt/example/ticker" --out "$work/ticker.tar.gz" --wasmtime "$wasmtime" --target "$target"
+"$work/wt-deploy" bundle --dir "$root/wt/example/ticker" --app-host ticker.localhost --out "$work/ticker.tar.gz" --wasmtime "$wasmtime" --target "$target"
 deploy "$work/ticker.tar.gz" ticker
 curl -fsS -H "Host: ticker.localhost" "http://127.0.0.1:$port/" | grep -q "ticker logs a beat"
 
@@ -165,12 +165,12 @@ curl -fsS -H "Host: ticker.localhost" "http://127.0.0.1:$port/" | grep -q "ticke
 if [ "${WT_E2E_EXAMPLES:-0}" = "1" ]; then
 	echo "e2e: scaffolding a standalone app"
 	"$work/wt-deploy" new --dir "$work/scaffolded"
-	"$work/wt-deploy" bundle --dir "$work/scaffolded" --out "$work/scaffolded.tar.gz" --wasmtime "$wasmtime" --target "$target"
+	"$work/wt-deploy" bundle --dir "$work/scaffolded" --app-host scaffolded.localhost --out "$work/scaffolded.tar.gz" --wasmtime "$wasmtime" --target "$target"
 	deploy "$work/scaffolded.tar.gz" scaffolded
 	curl -fsS -H "Host: scaffolded.localhost" -H "Accept: text/html" "http://127.0.0.1:$port/" | grep -q "A tiny notes app"
 
 	echo "e2e: bundling and deploying the guestbook"
-	"$work/wt-deploy" bundle --dir "$root/wt/example/guestbook" --out "$work/guestbook.tar.gz" --wasmtime "$wasmtime" --target "$target"
+	"$work/wt-deploy" bundle --dir "$root/wt/example/guestbook" --app-host guestbook.localhost --out "$work/guestbook.tar.gz" --wasmtime "$wasmtime" --target "$target"
 	deploy "$work/guestbook.tar.gz" guestbook
 	curl -fsS -H "Host: guestbook.localhost" -H "Accept: text/html" "http://127.0.0.1:$port/" | grep -q "Wasm Wall"
 fi

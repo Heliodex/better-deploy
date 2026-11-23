@@ -170,7 +170,13 @@ func printInspect(report inspectReport) {
 	}
 
 	fmt.Printf("compiler: %v\n", report.Supervisor.Compiler)
-	fmt.Printf("app: %s\n", report.App.Name)
+
+	runtimeName := report.App.Runtime
+	if runtimeName == "" {
+		runtimeName = runtimeWasm
+	}
+
+	fmt.Printf("app: %s (%s)\n", report.App.Name, runtimeName)
 	fmt.Printf("host: %s\n", report.App.Host)
 	fmt.Printf("url: %s\n", report.URL)
 	fmt.Printf("status: %s (ready %v)\n", report.App.Status, report.App.Ready)

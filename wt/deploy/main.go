@@ -112,6 +112,7 @@ func resolveBundleConfig(args []string) (*deployConfig, error) {
 	target := flags.String("target", firstNonEmpty(env("WT_WASMTIME_TARGET"), fileCfg.Target, "x86_64-unknown-linux-musl"), "wasmtime compile target")
 	runtimeName := flags.String("runtime", "", "runtime backend: wasm or native (default app.json runtime or wasm)")
 	out := flags.String("out", "", "output file (default <name>.tar.gz)")
+	appHost := flags.String("app-host", "", "override the app host in the uploaded app.json")
 	profileFlag := flags.String("profile", profileName, "config profile for the app domain")
 	appDomain := flags.String("app-domain", profile.AppDomain, "app host suffix for <app>.localhost hosts")
 
@@ -136,6 +137,7 @@ func resolveBundleConfig(args []string) (*deployConfig, error) {
 		runtime: strings.TrimSpace(*runtimeName),
 		profile: strings.TrimSpace(*profileFlag),
 		appDomain: *appDomain,
+		appHost: *appHost,
 		skipBuild: *skipBuild,
 		skipCompile: *skipCompile,
 		forceBuild: *forceBuild,

@@ -1,6 +1,6 @@
 # wt
 
-A prototype of a small Wasm deploy platform built directly on [wasmtime](https://wasmtime.dev), with no Spin and no container image.
+A prototype of a small Wasm and native Go deploy platform built directly on [wasmtime](https://wasmtime.dev), with no Spin and no per-app container image.
 
 The deploy artifact is `main.wasm` for the wasm backend or `main` for the native backend. On wasm, compiling it to native code is a cache step, not part of the artifact:
 

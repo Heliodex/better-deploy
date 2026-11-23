@@ -16,6 +16,7 @@ import (
 type (
 	routeAppInfo struct {
 		Name string `json:"name"`
+		Runtime string `json:"runtime"`
 		Host string `json:"host"`
 		Status string `json:"status"`
 		Ready bool `json:"ready"`
