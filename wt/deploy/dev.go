@@ -183,8 +183,8 @@ func resolveDevConfig(args []string) (*devConfig, error) {
 	}
 
 	return &devConfig{
-		dir: *dir,
-		workspace: *workspace,
+		dir: resolveAppDir(*dir),
+		workspace: resolveAppDir(*workspace),
 		wasmtime: *wasmtime,
 		target: *target,
 		supervisor: *supervisor,

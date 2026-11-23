@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -74,6 +75,42 @@ func isHelpFlag(arg string) bool {
 	return arg == "-h" || arg == "-help" || arg == "--help"
 }
 
+// resolveAppDir keeps the documented repo-root paths working from a subdirectory such as wt/.
+func resolveAppDir(dir string) string {
+	if dir == "" {
+		return ""
+	}
+
+	if info, err := os.Stat(dir); err == nil && info.IsDir() {
+		return dir
+	}
+
+	if filepath.IsAbs(dir) {
+		return dir
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return dir
+	}
+
+	for root := cwd; ; root = filepath.Dir(root) {
+		if _, err := os.Stat(filepath.Join(root, ".git")); err == nil {
+			candidate := filepath.Join(root, dir)
+
+			if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+				return candidate
+			}
+
+			return dir
+		}
+
+		if filepath.Dir(root) == root {
+			return dir
+		}
+	}
+}
+
 // selectProfile loads the config file named by args and resolves the profile that the flags select.
 func selectProfile(args []string) (profileSelection, error) {
 	path := configArg(args)
@@ -131,7 +168,7 @@ func resolveBundleConfig(args []string) (*deployConfig, error) {
 	}
 
 	return &deployConfig{
-		dir: *dir,
+		dir: resolveAppDir(*dir),
 		wasmtime: *wasmtime,
 		target: *target,
 		runtime: strings.TrimSpace(*runtimeName),
@@ -223,7 +260,7 @@ func resolveConfig(args []string) (*deployConfig, error) {
 	}
 
 	return &deployConfig{
-		dir: *dir,
+		dir: resolveAppDir(*dir),
 		app: *app,
 		host: *host,
 		token: *token,
