@@ -71,7 +71,15 @@ func launchRunner(socket string) (*exec.Cmd, *os.File, error) {
 		return nil, nil, fmt.Errorf("runner liveness pipe: %w", err)
 	}
 
-	cmd := exec.CommandContext(context.Background(), "/proc/self/exe", runnerArg)
+	executable, err := os.Executable()
+	if err != nil {
+		_ = read.Close()
+		_ = write.Close()
+
+		return nil, nil, fmt.Errorf("resolve supervisor executable: %w", err)
+	}
+
+	cmd := exec.CommandContext(context.Background(), executable, runnerArg)
 
 	cmd.Env = append(minimalEnv(), runnerSocketEnv+"="+socket, runnerLivenessEnv+"=3")
 	cmd.ExtraFiles = []*os.File{read}

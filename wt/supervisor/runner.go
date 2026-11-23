@@ -115,7 +115,17 @@ func newRunnerCommand(request runnerStartRequest, output *os.File) (*exec.Cmd, *
 			return nil, nil, nil, fmt.Errorf("start pipe: %w", err)
 		}
 
-		cmd := exec.CommandContext(context.Background(), "/proc/self/exe", append([]string{nsInitArg}, request.Args...)...)
+		executable, err := os.Executable()
+		if err != nil {
+			_ = pidRead.Close()
+			_ = pidWrite.Close()
+			_ = goRead.Close()
+			_ = goWrite.Close()
+
+			return nil, nil, nil, fmt.Errorf("resolve supervisor executable: %w", err)
+		}
+
+		cmd := exec.CommandContext(context.Background(), executable, append([]string{nsInitArg}, request.Args...)...)
 		cmd.Env = append(stripEnv(request.Env, nsPlanEnv), nsPlanEnv+"="+string(request.Plan))
 		cmd.SysProcAttr = namespaceSysProcAttr(request.HostID, request.HostGID, request.AllowSetgroups)
 		cmd.ExtraFiles = []*os.File{pidWrite, goRead}
