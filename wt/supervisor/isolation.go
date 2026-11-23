@@ -243,7 +243,13 @@ func (s *supervisor) prepareIsolation(a *app, cfg appConfig) (*isolationPlan, er
 		return nil, fmt.Errorf("state dir: %w", err)
 	}
 
-	nativeIsolated := cfg.Runtime == runtimeNative && s.cfg.nativeNamespaces
+	a.mu.Lock()
+
+	forceDirect := a.forceDirectNative
+
+	a.mu.Unlock()
+
+	nativeIsolated := cfg.Runtime == runtimeNative && s.cfg.nativeNamespaces && !forceDirect
 	fullIsolation := s.cfg.untrusted() || nativeIsolated
 
 	var fallback bool

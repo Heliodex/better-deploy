@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -94,6 +95,11 @@ func epochMismatch(output string) (bool, bool) {
 	}
 
 	return false, false
+}
+
+// execPermissionDenied recognises both a direct syscall error and the runner's string-wrapped start failure.
+func execPermissionDenied(err error) bool {
+	return errors.Is(err, syscall.EACCES) || strings.Contains(err.Error(), "permission denied")
 }
 
 // appEnv builds the --env pairs and the process environment, resolving secret references first.
@@ -525,11 +531,33 @@ func (s *supervisor) launchOnce(a *app, source string) error {
 	return nil
 }
 
-// launch starts one app, retrying once with the epoch setting wasmtime reports when a retained cwasm was compiled with the opposite one.
+// launch starts one app, retrying once when a native helper cannot be executed or a cwasm has the opposite epoch setting.
 func (s *supervisor) launch(a *app, source string) error {
-	if err := s.launchOnce(a, source); !errors.Is(err, errEpochMismatch) {
+	err := s.launchOnce(a, source)
+	if err == nil {
+		return nil
+	}
+
+	if execPermissionDenied(err) && a.cfg.Runtime == runtimeNative && !s.cfg.untrusted() {
+		a.mu.Lock()
+
+		alreadyDirect := a.forceDirectNative
+		a.forceDirectNative = true
+
+		a.mu.Unlock()
+
+		if !alreadyDirect {
+			log.Printf("app %s: native namespace helper could not execute (%v); retrying un-namespaced", a.name, err)
+			s.cancelRestart(a)
+
+			return s.launchOnce(a, source)
+		}
+	}
+
+	if !errors.Is(err, errEpochMismatch) {
 		return err
 	}
+
 	// The failed attempt already scheduled its own restart; the corrected retry replaces it.
 	s.cancelRestart(a)
 

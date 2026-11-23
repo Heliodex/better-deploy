@@ -146,7 +146,7 @@ type (
 		inflight int
 		lastRequest time.Time
 		slots chan struct{}
-		wasmEpoch bool
+		wasmEpoch, forceDirectNative bool
 		workPID int
 		healthOK, ready bool
 		healthFailures int
