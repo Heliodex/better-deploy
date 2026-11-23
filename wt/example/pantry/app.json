@@ -1,0 +1,15 @@
+{
+	"name": "pantry",
+	"host": "pantry.localhost",
+	"health": "/healthz",
+	"memory_mb": 128,
+	"max_concurrency": 8,
+	"request_timeout": "10s",
+	"build_component": "../../packages/generate.sh && go tool componentize-go -d ../../packages/wit -w wt:app/app build",
+	"build_native": "CGO_ENABLED=0 go build -tags wt_native -trimpath -o main .",
+	"component_inputs": ["templates"],
+	"dev": {
+		"build": "../../packages/generate.sh && go tool componentize-go -d ../../packages/wit -w wt:app/app build",
+		"watch": ["templates"]
+	}
+}

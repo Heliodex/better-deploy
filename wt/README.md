@@ -29,6 +29,7 @@ The first request for a precompiled Go component is tens of milliseconds on a la
 - `example/` – example apps only.
   - `example/hello` – returns the method and path.
   - `example/notes` – JSON notes persisted in a real `notes` table through the supervisor's SQLite service.
+  - `example/pantry` – server-rendered pantry inventory built with Go and HTMX: live search, low-stock filtering, inline quantity steppers and deletes, all as HTML fragments from SQLite. The HTMX runtime is vendored under `static/`, so the app has no JavaScript build step.
   - `example/shelf` – link shelf with tags, search, pagination and click analytics.
   - `example/ticker` – logs a `ticker beat` line every 10 seconds from an `app.json` schedule and enqueues a durable `/jobs/beat` job with a payload, so the supervisor log tail and job queue have steady activity to show.
   - `example/guestbook` – SvelteKit static frontend with a Go JSON API; the frontend is served from the bundle's `static/` directory, not embedded in the component.

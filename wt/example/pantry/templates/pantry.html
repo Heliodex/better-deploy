@@ -1,0 +1,68 @@
+{{define "pantry"}}
+<section class="summary" aria-live="polite">
+	<div class="summary-stat">
+		<strong>{{.Total}}</strong>
+		<span>{{if eq .Total 1}}item{{else}}items{{end}} on the shelves</span>
+	</div>
+	<div class="summary-stat {{if .LowCount}}warning{{else}}good{{end}}">
+		<strong>{{.LowCount}}</strong>
+		<span>{{if eq .LowCount 1}}item needs a top-up{{else}}items need a top-up{{end}}</span>
+	</div>
+	{{if .Error}}<p class="notice error" role="alert">{{.Error}}</p>{{end}}
+</section>
+
+{{if .Groups}}
+<div class="shelves">
+	{{range .Groups}}
+	<section class="shelf">
+		<h2><span>{{.Label}}</span><small>{{len .Items}}</small></h2>
+		<ul class="items">
+			{{range .Items}}
+			<li class="item{{if .Low}} low{{end}}">
+				<div class="item-copy">
+					<div class="item-heading">
+						<span class="item-name">{{.Name}}</span>
+						{{if .Low}}<span class="badge">low</span>{{end}}
+					</div>
+					<p class="item-meta">
+						<span class="qty">{{.Quantity}} {{.Unit}}</span>
+						<span class="dot">·</span>
+						<span>top up at {{.LowAt}}</span>
+						<span class="dot">·</span>
+						<span>{{.Updated}}</span>
+					</p>
+				</div>
+				<div class="item-actions">
+					<form hx-post="/items/{{.ID}}/adjust" hx-target="#pantry" hx-swap="outerHTML" hx-disabled-elt="find button">
+						<input type="hidden" name="delta" value="-1">
+						<input type="hidden" name="q" value="{{$.Q}}">
+						<input type="hidden" name="filter" value="{{$.Filter}}">
+						<button class="button stepper" type="submit" aria-label="Use one {{.Name}}">−</button>
+					</form>
+					<form hx-post="/items/{{.ID}}/adjust" hx-target="#pantry" hx-swap="outerHTML" hx-disabled-elt="find button">
+						<input type="hidden" name="delta" value="1">
+						<input type="hidden" name="q" value="{{$.Q}}">
+						<input type="hidden" name="filter" value="{{$.Filter}}">
+						<button class="button stepper" type="submit" aria-label="Add one {{.Name}}">+</button>
+					</form>
+					<form hx-post="/items/{{.ID}}/delete" hx-target="#pantry" hx-swap="outerHTML" hx-disabled-elt="find button"
+						hx-confirm="Remove {{.Name}} from the pantry?">
+						<input type="hidden" name="q" value="{{$.Q}}">
+						<input type="hidden" name="filter" value="{{$.Filter}}">
+						<button class="button remove" type="submit" aria-label="Remove {{.Name}}">Remove</button>
+					</form>
+				</div>
+			</li>
+			{{end}}
+		</ul>
+	</section>
+	{{end}}
+</div>
+{{else}}
+<section class="empty">
+	<p class="empty-mark" aria-hidden="true">∅</p>
+	<h2>{{if .Q}}No matches{{else if eq .Filter "low"}}Everything is stocked{{else}}An empty pantry{{end}}</h2>
+	<p>{{if .Q}}Nothing on the shelves matches “{{.Q}}”.{{else if eq .Filter "low"}}No item is at or below its low-water mark.{{else}}Add the first thing above and the shelves will fill in.{{end}}</p>
+</section>
+{{end}}
+{{end}}

@@ -17,3 +17,5 @@ supervisor/web/node_modules/
 supervisor/web/.svelte-kit/
 supervisor/wt-supervisor
 deploy/wt-deploy
+!example/pantry/static/
+!example/pantry/static/**

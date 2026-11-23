@@ -1,0 +1,80 @@
+{{define "page"}}<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Pantry · a wt example</title>
+	<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+	<link rel="stylesheet" href="/app.css">
+	<script src="/htmx.min.js" defer></script>
+</head>
+<body>
+	<main class="shell">
+		<header class="masthead">
+			<div class="masthead-copy">
+				<p class="eyebrow">wt example · Go + HTMX</p>
+				<h1>Pantry</h1>
+				<p class="lede">A tiny shared inventory. Every button is a server request; every response is a slice of HTML. No client framework, no JSON round-trip.</p>
+			</div>
+			<div class="stamp" aria-hidden="true">
+				<span class="stamp-top">SHELF</span>
+				<span class="stamp-mark">01</span>
+				<span class="stamp-bottom">STOCK</span>
+			</div>
+		</header>
+
+		<section class="toolbar" aria-label="Pantry controls">
+			<form class="filters" hx-get="/items" hx-target="#pantry" hx-swap="outerHTML"
+				hx-trigger="input changed delay:250ms, change, search" hx-indicator="#search-status">
+				<label class="field search-field">
+					<span>Search the shelves</span>
+					<input type="search" name="q" value="{{.Pantry.Q}}" placeholder="Coffee, oats, milk…" autocomplete="off">
+				</label>
+				<label class="field">
+					<span>Show</span>
+					<select name="filter">
+						<option value="all"{{if ne .Pantry.Filter "low"}} selected{{end}}>Everything</option>
+						<option value="low"{{if eq .Pantry.Filter "low"}} selected{{end}}>Low stock only</option>
+					</select>
+				</label>
+				<noscript><button class="button ghost" type="submit">Filter</button></noscript>
+				<span id="search-status" class="htmx-indicator search-status">searching…</span>
+			</form>
+
+			<form class="add-form" hx-post="/items" hx-target="#pantry" hx-swap="outerHTML"
+				hx-disabled-elt="find button" hx-on::after-request="if(event.detail.successful && !event.detail.xhr.getResponseHeader('X-Pantry-Error')) this.reset()">
+				<label class="field grow">
+					<span>New item</span>
+					<input name="name" required maxlength="80" placeholder="What did you bring home?" autocomplete="off">
+				</label>
+				<label class="field qty-field">
+					<span>Qty</span>
+					<input name="quantity" type="number" min="0" max="9999" value="1" inputmode="numeric">
+				</label>
+				<label class="field unit-field">
+					<span>Unit</span>
+					<input name="unit" maxlength="16" value="pcs" autocomplete="off">
+				</label>
+				<label class="field">
+					<span>Shelf</span>
+					<select name="category">
+						{{range .Pantry.Categories}}<option value="{{.Key}}">{{.Label}}</option>{{end}}
+					</select>
+				</label>
+				<label class="field threshold-field">
+					<span>Low at</span>
+					<input name="low_at" type="number" min="0" max="9999" value="1" inputmode="numeric">
+				</label>
+				<button class="button primary" type="submit">Add</button>
+			</form>
+		</section>
+
+		<div id="pantry">{{template "pantry" .Pantry}}</div>
+
+		<footer class="foot">
+			<span>Rendered by Go, swapped by <a href="https://htmx.org/docs/">HTMX</a>.</span>
+			<span class="foot-note">The list, counts and low-water marks all live in SQLite.</span>
+		</footer>
+	</main>
+</body>
+</html>{{end}}
