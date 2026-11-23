@@ -13,15 +13,15 @@ import (
 )
 
 type (
-	createNoteRequest struct {
-		Text string `json:"text"`
-	}
-
 	// note is the hand-written response shape. Keep it in step with web/src/lib/contract.ts.
 	note struct {
 		ID string `json:"id"`
 		Text string `json:"text"`
 		CreatedAt string `json:"createdAt"`
+	}
+
+	createNoteRequest struct {
+		Text string `json:"text"`
 	}
 
 	// notesApp owns the store and routes so handler tests can construct it without wasmtime or package globals.

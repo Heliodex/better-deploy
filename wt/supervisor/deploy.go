@@ -111,7 +111,7 @@ func (r *deployRecorder) Write(data []byte) (int, error) {
 func bundleDigest(dir string) string {
 	hash := sha256.New()
 
-	for _, name := range []string{"main.wasm", "main.cwasm", "artefact.json", "app.json"} {
+	for _, name := range []string{"main.wasm", "main.cwasm", "main", "artefact.json", "app.json"} {
 		data, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
 			continue
@@ -543,11 +543,19 @@ func (s *supervisor) stageDeploy(w http.ResponseWriter, r *http.Request, name st
 	}
 
 	// A bundle without a component keeps the running one, which makes a frontend-only deploy cheap.
-	if !exists(dir, "main.wasm") {
+	files := []string{"main.wasm", "main.cwasm", artifactName}
+
+	if cfg.Runtime == runtimeNative {
+		files = []string{"main"}
+	}
+
+	component := files[0]
+
+	if !exists(dir, component) {
 		a := s.lookup(name)
 		if a == nil {
 			cleanup()
-			writeError(w, http.StatusBadRequest, "bundle has no main.wasm and the app is not running")
+			writeError(w, http.StatusBadRequest, "bundle has no "+component+" and the app is not running")
 
 			return nil, false
 		}
@@ -558,7 +566,7 @@ func (s *supervisor) stageDeploy(w http.ResponseWriter, r *http.Request, name st
 
 		a.mu.Unlock()
 
-		for _, file := range []string{"main.wasm", "main.cwasm", artifactName} {
+		for _, file := range files {
 			if exists(dir, file) {
 				continue
 			}
@@ -572,11 +580,25 @@ func (s *supervisor) stageDeploy(w http.ResponseWriter, r *http.Request, name st
 		}
 	}
 
-	staged.digest = sourceDigest(dir)
+	if cfg.Runtime == runtimeNative {
+		if err := ensureNativeArtifact(dir); err != nil {
+			cleanup()
+			writeError(w, http.StatusBadRequest, err.Error())
+
+			return nil, false
+		}
+	}
+
+	staged.digest = sourceDigest(dir, cfg.Runtime)
 
 	if staged.digest == "" {
 		cleanup()
-		writeError(w, http.StatusBadRequest, "bundle has no main.wasm")
+
+		if cfg.Runtime == runtimeNative {
+			writeError(w, http.StatusBadRequest, "bundle has no native main binary")
+		} else {
+			writeError(w, http.StatusBadRequest, "bundle has no main.wasm")
+		}
 
 		return nil, false
 	}

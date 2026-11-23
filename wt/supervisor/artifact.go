@@ -139,8 +139,14 @@ func artifactMatches(recorded, current artifactInfo) bool {
 }
 
 // sourceDigest returns the digest a deploy and running app are compared by.
-func sourceDigest(dir string) string {
-	digest, _ := fileDigest(filepath.Join(dir, "main.wasm"))
+func sourceDigest(dir, runtimeName string) string {
+	name := "main.wasm"
+
+	if runtimeName == runtimeNative {
+		name = "main"
+	}
+
+	digest, _ := fileDigest(filepath.Join(dir, name))
 
 	return digest
 }

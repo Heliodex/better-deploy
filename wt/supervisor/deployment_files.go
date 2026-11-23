@@ -14,8 +14,8 @@ import (
 // componentRecord describes the component files stored for one deployment.
 type componentRecord struct {
 	files map[string]string
-	cwasmDigest, wasmDigest string
-	cwasmSize, wasmSize, bytes int64
+	cwasmDigest, wasmDigest, nativeDigest string
+	cwasmSize, wasmSize, nativeSize, bytes int64
 }
 
 // digest returns the preferred artifact digest, preferring the portable wasm over the cwasm.
@@ -26,6 +26,10 @@ func (r componentRecord) digest() (digest string, size int64, ok bool) {
 
 	if r.cwasmDigest != "" {
 		return r.cwasmDigest, r.cwasmSize, true
+	}
+
+	if r.nativeDigest != "" {
+		return r.nativeDigest, r.nativeSize, true
 	}
 
 	return "", 0, false
@@ -109,8 +113,14 @@ func copyBundle(src, dst string) error {
 		return fmt.Errorf("copy app.json: %w", err)
 	}
 
-	for _, name := range []string{"main.cwasm", "main.wasm", artifactName} {
+	for _, name := range []string{"main.cwasm", "main.wasm", "main", artifactName} {
 		if err := copyOptional(src, dst, name); err != nil {
+			return err
+		}
+	}
+
+	if exists(src, "main") {
+		if err := os.Chmod(filepath.Join(dst, "main"), 0o755); err != nil {
 			return err
 		}
 	}
@@ -124,7 +134,7 @@ func (m *deploymentManager) storeComponent(app, source, temp string) (componentR
 		files: map[string]string{},
 	}
 
-	for _, name := range []string{"main.cwasm", "main.wasm"} {
+	for _, name := range []string{"main.cwasm", "main.wasm", "main"} {
 		info, err := os.Stat(filepath.Join(source, name))
 		if err != nil {
 			continue
@@ -135,8 +145,16 @@ func (m *deploymentManager) storeComponent(app, source, temp string) (componentR
 			return record, fmt.Errorf("store %s: %w", name, err)
 		}
 
-		if err := m.content(app).link(stored, filepath.Join(temp, name)); err != nil {
+		linked := filepath.Join(temp, name)
+
+		if err := m.content(app).link(stored, linked); err != nil {
 			return record, fmt.Errorf("link %s: %w", name, err)
+		}
+
+		if name == "main" {
+			if err := os.Chmod(linked, 0o755); err != nil {
+				return record, fmt.Errorf("make %s executable: %w", name, err)
+			}
 		}
 
 		record.files[name] = stored
@@ -147,6 +165,8 @@ func (m *deploymentManager) storeComponent(app, source, temp string) (componentR
 			record.cwasmDigest, record.cwasmSize = stored, info.Size()
 		case "main.wasm":
 			record.wasmDigest, record.wasmSize = stored, info.Size()
+		case "main":
+			record.nativeDigest, record.nativeSize = stored, info.Size()
 		}
 	}
 

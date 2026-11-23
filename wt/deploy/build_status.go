@@ -10,7 +10,8 @@ type buildStatus struct {
 	ComponentBuilt, ComponentReused, ComponentRecompiled, StaticBuilt, StaticReused, StaticSkipped, BuildSkipped bool
 	ComponentHash, StaticHash string
 	ComponentFiles, StaticFiles int
-	WasmDigest string
+	WasmDigest, Runtime string
+	Native bool
 }
 
 // buildDetail renders the auditable cache evidence for one phase: the short input hash and the file count behind it.
@@ -45,13 +46,19 @@ func printBuildStatus(status buildStatus) {
 		return
 	}
 
+	label := "component"
+
+	if status.Native {
+		label = "native"
+	}
+
 	switch {
 	case status.ComponentBuilt:
-		fmt.Fprintln(os.Stderr, "component: built"+buildDetail(status.ComponentHash, status.ComponentFiles))
+		fmt.Fprintln(os.Stderr, label+": built"+buildDetail(status.ComponentHash, status.ComponentFiles))
 	case status.ComponentRecompiled:
-		fmt.Fprintln(os.Stderr, "component: recompiled"+buildDetail(status.ComponentHash, status.ComponentFiles))
+		fmt.Fprintln(os.Stderr, label+": recompiled"+buildDetail(status.ComponentHash, status.ComponentFiles))
 	case status.ComponentReused:
-		fmt.Fprintln(os.Stderr, "component: reused"+buildDetail(status.ComponentHash, status.ComponentFiles))
+		fmt.Fprintln(os.Stderr, label+": reused"+buildDetail(status.ComponentHash, status.ComponentFiles))
 	}
 
 	switch {

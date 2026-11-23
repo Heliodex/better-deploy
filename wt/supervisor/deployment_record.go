@@ -75,7 +75,13 @@ func deploymentMetadata(previous deploymentInfo, id string, now time.Time, recor
 	previous.Size = size
 	previous.WasmDigest = record.wasmDigest
 	previous.WasmBytes = record.wasmSize
-	previous.Runtime = artifact.Wasmtime
+
+	if record.nativeDigest != "" {
+		previous.Runtime = runtimeNative
+	} else {
+		previous.Runtime = artifact.Wasmtime
+	}
+
 	previous.Target = artifact.Target
 	previous.Rebuildable = record.files["main.wasm"] != ""
 	previous.Bytes = total

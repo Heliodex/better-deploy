@@ -62,6 +62,13 @@ func checkStaticSvelteKit(dir string, m manifest) error {
 	return nil
 }
 
+// fileExists reports whether path is a regular file.
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+
+	return err == nil && info.Mode().IsRegular()
+}
+
 // generateStaleContract regenerates the Valibot contract only when the component inputs changed.
 func generateStaleContract(cfg *deployConfig, m manifest, stale bool) error {
 	if !stale || m.Contract != "valibot" {
@@ -159,8 +166,36 @@ func buildComponent(cfg *deployConfig, m manifest, cache *buildCache, status *bu
 		cache.WasmDigest = digest
 	}
 
+	status.Runtime = runtimeWasm
+	cache.Runtime = runtimeWasm
 	in = in.remeasure(cfg.dir, m, componentInputHash)
 	cache.ComponentHash = in.hash
+	status.ComponentHash, status.ComponentFiles = in.hash, in.files
+
+	writeBuildCache(cfg.dir, *cache)
+
+	return nil
+}
+
+// buildNative runs the native build command and records the binary digest and input hash.
+func buildNative(cfg *deployConfig, m manifest, cache *buildCache, status *buildStatus, in phaseInputs) error {
+	if err := runBuildPhase(cfg, "native", in.cmd); err != nil {
+		return err
+	}
+
+	status.ComponentBuilt = true
+	status.Native = true
+	status.Runtime = runtimeNative
+	mainPath := filepath.Join(cfg.dir, "main")
+
+	if digest, err := fileDigest(mainPath); err == nil {
+		status.WasmDigest = digest
+		cache.WasmDigest = digest
+	}
+
+	in = in.remeasure(cfg.dir, m, componentInputHash)
+	cache.ComponentHash = in.hash
+	cache.Runtime = runtimeNative
 	status.ComponentHash, status.ComponentFiles = in.hash, in.files
 
 	writeBuildCache(cfg.dir, *cache)
@@ -192,6 +227,23 @@ func buildStatic(cfg *deployConfig, m manifest, cache *buildCache, status *build
 
 // runComponentPhase builds the component when its inputs are stale. Otherwise it keeps the compiled component when its metadata still matches, and recompiles it when not.
 func runComponentPhase(cfg *deployConfig, m manifest, cache *buildCache, status *buildStatus, in phaseInputs, stale bool) error {
+	if m.Runtime == runtimeNative {
+		if stale || !fileExists(filepath.Join(cfg.dir, "main")) {
+			return buildNative(cfg, m, cache, status, in)
+		}
+
+		status.ComponentHash, status.ComponentFiles = in.hash, in.files
+		status.ComponentReused = true
+		status.Native = true
+		status.Runtime = runtimeNative
+
+		if digest, err := fileDigest(filepath.Join(cfg.dir, "main")); err == nil {
+			status.WasmDigest = digest
+		}
+
+		return nil
+	}
+
 	if stale {
 		return buildComponent(cfg, m, cache, status, in)
 	}
@@ -200,6 +252,7 @@ func runComponentPhase(cfg *deployConfig, m manifest, cache *buildCache, status 
 
 	if artifactUsable(cfg) {
 		status.ComponentReused = true
+		status.Runtime = runtimeWasm
 
 		return nil
 	}
@@ -209,6 +262,7 @@ func runComponentPhase(cfg *deployConfig, m manifest, cache *buildCache, status 
 	}
 
 	status.ComponentRecompiled = true
+	status.Runtime = runtimeWasm
 
 	return nil
 }
@@ -232,12 +286,24 @@ func runStaticPhase(cfg *deployConfig, m manifest, cache *buildCache, status *bu
 func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 	var status buildStatus
 
+	if m.Runtime == "" {
+		m.Runtime = runtimeWasm
+	}
+
 	if err := checkStaticSvelteKit(cfg.dir, m); err != nil {
 		return status, err
 	}
 
+	native := m.Runtime == runtimeNative
 	componentCmd := strings.TrimSpace(cfg.buildComponentCommand)
-	if componentCmd == "" {
+
+	if native {
+		componentCmd = strings.TrimSpace(m.BuildNative)
+
+		if componentCmd == "" {
+			componentCmd = "CGO_ENABLED=0 go build -trimpath -o main ."
+		}
+	} else if componentCmd == "" {
 		componentCmd = strings.TrimSpace(m.BuildComponent)
 	}
 
@@ -248,23 +314,33 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 		status.StaticSkipped = true
 	}
 
-	wasmPath := filepath.Join(cfg.dir, "main.wasm")
+	artifactPath := filepath.Join(cfg.dir, "main.wasm")
+
+	if native {
+		artifactPath = filepath.Join(cfg.dir, "main")
+	}
 
 	if cfg.skipBuild {
 		status.BuildSkipped = true
+		status.Runtime = m.Runtime
+		status.Native = native
 
-		if digest, err := fileDigest(wasmPath); err == nil {
+		if digest, err := fileDigest(artifactPath); err == nil {
 			status.WasmDigest = digest
 		}
 
 		return status, nil
 	}
 
-	wasmInfo, wasmErr := os.Stat(wasmPath)
-	wasmExists := wasmErr == nil && wasmInfo.Mode().IsRegular()
+	artifactInfo, artifactErr := os.Stat(artifactPath)
+	artifactExists := artifactErr == nil && artifactInfo.Mode().IsRegular()
 	hasComponentBuild := componentCmd != ""
 
-	if !hasComponentBuild && !wasmExists {
+	if !hasComponentBuild && !artifactExists {
+		if native {
+			return status, errors.New("app.json has no build_native and main is missing")
+		}
+
 		return status, errors.New("app.json has no build_component and main.wasm is missing")
 	}
 
@@ -286,7 +362,7 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 		return status, err
 	}
 
-	componentStale := hasComponentBuild && (cfg.forceBuild || cache.ComponentHash != component.hash || !wasmExists)
+	componentStale := hasComponentBuild && (cfg.forceBuild || cache.Runtime != m.Runtime || cache.ComponentHash != component.hash || !artifactExists)
 	staticStale := static.cmd != "" && (cfg.forceBuild || cache.StaticHash != static.hash || !staticExists)
 
 	if err := generateStaleContract(cfg, m, componentStale); err != nil {
@@ -309,10 +385,13 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 	}
 
 	if status.WasmDigest == "" {
-		if digest, err := fileDigest(wasmPath); err == nil {
+		if digest, err := fileDigest(artifactPath); err == nil {
 			status.WasmDigest = digest
 		}
 	}
+
+	status.Runtime = m.Runtime
+	status.Native = native
 
 	return status, nil
 }

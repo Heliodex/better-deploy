@@ -54,6 +54,10 @@ func runRuntime(args []string) error {
 		report := map[string]any{
 			"compiler": caps.Compiler,
 			"local": local,
+			"native": caps.Native,
+			"nativeGoarch": caps.NativeGoarch,
+			"nativeGoos": caps.NativeGoos,
+			"runtimes": caps.Runtimes,
 			"supervisor": caps.Wasmtime,
 			"target": caps.WasmtimeTarget,
 		}
@@ -99,6 +103,12 @@ func runRuntime(args []string) error {
 	}
 
 	fmt.Printf("compiler: %v\n", caps.Compiler)
+
+	if caps.Native {
+		fmt.Printf("native: supported (%s/%s)\n", caps.NativeGoos, caps.NativeGoarch)
+	} else {
+		fmt.Println("native: unsupported")
+	}
 
 	return nil
 }

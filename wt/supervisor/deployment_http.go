@@ -144,7 +144,7 @@ func (s *supervisor) handleRollback(w http.ResponseWriter, r *http.Request, name
 		return
 	}
 
-	digest := sourceDigest(dir)
+	digest := sourceDigest(dir, cfg.Runtime)
 
 	next, mode, err := s.installBundle(w, name, cfg, dir, digest, "rolled back")
 	if err != nil {
@@ -157,6 +157,7 @@ func (s *supervisor) handleRollback(w http.ResponseWriter, r *http.Request, name
 	s.metrics.observeDeploy(name, "rollback")
 	s.recordDeployment(name, next.dir)
 	w.Header().Set("X-Wt-Wasm-Digest", next.digest)
+	w.Header().Set("X-Wt-Runtime", cfg.Runtime)
 	w.Header().Set("X-Wt-Deploy-Mode", mode)
 	writeJSON(w, http.StatusOK, s.info(next))
 }

@@ -129,7 +129,34 @@ func (s *supervisor) appEnv(a *app, cfg appConfig, namespaced bool) (extraArgs, 
 	}
 
 	if cfg.MemoryMB > 0 {
-		extraArgs = append(extraArgs, "-W", fmt.Sprintf("max-memory-size=%d", cfg.MemoryMB<<20))
+		if cfg.Runtime == runtimeNative {
+			set("GOMEMLIMIT", fmt.Sprintf("%dMiB", cfg.MemoryMB))
+		} else {
+			extraArgs = append(extraArgs, "-W", fmt.Sprintf("max-memory-size=%d", cfg.MemoryMB<<20))
+		}
+	}
+
+	if cfg.Runtime == runtimeNative {
+		set("WT_APP_LISTEN", serveAddr)
+
+		if cfg.CPUMillicores > 0 {
+			set("GOMAXPROCS", strconv.Itoa(max(1, (cfg.CPUMillicores+999)/1000)))
+		}
+
+		if namespaced {
+			set("WT_DATA_DIR", "/data")
+		} else {
+			dataDir := filepath.Join(s.cfg.stateDir, a.name)
+			tmpDir := filepath.Join(dataDir, ".tmp")
+
+			if err := os.MkdirAll(tmpDir, 0o700); err != nil {
+				return nil, nil, fmt.Errorf("native app temp dir: %w", err)
+			}
+
+			set("HOME", dataDir)
+			set("TMPDIR", tmpDir)
+			set("WT_DATA_DIR", dataDir)
+		}
 	}
 
 	if s.storage != nil {
@@ -185,6 +212,19 @@ func (s *supervisor) appArgsFor(a *app, source string, namespaced bool) (args, e
 	epoch := a.wasmEpoch
 
 	a.mu.Unlock()
+
+	if cfg.Runtime == runtimeNative {
+		_, env, err := s.appEnv(a, cfg, namespaced)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		if namespaced {
+			source = "/app/main"
+		}
+
+		return nil, env, nil
+	}
 
 	args = appServeArgs(s.cfg.wasmtimeTarget, cfg, epoch)
 	dirSpec := filepath.Join(s.cfg.stateDir, a.name) + "::/data"
@@ -303,11 +343,17 @@ func (s *supervisor) awaitAppReady(a *app, l *launchSession, done <-chan struct{
 func (s *supervisor) launchRunner(a *app, l *launchSession) error {
 	finder, recent, out := s.launchOutput(a)
 	configData, _ := json.Marshal(l.cfg)
+	path := s.cfg.wasmtime
+
+	if l.cfg.Runtime == runtimeNative {
+		path = filepath.Join(a.dir, "main")
+	}
+
 	request := runnerStartRequest{
 		ID: l.id,
 		Name: a.name,
 		Dir: a.dir,
-		Path: s.cfg.wasmtime,
+		Path: path,
 		Args: l.args,
 		Env: mergeEnv(minimalEnv(), l.env),
 		Config: configData,
@@ -346,7 +392,11 @@ func (s *supervisor) launchRunner(a *app, l *launchSession) error {
 	a.cmd = cmd
 	a.done = done
 	a.exited = false
-	a.workPID = started.WorkPID
+
+	if started.WorkPID > 0 {
+		a.workPID = started.WorkPID
+	}
+
 	a.port = 0
 	a.started = time.Now().UTC()
 
@@ -386,14 +436,15 @@ func (s *supervisor) launchRunner(a *app, l *launchSession) error {
 
 // prepareLaunchSession resolves the environment, isolation and namespace inputs before any process starts.
 func (s *supervisor) prepareLaunchSession(a *app, source string, cfg appConfig, deadline time.Time) (*launchSession, error) {
+	namespaced := s.cfg.appNamespaces || cfg.Runtime == runtimeNative
 	session := &launchSession{
 		cfg: cfg,
 		source: source,
 		deadline: deadline,
-		namespaced: s.cfg.appNamespaces,
+		namespaced: namespaced,
 	}
 
-	args, env, err := s.appArgsFor(a, source, session.namespaced)
+	args, env, err := s.appArgsFor(a, source, namespaced)
 	if err != nil {
 		a.recordError(err)
 		return nil, err
@@ -414,6 +465,8 @@ func (s *supervisor) prepareLaunchSession(a *app, source string, cfg appConfig, 
 	session.iso = iso
 
 	if iso.ns == nil {
+		session.namespaced = false
+
 		return session, nil
 	}
 

@@ -385,7 +385,7 @@ func (m *deploymentManager) bundle(app, id string) (string, error) {
 		return "", errDeploymentNotFound
 	}
 
-	for _, name := range []string{"main.cwasm", "main.wasm"} {
+	for _, name := range []string{"main.cwasm", "main.wasm", "main"} {
 		if info, err := os.Stat(filepath.Join(dir, name)); err == nil && info.Mode().IsRegular() {
 			return dir, nil
 		}

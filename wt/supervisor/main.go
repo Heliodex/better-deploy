@@ -52,6 +52,7 @@ type (
 		LastHealthy time.Time `json:"lastHealthy"`
 		LastError string `json:"lastError,omitempty"`
 		CurrentDigest string `json:"currentDigest,omitempty"`
+		Runtime string `json:"runtime,omitempty"`
 		Ready bool `json:"ready"`
 		// Schedules reports the last call of each schedule entry since the app started.
 		Schedules []scheduleRun `json:"schedules,omitempty"`
@@ -90,6 +91,7 @@ type (
 
 	appConfig struct {
 		Name string `json:"name"`
+		Runtime string `json:"runtime,omitempty"`
 		Host string `json:"host"`
 		Hosts []string `json:"hosts,omitempty"`
 		Health string `json:"health"`
@@ -372,6 +374,7 @@ func (s *supervisor) info(a *app) appInfo {
 	info.LastHealthy = a.lastHealthy
 	lastError := a.lastError
 	info.CurrentDigest = a.digest
+	info.Runtime = a.cfg.Runtime
 	info.Ready = a.ready
 	info.Maintenance = a.cfg.Maintenance
 	info.Idle = a.idleStopped

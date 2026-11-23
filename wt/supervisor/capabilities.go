@@ -18,6 +18,11 @@ type capabilitiesResponse struct {
 	WasmtimeTarget string `json:"wasmtimeTarget,omitempty"`
 	Compiler bool `json:"compiler"`
 	Epoch bool `json:"epoch"`
+	Runtimes []string `json:"runtimes"`
+	Native bool `json:"native"`
+	NativeGoos string `json:"nativeGoos,omitempty"`
+	NativeGoarch string `json:"nativeGoarch,omitempty"`
+	TenantMode string `json:"tenantMode"`
 }
 
 // version is overridden with -ldflags "-X main.version=..." in a release build.
@@ -83,5 +88,10 @@ func (s *supervisor) handleCapabilities(w http.ResponseWriter, r *http.Request) 
 		WasmtimeTarget: s.cfg.wasmtimeTarget,
 		Compiler: s.canCompile(),
 		Epoch: true,
+		Runtimes: []string{runtimeWasm, runtimeNative},
+		Native: true,
+		NativeGoos: runtime.GOOS,
+		NativeGoarch: runtime.GOARCH,
+		TenantMode: s.cfg.tenantMode,
 	})
 }

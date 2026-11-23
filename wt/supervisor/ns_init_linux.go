@@ -174,8 +174,12 @@ func readNSPlan() (nsPlan, error) {
 		return plan, fmt.Errorf("parse namespace plan: %w", err)
 	}
 
-	if plan.Root == "" || plan.AppDir == "" || plan.DataDir == "" || plan.Wasmtime == "" || !strings.HasPrefix(plan.BinPath, "/") {
+	if plan.Root == "" || plan.AppDir == "" || plan.DataDir == "" || !strings.HasPrefix(plan.BinPath, "/") {
 		return plan, errors.New("namespace plan is incomplete")
+	}
+
+	if !plan.Native && plan.Wasmtime == "" {
+		return plan, errors.New("namespace plan is missing the runtime binary")
 	}
 
 	if plan.TmpfsMB < 1 || plan.TmpfsMB > 1024 {
@@ -195,6 +199,10 @@ func runApp(plan *nsPlan, args []string) int {
 	cmd.Stderr = os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setpgid: true,
+	}
+
+	if plan.Native {
+		cmd.Dir = "/app"
 	}
 
 	if err := cmd.Start(); err != nil {
@@ -276,8 +284,10 @@ func setupNamespace(plan *nsPlan) error {
 		return fmt.Errorf("mount /data: %w", err)
 	}
 
-	if err := bindFile(plan.Wasmtime, insideRoot(plan.Root, plan.BinPath), true); err != nil {
-		return fmt.Errorf("mount %s: %w", plan.BinPath, err)
+	if !plan.Native {
+		if err := bindFile(plan.Wasmtime, insideRoot(plan.Root, plan.BinPath), true); err != nil {
+			return fmt.Errorf("mount %s: %w", plan.BinPath, err)
+		}
 	}
 
 	for _, dir := range plan.LibDirs {

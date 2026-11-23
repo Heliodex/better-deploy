@@ -25,6 +25,8 @@ const (
 	maxIdleTimeout = 24 * time.Hour
 	tenantTrusted = "trusted"
 	tenantUntrusted = "untrusted"
+	runtimeWasm = "wasm"
+	runtimeNative = "native"
 	defaultCPUMillicores = 1000
 	defaultPidsMax = 128
 	defaultIOWeight = 100
@@ -178,9 +180,27 @@ func normaliseAppNetwork(cfg *appConfig, mode string) error {
 	return nil
 }
 
+// normaliseAppRuntime defaults to the wasm backend and keeps native processes out of untrusted tenancy.
+func normaliseAppRuntime(cfg *appConfig, mode string) error {
+	cfg.Runtime = strings.ToLower(strings.TrimSpace(cfg.Runtime))
+
+	switch cfg.Runtime {
+	case "", runtimeWasm:
+		cfg.Runtime = runtimeWasm
+	case runtimeNative:
+		if mode != tenantTrusted {
+			return errors.New("runtime native is only allowed in trusted mode; leave it unset or use wasm in untrusted mode")
+		}
+	default:
+		return errors.New("runtime must be wasm or native")
+	}
+
+	return nil
+}
+
 // sameRuntimeConfig compares the settings that require a new process, ignoring build and display metadata.
 func sameRuntimeConfig(a, b appConfig) bool {
-	if a.Host != b.Host || a.Health != b.Health {
+	if a.Runtime != b.Runtime || a.Host != b.Host || a.Health != b.Health {
 		return false
 	}
 
@@ -272,6 +292,10 @@ func validateAppSchedule(cfg *appConfig) error {
 // applyAppDefaults fills in tenant defaults, network and identity rules, timeouts and scheduled calls.
 func applyAppDefaults(cfg *appConfig, mode string) error {
 	applyTenantDefaults(cfg, mode)
+
+	if err := normaliseAppRuntime(cfg, mode); err != nil {
+		return err
+	}
 
 	if err := normaliseAppNetwork(cfg, mode); err != nil {
 		return err

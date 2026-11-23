@@ -179,13 +179,11 @@ func (s *supervisor) restart(a *app) {
 	}
 
 	dir := a.dir
-	requireEpoch := a.cfg.requestTimeout > 0
+	cfg := a.cfg
 
 	a.mu.Unlock()
 
-	cwasm := filepath.Join(dir, "main.cwasm")
-
-	epoch, err := s.ensureArtifact(dir, requireEpoch)
+	source, epoch, err := s.appSource(dir, cfg)
 	if err != nil {
 		log.Printf("app %s: restart: %v", a.name, err)
 		s.scheduleRetry(a)
@@ -196,11 +194,11 @@ func (s *supervisor) restart(a *app) {
 	a.mu.Lock()
 
 	a.wasmEpoch = epoch
-	a.digest = sourceDigest(dir)
+	a.digest = sourceDigest(dir, cfg.Runtime)
 
 	a.mu.Unlock()
 
-	if err := s.launch(a, cwasm); err != nil {
+	if err := s.launch(a, source); err != nil {
 		log.Printf("app %s: restart: %v", a.name, err)
 		s.kill(a)
 		s.cancelRestart(a)
@@ -318,14 +316,16 @@ func (s *supervisor) adoptApp(name, dir string, cfg appConfig, info runnerAppInf
 
 	var epoch bool
 
-	if artifact, err := readArtifact(dir); err == nil {
-		epoch = artifact.Epoch
+	if cfg.Runtime != runtimeNative {
+		if artifact, err := readArtifact(dir); err == nil {
+			epoch = artifact.Epoch
+		}
 	}
 
 	a := &app{
 		name: name,
 		dir: dir,
-		digest: sourceDigest(dir),
+		digest: sourceDigest(dir, cfg.Runtime),
 		cfg: cfg,
 		logs: logs,
 		done: make(chan struct{}),
@@ -416,9 +416,7 @@ func (s *supervisor) createApp(name, dir string, cfg appConfig, asleep bool) (*a
 		s.storage.setQuota(name, int64(cfg.DiskMB)<<20)
 	}
 
-	cwasm := filepath.Join(dir, "main.cwasm")
-
-	epoch, err := s.ensureArtifact(dir, cfg.requestTimeout > 0)
+	source, epoch, err := s.appSource(dir, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -433,7 +431,7 @@ func (s *supervisor) createApp(name, dir string, cfg appConfig, asleep bool) (*a
 	a := &app{
 		name: name,
 		dir: dir,
-		digest: sourceDigest(dir),
+		digest: sourceDigest(dir, cfg.Runtime),
 		cfg: cfg,
 		logs: logs,
 		done: make(chan struct{}),
@@ -451,7 +449,7 @@ func (s *supervisor) createApp(name, dir string, cfg appConfig, asleep bool) (*a
 		return a, nil
 	}
 
-	if err := s.launch(a, cwasm); err != nil {
+	if err := s.launch(a, source); err != nil {
 		s.stop(a)
 		return nil, err
 	}
@@ -587,7 +585,7 @@ func (s *supervisor) loadApps() error {
 	return s.checkDependencyCycles()
 }
 
-// waitForPort waits for wasmtime to report its serve port and stores it on the app.
+// waitForPort waits for the app process to report its serve port and stores it on the app.
 func (s *supervisor) waitForPort(a *app, finder *portFinder, done <-chan struct{}, deadline time.Time) error {
 	timer := time.NewTimer(time.Until(deadline))
 
@@ -603,9 +601,9 @@ func (s *supervisor) waitForPort(a *app, finder *portFinder, done <-chan struct{
 
 		return nil
 	case <-done:
-		return errors.New("wasmtime exited before it reported a serve address")
+		return errors.New("app exited before it reported a serve address")
 	case <-timer.C:
-		return errors.New("wasmtime did not report a serve address within the startup timeout")
+		return errors.New("app did not report a serve address within the startup timeout")
 	}
 }
 
@@ -626,7 +624,7 @@ func (s *supervisor) waitReadyUntil(a *app, done <-chan struct{}, deadline time.
 	for wait := 50 * time.Millisecond; ; {
 		select {
 		case <-done:
-			return fmt.Errorf("wasmtime exited before %s answered", target)
+			return fmt.Errorf("app exited before %s answered", target)
 		default:
 		}
 

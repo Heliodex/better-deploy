@@ -26,7 +26,7 @@ type (
 		Root, Hostname, AppDir, DataDir, Wasmtime, BinPath string
 		Files, LibDirs []string
 		TmpfsMB int
-		Dynamic, ClearGroups, Seccomp bool
+		Native, Dynamic, ClearGroups, Seccomp bool
 		Rlimits []rlimitSpec
 	}
 
@@ -211,7 +211,51 @@ func resolveBinary(name string) (string, error) {
 
 // buildNamespacePlan resolves the runtime binary and the files the app needs inside its minimal root.
 // A static wasmtime needs only the binary; a dynamic one also gets its interpreter directory and the usual library directories.
+// Native apps use the uploaded static Go binary from /app and need no runtime bind mount.
 func (s *supervisor) buildNamespacePlan(a *app, root string, clearGroups bool) (nsPlan, error) {
+	appDir, err := filepath.Abs(a.dir)
+	if err != nil {
+		return nsPlan{}, fmt.Errorf("app dir: %w", err)
+	}
+
+	dataDir := filepath.Join(s.cfg.stateDir, a.name)
+
+	if info, err := os.Stat(dataDir); err != nil || !info.IsDir() {
+		return nsPlan{}, fmt.Errorf("data dir %s is not a directory", dataDir)
+	}
+
+	a.mu.Lock()
+
+	cfg := a.cfg
+
+	a.mu.Unlock()
+
+	limits := []rlimitSpec(nil)
+
+	if s.cfg.untrusted() || cfg.Runtime == runtimeNative {
+		limits = rlimitPlan(cfg)
+	}
+
+	if cfg.Runtime == runtimeNative {
+		if err := ensureNativeArtifact(appDir); err != nil {
+			return nsPlan{}, err
+		}
+
+		return nsPlan{
+			Root: root,
+			Hostname: a.name,
+			AppDir: appDir,
+			DataDir: dataDir,
+			Native: true,
+			BinPath: "/app/main",
+			Files: namespaceFiles(false),
+			TmpfsMB: defaultTmpfsMB,
+			ClearGroups: clearGroups,
+			Seccomp: true,
+			Rlimits: limits,
+		}, nil
+	}
+
 	wasmtime, err := resolveBinary(s.cfg.wasmtime)
 	if err != nil {
 		return nsPlan{}, fmt.Errorf("resolve wasmtime: %w", err)
@@ -226,30 +270,7 @@ func (s *supervisor) buildNamespacePlan(a *app, root string, clearGroups bool) (
 		return nsPlan{}, fmt.Errorf("app namespaces need an ELF wasmtime binary, %s is not ELF", wasmtime)
 	}
 
-	appDir, err := filepath.Abs(a.dir)
-	if err != nil {
-		return nsPlan{}, fmt.Errorf("app dir: %w", err)
-	}
-
-	dataDir := filepath.Join(s.cfg.stateDir, a.name)
-
-	if info, err := os.Stat(dataDir); err != nil || !info.IsDir() {
-		return nsPlan{}, fmt.Errorf("data dir %s is not a directory", dataDir)
-	}
-
 	dynamic := interp != ""
-
-	a.mu.Lock()
-
-	cfg := a.cfg
-
-	a.mu.Unlock()
-
-	var limits []rlimitSpec
-
-	if s.cfg.untrusted() {
-		limits = rlimitPlan(cfg)
-	}
 
 	return nsPlan{
 		Root: root,

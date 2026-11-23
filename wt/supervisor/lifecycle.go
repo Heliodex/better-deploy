@@ -89,13 +89,11 @@ func (s *supervisor) startStopped(a *app) error {
 	}
 
 	dir := a.dir
-	requireEpoch := a.cfg.requestTimeout > 0
+	cfg := a.cfg
 
 	a.mu.Unlock()
 
-	cwasm := filepath.Join(dir, "main.cwasm")
-
-	epoch, err := s.ensureArtifact(dir, requireEpoch)
+	source, epoch, err := s.appSource(dir, cfg)
 	if err != nil {
 		return err
 	}
@@ -109,11 +107,11 @@ func (s *supervisor) startStopped(a *app) error {
 	a.lastRequest = time.Now().UTC()
 	a.delay = time.Second
 	a.wasmEpoch = epoch
-	a.digest = sourceDigest(dir)
+	a.digest = sourceDigest(dir, cfg.Runtime)
 
 	a.mu.Unlock()
 
-	if err := s.launch(a, cwasm); err != nil {
+	if err := s.launch(a, source); err != nil {
 		return err
 	}
 

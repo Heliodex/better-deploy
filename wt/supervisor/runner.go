@@ -55,6 +55,50 @@ const (
 	runnerSocketEnv = "WT_RUNNER_SOCKET"
 )
 
+// hostWorkPID maps a PID namespace child back to its host PID by matching the helper's parent pid and the NSpid field.
+func hostWorkPID(parent, namespacePID int) int {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return 0
+	}
+
+	for _, entry := range entries {
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil {
+			continue
+		}
+
+		data, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "status"))
+		if err != nil {
+			continue
+		}
+
+		var (
+			ppid int
+			matched bool
+		)
+
+		for line := range strings.Lines(string(data)) {
+			if value, ok := strings.CutPrefix(line, "PPid:"); ok {
+				ppid, _ = strconv.Atoi(strings.TrimSpace(value))
+				continue
+			}
+
+			if value, ok := strings.CutPrefix(line, "NSpid:"); ok {
+				if fields := strings.Fields(value); len(fields) > 0 && fields[len(fields)-1] == strconv.Itoa(namespacePID) {
+					matched = true
+				}
+			}
+		}
+
+		if ppid == parent && matched {
+			return pid
+		}
+	}
+
+	return 0
+}
+
 // newRunnerCommand builds the wasmtime or namespace-helper command and its pipes.
 func newRunnerCommand(request runnerStartRequest, output *os.File) (*exec.Cmd, *os.File, *os.File, error) {
 	if request.Namespaced {
@@ -82,6 +126,7 @@ func newRunnerCommand(request runnerStartRequest, output *os.File) (*exec.Cmd, *
 	}
 
 	cmd := exec.CommandContext(context.Background(), request.Path, request.Args...)
+	cmd.Dir = request.Dir
 	cmd.Env = request.Env
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Pdeathsig: syscall.SIGTERM,
@@ -261,11 +306,15 @@ func (r *runnerServer) readOutput(app *runnerProcess, output *os.File) {
 func (r *runnerServer) readWorkPID(app *runnerProcess, reader *os.File) {
 	defer reader.Close()
 
-	data, _ := io.ReadAll(io.LimitReader(reader, 64))
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	line, _ := bufio.NewReader(io.LimitReader(reader, 64)).ReadString('\n')
+	pid, err := strconv.Atoi(strings.TrimSpace(line))
 
 	if err != nil || pid <= 0 {
 		return
+	}
+
+	if host := hostWorkPID(app.cmd.Process.Pid, pid); host > 0 {
+		pid = host
 	}
 
 	app.mu.Lock()

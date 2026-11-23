@@ -34,13 +34,17 @@ func manifestJSON(dir string, m manifest) ([]byte, error) {
 		values["host"] = m.Host
 	}
 
+	if m.Runtime != "" {
+		values["runtime"] = m.Runtime
+	}
+
 	return json.Marshal(values, jsontext.WithIndent("  "))
 }
 
-func writeTarFile(tw *tar.Writer, name string, data []byte) error {
+func writeTarFileMode(tw *tar.Writer, name string, data []byte, mode int64) error {
 	if err := tw.WriteHeader(&tar.Header{
 		Name: name,
-		Mode: tarFileMode,
+		Mode: mode,
 		Size: int64(len(data)),
 	}); err != nil {
 		return fmt.Errorf("write %s: %w", name, err)
@@ -51,6 +55,10 @@ func writeTarFile(tw *tar.Writer, name string, data []byte) error {
 	}
 
 	return nil
+}
+
+func writeTarFile(tw *tar.Writer, name string, data []byte) error {
+	return writeTarFileMode(tw, name, data, tarFileMode)
 }
 
 // writeTarPath adds a file from disk to the bundle with its relative name.
@@ -99,28 +107,39 @@ func bundle(dir string, m manifest, includeComponent bool) ([]byte, error) {
 	}
 
 	if includeComponent {
-		wasm, err := os.ReadFile(filepath.Join(dir, "main.wasm"))
-		if err != nil {
-			return nil, fmt.Errorf("read main.wasm: %w (did the build run?)", err)
-		}
-
-		if err := writeTarFile(tw, "main.wasm", wasm); err != nil {
-			return nil, err
-		}
-
-		// main.cwasm is only a precompiled hint; the supervisor can compile from main.wasm or reuse its cache.
-		for _, name := range []string{"main.cwasm", artifactName} {
-			extra, err := os.ReadFile(filepath.Join(dir, name))
-			if os.IsNotExist(err) {
-				continue
-			}
-
+		if m.Runtime == runtimeNative {
+			main, err := os.ReadFile(filepath.Join(dir, "main"))
 			if err != nil {
-				return nil, fmt.Errorf("read %s: %w", name, err)
+				return nil, fmt.Errorf("read main: %w (did the build run?)", err)
 			}
 
-			if err := writeTarFile(tw, name, extra); err != nil {
+			if err := writeTarFileMode(tw, "main", main, 0o755); err != nil {
 				return nil, err
+			}
+		} else {
+			wasm, err := os.ReadFile(filepath.Join(dir, "main.wasm"))
+			if err != nil {
+				return nil, fmt.Errorf("read main.wasm: %w (did the build run?)", err)
+			}
+
+			if err := writeTarFile(tw, "main.wasm", wasm); err != nil {
+				return nil, err
+			}
+
+			// main.cwasm is only a precompiled hint; the supervisor can compile from main.wasm or reuse its cache.
+			for _, name := range []string{"main.cwasm", artifactName} {
+				extra, err := os.ReadFile(filepath.Join(dir, name))
+				if os.IsNotExist(err) {
+					continue
+				}
+
+				if err != nil {
+					return nil, fmt.Errorf("read %s: %w", name, err)
+				}
+
+				if err := writeTarFile(tw, name, extra); err != nil {
+					return nil, err
+				}
 			}
 		}
 	}

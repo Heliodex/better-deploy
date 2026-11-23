@@ -13,7 +13,7 @@ import (
 
 type (
 	deployConfig struct {
-		dir, app, host, token, wasmtime, target, appHost, appDomain, profile, out, buildComponentCommand string
+		dir, app, host, token, wasmtime, target, appHost, appDomain, profile, out, buildComponentCommand, runtime string
 		skipBuild, skipCompile, skipStatic, jsonOut, forceBuild, skipRouteCheck, overlayEnv, targetConfigured, verify bool
 		verifyPath string
 		verifyTimeout time.Duration
@@ -27,6 +27,11 @@ type (
 		file fileConfig
 		profile fileProfile
 	}
+)
+
+const (
+	runtimeNative = "native"
+	runtimeWasm = "wasm"
 )
 
 // applyConfigFile reloads the profile from the file named by --config. It fills any host, token or app domain that the flags left empty.
@@ -105,6 +110,7 @@ func resolveBundleConfig(args []string) (*deployConfig, error) {
 	dir := flags.String("dir", ".", "app directory containing app.json")
 	wasmtime := flags.String("wasmtime", firstNonEmpty(env("WT_WASMTIME"), fileCfg.Wasmtime, "wasmtime"), "wasmtime binary")
 	target := flags.String("target", firstNonEmpty(env("WT_WASMTIME_TARGET"), fileCfg.Target, "x86_64-unknown-linux-musl"), "wasmtime compile target")
+	runtimeName := flags.String("runtime", "", "runtime backend: wasm or native (default app.json runtime or wasm)")
 	out := flags.String("out", "", "output file (default <name>.tar.gz)")
 	profileFlag := flags.String("profile", profileName, "config profile for the app domain")
 	appDomain := flags.String("app-domain", profile.AppDomain, "app host suffix for <app>.localhost hosts")
@@ -127,6 +133,7 @@ func resolveBundleConfig(args []string) (*deployConfig, error) {
 		dir: *dir,
 		wasmtime: *wasmtime,
 		target: *target,
+		runtime: strings.TrimSpace(*runtimeName),
 		profile: strings.TrimSpace(*profileFlag),
 		appDomain: *appDomain,
 		skipBuild: *skipBuild,
@@ -159,6 +166,7 @@ func resolveConfig(args []string) (*deployConfig, error) {
 	}
 
 	target := flags.String("target", targetDefault, "wasmtime compile target (default: supervisor target or x86_64-unknown-linux-musl)")
+	runtimeName := flags.String("runtime", "", "runtime backend: wasm or native (default app.json runtime or wasm)")
 	appDomain := flags.String("app-domain", profile.AppDomain, "app host suffix for <app>.localhost hosts")
 	appHost := flags.String("app-host", fileCfg.AppHost, "override the app host in the uploaded app.json")
 	config := flags.String("config", configPath, "config file (default ~/.config/wt/config.json)")
@@ -219,6 +227,7 @@ func resolveConfig(args []string) (*deployConfig, error) {
 		token: *token,
 		wasmtime: *wasmtime,
 		target: *target,
+		runtime: strings.TrimSpace(*runtimeName),
 		skipBuild: *skipBuild,
 		skipCompile: *skipCompile,
 		forceBuild: *forceBuild,

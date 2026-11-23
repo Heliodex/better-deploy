@@ -137,6 +137,10 @@ func buildBundle(cfg *deployConfig) (manifest, []byte, buildStatus, error) {
 		return m, nil, buildStatus{}, err
 	}
 
+	if err := applyRuntime(cfg, &m); err != nil {
+		return m, nil, buildStatus{}, err
+	}
+
 	status, err := prepareBuilds(cfg, m)
 	if err != nil {
 		return m, nil, status, err
@@ -390,6 +394,10 @@ func deploy(args []string) error {
 		return err
 	}
 
+	if err := applyRuntime(cfg, &m); err != nil {
+		return err
+	}
+
 	if err := checkAppHostTarget(cfg.host, m.Host, m.Name, cfg.profile); err != nil {
 		return err
 	}
@@ -433,14 +441,22 @@ func deploy(args []string) error {
 		keepComponent = keepRunningComponent(false, status, serverDigest(cfg, m.Name))
 	}
 
+	label := "component"
+
+	if status.Native {
+		label = "native"
+	}
+
 	if keepComponent {
-		fmt.Fprintln(os.Stderr, "component: already running; uploading static only")
+		fmt.Fprintln(os.Stderr, label+": already running; uploading static only")
 	} else if status.WasmDigest != "" {
-		fmt.Fprintln(os.Stderr, "component: uploading")
+		fmt.Fprintln(os.Stderr, label+": uploading")
 
-		_, cwasmErr := os.Stat(filepath.Join(cfg.dir, "main.cwasm"))
+		if !status.Native {
+			_, cwasmErr := os.Stat(filepath.Join(cfg.dir, "main.cwasm"))
 
-		printRuntimePlan(preflight, cwasmErr == nil)
+			printRuntimePlan(preflight, cwasmErr == nil)
+		}
 	}
 
 	data, err := bundle(cfg.dir, m, !keepComponent)

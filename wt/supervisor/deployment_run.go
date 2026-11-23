@@ -395,6 +395,7 @@ func (s *supervisor) handleDeploymentCreate(w http.ResponseWriter, r *http.Reque
 			defer staged.cleanup()
 
 			w.Header().Set("X-Wt-Wasm-Digest", staged.digest)
+			w.Header().Set("X-Wt-Runtime", staged.cfg.Runtime)
 			writeJSON(w, http.StatusOK, deployValidationResponse{
 				Valid: true,
 				Config: configResponse(staged.cfg),
@@ -410,6 +411,7 @@ func (s *supervisor) handleDeploymentCreate(w http.ResponseWriter, r *http.Reque
 	if match := r.Header.Get("If-None-Match"); match != "" && etagMatches(match, staged.etag) {
 		staged.cleanup()
 		w.Header().Set("X-Wt-Wasm-Digest", staged.digest)
+		w.Header().Set("X-Wt-Runtime", staged.cfg.Runtime)
 		w.WriteHeader(http.StatusNotModified)
 
 		return
@@ -441,5 +443,6 @@ func (s *supervisor) handleDeploymentCreate(w http.ResponseWriter, r *http.Reque
 
 	w.Header().Set("Location", "/apps/"+name+"/deployments/"+info.ID)
 	w.Header().Set("X-Wt-Wasm-Digest", staged.digest)
+	w.Header().Set("X-Wt-Runtime", staged.cfg.Runtime)
 	writeJSON(w, http.StatusAccepted, info)
 }

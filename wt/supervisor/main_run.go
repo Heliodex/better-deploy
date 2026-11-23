@@ -36,6 +36,19 @@ func configureUntrusted(s *supervisor, cfg config) {
 	s.quota = newDataQuota(cfg.dataQuotaMode, cfg.dataQuotaFS, cfg.stateDir, cfg.setquota, cfg.findmnt, nil)
 }
 
+// configureNativeBounds installs the per-app uid, cgroup and quota boundaries native trusted apps use.
+// Egress rules stay off because trusted tenancy does not restrict the network.
+func configureNativeBounds(s *supervisor, cfg config) {
+	uids, err := newUIDAllocator(filepath.Join(cfg.stateDir, ".uids.json"), cfg.appUIDBase)
+	if err != nil {
+		log.Fatalf("uid allocator: %v", err)
+	}
+
+	s.uids = uids
+	s.cgroups = newCgroupManager(cfg.cgroupRoot)
+	s.quota = newDataQuota(cfg.dataQuotaMode, cfg.dataQuotaFS, cfg.stateDir, cfg.setquota, cfg.findmnt, nil)
+}
+
 // listenAndServe starts the public listener with TLS when configured.
 func listenAndServe(server *http.Server, s *supervisor) error {
 	cfg := s.cfg
@@ -229,16 +242,17 @@ func startSupervisor(cfg config) *supervisor {
 
 	if cfg.untrusted() {
 		configureUntrusted(s, cfg)
+	} else if os.Geteuid() == 0 {
+		configureNativeBounds(s, cfg)
 	}
 
 	if err := recoverRollbacks(cfg.stateDir, s.backups); err != nil {
 		log.Fatalf("rollback recovery: %v", err)
 	}
 
-	if cfg.appNamespaces {
-		if err := resetNamespaceRoots(cfg.stateDir, cfg.untrusted()); err != nil {
-			log.Fatalf("%v", err)
-		}
+	// Native apps always use the namespace helper, even in trusted mode, so the roots are reset unconditionally.
+	if err := resetNamespaceRoots(cfg.stateDir, cfg.untrusted()); err != nil {
+		log.Fatalf("%v", err)
 	}
 
 	if err := s.loadApps(); err != nil {
@@ -295,7 +309,7 @@ func (s *supervisor) startMonitors(ctx context.Context) {
 	go s.monitorIdle()
 	go s.monitorDiskBudget()
 
-	if s.cfg.untrusted() {
+	if s.quota != nil {
 		go s.monitorDiskQuota()
 	}
 }

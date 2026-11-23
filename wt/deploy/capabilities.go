@@ -19,6 +19,11 @@ type (
 		WasmtimeTarget string `json:"wasmtimeTarget,omitempty"`
 		Compiler bool `json:"compiler"`
 		Epoch bool `json:"epoch"`
+		Runtimes []string `json:"runtimes,omitempty"`
+		Native bool `json:"native,omitempty"`
+		NativeGoos string `json:"nativeGoos,omitempty"`
+		NativeGoarch string `json:"nativeGoarch,omitempty"`
+		TenantMode string `json:"tenantMode,omitempty"`
 	}
 
 	// deployPreflight is the result of asking the supervisor what it can do before a build starts.
@@ -109,6 +114,23 @@ func preflightDeploy(cfg *deployConfig) (deployPreflight, error) {
 		return deployPreflight{}, fmt.Errorf("preflight %s: %w", cfg.host, err)
 	}
 
+	if cfg.runtime == runtimeNative {
+		if !caps.Native {
+			return deployPreflight{}, fmt.Errorf("supervisor %s does not support the native runtime", cfg.host)
+		}
+
+		if caps.TenantMode != "" && caps.TenantMode != "trusted" {
+			return deployPreflight{}, fmt.Errorf("native runtime needs a trusted supervisor; %s reports %s", cfg.host, caps.TenantMode)
+		}
+
+		fmt.Fprintf(os.Stderr, "native: supervisor builds for %s/%s\n", caps.NativeGoos, caps.NativeGoarch)
+
+		return deployPreflight{
+			Checked: true,
+			Capabilities: caps,
+		}, nil
+	}
+
 	pre := deployPreflight{
 		Checked: true,
 		Capabilities: caps,
@@ -173,6 +195,10 @@ func (c supervisorCapabilities) summary() string {
 
 	if target := strings.TrimSpace(c.WasmtimeTarget); target != "" {
 		runtime += " (" + target + ")"
+	}
+
+	if c.Native {
+		runtime += "; native " + c.NativeGoos + "/" + c.NativeGoarch
 	}
 
 	return "supervisor: " + c.displayVersion() + "; " + runtime

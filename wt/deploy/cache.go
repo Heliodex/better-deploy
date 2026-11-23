@@ -14,6 +14,7 @@ import (
 
 // buildCache records the input hash and output digest of each build phase. A phase whose hash and output are unchanged is reused.
 type buildCache struct {
+	Runtime string `json:"runtime,omitempty"`
 	ComponentHash string `json:"componentHash,omitempty"`
 	StaticHash string `json:"staticHash,omitempty"`
 	WasmDigest string `json:"wasmDigest,omitempty"`

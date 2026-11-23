@@ -426,7 +426,7 @@ func TestRunNewContractless(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if strings.Contains(string(main), `plainnotes/contract`) || !strings.Contains(string(main), "type note struct") {
+	if strings.Contains(string(main), `plainnotes/contract`) || !strings.Contains(string(main), "note struct {") {
 		t.Errorf("main.go still uses the generated contract:\n%s", main)
 	}
 

@@ -44,7 +44,9 @@ type (
 		Host string `json:"host"`
 		Health string `json:"health"`
 		Env map[string]string `json:"env"`
+		Runtime string `json:"runtime,omitempty"`
 		BuildComponent string `json:"build_component,omitempty"`
+		BuildNative string `json:"build_native,omitempty"`
 		BuildStatic string `json:"build_static,omitempty"`
 		ComponentInputs []string `json:"component_inputs,omitempty"`
 		StaticInputs []string `json:"static_inputs,omitempty"`
@@ -72,6 +74,37 @@ const (
 
 // defaultSupervisorProxy lists the supervisor-owned app-host routes the Vite dev server must forward in addition to the app API.
 var defaultSupervisorProxy = []string{"/v1/events", "/_wt/blobs", "/_wt/identity"}
+
+// readManifest loads and validates app.json, defaulting the name to the directory name.
+// normaliseRuntime validates a backend name and defaults an omitted value to wasm.
+func normaliseRuntime(value string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", runtimeWasm:
+		return runtimeWasm, nil
+	case runtimeNative:
+		return runtimeNative, nil
+	}
+
+	return "", fmt.Errorf("runtime must be wasm or native, got %q", value)
+}
+
+// applyRuntime resolves the CLI override against app.json and writes the effective backend back to both.
+func applyRuntime(cfg *deployConfig, m *manifest) error {
+	value := cfg.runtime
+	if value == "" {
+		value = m.Runtime
+	}
+
+	runtimeName, err := normaliseRuntime(value)
+	if err != nil {
+		return err
+	}
+
+	cfg.runtime = runtimeName
+	m.Runtime = runtimeName
+
+	return nil
+}
 
 // validAppRelative keeps dev paths inside the app directory.
 func validAppRelative(value string) bool {
@@ -208,7 +241,6 @@ func validateServerPaths(field string, paths []string) error {
 	return nil
 }
 
-// readManifest loads and validates app.json, defaulting the name to the directory name.
 func readManifest(dir string) (manifest, error) {
 	var m manifest
 
@@ -228,6 +260,13 @@ func readManifest(dir string) (manifest, error) {
 	if !validName(m.Name) {
 		return m, fmt.Errorf("invalid app name %q", m.Name)
 	}
+
+	runtimeName, err := normaliseRuntime(m.Runtime)
+	if err != nil {
+		return m, err
+	}
+
+	m.Runtime = runtimeName
 
 	switch m.Contract {
 	case "", "none", "valibot":
