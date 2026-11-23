@@ -140,6 +140,61 @@ func (p *isolationPlan) activate(s *supervisor, cfg appConfig) error {
 	return nil
 }
 
+// prepareRootIsolation allocates the per-app uid, data ownership, quota and cgroup for native and untrusted launches.
+func (s *supervisor) prepareRootIsolation(a *app, cfg appConfig, dataDir string, plan *isolationPlan) error {
+	if s.uids == nil {
+		return errors.New("native and untrusted apps need a uid allocator")
+	}
+
+	if err := ensureDirTraversable(s.cfg.appsDir); err != nil {
+		return fmt.Errorf("apps directory: %w", err)
+	}
+
+	if err := ensureDirTraversable(s.cfg.stateDir); err != nil {
+		return fmt.Errorf("state directory: %w", err)
+	}
+
+	uid, err := s.uids.Allocate(a.name)
+	if err != nil {
+		return fmt.Errorf("allocate app uid: %w", err)
+	}
+
+	plan.uid, plan.gid = uid, uid
+
+	if err := chownTree(dataDir, uid, uid); err != nil {
+		return fmt.Errorf("chown /data to uid %d: %w", uid, err)
+	}
+
+	if err := ensureAppReadable(a.dir); err != nil {
+		return fmt.Errorf("make app readable by uid %d: %w", uid, err)
+	}
+
+	a.mu.Lock()
+
+	a.uid = uid
+
+	a.mu.Unlock()
+
+	if s.quota != nil {
+		if err := s.quota.apply(uid, int64(cfg.DiskMB)<<20, maxAppEntries); err != nil {
+			return fmt.Errorf("data quota: %w", err)
+		}
+	}
+
+	if s.cgroups == nil {
+		return errors.New("native and untrusted apps need a cgroup manager")
+	}
+
+	path, err := s.cgroups.create(a.name, cfg)
+	if err != nil {
+		return fmt.Errorf("cgroup: %w", err)
+	}
+
+	plan.cgroup = path
+
+	return nil
+}
+
 func (s *supervisor) removeAppCgroup(a *app) {
 	if a == nil || s.cgroups == nil {
 		return
@@ -189,66 +244,16 @@ func (s *supervisor) prepareIsolation(a *app, cfg appConfig) (*isolationPlan, er
 	}
 
 	fullIsolation := s.cfg.untrusted() || cfg.Runtime == runtimeNative
-
 	if fullIsolation {
 		if os.Geteuid() != 0 {
 			if s.cfg.untrusted() {
 				return nil, fmt.Errorf("untrusted mode requires root to set the app uid; running as uid %d", os.Geteuid())
 			}
-
 			// A trusted native app still gets user, PID, mount, IPC and UTS namespaces and seccomp through the
 			// non-root namespace path. Without root it shares the supervisor uid, so it is isolated from the host
 			// rather than from other apps.
-		} else {
-			if s.uids == nil {
-				return nil, errors.New("native and untrusted apps need a uid allocator")
-			}
-
-			if err := ensureDirTraversable(s.cfg.appsDir); err != nil {
-				return nil, fmt.Errorf("apps directory: %w", err)
-			}
-
-			if err := ensureDirTraversable(s.cfg.stateDir); err != nil {
-				return nil, fmt.Errorf("state directory: %w", err)
-			}
-
-			uid, err := s.uids.Allocate(a.name)
-			if err != nil {
-				return nil, fmt.Errorf("allocate app uid: %w", err)
-			}
-
-			plan.uid, plan.gid = uid, uid
-
-			if err := chownTree(dataDir, uid, uid); err != nil {
-				return nil, fmt.Errorf("chown /data to uid %d: %w", uid, err)
-			}
-
-			if err := ensureAppReadable(a.dir); err != nil {
-				return nil, fmt.Errorf("make app readable by uid %d: %w", uid, err)
-			}
-
-			a.mu.Lock()
-
-			a.uid = uid
-
-			a.mu.Unlock()
-
-			if s.quota != nil {
-				if err := s.quota.apply(uid, int64(cfg.DiskMB)<<20, maxAppEntries); err != nil {
-					return nil, fmt.Errorf("data quota: %w", err)
-				}
-			}
-
-			if s.cgroups == nil {
-				return nil, errors.New("native and untrusted apps need a cgroup manager")
-			}
-
-			path, err := s.cgroups.create(a.name, cfg)
-			if err != nil {
-				return nil, fmt.Errorf("cgroup: %w", err)
-			}
-
-			plan.cgroup = path
+		} else if err := s.prepareRootIsolation(a, cfg, dataDir, plan); err != nil {
+			return nil, err
 		}
 	}
 

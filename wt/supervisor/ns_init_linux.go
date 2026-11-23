@@ -409,7 +409,7 @@ func nsInitMain(args []string) {
 	}
 
 	if plan.Seccomp {
-		if err := installSeccomp(); err != nil {
+		if err := installSeccomp(plan.NoEgress); err != nil {
 			nsFatal(err)
 		}
 	}

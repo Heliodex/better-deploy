@@ -13,7 +13,7 @@ import (
 )
 
 type devConfig struct {
-	dir, workspace, wasmtime, target, supervisor, appHost string
+	dir, workspace, wasmtime, target, supervisor, appHost, runtime string
 	port, adminPort int
 	skipBuild, skipCompile, watch, vite bool
 }
@@ -35,6 +35,11 @@ func deployDevApps(cfg *devConfig, dirs []string, deployAddr, target string, vit
 			host = m.Name + ".localhost"
 		}
 
+		runtimeName := cfg.runtime
+		if runtimeName == "" {
+			runtimeName = m.Runtime
+		}
+
 		dcfg := &deployConfig{
 			dir: dir,
 			host: "http://" + deployAddr,
@@ -42,13 +47,17 @@ func deployDevApps(cfg *devConfig, dirs []string, deployAddr, target string, vit
 			wasmtime: cfg.wasmtime,
 			target: target,
 			appHost: host,
+			runtime: runtimeName,
 			skipBuild: cfg.skipBuild,
 			skipCompile: cfg.skipCompile,
 			overlayEnv: true,
 		}
 
 		if vite != nil && dir == vite.appDir {
-			dcfg.buildComponentCommand = vite.build
+			if runtimeName != runtimeNative {
+				dcfg.buildComponentCommand = vite.build
+			}
+
 			dcfg.skipStatic = true
 			viteDCfg = dcfg
 		}
@@ -122,6 +131,7 @@ func resolveDevConfig(args []string) (*devConfig, error) {
 	adminPort := flags.Int("admin-port", 0, "separate admin port (default app port + 1)")
 	wasmtime := flags.String("wasmtime", firstNonEmpty(env("WT_WASMTIME"), fileCfg.Wasmtime, "wasmtime"), "wasmtime binary")
 	target := flags.String("target", firstNonEmpty(env("WT_WASMTIME_TARGET"), fileCfg.Target), "wasmtime compile target (default: match the local wasmtime)")
+	runtimeName := flags.String("runtime", "", "runtime backend: wasm or native (default app.json runtime or wasm)")
 	supervisor := flags.String("supervisor", env("WT_SUPERVISOR"), "supervisor binary (default: PATH, then build from ../../supervisor)")
 	appHostDefault := fileCfg.AppHost
 	appHost := flags.String("app-host", appHostDefault, "override the app host (default: <app>.localhost)")
@@ -170,6 +180,7 @@ func resolveDevConfig(args []string) (*devConfig, error) {
 		workspace: *workspace,
 		wasmtime: *wasmtime,
 		target: *target,
+		runtime: strings.TrimSpace(*runtimeName),
 		supervisor: *supervisor,
 		appHost: *appHost,
 		port: resolved,
@@ -356,9 +367,13 @@ func runDev(args []string) error {
 		return err
 	}
 
-	target, err := resolveDevTarget(cfg)
-	if err != nil {
-		return err
+	var target string
+
+	if cfg.runtime != runtimeNative {
+		target, err = resolveDevTarget(cfg)
+		if err != nil {
+			return err
+		}
 	}
 
 	addr, adminAddr := devAddresses(cfg)

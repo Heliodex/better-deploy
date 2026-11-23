@@ -8,34 +8,49 @@ import (
 	"testing"
 )
 
-// staticTestBinary builds a minimal CGO-free Go executable for the native artifact tests.
-func staticTestBinary(t *testing.T) string {
-	t.Helper()
+func TestNativeAppArgs(t *testing.T) {
+	state := t.TempDir()
+	a := &app{
+		name: "demo",
+		cfg: appConfig{
+			Runtime: runtimeNative,
+			MemoryMB: 64,
+			CPUMillicores: 1500,
+		},
+	}
+	s := &supervisor{
+		cfg: config{
+			stateDir: state,
+		},
+	}
 
-	dir := t.TempDir()
-
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module native.test\n\ngo 1.27\n"), 0o644); err != nil {
+	args, env, err := s.appArgsFor(a, "main", false)
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
-		t.Fatal(err)
+	if len(args) != 0 {
+		t.Errorf("native args = %v, want none", args)
 	}
 
-	bin := filepath.Join(dir, "main")
-	cmd := exec.Command("go", "build", "-trimpath", "-o", bin, ".")
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+	joined := strings.Join(env, "\n")
 
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("build static test binary: %v\n%s", err, out)
+	for _, want := range []string{"WT_APP_LISTEN=127.0.0.1:0", "GOMEMLIMIT=64MiB", "GOMAXPROCS=2", "WT_DATA_DIR="} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("env is missing %s:\n%s", want, joined)
+		}
 	}
 
-	return bin
+	if strings.Contains(joined, "max-memory-size") {
+		t.Fatalf("native env contains a wasmtime flag:\n%s", joined)
+	}
 }
 
 func TestNormaliseRuntime(t *testing.T) {
-	cfg := appConfig{Name: "demo", Host: "demo.localhost"}
+	cfg := appConfig{
+		Name: "demo",
+		Host: "demo.localhost",
+	}
 
 	normalised, err := normaliseAppConfig(cfg, "demo", "localhost", tenantTrusted)
 	if err != nil {
@@ -62,35 +77,36 @@ func TestNormaliseRuntime(t *testing.T) {
 	}
 }
 
-func TestNativeAppArgs(t *testing.T) {
-	state := t.TempDir()
-	s := &supervisor{cfg: config{stateDir: state}}
-	a := &app{name: "demo", cfg: appConfig{Runtime: runtimeNative, MemoryMB: 64, CPUMillicores: 1500}}
+// staticTestBinary builds a minimal CGO-free Go executable for the native artifact tests.
+func staticTestBinary(t *testing.T) string {
+	t.Helper()
 
-	args, env, err := s.appArgsFor(a, "main", false)
-	if err != nil {
+	dir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module native.test\n\ngo 1.27\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	if len(args) != 0 {
-		t.Errorf("native args = %v, want none", args)
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 
-	joined := strings.Join(env, "\n")
+	bin := filepath.Join(dir, "main")
+	cmd := exec.Command("go", "build", "-trimpath", "-o", bin, ".")
+	cmd.Dir = dir
 
-	for _, want := range []string{"WT_APP_LISTEN=127.0.0.1:0", "GOMEMLIMIT=64MiB", "GOMAXPROCS=2", "WT_DATA_DIR="} {
-		if !strings.Contains(joined, want) {
-			t.Errorf("env is missing %s:\n%s", want, joined)
-		}
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build static test binary: %v\n%s", err, out)
 	}
 
-	if strings.Contains(joined, "max-memory-size") {
-		t.Fatalf("native env contains a wasmtime flag:\n%s", joined)
-	}
+	return bin
 }
 
 func TestEnsureNativeArtifact(t *testing.T) {
 	dir := t.TempDir()
+
 	self, err := os.ReadFile(staticTestBinary(t))
 	if err != nil {
 		t.Fatal(err)
@@ -127,6 +143,7 @@ func TestEnsureNativeArtifact(t *testing.T) {
 func TestNativeNamespacePlan(t *testing.T) {
 	state := t.TempDir()
 	dir := filepath.Join(state, "apps", "demo")
+
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -144,8 +161,19 @@ func TestNativeNamespacePlan(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s := &supervisor{cfg: config{stateDir: state, wasmtime: "wasmtime"}}
-	a := &app{name: "demo", dir: dir, cfg: appConfig{Runtime: runtimeNative}}
+	a := &app{
+		name: "demo",
+		dir: dir,
+		cfg: appConfig{
+			Runtime: runtimeNative,
+		},
+	}
+	s := &supervisor{
+		cfg: config{
+			stateDir: state,
+			wasmtime: "wasmtime",
+		},
+	}
 
 	plan, err := s.buildNamespacePlan(a, filepath.Join(state, ".ns", "demo"), false)
 	if err != nil {

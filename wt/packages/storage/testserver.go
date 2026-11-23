@@ -1,4 +1,4 @@
-//go:build !wasip1
+//go:build !wasip1 && !wt_native
 
 package storage
 

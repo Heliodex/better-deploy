@@ -83,7 +83,7 @@ func TestSeccompInstallHelper(t *testing.T) {
 		t.Skip("seccomp install helper")
 	}
 
-	if err := installSeccomp(); err != nil {
+	if err := installSeccomp(false); err != nil {
 		t.Fatal(err)
 	}
 

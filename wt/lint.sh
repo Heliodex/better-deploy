@@ -71,7 +71,10 @@ CONTRACT
 
 run "$root/deploy" "$@"
 run "$root/supervisor" "$@"
+printf 'lint: packages (native)\n'
+(cd "$root/packages" && golangci-lint run --config "$config" ./wasihttp ./httpmeta ./app ./outbox ./session ./sign) || status=1
 run_component "$root/packages" "$@"
+run "$root/example" "$@"
 run_component "$root/example" "$@"
 run_template "$@"
 exit "$status"

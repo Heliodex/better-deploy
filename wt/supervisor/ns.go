@@ -26,7 +26,7 @@ type (
 		Root, Hostname, AppDir, DataDir, Wasmtime, BinPath string
 		Files, LibDirs []string
 		TmpfsMB int
-		Native, Dynamic, ClearGroups, Seccomp bool
+		Native, Dynamic, ClearGroups, Seccomp, NoEgress bool
 		Rlimits []rlimitSpec
 	}
 
@@ -252,6 +252,7 @@ func (s *supervisor) buildNamespacePlan(a *app, root string, clearGroups bool) (
 			TmpfsMB: defaultTmpfsMB,
 			ClearGroups: clearGroups,
 			Seccomp: true,
+			NoEgress: cfg.Network == "none",
 			Rlimits: limits,
 		}, nil
 	}

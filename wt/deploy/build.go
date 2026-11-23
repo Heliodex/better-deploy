@@ -301,7 +301,7 @@ func prepareBuilds(cfg *deployConfig, m manifest) (buildStatus, error) {
 		componentCmd = strings.TrimSpace(m.BuildNative)
 
 		if componentCmd == "" {
-			componentCmd = "CGO_ENABLED=0 go build -trimpath -o main ."
+			componentCmd = "CGO_ENABLED=0 go build -tags wt_native -trimpath -o main ."
 		}
 	} else if componentCmd == "" {
 		componentCmd = strings.TrimSpace(m.BuildComponent)

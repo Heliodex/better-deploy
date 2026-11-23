@@ -1417,6 +1417,18 @@ paths:
                     type: boolean
                   epoch:
                     type: boolean
+                  runtimes:
+                    type: array
+                    items:
+                      type: string
+                  native:
+                    type: boolean
+                  nativeGoos:
+                    type: string
+                  nativeGoarch:
+                    type: string
+                  tenantMode:
+                    type: string
         "401":
           description: Unauthorized
         "403":
@@ -1523,6 +1535,11 @@ components:
           minimum: 0
         currentDigest:
           type: string
+        runtime:
+          type: string
+          enum:
+            - wasm
+            - native
         diskBytes:
           type: number
           minimum: 0
@@ -2197,6 +2214,11 @@ components:
                 minimum: 0
               currentDigest:
                 type: string
+              runtime:
+                type: string
+                enum:
+                  - wasm
+                  - native
               diskBytes:
                 type: number
                 minimum: 0

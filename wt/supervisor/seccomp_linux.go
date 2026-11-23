@@ -21,6 +21,14 @@ const (
 	x32SyscallBit = 0x40000000
 )
 
+// noEgressSyscalls block outbound connections while leaving the app's own loopback listener usable.
+// socket, bind, listen and accept stay allowed so the supervisor can reach the native app; connect and sendto stop it from starting outbound TCP, UDP or Unix-socket calls.
+var noEgressSyscalls = []uintptr{
+	unix.SYS_CONNECT,
+	unix.SYS_SENDTO,
+	unix.SYS_SENDMSG,
+}
+
 // commonDeniedSyscalls are dangerous syscalls present on both amd64 and arm64.
 // Arch-specific extras live in seccomp_linux_<arch>.go.
 var commonDeniedSyscalls = []uintptr{
@@ -160,13 +168,19 @@ func seccompFilter(arch uint32, denied []uintptr) []unix.SockFilter {
 	})
 }
 
-func installSeccomp() error {
+func installSeccomp(noEgress bool) error {
 	arch, err := seccompArch()
 	if err != nil {
 		return err
 	}
 
-	filter := seccompFilter(arch, deniedSyscalls())
+	denied := deniedSyscalls()
+
+	if noEgress {
+		denied = append(denied, noEgressSyscalls...)
+	}
+
+	filter := seccompFilter(arch, denied)
 	//nolint:gosec // The filter count is bounded by the kernel limit.
 	program := unix.SockFprog{
 		Len: uint16(len(filter)),

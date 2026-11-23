@@ -79,6 +79,10 @@ func TestHandleCapabilities(t *testing.T) {
 		t.Errorf("runtime = %q target %q", caps.Wasmtime, caps.WasmtimeTarget)
 	}
 
+	if !caps.Native || len(caps.Runtimes) != 2 || caps.NativeGoos == "" || caps.NativeGoarch == "" {
+		t.Errorf("native capability = %+v", caps)
+	}
+
 	if !caps.Compiler || !caps.Epoch {
 		t.Errorf("compiler=%v epoch=%v, want both true", caps.Compiler, caps.Epoch)
 	}

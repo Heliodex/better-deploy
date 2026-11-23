@@ -119,7 +119,9 @@ func Handle(fn func(http.ResponseWriter, *http.Request)) {
 		addr = "127.0.0.1:0"
 	}
 
-	listener, err := net.Listen("tcp", addr)
+	var listenConfig net.ListenConfig
+
+	listener, err := listenConfig.Listen(context.Background(), "tcp", addr)
 	if err != nil {
 		log.Fatalf("wasihttp: listen %s: %v", addr, err)
 	}

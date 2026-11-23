@@ -120,6 +120,9 @@ jobs:
                   WT_E2E_EXAMPLES: "1"
               run: WT_WASMTIME="$(command -v wasmtime)" bash wt/e2e.sh
 
+            - name: Run native end-to-end test
+              run: WT_WASMTIME="$(command -v wasmtime)" bash wt/e2e-native.sh
+
     test:
         runs-on: ubuntu-latest
         timeout-minutes: 20
@@ -178,7 +181,7 @@ jobs:
 
             - name: Test shared packages
               working-directory: wt/packages
-              run: go test -race -count=1 -covermode=atomic -coverprofile=coverage.out ./app/... ./storage/... ./httpmeta/... ./sign/... ./outbox/...
+              run: go test -race -count=1 -covermode=atomic -coverprofile=coverage.out ./app/... ./storage/... ./httpmeta/... ./sign/... ./outbox/... ./wasihttp/...
 
             - name: Summarize Go coverage
               if: always()

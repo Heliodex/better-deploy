@@ -27,8 +27,13 @@ type launchSession struct {
 	namespaced bool
 }
 
-// epochIdleTimeout stands in for "no request timeout". Epoch interruption always needs a deadline, and wasmtime applies the deadline immediately when none is set.
-const epochIdleTimeout = 24 * time.Hour
+const (
+	// epochIdleTimeout stands in for "no request timeout". Epoch interruption always needs a deadline, and wasmtime applies the deadline immediately when none is set.
+	epochIdleTimeout = 24 * time.Hour
+
+	// millicoresPerCPU converts the configured CPU quota into GOMAXPROCS.
+	millicoresPerCPU = 1000
+)
 
 // errEpochMismatch reports a cwasm whose epoch instrumentation disagrees with the recorded artifact or the launch flags.
 var errEpochMismatch = errors.New("cwasm epoch setting does not match the host")
@@ -140,7 +145,7 @@ func (s *supervisor) appEnv(a *app, cfg appConfig, namespaced bool) (extraArgs, 
 		set("WT_APP_LISTEN", serveAddr)
 
 		if cfg.CPUMillicores > 0 {
-			set("GOMAXPROCS", strconv.Itoa(max(1, (cfg.CPUMillicores+999)/1000)))
+			set("GOMAXPROCS", strconv.Itoa(max(1, (cfg.CPUMillicores-1)/millicoresPerCPU+1)))
 		}
 
 		if namespaced {
@@ -217,10 +222,6 @@ func (s *supervisor) appArgsFor(a *app, source string, namespaced bool) (args, e
 		_, env, err := s.appEnv(a, cfg, namespaced)
 		if err != nil {
 			return nil, nil, err
-		}
-
-		if namespaced {
-			source = "/app/main"
 		}
 
 		return nil, env, nil
