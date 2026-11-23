@@ -81,29 +81,30 @@ func findSupervisor(cfg *devConfig, workDir string) (string, error) {
 		return value, nil
 	}
 
+	// Prefer the monorepo source over a possibly stale wt-supervisor earlier on PATH.
+	src, err := filepath.Abs(filepath.Join(cfg.dir, "..", "..", "supervisor"))
+	if err == nil && dirHasGoMod(src) {
+		out := filepath.Join(workDir, "wt-supervisor")
+
+		fmt.Fprintln(os.Stderr, "dev: building supervisor from", src)
+
+		cmd := exec.CommandContext(context.Background(), "go", "build", "-o", out, ".")
+		cmd.Dir = src
+		cmd.Stdout = os.Stderr
+		cmd.Stderr = os.Stderr
+
+		if err := cmd.Run(); err != nil {
+			return "", fmt.Errorf("build supervisor: %w", err)
+		}
+
+		return out, nil
+	}
+
 	if path, err := exec.LookPath("wt-supervisor"); err == nil {
 		return path, nil
 	}
 
-	src, err := filepath.Abs(filepath.Join(cfg.dir, "..", "..", "supervisor"))
-	if err != nil || !dirHasGoMod(src) {
-		return "", errors.New("no wt-supervisor in PATH; pass --supervisor or set WT_SUPERVISOR")
-	}
-
-	out := filepath.Join(workDir, "wt-supervisor")
-
-	fmt.Fprintln(os.Stderr, "dev: building supervisor from", src)
-
-	cmd := exec.CommandContext(context.Background(), "go", "build", "-o", out, ".")
-	cmd.Dir = src
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("build supervisor: %w", err)
-	}
-
-	return out, nil
+	return "", errors.New("no wt-supervisor in PATH; pass --supervisor or set WT_SUPERVISOR")
 }
 
 // prepareDevState creates the apps and state directories the dev supervisor uses.
